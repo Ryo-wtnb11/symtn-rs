@@ -209,6 +209,43 @@ jobs:
         env:
           CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
 
+  # The `krylov` feature's only coverage: the default `lint` job does not
+  # compile the module (#1450). krylov declares LAPACK, so the feature needs a
+  # provider; OpenBLAS here. The test step runs only the krylov targets, so
+  # it does not depend on the provider's full-SVD status (#2113).
+  feature-contract-krylov:
+    name: feature contract (krylov)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: symtn
+      - name: Record source revisions
+        run: |
+          git -C symtn log -1 --format='symtn %H'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: symtn
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: feature-krylov
+      - uses: ./symtn/.github/actions/cargo-build-script-cache
+        with:
+          key: feature-krylov
+      - name: clippy symtn (krylov)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --locked -p symtn --no-default-features --features "krylov,blas-openblas" --all-targets -- -D warnings
+        working-directory: symtn
+      - name: test symtn (krylov)
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked -p symtn --no-default-features --features "krylov,blas-openblas" --test krylov_vector
+          cargo test --locked -p symtn --no-default-features --features "krylov,blas-openblas" --doc krylov
+        working-directory: symtn
+        env:
+          CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
+
   # cgc-gen: one job so the fusion-symbols dependency chain compiles once for
   # all packages instead of once per matrix row.
   feature-contract-cgc-gen:

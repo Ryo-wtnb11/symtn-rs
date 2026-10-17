@@ -27,3 +27,12 @@ its CPU build enables `cpu-blas`, otherwise `cpu-faer`; see the
 alternatives. `cuda` and `cgc-gen` add
 the typed CUDA surface and SUN providers. Contraction-order planners and their
 configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
+
+The `krylov` feature makes Host `TensorMap` a vector of the
+[krylov](https://docs.rs/krylov) crate (re-exported as `symtn::krylov`), so
+`eigsolve`, `exponentiate` and `linsolve` run directly on tensors with
+closures as linear maps (`svdsolve` takes a user type implementing
+`AdjointMap`); the [krylov correspondence](../docs/krylov.md)
+records the TensorKit and QSpace counterparts. krylov needs a LAPACK provider
+in the final binary: enable a `blas-*` feature or link one yourself (the
+default `cpu-faer` links none).

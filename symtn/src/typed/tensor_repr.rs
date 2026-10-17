@@ -576,6 +576,14 @@ impl<R, D, S> TensorMap<R, D, S> {
         self.logical_space()
     }
 
+    /// Whether the tensor owns a dense payload (neither a lazy adjoint nor a
+    /// compact diagonal): the representations `axpby_into` writes into.
+    #[cfg(feature = "krylov")]
+    pub(crate) fn is_owned_dense(&self) -> bool {
+        self.owned_body()
+            .is_some_and(|body| matches!(body.data.as_ref(), TypedData::Dense(_)))
+    }
+
     pub(super) fn owned_body(&self) -> Option<&Arc<TypedTensorBody<R, D, S>>> {
         match &self.repr {
             TypedTensorRepr::Owned(body) => Some(body),

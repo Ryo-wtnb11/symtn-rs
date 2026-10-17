@@ -21,8 +21,13 @@ blas-mkl = ["symtn-tensors/blas-mkl", "symtn-matrixalgebra/blas-mkl"]
 provider-inject = ["symtn-tensors/provider-inject"]
 cuda = ["symtn-dense/cuda", "symtn-tensors/cuda"]
 cgc-gen = ["symtn-core/cgc-gen", "symtn-tensors/cgc-gen"]
+# Host `TensorMap` as a `krylov::Vector`, re-exported as `symtn::krylov`.
+# krylov declares LAPACK symbols: the final binary must link a provider
+# (a `blas-*` feature, or one linked by the application).
+krylov = ["dep:krylov"]
 
 [dependencies]
+krylov = { version = "0.1", optional = true, default-features = false }
 num-complex = "0.4"
 smallvec = { version = "1", features = ["const_generics", "union"] }
 symtn-core = { version = "0.1.1", path = "../symtn-core" }
