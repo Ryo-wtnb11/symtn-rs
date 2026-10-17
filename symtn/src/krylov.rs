@@ -80,8 +80,8 @@ use num_complex::{Complex32, Complex64};
 use crate::sector::TypedSectorAdmission;
 // `Error` is not imported: it would shadow the re-exported `krylov::Error`.
 use crate::typed::{
-    ElementwiseExec, FacadeError, ReduceExec, TensorMap, TypedAdjointSpace, TypedSpaceModeDispatch,
-    TypedTensorModeDispatch,
+    ElementwiseExec, FacadeError, FactorScalar, ReduceExec, TensorMap, TypedAdjointSpace,
+    TypedSpaceModeDispatch, TypedTensorModeDispatch,
 };
 
 // One impl per payload dtype: krylov's `Real<D>` comes from a sealed trait,
@@ -110,7 +110,7 @@ macro_rules! host_vector {
             }
 
             fn copy_from(&mut self, x: &Self) -> Result<(), Self::Error> {
-                x.axpby_into(self, <$d>::from(1.0), <$d>::from(0.0))
+                x.axpby_into(self, <$d>::from_real(1.0), <$d>::from_real(0.0))
             }
 
             fn inner(&self, y: &Self) -> Result<$d, Self::Error> {

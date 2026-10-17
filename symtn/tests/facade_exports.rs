@@ -266,7 +266,14 @@ fn scanner_reads_nested_groups_renames_and_inline_modules() {
     );
 }
 
-const ROOT: &[&str] = &["cache", "expert", "mathematics", "sector", "typed"];
+const ROOT: &[&str] = &[
+    "cache",
+    "expert",
+    "krylov",
+    "mathematics",
+    "sector",
+    "typed",
+];
 const TYPED: &[&str] = &[
     "AdvancedLinalgScalar",
     "Alternative",
