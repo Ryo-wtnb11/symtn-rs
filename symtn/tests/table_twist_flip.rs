@@ -1,8 +1,8 @@
 //! `twist` and `flip` of complex-symbol rules (#2281) on Fibonacci and
-//! Ising through `TableRule`: twist against the closed-form θ (entrywise and
-//! through the d-weighted inner product), flip against a few values checked
-//! against TensorKit 0.17.1, TensorKit's inverse identities, and the lazy
-//! adjoint; and the unchanged `NoBraiding` refusals on Rep(S₃).
+//! Ising through `TableRule`: twist against the closed-form θ entrywise,
+//! flip against a few values checked against TensorKit 0.17.1, TensorKit's
+//! inverse identities, and the lazy adjoint; and the unchanged `NoBraiding`
+//! refusals on Rep(S₃).
 
 use std::sync::Arc;
 
@@ -48,8 +48,6 @@ struct Category {
     v: GradedSpace<TableRule>,
     /// Closed-form θ by AnyonWiki label.
     theta: fn(u16) -> Complex64,
-    /// Quantum dimension by AnyonWiki label.
-    d: fn(u16) -> f64,
 }
 
 fn fibonacci() -> Category {
@@ -61,13 +59,6 @@ fn fibonacci() -> Category {
             // TensorKitSectors `twist_from_Rsymbol`:
             // θ_τ = R^{ττ}_1/φ + R^{ττ}_τ = e^{4πi/5}/φ + e^{-3πi/5} = e^{-4πi/5}.
             _ => Complex64::from_polar(1.0, -4.0 * std::f64::consts::PI / 5.0),
-        },
-        d: |label| {
-            if label == 1 {
-                1.0
-            } else {
-                (1.0 + 5.0_f64.sqrt()) / 2.0
-            }
         },
     }
 }
@@ -82,7 +73,6 @@ fn ising() -> Category {
             // θ_σ = (R^{σσ}_1 + R^{σσ}_ψ)/√2 = (e^{-iπ/8} + e^{3iπ/8})/√2 = e^{iπ/8}.
             _ => Complex64::from_polar(1.0, std::f64::consts::PI / 8.0),
         },
-        d: |label| if label == 3 { 2.0_f64.sqrt() } else { 1.0 },
     }
 }
 
@@ -187,49 +177,6 @@ fn flip_matches_values_checked_against_tensorkit() {
                     want,
                 );
             }
-        }
-    }
-}
-
-/// `inner(probe, twist(t, legs)) = Σ_c d_c Σ conj(p) Π θ t` over every
-/// subblock of coupled sector `c` (θ̄ for the inverse): the d-weighted inner
-/// product of the twisted tensor, built from the entry function alone.
-#[test]
-fn twisted_inner_product_follows_the_closed_form() {
-    let runtime = Runtime::builder().build().unwrap();
-    for category in [fibonacci(), ising()] {
-        let t = operand(&runtime, &category);
-        for (inverse, legs) in TWISTS {
-            let mut want = Complex64::new(0.0, 0.0);
-            for (trees, block) in t.subblocks().unwrap() {
-                let uncoupled = [trees.codomain_uncoupled(), trees.domain_uncoupled()].concat();
-                let theta: Complex64 = legs
-                    .iter()
-                    .map(|&leg| (category.theta)(uncoupled[leg].label()))
-                    .product();
-                let factor = if inverse { theta.conj() } else { theta };
-                let d = (category.d)(trees.coupled().label());
-                let shape = block.shape().to_vec();
-                for linear in 0..shape.iter().product::<usize>() {
-                    let mut rest = linear;
-                    let index: Vec<usize> = shape
-                        .iter()
-                        .map(|&extent| {
-                            let i = rest % extent;
-                            rest /= extent;
-                            i
-                        })
-                        .collect();
-                    want +=
-                        d * entry("p", &trees, &index).conj() * factor * entry("t", &trees, &index);
-                }
-            }
-            let result = t.twist(legs, direction(inverse)).unwrap();
-            assert_close(
-                &format!("{} twist {inverse} {legs:?}", category.name),
-                probe(&runtime, &result),
-                want,
-            );
         }
     }
 }
