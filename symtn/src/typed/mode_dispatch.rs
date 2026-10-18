@@ -518,17 +518,22 @@ where
 impl<R, D> TypedTensorTwistDispatch<R, D> for MultiplicityFreeAdmissionMode
 where
     R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + MultiplicityFreeRigidSymbols
         + CheckedFusionAlgebra
         + SectorCodec,
+    R::Scalar: TwistCoefficient<D>,
+    MultiplicityFreeAdmissionMode: symtn_tensors::RigidCoefficientAlgebra<R>
+        + symtn_tensors::CoefficientAlgebra<R, Error = symtn_tensors::OperationError>,
     D: TensorScalar,
 {
+    type Coeff = R::Scalar;
+
     fn twist_values<'a>(
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
         legs: &[usize],
-    ) -> Result<Option<impl Fn(SectorId) -> f64 + 'a>, Error> {
+    ) -> Result<Option<impl Fn(SectorId) -> R::Scalar + 'a>, Error> {
         if twist_is_identity_over_blocks(provider, structure, codomain_rank, legs)? {
             return Ok(None);
         }
@@ -544,6 +549,8 @@ where
         > + CheckedGenericPivotal<Scalar = f64>,
     D: TensorScalar,
 {
+    type Coeff = f64;
+
     fn twist_values<'a>(
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
@@ -582,11 +589,14 @@ where
 impl<R, D> TypedTensorFlipDispatch<R, D> for MultiplicityFreeAdmissionMode
 where
     R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + MultiplicityFreeRigidSymbols
         + CheckedFusionAlgebra
         + SectorCodec,
+    R::Scalar: TwistCoefficient<D>,
     D: TensorScalar,
 {
+    type Coeff = R::Scalar;
+
     fn root(
         space: &BoundDynamicFusionMapSpace<R>,
         homspace: FusionTreeHomSpace,
@@ -599,7 +609,7 @@ where
         _structure: &symtn_core::BlockStructure,
         _codomain_rank: usize,
         _occurrences: &[(usize, bool)],
-    ) -> Result<impl Fn(SectorId) -> (f64, f64) + 'a, Error> {
+    ) -> Result<impl Fn(SectorId) -> (R::Scalar, R::Scalar) + 'a, Error> {
         Ok(move |sector| {
             (
                 provider.frobenius_schur_phase_scalar(sector),
@@ -617,6 +627,8 @@ where
         > + CheckedGenericPivotal<Scalar = f64>,
     D: TensorScalar,
 {
+    type Coeff = f64;
+
     fn root(
         space: &BoundDynamicFusionMapSpace<R>,
         homspace: FusionTreeHomSpace,

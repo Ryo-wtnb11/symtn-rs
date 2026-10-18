@@ -1006,7 +1006,7 @@ where
     )
     .unwrap()
     .unwrap_or_else(|| panic!("{what}: fixture is not the identity"));
-    let lowered = super::super::cuda_transform::cuda_twist_regions::<D>(
+    let lowered = super::super::cuda_transform::cuda_twist_regions::<D, _>(
         space.space(),
         &super::super::twist_flip::twist_block_factor(&theta, nout, &legs, inverse),
         "twist",

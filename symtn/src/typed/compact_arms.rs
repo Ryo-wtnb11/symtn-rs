@@ -501,24 +501,28 @@ fn output_layout(
 /// factor collapses to `θ(sector)^|legs|`; the space is unchanged, so the
 /// payload stays compact. `theta` is the mode's staged `twist_values`; the
 /// caller has already returned a shared clone when every value is one.
-pub(super) fn twist_spectrum<R, D>(
+pub(super) fn twist_spectrum<R, D, C>(
     tensor: &TensorMap<R, D>,
     legs: &[usize],
     inverse: bool,
-    theta: impl Fn(SectorId) -> f64,
+    theta: impl Fn(SectorId) -> C,
 ) -> Option<TensorMap<R, D>>
 where
     D: TensorScalar,
+    C: TwistCoefficient<D>,
 {
     let spectrum = tensor.spectrum()?;
-    let sector_factor = |sector: SectorId| -> f64 {
-        let factor = legs.iter().map(|_| theta(sector)).product();
+    let sector_factor = |sector: SectorId| -> C {
+        let factor = legs
+            .iter()
+            .map(|_| theta(sector))
+            .fold(C::one(), |product, factor| product * factor);
         twist_factor_with_inverse(factor, inverse)
     };
     let scaled = spectrum
         .iter()
         .map(|entry| {
-            let factor = D::from_real(sector_factor(entry.sector));
+            let factor: D = sector_factor(entry.sector).as_data();
             symtn_matrixalgebra::SectorSpectrum {
                 sector: entry.sector,
                 values: entry.values.iter().map(|&value| value * factor).collect(),

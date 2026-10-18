@@ -383,7 +383,9 @@ pub use dispatch::{
     TypedTensorTraceDispatch, TypedTensorTransformDispatch, TypedTensorTwistDispatch,
     TypedTensorUnitDispatch, TypedTruncationDispatch,
 };
-use dispatch::{MultiplicityFreeContractExecution, MultiplicityFreeTransformExecution};
+use dispatch::{
+    MultiplicityFreeContractExecution, MultiplicityFreeTransformExecution, TwistCoefficient,
+};
 mod factorize;
 #[doc(hidden)]
 pub use factorize::FactorExec;

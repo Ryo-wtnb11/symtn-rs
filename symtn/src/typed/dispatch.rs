@@ -236,6 +236,31 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
 }
 
+/// A twist or Z-isomorphism coefficient (θ, χ) acting on payload `D`: the
+/// provider's own categorical scalar, so a complex-symbol rule's θ is never
+/// narrowed to `f64`.
+///
+/// Why a bound on the coefficient rather than `D: RecouplingCoefficientAction<C>`
+/// at each call site: bounds on an associated type are implied wherever the
+/// dispatch trait is, so generic callers of `twist`/`flip` keep naming only
+/// `R::Mode: TypedTensorTwistDispatch<R, D>`.
+#[doc(hidden)]
+pub trait TwistCoefficient<D>: CategoricalScalar + Copy + PartialEq {
+    /// This coefficient as a payload scalar.
+    fn as_data(self) -> D;
+}
+
+impl<C, D> TwistCoefficient<D> for C
+where
+    C: CategoricalScalar + Copy + PartialEq,
+    D: RecouplingCoefficientAction<C>,
+{
+    #[inline]
+    fn as_data(self) -> D {
+        D::coefficient_as_data(self)
+    }
+}
+
 /// Ribbon-twist execution selected by the admitted provider mode.
 #[doc(hidden)]
 pub trait TypedTensorTwistDispatch<R, D>: TypedSpaceModeDispatch<R>
@@ -243,6 +268,10 @@ where
     R: TypedSectorAdmission,
     D: TensorScalar,
 {
+    /// The coefficient type of θ: the provider's categorical scalar
+    /// (TensorKit `braidingscalartype`).
+    type Coeff: TwistCoefficient<D>;
+
     /// θ of every sector that `legs` carry in `structure`'s fusion-tree
     /// blocks, or `None` when every one of them is one. Every fallible
     /// provider query happens here, so scaling by the returned values never
@@ -252,7 +281,7 @@ where
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
         legs: &[usize],
-    ) -> Result<Option<impl Fn(SectorId) -> f64 + 'a>, Self::FacadeError>;
+    ) -> Result<Option<impl Fn(SectorId) -> Self::Coeff + 'a>, Self::FacadeError>;
 }
 
 /// Z-isomorphism execution selected by the admitted provider mode.
@@ -262,6 +291,10 @@ where
     R: TypedSectorAdmission,
     D: TensorScalar,
 {
+    /// The coefficient type of (χ, θ): the provider's categorical scalar
+    /// (TensorKit `sectorscalartype`).
+    type Coeff: TwistCoefficient<D>;
+
     /// The admitted space of `homspace`, bound to `space`'s provider.
     fn root(
         space: &BoundDynamicFusionMapSpace<R>,
@@ -270,12 +303,16 @@ where
 
     /// (χ, θ) of every sector the flip `occurrences` carry in `structure`'s
     /// fusion-tree blocks, with every fallible provider query made here.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the staged (χ, θ) table is one opaque closure"
+    )]
     fn pivotal_values<'a>(
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
         occurrences: &[(usize, bool)],
-    ) -> Result<impl Fn(SectorId) -> (f64, f64) + 'a, Self::FacadeError>;
+    ) -> Result<impl Fn(SectorId) -> (Self::Coeff, Self::Coeff) + 'a, Self::FacadeError>;
 }
 
 /// Tensor-product execution selected by a provider-owned mode.

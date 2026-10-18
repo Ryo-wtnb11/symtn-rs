@@ -759,17 +759,17 @@ pub(super) fn fill_block_elements<D: ScalarOps>(
     Ok(())
 }
 
-/// Scales every fusion-tree block by its real categorical factor.
-pub(crate) fn scale_blocks_impl<D: ScalarOps>(
+/// Scales every fusion-tree block by its categorical factor.
+pub(crate) fn scale_blocks_impl<D: ScalarOps, C: TwistCoefficient<D>>(
     space: &DynamicFusionMapSpace,
     data: &mut [D],
-    factor_of: &dyn Fn(&BlockKey) -> f64,
+    factor_of: &dyn Fn(&BlockKey) -> C,
 ) -> Result<(), Error> {
     let structure = space.structure();
     for index in 0..structure.block_count() {
         let block = structure.block(index)?;
         let factor = factor_of(block.key());
-        if factor == 1.0 {
+        if factor == C::one() {
             continue;
         }
         scale_strided_block(
@@ -777,7 +777,7 @@ pub(crate) fn scale_blocks_impl<D: ScalarOps>(
             block.shape(),
             block.strides(),
             block.offset(),
-            D::from_real(factor),
+            factor.as_data(),
         )?;
     }
     Ok(())
@@ -886,9 +886,13 @@ pub(super) fn uncoupled_sector_of_leg(
     }
 }
 
-pub(crate) fn twist_factor_with_inverse(factor: f64, inverse: bool) -> f64 {
+/// θ for the twist, `θ̄` for its inverse. Why the conjugate is the inverse:
+/// every admitted rule is unitary, so a twist is a phase (`|θ| = 1`), and
+/// TensorKit `twist!` uses `θ'` the same way without a runtime check
+/// (`src/tensors/indexmanipulations.jl:74`).
+pub(crate) fn twist_factor_with_inverse<C: CategoricalScalar>(factor: C, inverse: bool) -> C {
     if inverse {
-        (factor).conj()
+        factor.conj()
     } else {
         factor
     }
@@ -901,18 +905,20 @@ pub(crate) fn twist_is_identity_over_blocks<R>(
     legs: &[usize],
 ) -> Result<bool, Error>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + ?Sized,
+    R: MultiplicityFreeRigidSymbols + ?Sized,
+    R::Scalar: PartialEq,
 {
     if rule.braiding_style().is_bosonic() {
         return Ok(true);
     }
+    let one = <R::Scalar as CategoricalScalar>::one();
     (0..structure.block_count()).try_fold(true, |noop, index| {
         let block = structure.block(index)?;
         Ok::<_, Error>(
             noop && match block.key() {
                 BlockKey::FusionTree(key) => legs
                     .iter()
-                    .all(|&leg| rule.twist_scalar(uncoupled_sector_of_leg(key, nout, leg)) == 1.0),
+                    .all(|&leg| rule.twist_scalar(uncoupled_sector_of_leg(key, nout, leg)) == one),
                 _ => true,
             },
         )
@@ -921,13 +927,13 @@ where
 
 /// TensorKit-compatible Z-isomorphism phase for sequential flip occurrences,
 /// reading each uncoupled sector's (χ, θ) from `values`.
-pub(crate) fn flip_block_factor(
-    values: &impl Fn(SectorId) -> (f64, f64),
+pub(crate) fn flip_block_factor<C: CategoricalScalar + Copy>(
+    values: &impl Fn(SectorId) -> (C, C),
     key: &FusionTreePairKey,
     nout: usize,
     occurrences: &[(usize, bool)],
     inverse: bool,
-) -> f64 {
+) -> C {
     occurrences
         .iter()
         .map(|&(leg, dual)| {
@@ -935,20 +941,20 @@ pub(crate) fn flip_block_factor(
             if leg < nout {
                 if dual {
                     if inverse {
-                        1.0
+                        C::one()
                     } else {
                         chi * theta
                     }
                 } else if inverse {
                     (chi * theta).conj()
                 } else {
-                    1.0
+                    C::one()
                 }
             } else if dual {
                 if inverse {
-                    (theta).conj()
+                    theta.conj()
                 } else {
-                    (chi).conj()
+                    chi.conj()
                 }
             } else if inverse {
                 chi
@@ -956,7 +962,7 @@ pub(crate) fn flip_block_factor(
                 theta
             }
         })
-        .product()
+        .fold(C::one(), |product, factor| product * factor)
 }
 
 /// Returns the duality-toggled HomSpace and each flip occurrence's pre-state.
