@@ -12,14 +12,16 @@
 //!
 //! Symmetric rules: a Bosonic planar contraction is the ordinary one (U(1),
 //! SU(2)); a fermionic one is the twist-free transposes-and-compose, which
-//! differs from `contract` and matches a TensorKit fℤ₂ `@planar` row.
+//! differs from `contract` and matches a TensorKit fℤ₂ `@planar` row, and
+//! equals the same-run explicit steps on fℤ₂×U(1), through a lazy adjoint and
+//! in the destination form with complex α and β ≠ 0.
 
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule,
-    U1Irrep, Z2Irrep,
+    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep, TableRule,
+    TableSector, U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, TensorMap,
@@ -496,5 +498,150 @@ fn fermionic_planar_contract_is_twist_free_and_matches_tensorkit() {
     assert!(
         difference > 1e-3 * norm,
         "fermionic planar must differ from contract"
+    );
+}
+
+fn fermionic_u1_space() -> GradedSpace<ProductFusionRule<FermionParityFusionRule, U1FusionRule>> {
+    GradedSpace::try_new(
+        Arc::new(
+            ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            ),
+        ),
+        [
+            (ProductSector::new(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
+            (ProductSector::new(Z2Irrep::ODD, U1Irrep::new(1)), 2),
+            (ProductSector::new(Z2Irrep::ODD, U1Irrep::new(-1)), 1),
+            (ProductSector::new(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+        ],
+    )
+    .unwrap()
+}
+
+fn max_distance(lhs: &[f64], rhs: &[f64]) -> f64 {
+    assert_eq!(lhs.len(), rhs.len());
+    lhs.iter()
+        .zip(rhs)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f64::max)
+}
+
+/// fℤ₂×U(1) (design §7.5): the cyclic geometry with an operand transposed
+/// on each side and a rotated output equals the explicit steps and differs
+/// from `contract`; a lazy-adjoint operand equals the steps over the same
+/// adjoint view.
+#[test]
+fn fermionic_u1_planar_contract_is_the_explicit_steps() {
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let v = fermionic_u1_space();
+    let x = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 21).unwrap();
+    let y = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 22).unwrap();
+    let cyclic = spec(&[1, 3], &[3, 1], &[0, 3], &[1, 2]);
+    let planar = x.planar_contract(&y, &cyclic).unwrap();
+    let steps = x
+        .transpose(&[2, 0], &[3, 1])
+        .unwrap()
+        .compose(&y.transpose(&[1, 3], &[0, 2]).unwrap())
+        .unwrap()
+        .transpose(&[1, 3], &[0, 2])
+        .unwrap();
+    let scale = planar.norm(2.0).unwrap();
+    let (got, want) = (planar.dense_data().unwrap(), steps.dense_data().unwrap());
+    assert!(max_distance(got, want) <= 1e-12 * scale.max(1.0), "steps");
+    let ordinary = x.contract(&y, &cyclic).unwrap();
+    assert!(
+        max_distance(got, ordinary.dense_data().unwrap()) > 1e-3 * scale,
+        "the supertrace twist distinguishes contract"
+    );
+
+    // `θ[l s1 s2; a] * conj(θ[l s1 s2; b])` through the lazy adjoint.
+    let theta = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v, &v], [&v], 23).unwrap();
+    let g6 = spec(&[0, 1, 2], &[1, 2, 3], &[0], &[1]);
+    let planar = theta.planar_contract(theta.adjoint_view(), &g6).unwrap();
+    let materialized = theta.adjoint().unwrap().materialize().unwrap();
+    let explicit = theta
+        .transpose(&[3], &[2, 1, 0])
+        .unwrap()
+        .compose(&materialized.transpose(&[3, 2, 1], &[0]).unwrap())
+        .unwrap();
+    let scale = planar.norm(2.0).unwrap();
+    let got = planar.dense_data().unwrap();
+    assert!(
+        max_distance(got, explicit.dense_data().unwrap()) <= 1e-12 * scale.max(1.0),
+        "lazy adjoint steps"
+    );
+    let ordinary = theta.contract(theta.adjoint_view(), &g6).unwrap();
+    assert!(
+        max_distance(got, ordinary.dense_data().unwrap()) > 1e-3 * scale,
+        "the supertrace twist distinguishes contract on the adjoint"
+    );
+}
+
+/// `planar_contract_into` with complex α and β ≠ 0 on fℤ₂: α · (explicit
+/// steps) + β · destination, and not α · contract + β · destination.
+#[test]
+fn fermionic_planar_contract_into_is_alpha_steps_plus_beta() {
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let v = GradedSpace::try_new(
+        Arc::new(FermionParityFusionRule),
+        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
+    )
+    .unwrap();
+    let filled = |tag: &str, codomain: usize, domain: usize| {
+        TensorMap::<_, Complex64>::from_subblock_fn(
+            &runtime,
+            vec![&v; codomain],
+            vec![&v; domain],
+            |t, i| parity_entry(tag, t, i),
+        )
+        .unwrap()
+    };
+    let (x, y) = (filled("fx", 2, 2), filled("fy", 2, 2));
+    let cyclic = spec(&[1, 3], &[3, 1], &[0, 3], &[1, 2]);
+    let (alpha, beta) = (Complex64::new(0.5, -0.25), Complex64::new(1.5, 0.75));
+    let steps = x
+        .transpose(&[2, 0], &[3, 1])
+        .unwrap()
+        .compose(&y.transpose(&[1, 3], &[0, 2]).unwrap())
+        .unwrap()
+        .transpose(&[1, 3], &[0, 2])
+        .unwrap();
+    let ordinary = x.contract(&y, &cyclic).unwrap();
+    let initial = TensorMap::<_, Complex64>::from_subblock_fn(
+        &runtime,
+        &steps.codomain(),
+        &steps.domain(),
+        |t, i| parity_entry("fdst", t, i),
+    )
+    .unwrap();
+    let mut destination = TensorMap::<_, Complex64>::from_subblock_fn(
+        &runtime,
+        &steps.codomain(),
+        &steps.domain(),
+        |t, i| parity_entry("fdst", t, i),
+    )
+    .unwrap();
+    x.planar_contract_into(&y, &cyclic, &mut destination, alpha, beta)
+        .unwrap();
+    let got = destination.dense_data().unwrap();
+    let start = initial.dense_data().unwrap();
+    let expect = |op: &[Complex64]| -> Vec<Complex64> {
+        op.iter()
+            .zip(start.iter())
+            .map(|(o, d)| alpha * o + beta * d)
+            .collect()
+    };
+    for (got, want) in got.iter().zip(expect(steps.dense_data().unwrap())) {
+        assert_close("fz2 planar_contract_into", *got, want);
+    }
+    let twisted = expect(ordinary.dense_data().unwrap());
+    assert!(
+        got.iter()
+            .zip(&twisted)
+            .map(|(g, t)| (g - t).norm())
+            .fold(0.0, f64::max)
+            > 1e-3,
+        "the destination form is the planar morphism, not contract's"
     );
 }
