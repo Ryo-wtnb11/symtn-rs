@@ -221,6 +221,7 @@ fn symtn_tensors_exports_exactly_the_pinned_names() {
         "project_physical_host",
         "PhysicalConversionError",
         "PivotalCoefficientAlgebra",
+        "PlanarContractOrders",
         // symtn_core
         "RuleIdentity",
         // symtn_operations

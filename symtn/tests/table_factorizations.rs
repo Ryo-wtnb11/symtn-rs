@@ -23,8 +23,8 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{
-    EighFullPlan, GradedSpace, HermitianTol, LeftPolar, Lq, OperationError, Qr, RightPolar,
-    Runtime, SectorSpectrum, StackedTensorMap, Svd, TensorMap, Truncation,
+    ContractSpec, EighFullPlan, GradedSpace, HermitianTol, LeftPolar, Lq, OperationError, Qr,
+    RightPolar, Runtime, SectorSpectrum, StackedTensorMap, Svd, TensorMap, Truncation,
 };
 use symtn_sectors::{TableRule, TableSector};
 
@@ -452,15 +452,33 @@ fn ising_truncation_matches_tensorkit() {
     truncation_matches_tensorkit(&Case::ising());
 }
 
-/// TensorKit `@planar C[b d; h f] := A[a b; c d] * B[c f; a h]` as
-/// `planarcontract!` runs it: two crossing-free transposes, then compose.
+/// TensorKit `@planar C[b d; h f] := A[a b; c d] * B[c f; a h]`, checked
+/// in the same run against `planarcontract!`'s steps: two crossing-free
+/// transposes, then compose.
 fn planar_contraction(case: &Case) -> Table {
     let a = case.filled("a", 2, 2);
     let b = case.filled("b", 2, 2);
-    a.transpose(&[1, 3], &[0, 2])
+    let spec = ContractSpec {
+        lhs: &[0, 2],
+        rhs: &[2, 0],
+        codomain: &[0, 1],
+        domain: &[3, 2],
+    };
+    let c = a.planar_contract(&b, &spec).unwrap();
+    let steps = a
+        .transpose(&[1, 3], &[0, 2])
         .unwrap()
         .compose(&b.transpose(&[2, 0], &[3, 1]).unwrap())
+        .unwrap();
+    for (got, want) in c
+        .dense_data()
         .unwrap()
+        .iter()
+        .zip(steps.dense_data().unwrap().iter())
+    {
+        assert_close("planar_contract vs transpose ∘ compose", *got, *want);
+    }
+    c
 }
 
 fn planar_contraction_then_factorization(case: &Case) {

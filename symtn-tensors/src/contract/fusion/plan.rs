@@ -387,6 +387,7 @@ impl CandidatePlan {
             rhs_open_rank: self.rhs_open_rank,
             lhs_source_conjugate: self.lhs_source_conjugate,
             rhs_source_conjugate: self.rhs_source_conjugate,
+            supertrace_twist: true,
         }
     }
 }
@@ -420,9 +421,57 @@ pub struct FusionContractPlan {
     rhs_open_rank: usize,
     lhs_source_conjugate: bool,
     rhs_source_conjugate: bool,
+    /// Whether dual rhs-contracted legs take the fermionic supertrace twist:
+    /// a contraction's (`blas_contract!`), never a planar contraction's
+    /// (`planarcontract!` is transposes and `mul!`).
+    supertrace_twist: bool,
 }
 
 impl FusionContractPlan {
+    /// TensorKit `planarcontract!`'s steps for admitted `orders`: each
+    /// operand transposed onto its core layout, the core GEMMs, and the
+    /// output transpose, with no candidate walk and no twist. An identity
+    /// transpose is borrowed like an identity permute.
+    pub(crate) fn planar(
+        orders: &super::super::PlanarContractOrders,
+        lhs_source_conjugate: bool,
+        rhs_source_conjugate: bool,
+    ) -> Self {
+        let transpose = |[codomain, domain]: &[AxisVec; 2]| {
+            TreeTransformOperation::transpose(codomain.iter().copied(), domain.iter().copied())
+        };
+        let lhs_open_rank = orders.lhs[0].len();
+        let contract_rank = orders.lhs[1].len();
+        let rhs_open_rank = orders.rhs[1].len();
+        Self {
+            orientation: FusionContractOrientation::LhsRhs,
+            lhs_transform: transpose(&orders.lhs),
+            rhs_transform: transpose(&orders.rhs),
+            output_transform: transpose(&orders.output),
+            core_axes: TensorContractSpecOwned::from_axis_vecs(
+                (lhs_open_rank..lhs_open_rank + contract_rank).collect(),
+                (0..contract_rank).collect(),
+                (0..lhs_open_rank + rhs_open_rank).collect(),
+                false,
+                false,
+            ),
+            core_dst_open_lhs_rank: lhs_open_rank,
+            core_dst_open_rhs_rank: rhs_open_rank,
+            lhs_open_rank,
+            lhs_contract_rank: contract_rank,
+            rhs_contract_rank: contract_rank,
+            rhs_open_rank,
+            lhs_source_conjugate,
+            rhs_source_conjugate,
+            supertrace_twist: false,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn supertrace_twist(&self) -> bool {
+        self.supertrace_twist
+    }
+
     #[inline]
     pub(crate) fn orientation(&self) -> FusionContractOrientation {
         self.orientation
@@ -459,7 +508,7 @@ impl FusionContractPlan {
     }
 
     pub(crate) fn output_transform_is_identity(&self) -> bool {
-        self.output_transform.kind() == TreeTransformOperationKind::Permute
+        self.output_transform.kind() != TreeTransformOperationKind::Braid
             && output_permutation_is_identity(
                 self.output_transform.codomain_permutation(),
                 self.output_transform.domain_permutation(),

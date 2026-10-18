@@ -367,6 +367,14 @@ where
                     lhs_nout,
                 )
             }
+            // A Bosonic planar contraction is the ordinary one, which the
+            // facade runs; the checked planner has no planar route.
+            ContractRequest::Planar { .. } => {
+                return Err(OperationError::UnsupportedTensorContractScope {
+                    message: "checked Generic planar contraction requires Bosonic braiding",
+                }
+                .into())
+            }
         };
         let axis_plan = validate_contract_local(
             (lhs, lhs_operand, lhs_len),
@@ -377,7 +385,9 @@ where
         let provider = crate::admission::admit_checked_generic_pair(lhs, rhs)?;
         let sides = [(lhs_operand, lhs.space()), (rhs_operand, rhs.space())];
         let authority = match request {
-            ContractRequest::Contract { .. } => CheckedAuthority::contraction(lhs, sides)?,
+            ContractRequest::Contract { .. } | ContractRequest::Planar { .. } => {
+                CheckedAuthority::contraction(lhs, sides)?
+            }
             ContractRequest::Compose => CheckedAuthority::composition(lhs, sides),
         };
         let destination = lhs.prepare_final_homspace_generic_from_checked(provider, || {

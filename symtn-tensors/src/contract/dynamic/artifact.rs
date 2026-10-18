@@ -367,14 +367,18 @@ where
     } else {
         &rhs_transform
     };
-    let source_twist_destination_scales = M::contract_twist_scales(
-        rule,
-        authority,
-        &twisted_transform.space,
-        core_right_space.homspace(),
-        borrowing.twist_lhs != reverse,
-        plan.core_axes().as_spec().rhs_contracting_axes(),
-    )?;
+    let source_twist_destination_scales = if plan.supertrace_twist() {
+        M::contract_twist_scales(
+            rule,
+            authority,
+            &twisted_transform.space,
+            core_right_space.homspace(),
+            borrowing.twist_lhs != reverse,
+            plan.core_axes().as_spec().rhs_contracting_axes(),
+        )?
+    } else {
+        Vec::new()
+    };
     if !source_twist_destination_scales.is_empty() {
         let Some(structure) = &twisted_transform.transform_structure else {
             return Err(OperationError::InvalidArgument {

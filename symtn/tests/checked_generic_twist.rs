@@ -1194,6 +1194,73 @@ fn checked_generic_contract_keeps_its_braiding_boundaries() {
 }
 
 #[test]
+fn checked_generic_planar_contract_is_bosonic_only() {
+    // What (#2284): a Bosonic checked provider's planar contraction is its
+    // ordinary contraction; every other style is the typed
+    // `UnsupportedTensorContractScope` (the checked engine has no planar
+    // route), eager and `_into`, with the destination untouched.
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let spec = ContractSpec {
+        lhs: &[1],
+        rhs: &[0],
+        codomain: &[0],
+        domain: &[1],
+    };
+    for (tag, braiding) in [
+        (40, BraidingStyleKind::NoBraiding),
+        (41, BraidingStyleKind::Anyonic),
+        (42, BraidingStyleKind::Fermionic),
+        (43, BraidingStyleKind::Bosonic),
+    ] {
+        let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
+        let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
+        let matrix = |offset: f64| -> TensorMap<_, f64> {
+            TensorMap::from_subblock_fn(&runtime, [&unit], [&unit], |_, index| {
+                offset + (2 * index[0] + index[1]) as f64
+            })
+            .unwrap()
+        };
+        let (lhs, rhs) = (matrix(1.0), matrix(5.0));
+        let mut destination = matrix(-3.0);
+        let before = destination.dense_data().unwrap().to_vec();
+        let eager = lhs.planar_contract(&rhs, &spec);
+        let into = lhs.planar_contract_into(&rhs, &spec, &mut destination, 1.0, 1.0);
+        if braiding == BraidingStyleKind::Bosonic {
+            assert_eq!(
+                eager.unwrap().dense_data().unwrap(),
+                lhs.contract(&rhs, &spec).unwrap().dense_data().unwrap()
+            );
+            into.unwrap();
+            continue;
+        }
+        for result in [eager.map(drop), into] {
+            let operation = match &result {
+                Err(GenericTensorError::Facade(Error::Operation(operation))) => &**operation,
+                Err(GenericTensorError::Plan(CheckedGenericPlanError::Operation(operation))) => {
+                    operation
+                }
+                other => panic!("{braiding:?}: {:?}", other.as_ref().err()),
+            };
+            assert!(
+                matches!(
+                    operation,
+                    symtn::typed::OperationError::UnsupportedTensorContractScope { .. }
+                ),
+                "{braiding:?}: {operation:?}"
+            );
+        }
+        let after = destination.dense_data().unwrap();
+        assert!(
+            before
+                .iter()
+                .zip(after.iter())
+                .all(|(x, y)| x.to_bits() == y.to_bits()),
+            "{braiding:?}: destination written"
+        );
+    }
+}
+
+#[test]
 fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
     // What (#1553, #1620): factorization and solve leg roles are a `permute`, so a split
     // other than the current one needs a symmetric braiding. The anyonic

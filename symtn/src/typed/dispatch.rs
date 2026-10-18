@@ -219,12 +219,14 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
 
     fn contract_into<S: ContractExec<R, Self>>(
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
         destination: &mut TensorMap<R, Self, S>,
         alpha: Self,
         beta: Self,
@@ -345,10 +347,13 @@ where
     /// Contracts two operands, a lazy adjoint read through its parent's
     /// payload, into a fresh destination payload of their storage: the
     /// staging, the storage's planner capabilities, its kernel, the commit.
+    /// With `planar`, the planar contraction over those admitted orders
+    /// ([`TensorMap::planar_contract`]) instead of the ordinary one.
     fn contract<S: ContractExec<R, D>>(
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>;
 
     /// `destination = alpha · contract(lhs, rhs) + beta · destination` on
@@ -361,6 +366,7 @@ where
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
         beta: D,

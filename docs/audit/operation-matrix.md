@@ -186,8 +186,9 @@ rejects `Anyonic` and `NoBraiding` with one shared
 canonical axes included, as TensorKit 0.17.1 `blas_contract!` does before any
 layout test. Behaviour change: a canonical `NoBraiding` contraction was
 accepted before. `compose` (TensorKit `mul!`) does not route through this
-boundary; planar contraction for non-symmetric categories is
-[#1070](https://github.com/Ryo-wtnb11/TeNeT/issues/1070). The checked-Generic
+boundary; planar contraction for every braiding style is the separate
+`planar_contract` / `planar_contract_into` (TensorKit `@planar` /
+`planarcontract!`, #2284), multiplicity-free Host only. The checked-Generic
 engine itself still restricts contraction and `compose` to Bosonic braiding.
 
 [13] Device `trace_pairs` replays the Host trace structure — its valid

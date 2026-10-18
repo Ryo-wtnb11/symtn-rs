@@ -50,6 +50,8 @@ pub(crate) use fusion_block::{
     compile_fusion_block_contract_plan_prelowered_validated, compile_operand_core_plan_general,
     core_homspace_matches, validate_fusion_contract_rule, ValidatedCoreContract,
 };
+mod planar;
+pub use planar::PlanarContractOrders;
 mod resolution;
 pub(crate) use resolution::{compile_derived_core_plan, contract_axes_require_twist};
 #[cfg(feature = "cuda")]

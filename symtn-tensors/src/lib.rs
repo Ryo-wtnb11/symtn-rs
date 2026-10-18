@@ -50,7 +50,7 @@ pub use contract::{
 #[doc(hidden)]
 pub use contract::{
     plan_compose, try_compile_storage_contract_core_route, HostContractMembersWorkspace,
-    StagedContract, StorageContractResolution,
+    PlanarContractOrders, StagedContract, StorageContractResolution,
 };
 pub use contract::{
     prepare_tensorcontract_fusion_plan_dyn, tensorcontract_fusion_block_specs, FusionContractPlan,
