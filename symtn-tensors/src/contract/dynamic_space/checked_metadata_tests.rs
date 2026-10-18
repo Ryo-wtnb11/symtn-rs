@@ -960,12 +960,19 @@ fn fz2_lowered_transform_contract_and_mixed_plan_match_encoded_oracle() {
         BoundDynamicFusionMapSpace::contracted_multiplicity_free(&encoded, &encoded, &[1], &[0])
             .unwrap();
     assert_eq!(lowered_dst.space(), encoded_dst.space());
-    let axes = symtn_operations::TensorContractSpec::with_default_output_order(&[1], &[0]);
-    let mixed =
-        crate::prepare_tensorcontract_fusion_plan_dyn(&lowered_dst, &lowered, &encoded, axes)
-            .unwrap();
-    let lowered_only =
-        crate::prepare_tensorcontract_fusion_plan_dyn(&lowered_dst, &lowered, &lowered, axes)
-            .unwrap();
+    let output = (0..lowered_dst.space().rank()).collect::<Vec<_>>();
+    let plan = |rhs: &BoundDynamicFusionMapSpace<_>| {
+        crate::prepare_tensorcontract_fusion_plan_dyn(
+            &lowered_dst,
+            crate::FusionOperand::direct(lowered.space()),
+            crate::FusionOperand::direct(rhs.space()),
+            &[1],
+            &[0],
+            &output,
+        )
+        .unwrap()
+    };
+    let mixed = plan(&encoded);
+    let lowered_only = plan(&lowered);
     assert_eq!(mixed, lowered_only);
 }

@@ -1,9 +1,7 @@
 use symtn_core::{BlockKey, BlockSpec, BlockStructure, FusionTreePairKey};
 
 use crate::OperationError;
-use symtn_operations::{
-    permutation_axes_inline, AxisVec, OutputAxisOrder, TensorContractSpec, TensorTraceAxisSpec,
-};
+use symtn_operations::{AxisVec, TensorTraceAxisSpec};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LoweredTensorTraceAxisSpec {
@@ -45,83 +43,6 @@ pub(crate) fn lower_tensortrace_source_adjoint_axes_dyn(
             storage_conjugate: false,
         })
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LoweredTensorContractSpec {
-    lhs_contracting_axes: AxisVec,
-    rhs_contracting_axes: AxisVec,
-    output_axes: AxisVec,
-    lhs_storage_conjugate: bool,
-    rhs_storage_conjugate: bool,
-}
-
-impl LoweredTensorContractSpec {
-    #[inline]
-    pub(crate) fn as_spec(&self) -> TensorContractSpec<'_> {
-        TensorContractSpec::new_with_conjugation(
-            &self.lhs_contracting_axes,
-            &self.rhs_contracting_axes,
-            OutputAxisOrder::from_axes(&self.output_axes),
-            self.lhs_storage_conjugate,
-            self.rhs_storage_conjugate,
-        )
-    }
-
-    #[inline]
-    pub(crate) fn lhs_storage_conjugate(&self) -> bool {
-        self.lhs_storage_conjugate
-    }
-
-    #[inline]
-    pub(crate) fn rhs_storage_conjugate(&self) -> bool {
-        self.rhs_storage_conjugate
-    }
-}
-
-pub(crate) fn lower_tensorcontract_adjoint_axes(
-    lhs_nout: usize,
-    lhs_nin: usize,
-    rhs_nout: usize,
-    rhs_nin: usize,
-    axes: TensorContractSpec<'_>,
-) -> Result<LoweredTensorContractSpec, OperationError> {
-    if axes.lhs_contracting_axes().len() != axes.rhs_contracting_axes().len() {
-        return Err(OperationError::ContractAxisCountMismatch {
-            lhs: axes.lhs_contracting_axes().len(),
-            rhs: axes.rhs_contracting_axes().len(),
-        });
-    }
-    let lhs_rank = lhs_nout
-        .checked_add(lhs_nin)
-        .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    let rhs_rank = rhs_nout
-        .checked_add(rhs_nin)
-        .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    let contract_count = axes.lhs_contracting_axes().len();
-    let core_output_rank = lhs_rank
-        .checked_sub(contract_count)
-        .and_then(|lhs_open| {
-            rhs_rank
-                .checked_sub(contract_count)
-                .and_then(|rhs_open| lhs_open.checked_add(rhs_open))
-        })
-        .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    Ok(LoweredTensorContractSpec {
-        lhs_contracting_axes: if axes.lhs_conjugate() {
-            adjoint_tensor_axes_inline(lhs_nout, lhs_nin, axes.lhs_contracting_axes())?
-        } else {
-            AxisVec::from_slice(axes.lhs_contracting_axes())
-        },
-        rhs_contracting_axes: if axes.rhs_conjugate() {
-            adjoint_tensor_axes_inline(rhs_nout, rhs_nin, axes.rhs_contracting_axes())?
-        } else {
-            AxisVec::from_slice(axes.rhs_contracting_axes())
-        },
-        output_axes: permutation_axes_inline(axes.output_permutation(), core_output_rank)?,
-        lhs_storage_conjugate: axes.lhs_conjugate(),
-        rhs_storage_conjugate: axes.rhs_conjugate(),
-    })
 }
 
 pub(crate) fn adjoint_tensor_axis(

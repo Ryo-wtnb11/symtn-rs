@@ -104,14 +104,16 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
         )
         .unwrap();
     assert_eq!(ordinary_swapped, [0.0, 6.5, 2.0, 13.5]);
-    let candidate = crate::contract::contracted_axis_order_candidates(&[0], &[0]).remove(0);
+    // The plan takes the same lazy-adjoint form as `prelowered_axes`: the
+    // contracted leg is the domain leg 1 of `A'`.
+    let candidate = crate::contract::contracted_axis_order_candidates(&[1], &[0]).remove(0);
     let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
         provider.as_ref(),
         swapped_dst_bound.space(),
         &canonical,
         &rhs,
         TensorContractSpec::new_with_conjugation(
-            &[0],
+            &[1],
             &[0],
             crate::OutputAxisOrder::from_axes(&[1, 0]),
             true,

@@ -42,14 +42,6 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let rule = SU2FusionRule;
-    let source_lhs_contracting_axes = [0, 1, 2];
-    let source_rhs_contracting_axes = [1, 2, 3];
-    let axes = TensorContractSpec::with_default_output_order_and_conjugation(
-        &source_lhs_contracting_axes,
-        &source_rhs_contracting_axes,
-        lhs_conjugate,
-        rhs_conjugate,
-    );
 
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
     let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
@@ -61,12 +53,12 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         .validate_rule(&rule)
         .and_then(|()| rhs_space.adjoint_view())
         .unwrap();
-    let lowered_lhs_axes = maybe_adjoint_axes::<3, 1>(&source_lhs_contracting_axes, lhs_conjugate);
-    let lowered_rhs_axes = maybe_adjoint_axes::<1, 3>(&source_rhs_contracting_axes, rhs_conjugate);
+    let (lowered_lhs_axes, lowered_rhs_axes) =
+        su2_contracted_logical_axes(lhs_conjugate, rhs_conjugate);
     let lowered_lhs_open_axes = complement_axes(4, &lowered_lhs_axes);
     let lowered_rhs_open_axes = complement_axes(4, &lowered_rhs_axes);
-    // The eager entry takes the lazy-adjoint operand form: a set flag names
-    // the operand's lazy adjoint, whose legs the axes index.
+    // The plan builder and the eager entry take one operand form: a set flag
+    // names the operand's lazy adjoint, whose legs the axes index.
     let lazy_axes = TensorContractSpec::with_default_output_order_and_conjugation(
         lowered_lhs_axes.as_slice(),
         lowered_rhs_axes.as_slice(),
@@ -210,12 +202,27 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
 
     let mut explicit_dst =
         TestTensor::<Complex64>::from_vec_with_fusion_space(initial_dst, dst_space).unwrap();
-    let plan = fixture_contract_plan(
-        &rule,
-        explicit_dst.fusion_space().unwrap(),
-        lhs.fusion_space().unwrap(),
-        rhs.fusion_space().unwrap(),
-        axes,
+    // What: the public plan builder takes the eager entry's operand form, a
+    // lazy-adjoint `FusionOperand` whose axes index the adjoint's legs, and
+    // its plan reproduces the materialized-adjoint reference sequence.
+    fn operand(space: &DynamicFusionMapSpace, adjoint: bool) -> crate::FusionOperand<'_> {
+        if adjoint {
+            crate::FusionOperand::adjoint(space)
+        } else {
+            crate::FusionOperand::direct(space)
+        }
+    }
+    let plan = crate::prepare_tensorcontract_fusion_plan_dyn(
+        &crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
+            explicit_dst.fusion_space().unwrap().as_ref().clone(),
+            Arc::new(rule),
+        )
+        .unwrap(),
+        operand(lhs.fusion_space().unwrap().as_ref(), lhs_conjugate),
+        operand(rhs.fusion_space().unwrap().as_ref(), rhs_conjugate),
+        lazy_axes.lhs_contracting_axes(),
+        lazy_axes.rhs_contracting_axes(),
+        &[0, 1],
     )
     .unwrap();
     assert_eq!(plan.lhs_source_conjugate(), lhs_conjugate);
@@ -295,17 +302,17 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     }
 }
 
-pub(super) fn maybe_adjoint_axes<const NOUT: usize, const NIN: usize>(
-    axes: &[usize],
-    source_conjugate: bool,
-) -> Vec<usize> {
-    if source_conjugate {
-        axes.iter()
-            .map(|&axis| crate::lowering::adjoint_tensor_axis(NOUT, NIN, axis).unwrap())
-            .collect()
-    } else {
-        axes.to_vec()
-    }
+/// The contracted stored legs `[0, 1, 2]` of `A(3 <- 1)` and `[1, 2, 3]` of
+/// `B(1 <- 3)`, stated by hand on each operand's logical legs: they are legs
+/// `[1, 2, 3]` of `A'(1 <- 3)` and `[0, 1, 2]` of `B'(3 <- 1)`.
+pub(super) fn su2_contracted_logical_axes(
+    lhs_conjugate: bool,
+    rhs_conjugate: bool,
+) -> ([usize; 3], [usize; 3]) {
+    (
+        if lhs_conjugate { [1, 2, 3] } else { [0, 1, 2] },
+        if rhs_conjugate { [0, 1, 2] } else { [1, 2, 3] },
+    )
 }
 
 fn complement_axes(rank: usize, axes: &[usize]) -> Vec<usize> {
