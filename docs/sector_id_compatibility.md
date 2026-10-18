@@ -13,13 +13,13 @@ application explicitly chooses a fixed-width layout. A provider differing only
 in its codec labels the same category with different numeric IDs and a
 different `RuleIdentity` — which is exactly why those IDs are not a wire format.
 
-The migration preserves:
+Changing the codec preserves:
 
 - sector labels and degeneracies;
 - fusion, duality, F, R, and pivotal semantics;
 - tensor results when inputs are matched by semantic fusion-tree labels.
 
-The migration can change:
+Changing the codec can change:
 
 - numeric `SectorId::id()` values;
 - the order returned by `GradedSpace::sectors()`;
@@ -68,14 +68,13 @@ A provider without a TensorKit counterpart keeps the default key, its
 `SectorId`, and its ties follow id order. A provider whose ids do not ascend in
 TensorKit order must override the hook.
 
-## Cache migration
+## Caches
 
 Codec types participate in fusion-rule identity, so in-process symtn caches do
 not reuse Cantor plans as packed plans. Complete tree-transform plans and
 structures are execution-context-local; source-column recoupling rows are
-compile-local and are not retained across plan misses. symtn no longer reads or writes the former
-`tree_transform_plans_v1.bin` and `tree_transform_plans_v2.bin` files. Existing
-files are ignored and may be deleted manually. Raw-ID-keyed application caches
+compile-local and are not retained across plan misses; symtn persists no
+tree-transform plan files. Raw-ID-keyed application caches
 must likewise be rebuilt from semantic labels.
 
 This does not change `symtn-network::{save_plan_cache, load_plan_cache}`.

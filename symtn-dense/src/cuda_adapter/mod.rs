@@ -3,11 +3,10 @@
 //! symtn workspace that touches tenferro GPU types; upper layers see opaque
 //! storage handles and `DenseError`.
 //!
-//! Split by responsibility (#1595, move-only): device context and transfer
-//! stats stay here with the scalar-admission traits every child uses;
-//! `context`, `storage`, `gemm`, `elementwise`, `hermitian` and
-//! `factorization` each own one device-boundary concern so an independent
-//! leaf can touch one without conflicting with another.
+//! Split by responsibility: device context and transfer stats stay here with
+//! the scalar-admission traits every child uses; `context`, `storage`,
+//! `gemm`, `elementwise`, `hermitian` and `factorization` each own one
+//! device-boundary concern.
 
 use std::cell::Cell;
 use std::num::NonZeroUsize;

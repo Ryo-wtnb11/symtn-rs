@@ -3,8 +3,7 @@
 //! # symtn-network — contraction planning and execution for the symtn user layer
 //!
 //! The planner half (labels, [`NetworkIR`], cost models, optimizer trait,
-//! [`ContractionPlan`], slicing) is ported nearly verbatim from the legacy
-//! `symtn-contract` crate: it is **pure structure** over labels and leg
+//! [`ContractionPlan`], slicing) is **pure structure** over labels and leg
 //! dimensions and never touches tensor data. Explicit execution uses homogeneous
 //! typed Host [`symtn::typed::TensorMap`] operands and a caller-owned typed
 //! workspace; device operands run the same schedule on CUDA when enabled.
@@ -34,7 +33,7 @@
 //!   while keeping execution in Rust. The optional `opt-path` feature wraps
 //!   the `opt-einsum-path` crate for optimal / dp / branch-and-bound searches.
 //! - **Sliced execution**: the slicing *decision* types ([`SlicePlan`],
-//!   [`greedy_slice`]) are ported, and [`Network::lower_symmetric_sliced_plan`]
+//!   [`greedy_slice`]) choose the sliced labels, and [`Network::lower_symmetric_sliced_plan`]
 //!   with [`Network::execute_symmetric_sliced`] runs a lowered plan under a
 //!   measured payload ceiling.
 

@@ -1,4 +1,4 @@
-//! symtn's structure caches (#2014): process-global, byte-bounded, one
+//! symtn's structure caches: process-global, byte-bounded, one
 //! wrapper over `quick_cache` for every one of them, and one registry of all
 //! of them.
 //!
@@ -435,7 +435,7 @@ pub trait ErasedStructureCacheControl: Sync {
     fn set_byte_budget(&self, bytes: u64);
 }
 
-/// Process default of every structure cache's byte budget (#1993, D4).
+/// Process default of every structure cache's byte budget.
 pub(crate) const DEFAULT_STRUCTURE_CACHE_BYTE_BUDGET: u64 = 64 * 1024 * 1024;
 
 /// The slot of an externally owned kind: its owner registers on first use.

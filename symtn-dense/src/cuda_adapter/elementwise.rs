@@ -536,10 +536,9 @@ pub fn cuda_region_trace_accumulate<D: CudaScalar>(
 /// Copies the leading compact `rows x cols` block of a device buffer into a
 /// packed sub-region of `dst`.
 ///
-/// Tenferro 0.5.0's `copy_read_into` accepted an offset/strided destination
-/// view but required a compact source view at offset 0 (0.6.0 accepts strided
-/// sources, tenferro-rs#1836; adopting that is leaf M4), so the source is read
-/// from its start; the caller owns the proof that the destination region's tree layout
+/// The source is passed to tenferro's `copy_read_into` as a compact view at
+/// offset 0 (strided sources, tenferro-rs#1836, are not used here), so it is
+/// read from its start; the caller owns the proof that the destination region's tree layout
 /// is identical to what it reads (see `CompactFactorPlan::left_preserves_trees`). A source longer
 /// than the region is accepted because contiguity is a layout predicate: the
 /// leading `rows * cols` elements of a compact buffer are themselves compact,

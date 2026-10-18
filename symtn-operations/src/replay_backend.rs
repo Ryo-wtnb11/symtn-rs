@@ -12,12 +12,12 @@ use crate::{
     TreeTransformScalar, TreeTransformStructure, TreeTransformWorkspace,
 };
 
-/// Legacy/current tree-transform execution contract over host-accessible data.
+/// Tree-transform execution contract over host-accessible data.
 ///
-/// The raw replay methods take host slices. New code that specifically depends
-/// on this host-slice contract may use `HostTreeTransformBackend`; future
-/// placement-aware/device/MPI transform traits should not inherit from this
-/// raw-slice API.
+/// The raw replay methods take host slices. Code that specifically depends on
+/// this host-slice contract may use `HostTreeTransformBackend`. Placement-aware
+/// (device or distributed) transform traits do not inherit from this raw-slice
+/// API.
 pub trait TreeTransformBackend<D, C>
 where
     D: TreeTransformScalar,
@@ -204,12 +204,12 @@ where
     Ok(())
 }
 
-/// Explicit marker for the legacy host-slice tree-transform backend family.
+/// Explicit marker for the host-slice tree-transform backend family.
 ///
-/// `TreeTransformBackend` keeps the existing method-bearing public trait for
-/// source compatibility. This marker means “implements the host-slice replay
-/// contract,” not necessarily “physically CPU-native.” Future device/MPI
-/// transform backends should use separate placement-aware execution traits.
+/// `TreeTransformBackend` carries the methods; this marker means “implements the
+/// host-slice replay contract,” not necessarily “physically CPU-native.”
+/// Device or distributed transform backends use separate placement-aware
+/// execution traits.
 pub trait HostTreeTransformBackend<D, C>: TreeTransformBackend<D, C>
 where
     D: TreeTransformScalar,

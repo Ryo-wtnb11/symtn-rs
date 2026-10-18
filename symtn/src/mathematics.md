@@ -78,7 +78,7 @@ So an SU(2) `GradedSpace` with degeneracy two in twice-spin sectors 0 and 1 has 
 </math>
 </div>
 
-The user layer currently exposes U(1), bosonic Z2, fermion parity fZ2,
+The user layer exposes U(1), bosonic Z2, fermion parity fZ2,
 SU(2), and selected product symmetries through `GradedSpace` values over
 admitted providers. Product-sector dimensions multiply sector
 quantum dimensions componentwise.
@@ -677,5 +677,5 @@ tested for construction, transformations including explicit planar braids,
 tensor products, and composition. Ordinary arbitrary-axis contraction,
 factorization, and general network execution are not supported or claimed.
 Checked Generic support is Host-only. CUDA requires explicit transfer and
-currently supports a multiplicity-free `f64` subset; unsupported device
+supports a multiplicity-free `f64` subset; unsupported device
 operations return an explicit error.

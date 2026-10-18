@@ -1,4 +1,4 @@
-//! The process-global composed-coefficient cache (cache 4 of #2014): the
+//! The process-global composed-coefficient cache: the
 //! transform specs of one source fusion-tree group, keyed on sectors and
 //! trees only.
 //!
@@ -567,7 +567,7 @@ where
     }
 }
 
-/// Rule O (#2192): an entry's key and value trees all point into the one
+/// Single-arena ownership: an entry's key and value trees all point into the one
 /// arena the entry owns, the group key's.
 fn owns_one_arena<'k>(
     key: &'k CoefficientGroupKey,

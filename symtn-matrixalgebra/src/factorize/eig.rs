@@ -88,7 +88,7 @@ pub fn ascending_eigh_order(values: &[f64], order: &mut [usize]) -> bool {
 /// (<https://github.com/QuantumKitHub/MatrixAlgebraKit.jl/blob/33d77fdf032d5ffa36310a04c21aef0c51a554f3/src/implementations/eig.jl#L162>).
 /// Why symtn also sorts dense sectors, where MAK `eig_full_qr_iteration!`
 /// keeps `geev`'s unspecified order: one representation-independent public
-/// order (approved deviation, #1985), at O(n log n) per sector next to the
+/// order (a deliberate deviation from MatrixAlgebraKit, #1985), at O(n log n) per sector next to the
 /// O(n³) solver.
 pub fn lexicographic_eig_order(values: &[Complex64], order: &mut [usize]) -> bool {
     stable_ascending_order(values, order, lexicographic_eig_cmp)
@@ -527,7 +527,7 @@ pub(crate) struct EigFull<R, D: FactorScalar> {
 }
 
 /// Dynamic-rank `EigFull`. Spectrum + eigenvectors only; the dense diagonal
-/// is materialized by the typed `eig_full` wrapper (see [`EighFullDyn`], #56 N).
+/// is materialized by the typed `eig_full` wrapper (see [`EighFullDyn`]).
 #[derive(Clone, Debug)]
 pub struct EigFullDyn<R, D: FactorScalar> {
     pub(super) v: BoundDynFactor<R, D::Eig>,

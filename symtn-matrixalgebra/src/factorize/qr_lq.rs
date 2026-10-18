@@ -181,8 +181,8 @@ where
 /// the first `n` columns of `Q` span a superspace of `X`'s columns whatever
 /// its rank, and the last `m - n` span their orthogonal complement.
 ///
-/// This is the single owner of the full-`Q` cost the dense backend imposes
-/// until #1140 A3: it exposes only economy QR, so a full `Q` costs
+/// This is the single owner of the full-`Q` cost the dense backend imposes:
+/// it exposes only economy QR, so a full `Q` costs
 /// `O(m^2 (n + m))` here against MatrixAlgebraKit's `geqrf` + `unmqr`/`ungqr`
 /// `O(m n^2 + m n (m - n))`. Its consumers are the tall branch of
 /// [`full_qr_numerical_stage`] (`qr_full`, `lq_full`), the full-SVD

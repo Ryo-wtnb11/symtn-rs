@@ -24,7 +24,7 @@ The typed API selects one of two admission modes through
 | mode | required provider capabilities | scope |
 | --- | --- | --- |
 | multiplicity-free | `MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec`, plus the coefficient and payload bounds of the operation | ordinary typed construction and multiplicity-free operations |
-| checked Generic | `TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>` plus the checked Generic fusion, rigidity, pivotal, and symbol traits required by each operation | outer multiplicity with fallible provider queries; currently Host-only |
+| checked Generic | `TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>` plus the checked Generic fusion, rigidity, pivotal, and symbol traits required by each operation | outer multiplicity with fallible provider queries; Host-only |
 
 For the multiplicity-free mode, `FusionRule` supplies the infallible algebra,
 `CheckedFusionAlgebra` validates the representable domain, and `SectorCodec`
@@ -222,7 +222,7 @@ catalog-bounded provider. Its `try_dim_scalar` is the testing-tier
 perfect square.
 
 Current checked Generic coverage is defined by the public bounds and executable
-tests at this revision. It is a Host path; CUDA typed execution is currently
+tests at this revision. It is a Host path; CUDA typed execution is
 limited to supported multiplicity-free `f64` paths. The
 [operation matrix](audit/operation-matrix.md) is retained only as
 revision-pinned historical evidence.
