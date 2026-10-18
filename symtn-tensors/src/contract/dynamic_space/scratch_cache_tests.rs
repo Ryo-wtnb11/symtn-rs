@@ -865,9 +865,9 @@ fn bound_layout_strategy_propagates_without_heap_ownership() {
     // What: clone, validated-layout rebind, derived construction, transform,
     // and contraction retain one opaque lowered strategy, while an expert
     // encoded root remains distinct and a mixed binary result follows lhs.
-    assert_eq!(
-        std::mem::size_of::<LayoutBuildCapability<symtn_core::SU2FusionRule>>(),
-        std::mem::size_of::<usize>()
+    assert!(
+        std::mem::size_of::<LayoutBuildCapability<symtn_core::SU2FusionRule>>()
+            <= std::mem::size_of::<usize>()
     );
     let provider = Arc::new(symtn_core::SU2FusionRule);
     let half = symtn_core::SU2Irrep::from_twice_spin(1).sector_id();

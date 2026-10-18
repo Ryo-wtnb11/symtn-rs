@@ -4,8 +4,10 @@ use symtn_network::{
     GreedyDenseOptimizer, LabelOrderDenseOptimizer, NetworkIR, SliceLabels, TemporaryLabel,
 };
 
-// Fixed reference outputs (captured at 98c9f4a8) the plan constructors and
-// slice functions must keep reproducing.
+// The public plan and slice text formats, small enough to check by hand: the
+// chain a-b-c-d contracts (0, 1) -> 3 with labels a c, then 3 with 2 -> 4 with
+// labels a d, each step line reading `lhs rhs result cost labels`; slicing the
+// internal label c of extent 8 yields 8 slices.
 const DENSE_PATH: &str =
     "symtn-contract-plan-v1\ntensor_count 3\noutput a d\nstep 0 1 3 32 a c\nstep 2 3 4 50 a d\n";
 const DENSE_GREEDY: &str =
