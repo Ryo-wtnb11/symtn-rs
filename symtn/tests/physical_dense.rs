@@ -286,7 +286,14 @@ fn factorial(n: i32) -> f64 {
 /// `clebschgordan`), computed independently of the symtn/fusion-symbols code
 /// under test.
 fn clebsch_gordan(j1: i32, m1: i32, j2: i32, m2: i32, j: i32, m: i32) -> f64 {
-    if m1 + m2 != m || m.abs() > j || j < (j1 - j2).abs() || j > j1 + j2 || (j1 + j2 + j) % 2 != 0 {
+    if m1 + m2 != m
+        || m.abs() > j
+        || m1.abs() > j1
+        || m2.abs() > j2
+        || j < (j1 - j2).abs()
+        || j > j1 + j2
+        || (j1 + j2 + j) % 2 != 0
+    {
         return 0.0;
     }
     let half = |doubled: i32| factorial(doubled / 2);
