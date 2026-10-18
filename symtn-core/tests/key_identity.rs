@@ -224,9 +224,9 @@ fn key_hashes_follow_the_field_formula() {
 
 // Values recorded by the former exhaustive key corpus, computed from the
 // `Arc`-slice key representation at e5023d98, and unchanged under the arena
-// representation through 85d16e6d. Frozen because cache lookups across arenas
-// and processes rely on the hash being a fixed function of the identity
-// fields; the formula tests alone would not notice a hasher swap.
+// representation through 85d16e6d. The hash is never persisted; these literals
+// pin the in-process hasher choice that cache lookups across arenas rely on,
+// which the formula tests alone would not notice being swapped.
 #[test]
 fn key_hashes_match_recorded_values() {
     let cases = [
