@@ -21,17 +21,16 @@ const REP_S3: &str = "37fa4e9c-97c6-11f1-8ce9-19309dfc597c";
 
 const BOUND: f64 = 256.0 * f64::EPSILON;
 
-/// TensorKit 0.17.1 `D3Irrep` rows of `fixtures/tensorkit_table_planar.jl`.
+/// TensorKitSectors 0.3.9 `D3Irrep` (Rep(S₃), `src/irreps/dnirrep.jl`):
+/// the crossing-free transpose-then-compose matrix on `x ⊗ x ⊗ x ← x` in the
+/// channel order `(xx) → A₁, A₂, E`, i.e. `F^{xxx}_x` in TensorKit's real
+/// gauge (checked against TensorKit 0.17.1). Only the moduli `1/2`, `1/√2`,
+/// `0` and the cross ratio are vertex-gauge invariant, and only those are
+/// compared.
 fn tensorkit_rep_s3_f(row: usize, column: usize) -> Complex64 {
-    let wanted = (row.to_string(), column.to_string());
-    include_str!("fixtures/tensorkit-0.17.1-table-planar.txt")
-        .lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| {
-            fields[0] == "rep_s3_f" && (fields[1], fields[2]) == (&*wanted.0, &*wanted.1)
-        })
-        .map(|fields| Complex64::new(fields[3].parse().unwrap(), fields[4].parse().unwrap()))
-        .unwrap_or_else(|| panic!("fixture is missing rep_s3_f {row} {column}"))
+    use std::f64::consts::FRAC_1_SQRT_2 as S;
+    let f = [[0.5, 0.5, S], [0.5, 0.5, -S], [S, -S, 0.0]];
+    Complex64::new(f[row][column], 0.0)
 }
 
 fn rep_s3() -> Arc<TableRule> {
