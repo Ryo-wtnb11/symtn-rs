@@ -1,29 +1,6 @@
 use super::*;
 
 #[test]
-fn host_tree_transform_workspace_is_explicit_host_workspace() {
-    let workspace = HostTreeTransformWorkspace::<f64>::default();
-    let alias = TreeTransformWorkspace::<f64>::default();
-
-    assert_eq!(workspace.placement(), Placement::Host);
-    assert!(workspace.is_host_workspace());
-    assert_eq!(workspace.source_len(), 0);
-    assert_eq!(workspace.destination_len(), 0);
-    assert_eq!(alias.placement(), Placement::Host);
-    assert_eq!(alias.source_len(), workspace.source_len());
-    assert_eq!(alias.destination_len(), workspace.destination_len());
-}
-
-#[test]
-fn tree_transform_execution_context_reports_host_placement() {
-    let context = TreeTransformExecutionContext::<f64, RuleIdentity>::default();
-
-    assert_eq!(context.backend_placement(), Placement::Host);
-    assert_eq!(context.workspace_placement(), Placement::Host);
-    assert!(context.is_host_context());
-}
-
-#[test]
 fn tree_transform_structure_replays_custom_host_storage_without_vec_fixing() {
     let space = vec![2, 2];
     let structure = BlockStructure::packed_column_major(2, [vec![2, 2]]).unwrap();

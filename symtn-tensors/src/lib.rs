@@ -64,8 +64,7 @@ pub use contract::{
 pub use contract::{CopyCRoute, CoreRoute, DirectCoreExecutor, ExecCaps, HostEagerExecutor};
 #[cfg(test)]
 pub(crate) use contract::{
-    HostTensorContractWorkspace, PreparedCheckedGenericDynamicSpace, TensorContractStructure,
-    TensorContractWorkspace,
+    PreparedCheckedGenericDynamicSpace, TensorContractStructure, TensorContractWorkspace,
 };
 #[doc(hidden)]
 pub use mode::ContractRequest;
@@ -86,8 +85,6 @@ pub use symtn_operations::cuda;
 #[doc(hidden)]
 pub use symtn_operations::host_pool;
 pub use symtn_operations::ContractDestinationInit;
-#[cfg(test)]
-pub(crate) use symtn_operations::HostTreeTransformWorkspace;
 pub use symtn_operations::OperationError;
 pub use symtn_operations::ReportsPlacement;
 pub(crate) use symtn_operations::StridedHostKernelAdapter;

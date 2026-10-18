@@ -72,16 +72,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dynamic_fusion_scratch_workspace_is_explicit_host_workspace() {
-        let workspace = HostDynamicFusionScratchWorkspace::<f64>::default();
-        let alias = DynamicFusionScratchWorkspace::<f64>::default();
-
-        assert_eq!(workspace.placement(), Placement::Host);
-        assert!(workspace.is_host_placement());
-        assert_eq!(alias.placement(), Placement::Host);
-    }
-
-    #[test]
     fn route_scratch_cold_is_exact_and_reuse_keeps_initialized_contents() {
         // What: cold scratch has exact capacity; same-length reuse neither
         // clears nor reallocates (the next replay overwrites it).

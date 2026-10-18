@@ -9,7 +9,29 @@
 use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{GradedSpace, LinalgBackend, Runtime, TensorMap};
+use symtn::typed::{GradedSpace, LinalgBackend, Runtime, RuntimeBuilder, TensorMap};
+
+/// Whether this build links a BLAS/LAPACK provider.
+const BLAS_COMPILED: bool = cfg!(any(
+    feature = "cpu-blas",
+    feature = "blas-accelerate",
+    feature = "blas-openblas",
+    feature = "blas-mkl"
+));
+
+/// Builds a runtime that selects `Blas`: the build succeeds exactly when a
+/// BLAS provider is compiled, and fails in `build` otherwise (documented on
+/// `RuntimeBuilder::linalg_backend`/`gemm_backend`).
+fn blas_runtime(builder: RuntimeBuilder) -> Option<Runtime> {
+    let built = builder.build();
+    assert_eq!(
+        built.is_ok(),
+        BLAS_COMPILED,
+        "Blas provider build with BLAS compiled = {BLAS_COMPILED}: {:?}",
+        built.as_ref().err()
+    );
+    built.ok()
+}
 
 fn u1_space() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
@@ -110,19 +132,12 @@ fn linalg_and_gemm_backends_are_independent() {
 
 #[test]
 fn faer_and_blas_agree_when_blas_is_available() {
-    // BLAS is only linked under a `blas-*` cargo feature; when absent, building
-    // the Blas provider fails cleanly and there is nothing to compare (CI runs
-    // the default faer-only feature set, so this path exercises the skip).
     let faer = Runtime::builder()
         .linalg_backend(LinalgBackend::Faer)
         .build()
         .unwrap();
-    let blas = match Runtime::builder()
-        .linalg_backend(LinalgBackend::Blas)
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(_) => return,
+    let Some(blas) = blas_runtime(Runtime::builder().linalg_backend(LinalgBackend::Blas)) else {
+        return;
     };
     let faer_s = spectra(&faer);
     let blas_s = spectra(&blas);
@@ -135,14 +150,13 @@ fn faer_and_blas_agree_when_blas_is_available() {
 #[test]
 fn gemm_faer_and_blas_agree_when_blas_is_available() {
     // Same idea for the contraction-GEMM seam: a contraction on faer and on the
-    // linked BLAS must agree to numerical precision. Skips when no BLAS linked.
+    // linked BLAS must agree to numerical precision.
     let faer = Runtime::builder()
         .gemm_backend(LinalgBackend::Faer)
         .build()
         .unwrap();
-    let blas = match Runtime::builder().gemm_backend(LinalgBackend::Blas).build() {
-        Ok(rt) => rt,
-        Err(_) => return,
+    let Some(blas) = blas_runtime(Runtime::builder().gemm_backend(LinalgBackend::Blas)) else {
+        return;
     };
     let f = contraction_norm(&faer);
     let b = contraction_norm(&blas);
