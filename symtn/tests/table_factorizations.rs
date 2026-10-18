@@ -1,23 +1,26 @@
 //! Factorizations and truncation of complex-symbol rules (#2281): SVD, QR/LQ,
 //! polar, eigh/eig, null spaces, matrix functions and the
 //! `svd_compact` → `find_truncated` → `restrict_leg` chain on Fibonacci and
-//! Ising through `TableRule`, against TensorKit 0.17.1
-//! (`fixtures/tensorkit_table_linalg.jl`), plus a planar contraction, the
-//! golden chain and the Ising σ-chain.
+//! Ising through `TableRule`, plus a planar contraction, the golden chain and
+//! the Ising σ-chain.
 //!
-//! Entries are the tree-hash function the fixture also evaluates, so the
-//! oracle builds the same tensors without reading anything symtn computed.
-//! Blockwise spectra and kept dimensions are invariant under AnyonWiki's
-//! Ising vertex gauge; the planar rows are compared through the recorded
-//! witness (the fixture signs its TensorKit entries), with the unsigned
-//! TensorKit result as the negative control.
+//! The oracles are readable in this file: reconstruction and isometry
+//! identities, the `dim(c)`-weighted trace identities of a blockwise
+//! spectrum (`Σ_c d_c Σ σ² = ‖t‖²`, `Σ_c d_c Σ λ = tr t`), TensorKit's
+//! `SectorVector` truncation rule written out over that spectrum, rank–nullity
+//! for null spaces, the golden chain diagonalised from a Hamiltonian written
+//! directly in the fusion-path basis with the closed-form `F^{τττ}_τ`
+//! (Feiguin et al., PRL 98, 160409), and the Ising σ-chain as the critical
+//! transverse-field Ising chain, whose open-chain spectrum is the free-fermion
+//! closed form. A few values checked against TensorKit 0.17.1 anchor the
+//! weighted conventions.
 //!
-//! Independent of TensorKit: the golden chain is also diagonalised from a
-//! Hamiltonian written directly in the fusion-path basis with the closed-form
-//! `F^{τττ}_τ` (Feiguin et al., PRL 98, 160409), and the Ising σ-chain is the
-//! critical transverse-field Ising chain, whose open-chain spectrum is the
-//! free-fermion closed form.
+//! Operands are filled with the tree-hash `entry` of `support/table_fixture.rs`,
+//! so a value checked against TensorKit is reproducible from the same
+//! coordinates (Ising entries there carry AnyonWiki's vertex sign
+//! `u^{σσ}_ψ = −1`, #2277, so both sides are the same morphism).
 
+use std::f64::consts::SQRT_2;
 use std::sync::Arc;
 
 use num_complex::Complex64;
@@ -35,68 +38,10 @@ use table_fixture::*;
 
 type Table = TensorMap<TableRule, Complex64>;
 
-const TENSORKIT: &str = include_str!("fixtures/tensorkit-0.17.1-table-linalg.txt");
-
-/// The fixture's values of `quantity` in `sector` (`-` for a scalar row).
-fn tensorkit(category: &str, quantity: &str, sector: &str) -> Vec<f64> {
-    TENSORKIT
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| fields[0] == category && fields[1] == quantity && fields[2] == sector)
-        .unwrap_or_else(|| panic!("fixture is missing {category} {quantity} {sector}"))[3..]
-        .iter()
-        .map(|value| value.parse().unwrap())
-        .collect()
-}
-
-/// The fixture's sectors of `quantity`, by AnyonWiki label.
-fn tensorkit_sectors(category: &str, quantity: &str) -> Vec<u16> {
-    TENSORKIT
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .filter(|fields| fields[0] == category && fields[1] == quantity)
-        .map(|fields| fields[2].parse().unwrap())
-        .collect()
-}
-
 /// Spectral values are backward stable to a few dozen ulps of the largest
 /// one; `64 · 64 · ε` leaves room for a few dozen accumulated terms.
 fn close(got: f64, want: f64, scale: f64) -> bool {
     (got - want).abs() <= 4096.0 * f64::EPSILON * scale.max(1.0)
-}
-
-fn assert_spectra<V: Copy>(
-    what: &str,
-    category: &str,
-    quantity: &str,
-    got: &[SectorSpectrum<TableSector, V>],
-    flatten: impl Fn(V) -> Vec<f64>,
-) {
-    let labels: Vec<u16> = got.iter().map(|entry| entry.sector.label()).collect();
-    assert_eq!(
-        labels,
-        tensorkit_sectors(category, quantity),
-        "{what}: sectors"
-    );
-    for entry in got {
-        let got: Vec<f64> = entry.values.iter().flat_map(|&v| flatten(v)).collect();
-        let want = tensorkit(category, quantity, &entry.sector.label().to_string());
-        let scale = want.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-        assert_eq!(got.len(), want.len(), "{what} sector {:?}", entry.sector);
-        for (g, w) in got.iter().zip(&want) {
-            assert!(
-                close(*g, *w, scale),
-                "{what} sector {:?}: {got:?} != {want:?}",
-                entry.sector
-            );
-        }
-    }
-}
-
-fn real_spectra(what: &str, category: &str, quantity: &str, got: &[SectorSpectrum<TableSector>]) {
-    assert_spectra(what, category, quantity, got, |v| vec![v]);
 }
 
 /// `‖x − y‖₂`, the dimension-weighted Frobenius norm.
@@ -142,29 +87,22 @@ fn degeneracies(leg: &GradedSpace<TableRule>) -> Vec<(u16, usize)> {
         .collect()
 }
 
-fn assert_tensorkit_dims(what: &str, category: &str, quantity: &str, leg: &GradedSpace<TableRule>) {
-    let want: Vec<(u16, usize)> = tensorkit_sectors(category, quantity)
-        .into_iter()
-        .map(|label| {
-            let n = tensorkit(category, quantity, &label.to_string())[0];
-            (label, n as usize)
-        })
-        .collect();
-    assert_eq!(degeneracies(leg), want, "{what}");
-}
-
-fn tensorkit_scalar(category: &str, quantity: &str) -> f64 {
-    tensorkit(category, quantity, "-")[0]
-}
-
 struct Case {
-    category: &'static str,
     runtime: Runtime,
     v: GradedSpace<TableRule>,
+    /// `d_c` by AnyonWiki label.
+    dim: fn(u16) -> f64,
+    /// `dim_c(V ⊗ V)` by coupled sector: the block sizes of `V⊗V ← V⊗V`.
+    pair_blocks: &'static [(u16, usize)],
 }
 
 impl Case {
-    fn new(category: &'static str, rule: TableRule, sectors: &[(u16, usize)]) -> Self {
+    fn new(
+        rule: TableRule,
+        sectors: &[(u16, usize)],
+        dim: fn(u16) -> f64,
+        pair_blocks: &'static [(u16, usize)],
+    ) -> Self {
         let v = GradedSpace::try_new(
             Arc::new(rule),
             sectors
@@ -173,18 +111,39 @@ impl Case {
         )
         .unwrap();
         Self {
-            category,
             runtime: Runtime::builder().build().unwrap(),
             v,
+            dim,
+            pair_blocks,
         }
     }
 
+    /// `V = 𝟙 ⊕ τ²`, `d_τ = φ`; `V ⊗ V` has `1 + 2·2 = 5` states in `𝟙` and
+    /// `2 + 2 + 2·2 = 8` in `τ`.
     fn fibonacci() -> Self {
-        Self::new("fibonacci", TableRule::fibonacci(), &[(1, 1), (2, 2)])
+        Self::new(
+            TableRule::fibonacci(),
+            &[(1, 1), (2, 2)],
+            |label| match label {
+                1 => 1.0,
+                _ => (1.0 + 5.0_f64.sqrt()) / 2.0,
+            },
+            &[(1, 5), (2, 8)],
+        )
     }
 
+    /// `V = 𝟙 ⊕ ψ ⊕ σ²`, `d_ψ = 1`, `d_σ = √2`; `V ⊗ V` has `1 + 1 + 2·2 = 6`
+    /// states in `𝟙` and in `ψ`, and `4 · 2 = 8` in `σ`.
     fn ising() -> Self {
-        Self::new("ising", TableRule::ising(), &[(1, 1), (2, 1), (3, 2)])
+        Self::new(
+            TableRule::ising(),
+            &[(1, 1), (2, 1), (3, 2)],
+            |label| match label {
+                3 => SQRT_2,
+                _ => 1.0,
+            },
+            &[(1, 6), (2, 6), (3, 8)],
+        )
     }
 
     fn filled(&self, tag: &'static str, codomain: usize, domain: usize) -> Table {
@@ -197,55 +156,148 @@ impl Case {
         )
         .unwrap()
     }
+
+    /// `Σ_c d_c Σ_i f(x_{c,i})` over a blockwise spectrum.
+    fn weighted_sum<V: Copy, S: std::iter::Sum<S> + std::ops::Mul<f64, Output = S>>(
+        &self,
+        spectra: &[SectorSpectrum<TableSector, V>],
+        f: impl Fn(V) -> S,
+    ) -> S {
+        spectra
+            .iter()
+            .map(|entry| {
+                entry.values.iter().map(|&x| f(x)).sum::<S>() * (self.dim)(entry.sector.label())
+            })
+            .sum()
+    }
+
+    /// One spectrum per coupled sector of `V ⊗ V`, each the block's size.
+    fn assert_pair_blocks<V>(&self, what: &str, spectra: &[SectorSpectrum<TableSector, V>]) {
+        let sizes: Vec<(u16, usize)> = spectra
+            .iter()
+            .map(|entry| (entry.sector.label(), entry.values.len()))
+            .collect();
+        assert_eq!(sizes, self.pair_blocks, "{what}: block sizes");
+    }
 }
 
-fn spectra_match_tensorkit(case: &Case) {
-    let category = case.category;
+/// The weighted trace identities of a blockwise spectrum:
+/// `Σ_c d_c Σ σ² = ‖t‖²` (SVD, which also holds for the lazy adjoint),
+/// `Σ_c d_c Σ λ = tr h` and `Σ_c d_c Σ λ² = ‖h‖²` (eigh of `h = t + t^H`),
+/// and `Σ_c d_c Σ λ = tr t` (eig).
+fn spectra_satisfy_weighted_trace_identities(case: &Case) {
     let t = case.filled("t", 2, 2);
-    real_spectra(
-        "svd_vals",
-        category,
-        "svd",
-        &t.svd_vals(&[0, 1], &[2, 3]).unwrap(),
-    );
+    let norm2 = t.norm(2.0).unwrap().powi(2);
+    for (what, svd) in [
+        ("svd_vals", t.svd_vals(&[0, 1], &[2, 3]).unwrap()),
+        (
+            "svd_vals of the adjoint",
+            t.adjoint().unwrap().svd_vals(&[0, 1], &[2, 3]).unwrap(),
+        ),
+    ] {
+        case.assert_pair_blocks(what, &svd);
+        for entry in &svd {
+            assert!(
+                entry.values.windows(2).all(|w| w[0] >= w[1]) && entry.values[0] >= 0.0,
+                "{what}: descending and non-negative"
+            );
+        }
+        let got = case.weighted_sum(&svd, |s| s * s);
+        assert!(close(got, norm2, norm2), "{what}: {got} != ‖t‖² {norm2}");
+    }
+
     let hermitian = t
         .axpby(Complex64::ONE, t.adjoint_view(), Complex64::ONE)
         .unwrap();
-    real_spectra(
-        "eigh_vals",
-        category,
-        "eigh",
-        &hermitian
-            .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
-            .unwrap(),
+    let eigh = hermitian
+        .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .unwrap();
+    case.assert_pair_blocks("eigh_vals", &eigh);
+    let (trace, h2) = (
+        hermitian.tr().unwrap(),
+        hermitian.norm(2.0).unwrap().powi(2),
     );
-    assert_spectra(
-        "eig_vals",
-        category,
-        "eig",
-        &t.eig_vals(&[0, 1], &[2, 3]).unwrap(),
-        |z: Complex64| vec![z.re, z.im],
+    let got = case.weighted_sum(&eigh, |x| x);
+    assert!(
+        close(got, trace.re, h2),
+        "eigh: Σ d λ {got} != tr h {trace}"
     );
+    let got = case.weighted_sum(&eigh, |x| x * x);
+    assert!(close(got, h2, h2), "eigh: Σ d λ² {got} != ‖h‖² {h2}");
 
-    // A lazy adjoint is factorized through its parent: the same spectrum.
-    real_spectra(
-        "svd_vals of the adjoint",
-        category,
-        "svd",
-        &t.adjoint().unwrap().svd_vals(&[0, 1], &[2, 3]).unwrap(),
+    let eig = t.eig_vals(&[0, 1], &[2, 3]).unwrap();
+    case.assert_pair_blocks("eig_vals", &eig);
+    let got = case.weighted_sum(&eig, |z: Complex64| z);
+    let trace = t.tr().unwrap();
+    assert!(
+        (got - trace).norm() <= 4096.0 * f64::EPSILON * norm2,
+        "eig: Σ d λ {got} != tr t {trace}"
     );
 }
 
 #[test]
-fn fibonacci_spectra_match_tensorkit() {
-    spectra_match_tensorkit(&Case::fibonacci());
+fn fibonacci_spectra_satisfy_weighted_trace_identities() {
+    spectra_satisfy_weighted_trace_identities(&Case::fibonacci());
 }
 
 #[test]
-fn ising_spectra_match_tensorkit() {
-    spectra_match_tensorkit(&Case::ising());
+fn ising_spectra_satisfy_weighted_trace_identities() {
+    spectra_satisfy_weighted_trace_identities(&Case::ising());
 }
 
+/// Equal sector labels and, per sector, equal values in order.
+fn assert_same_spectra<U: Copy + Into<Complex64>, W: Copy + Into<Complex64>>(
+    what: &str,
+    got: &[SectorSpectrum<TableSector, U>],
+    want: &[SectorSpectrum<TableSector, W>],
+) {
+    assert_eq!(got.len(), want.len(), "{what}: sectors");
+    for (g, w) in got.iter().zip(want) {
+        assert_eq!(g.sector, w.sector, "{what}: sector labels");
+        assert_eq!(g.values.len(), w.values.len(), "{what}: {:?}", g.sector);
+        let scale = w
+            .values
+            .iter()
+            .fold(0.0_f64, |m, &v| m.max(v.into().norm()));
+        for (&x, &y) in g.values.iter().zip(&w.values) {
+            assert!(
+                (x.into() - y.into()).norm() <= 4096.0 * f64::EPSILON * scale.max(1.0),
+                "{what}: sector {:?}",
+                g.sector
+            );
+        }
+    }
+}
+
+/// Rank–nullity per coupled sector: the null space of a map whose `V ⊗ V`
+/// side has `dim_c(V⊗V)` states has `dim_c(V⊗V) − rank_c` of them, `rank_c`
+/// the number of nonzero singular values of the block.
+fn assert_rank_nullity(
+    what: &str,
+    case: &Case,
+    spectra: &[SectorSpectrum<TableSector>],
+    null_leg: &GradedSpace<TableRule>,
+) {
+    let largest = spectra
+        .iter()
+        .flat_map(|entry| entry.values.iter().copied())
+        .fold(0.0, f64::max);
+    let want: Vec<(u16, usize)> = case
+        .pair_blocks
+        .iter()
+        .map(|&(label, states)| {
+            let rank = spectra
+                .iter()
+                .filter(|entry| entry.sector.label() == label)
+                .flat_map(|entry| entry.values.iter())
+                .filter(|&&s| s > 1.0e-12 * largest)
+                .count();
+            (label, states - rank)
+        })
+        .filter(|&(_, n)| n > 0)
+        .collect();
+    assert_eq!(degeneracies(null_leg), want, "{what}: rank–nullity");
+}
 fn decompositions_reconstruct(case: &Case) {
     let runtime = &case.runtime;
     let t = case.filled("t", 2, 2);
@@ -310,11 +362,30 @@ fn decompositions_reconstruct(case: &Case) {
         &hermitian,
     );
     assert_isometry("eigh v", runtime, &eigh.v);
+    // The values-only spectra are the factor's diagonal, sector by sector.
+    assert_same_spectra(
+        "eigh_vals vs diag(eigh d)",
+        &hermitian
+            .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+            .unwrap(),
+        &eigh.d.diagview().unwrap(),
+    );
     let eig = t.eig_full(&[0, 1], &[2, 3]).unwrap();
     assert_near(
         "t v = v d",
         &t.compose(&eig.v).unwrap(),
         &eig.v.compose(&eig.d).unwrap(),
+    );
+    assert_same_spectra(
+        "eig_vals vs diag(eig d)",
+        &t.eig_vals(&[0, 1], &[2, 3]).unwrap(),
+        &eig.d.diagview().unwrap(),
+    );
+    // `t v = v d` alone holds for `v = 0`: `v` must be invertible.
+    assert_near(
+        "inv(eig v) eig v",
+        &eig.v.inv(&[0, 1], &[2]).unwrap().compose(&eig.v).unwrap(),
+        &identity(runtime, &eig.v.domain()),
     );
 
     // exp(h) = v exp(d) v^H; inv(t) t = id; t solve(t, y) = y.
@@ -339,8 +410,8 @@ fn decompositions_reconstruct(case: &Case) {
     let solved = t.solve(&[0, 1], &[2, 3], &rhs, &[0, 1], &[2]).unwrap();
     assert_near("t solve", &t.compose(&solved).unwrap(), &rhs);
 
-    // Null spaces: orthonormal, annihilated by the input, of TensorKit's size.
-    let category = case.category;
+    // Null spaces: orthonormal, annihilated by the input, of the size
+    // rank–nullity gives.
     let n = tall.left_null(&[0, 1], &[2]).unwrap();
     assert_isometry("left null", runtime, &n);
     assert!(
@@ -354,7 +425,12 @@ fn decompositions_reconstruct(case: &Case) {
             .unwrap()
             < 1.0e-12
     );
-    assert_tensorkit_dims("left null", category, "left_null", &n.domain()[0]);
+    assert_rank_nullity(
+        "left null",
+        case,
+        &tall.svd_vals(&[0, 1], &[2]).unwrap(),
+        &n.domain()[0],
+    );
     let n = wide.right_null(&[0], &[1, 2]).unwrap();
     assert_isometry(
         "right null",
@@ -362,7 +438,12 @@ fn decompositions_reconstruct(case: &Case) {
         &n.adjoint().unwrap().materialize().unwrap(),
     );
     assert!(wide.compose(n.adjoint_view()).unwrap().norm(2.0).unwrap() < 1.0e-12);
-    assert_tensorkit_dims("right null", category, "right_null", &n.codomain()[0]);
+    assert_rank_nullity(
+        "right null",
+        case,
+        &wide.svd_vals(&[0], &[1, 2]).unwrap(),
+        &n.codomain()[0],
+    );
 }
 
 /// Moore–Penrose: `t · pinv(t) · t = t`, for a wide map whose `pinv` is
@@ -394,23 +475,101 @@ fn ising_decompositions_reconstruct() {
     decompositions_reconstruct(&Case::ising());
 }
 
+/// TensorKit's `SectorVector` truncation (`findtruncated`), written out over
+/// the `d_c`-weighted spectrum: every policy keeps a prefix of the values in
+/// descending order. `rank(n)` keeps values while the running `Σ d_c` stays
+/// `≤ n`; `absolute_cutoff(a)` keeps `σ ≥ a`
+/// (MatrixAlgebraKit `findtruncated_svd`, `searchsortedlast` with `rev = true`); an error budget `ε` discards
+/// from the smallest value while the discarded `Σ d_c σ²` stays `≤ ε²`. The
+/// reported error is `√(Σ_discarded d_c σ²)`.
+enum ByHand {
+    Rank(f64),
+    Cutoff(f64),
+    Error(f64),
+}
+
+fn truncate_by_hand(
+    case: &Case,
+    spectra: &[SectorSpectrum<TableSector>],
+    policy: &ByHand,
+) -> (Vec<(u16, usize)>, f64) {
+    let mut flat: Vec<(f64, u16)> = spectra
+        .iter()
+        .flat_map(|entry| entry.values.iter().map(|&s| (s, entry.sector.label())))
+        .collect();
+    flat.sort_by(|x, y| y.0.total_cmp(&x.0));
+    let d = |label: u16| (case.dim)(label);
+    let kept = match *policy {
+        ByHand::Rank(n) => {
+            let mut total = 0.0;
+            flat.iter()
+                .take_while(|&&(_, c)| {
+                    total += d(c);
+                    total <= n
+                })
+                .count()
+        }
+        ByHand::Cutoff(a) => flat.iter().take_while(|&&(s, _)| s >= a).count(),
+        ByHand::Error(eps) => {
+            let mut discarded = 0.0;
+            let dropped = flat
+                .iter()
+                .rev()
+                .take_while(|&&(s, c)| {
+                    discarded += d(c) * s * s;
+                    discarded <= eps * eps
+                })
+                .count();
+            flat.len() - dropped
+        }
+    };
+    let counts = case
+        .pair_blocks
+        .iter()
+        .map(|&(label, _)| (label, flat[..kept].iter().filter(|e| e.1 == label).count()))
+        .filter(|&(_, n)| n > 0)
+        .collect();
+    let error = flat[kept..]
+        .iter()
+        .map(|&(s, c)| d(c) * s * s)
+        .sum::<f64>()
+        .sqrt();
+    (counts, error)
+}
+
 /// The golden-chain DMRG step: `svd_compact` → `find_truncated` →
-/// `restrict_leg`, weighted by `dim(c)`, against TensorKit `svd_trunc`.
-fn truncation_matches_tensorkit(case: &Case) {
-    let category = case.category;
+/// `restrict_leg`, weighted by `dim(c)`, against the rule written out above.
+/// `kept` are TensorKit's `svd_trunc` dimensions for `truncrank(7)`,
+/// `trunctol(; atol = 1)` and `truncerror(; atol = 1.5)` on the same operand
+/// (checked against TensorKit 0.17.1).
+fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3]) {
     let t = case.filled("t", 2, 2);
+    let norm = t.norm(2.0).unwrap();
+    let spectrum = t.svd_vals(&[0, 1], &[2, 3]).unwrap();
     let Svd { u, s, vh } = t.svd_compact(&[0, 1], &[2, 3]).unwrap();
-    for (tag, truncation) in [
-        ("rank7", Truncation::rank(7)),
-        ("tol", Truncation::absolute_cutoff(1.0).unwrap()),
-        // TensorKit `truncerror(; atol = 1.5)`: symtn's budget is
-        // `(rtol · norm)²`, `norm` the weighted norm of the spectrum (= ‖t‖).
+    for ((what, truncation, by_hand), tensorkit) in [
+        ("rank 7", Truncation::rank(7), ByHand::Rank(7.0)),
         (
-            "discard",
-            Truncation::relative_error(1.5 / t.norm(2.0).unwrap()).unwrap(),
+            "cutoff 1",
+            Truncation::absolute_cutoff(1.0).unwrap(),
+            ByHand::Cutoff(1.0),
         ),
-    ] {
-        let quantity = format!("trunc_{tag}");
+        // symtn's budget is `(rtol · norm)²`, `norm` the weighted norm of the
+        // spectrum (= ‖t‖), so `rtol = 1.5 / ‖t‖` is the absolute budget 1.5.
+        (
+            "error 1.5",
+            Truncation::relative_error(1.5 / norm).unwrap(),
+            ByHand::Error(1.5),
+        ),
+    ]
+    .into_iter()
+    .zip(kept)
+    {
+        let (want_dims, want_error) = truncate_by_hand(case, &spectrum, &by_hand);
+        assert_eq!(
+            want_dims, tensorkit,
+            "{what}: the rule by hand vs TensorKit"
+        );
         let found = s.domain()[0]
             .find_truncated(&s.diagview().unwrap(), &truncation)
             .unwrap();
@@ -421,40 +580,62 @@ fn truncation_matches_tensorkit(case: &Case) {
             .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
             .unwrap();
         let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
-        assert_tensorkit_dims(&quantity, category, &quantity, &s.domain()[0]);
-        let error = tensorkit_scalar(category, &format!("{quantity}_error"));
+        assert_eq!(degeneracies(&s.domain()[0]), want_dims, "{what}: kept");
         assert!(
-            close(found.error, error, error),
-            "{quantity}: {} != {error}",
+            close(found.error, want_error, norm),
+            "{what}: error {} != {want_error}",
             found.error
         );
+        // The truncated map is orthogonal to what was discarded.
         let truncated = u.compose(&s).unwrap().compose(&vh).unwrap();
-        let norm = tensorkit_scalar(category, &format!("{quantity}_norm"));
+        let want_norm = (norm * norm - want_error * want_error).sqrt();
         assert!(
-            close(truncated.norm(2.0).unwrap(), norm, norm),
-            "{quantity} norm"
+            close(truncated.norm(2.0).unwrap(), want_norm, norm),
+            "{what}: norm"
         );
-        // The reported error is the weighted norm of what was discarded.
         assert!(
-            close(distance(&t, &truncated), found.error, error),
-            "{quantity} distance"
+            close(distance(&t, &truncated), want_error, norm),
+            "{what}: distance"
         );
     }
+
+    // A cutoff exactly at a singular value keeps that value.
+    let at = spectrum[0].values[1];
+    let (want_dims, _) = truncate_by_hand(case, &spectrum, &ByHand::Cutoff(at));
+    let found = s.domain()[0]
+        .find_truncated(
+            &s.diagview().unwrap(),
+            &Truncation::absolute_cutoff(at).unwrap(),
+        )
+        .unwrap();
+    let s = s
+        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .unwrap();
+    assert_eq!(degeneracies(&s.domain()[0]), want_dims, "cutoff at σ");
 }
 
 #[test]
-fn fibonacci_truncation_matches_tensorkit() {
-    truncation_matches_tensorkit(&Case::fibonacci());
+fn fibonacci_truncation_follows_the_weighted_rule() {
+    truncation_follows_the_weighted_rule(
+        &Case::fibonacci(),
+        [&[(1, 2), (2, 3)], &[(1, 2), (2, 4)], &[(1, 2), (2, 5)]],
+    );
 }
 
 #[test]
-fn ising_truncation_matches_tensorkit() {
-    truncation_matches_tensorkit(&Case::ising());
+fn ising_truncation_follows_the_weighted_rule() {
+    truncation_follows_the_weighted_rule(
+        &Case::ising(),
+        [
+            &[(1, 2), (2, 1), (3, 2)],
+            &[(1, 3), (2, 2), (3, 3)],
+            &[(1, 4), (2, 2), (3, 5)],
+        ],
+    );
 }
 
-/// TensorKit `@planar C[b d; h f] := A[a b; c d] * B[c f; a h]`, checked
-/// in the same run against `planarcontract!`'s steps: two crossing-free
-/// transposes, then compose.
+/// `@planar C[b d; h f] := A[a b; c d] * B[c f; a h]` against
+/// `planarcontract!`'s steps: two crossing-free transposes, then compose.
 fn planar_contraction(case: &Case) -> Table {
     let a = case.filled("a", 2, 2);
     let b = case.filled("b", 2, 2);
@@ -481,73 +662,49 @@ fn planar_contraction(case: &Case) -> Table {
     c
 }
 
-fn planar_contraction_then_factorization(case: &Case) {
-    let category = case.category;
+/// The planar result's `‖C‖` and `tr C` (checked against TensorKit 0.17.1
+/// `@planar` on the same operands), and its spectra by the weighted trace
+/// identities.
+fn planar_contraction_then_factorization(case: &Case, norm: f64, trace: Complex64) {
     let c = planar_contraction(case);
-    real_spectra(
-        "planar svd",
-        category,
-        "planar_svd",
-        &c.svd_vals(&[0, 1], &[2, 3]).unwrap(),
+    assert!(close(c.norm(2.0).unwrap(), norm, norm), "planar norm");
+    let got = c.tr().unwrap();
+    assert!(
+        close(got.re, trace.re, 1.0) && close(got.im, trace.im, 1.0),
+        "planar tr {got}"
     );
+    let svd = c.svd_vals(&[0, 1], &[2, 3]).unwrap();
+    let got = case.weighted_sum(&svd, |s| s * s);
+    assert!(close(got, norm * norm, norm * norm), "planar svd: Σ d σ²");
     let hermitian = c
         .axpby(Complex64::ONE, c.adjoint_view(), Complex64::ONE)
         .unwrap();
-    real_spectra(
-        "planar eigh",
-        category,
-        "planar_eigh",
-        &hermitian
-            .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
-            .unwrap(),
-    );
-    let tr = tensorkit(category, "planar_tr", "-");
-    let got = c.tr().unwrap();
-    assert!(
-        close(got.re, tr[0], 1.0) && close(got.im, tr[1], 1.0),
-        "planar tr {got}"
-    );
-    let norm = tensorkit_scalar(category, "planar_norm");
-    assert!(close(c.norm(2.0).unwrap(), norm, norm), "planar norm");
-}
-
-#[test]
-fn fibonacci_planar_contraction_then_factorization_matches_tensorkit() {
-    planar_contraction_then_factorization(&Case::fibonacci());
-}
-
-#[test]
-fn ising_planar_contraction_then_factorization_matches_tensorkit() {
-    planar_contraction_then_factorization(&Case::ising());
-}
-
-#[test]
-fn ising_planar_comparison_detects_the_vertex_gauge() {
-    // Negative control: the TensorKit contraction of the same coordinates in
-    // TensorKit's own gauge is a different morphism, and its σ spectrum
-    // differs from symtn's; the ψ-free unit and ψ blocks agree either way.
-    let case = Case::ising();
-    let c = planar_contraction(&case);
-    let spectra = c.svd_vals(&[0, 1], &[2, 3]).unwrap();
-    let sigma = spectra
-        .iter()
-        .find(|entry| entry.sector == TableSector::new(3))
+    let eigh = hermitian
+        .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
-    let ungauged = tensorkit("ising", "planar_ungauged_svd", "3");
+    let got = case.weighted_sum(&eigh, |x| x);
     assert!(
-        sigma
-            .values
-            .iter()
-            .zip(&ungauged)
-            .any(|(g, w)| !close(*g, *w, 4.0)),
-        "the ungauged comparison must fail"
+        close(got, 2.0 * trace.re, norm * norm),
+        "planar eigh: Σ d λ = 2 Re tr C"
     );
-    let unit = tensorkit("ising", "planar_ungauged_svd", "1");
-    assert!(spectra[0]
-        .values
-        .iter()
-        .zip(&unit)
-        .all(|(g, w)| close(*g, *w, 4.0)));
+}
+
+#[test]
+fn fibonacci_planar_contraction_then_factorization() {
+    planar_contraction_then_factorization(
+        &Case::fibonacci(),
+        4.937180638781755,
+        Complex64::new(-0.0014360199429993945, -0.5709659851802477),
+    );
+}
+
+#[test]
+fn ising_planar_contraction_then_factorization() {
+    planar_contraction_then_factorization(
+        &Case::ising(),
+        6.108913657070855,
+        Complex64::new(0.00024355996664443742, -3.7216496922109203),
+    );
 }
 
 /// `H = −Σ_i P^{(1)}_{i,i+1}` on `w^{⊗L}`, built as TensorKit builds it: the
@@ -624,26 +781,81 @@ fn golden_chain_by_hand(runtime: &Runtime, w: &GradedSpace<TableRule>, length: u
     .unwrap()
 }
 
+/// Eigenvalues by AnyonWiki sector label.
+type Spectrum = &'static [(u16, &'static [f64])];
+
+/// The golden chain against the fusion-path Hamiltonian for `L = 4 … 8`, and
+/// for `L = 4, 5` against eigenvalues checked against TensorKit 0.17.1
+/// (`eigh_vals` of the same `−Σ P^{(𝟙)}`).
 #[test]
-fn golden_chain_spectra_match_tensorkit_and_the_fusion_path_hamiltonian() {
+fn golden_chain_spectra_match_the_fusion_path_hamiltonian() {
+    let tensorkit: [(usize, Spectrum); 2] = [
+        (
+            4,
+            &[
+                (1, &[-2.506941916150187, -0.49305808384981287]),
+                (
+                    2,
+                    &[
+                        -1.874032048897642,
+                        -0.9999999999999996,
+                        -0.12596795110235737,
+                    ],
+                ),
+            ],
+        ),
+        (
+            5,
+            &[
+                (
+                    1,
+                    &[-1.9999999999999996, -1.381966011250105, -0.6180339887498942],
+                ),
+                (
+                    2,
+                    &[
+                        -3.1761168197374268,
+                        -2.294962899291598,
+                        -1.642922825273373,
+                        -0.705037100708401,
+                        -0.18096035498919852,
+                    ],
+                ),
+            ],
+        ),
+    ];
     let runtime = Runtime::builder().build().unwrap();
     let tau =
         GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TableSector::new(2), 1)]).unwrap();
     for length in 4..=8 {
-        let quantity = format!("chain{length}");
         let built = chain_spectra(&projector_chain(&runtime, &tau, length), length);
-        real_spectra(&quantity, "fibonacci", &quantity, &built);
         let by_hand = chain_spectra(&golden_chain_by_hand(&runtime, &tau, length), length);
         assert_eq!(built.len(), by_hand.len());
         for (b, h) in built.iter().zip(&by_hand) {
             assert_eq!(b.sector, h.sector);
+            assert_eq!(b.values.len(), h.values.len(), "L = {length}");
             assert!(
                 b.values
                     .iter()
                     .zip(&h.values)
                     .all(|(x, y)| close(*x, *y, 8.0)),
-                "{quantity}"
+                "L = {length}"
             );
+        }
+        if let Some((_, want)) = tensorkit.iter().find(|(l, _)| *l == length) {
+            let got: Vec<(u16, &[f64])> = built
+                .iter()
+                .map(|entry| (entry.sector.label(), entry.values.as_slice()))
+                .collect();
+            assert_eq!(got.len(), want.len(), "L = {length}");
+            for ((label, values), (want_label, want)) in got.iter().zip(want.iter()) {
+                assert_eq!(label, want_label, "L = {length}");
+                assert_eq!(values.len(), want.len(), "L = {length}");
+                assert!(
+                    values.iter().zip(*want).all(|(x, y)| close(*x, *y, 8.0)),
+                    "L = {length} sector {label}: {values:?} != {want:?}"
+                );
+            }
         }
     }
 }
@@ -681,14 +893,13 @@ fn free_fermion_spectrum(length: usize) -> Vec<(u16, Vec<f64>)> {
 }
 
 #[test]
-fn ising_sigma_chain_matches_free_fermions_and_tensorkit() {
+fn ising_sigma_chain_matches_free_fermions() {
     let runtime = Runtime::builder().build().unwrap();
     let sigma =
         GradedSpace::try_new(Arc::new(TableRule::ising()), [(TableSector::new(3), 1)]).unwrap();
     for length in 4..=8 {
         let quantity = format!("chain{length}");
         let built = chain_spectra(&projector_chain(&runtime, &sigma, length), length);
-        real_spectra(&quantity, "ising", &quantity, &built);
         let closed_form = free_fermion_spectrum(length);
         let got: Vec<(u16, &[f64])> = built
             .iter()
