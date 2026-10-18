@@ -17,7 +17,7 @@ use crate::{BoundDynamicFusionMapSpace, OperationError};
 #[doc(hidden)]
 pub const NON_SYMMETRIC_CONTRACTION_UNSUPPORTED: &str =
     "ordinary contraction requires symmetric (bosonic or fermionic) braiding; \
-     use compose for the composition of morphisms (planar contraction is symtn#1070)";
+     use compose for the composition of morphisms, or planar_contract for a planar contraction";
 
 /// The error message of a fusion trace over a non-symmetric braiding.
 #[doc(hidden)]
@@ -62,7 +62,7 @@ pub fn require_symmetric_braiding(
 /// well defined for arbitrary permutations only under a symmetric braiding.
 /// The one axis pattern that needs no braid is composition (TensorKit
 /// `mul!`), which stays admitted for every braiding style; planar contraction
-/// for non-symmetric categories is a separate named operation (#1070).
+/// is the separate `planar_contract` (TensorKit `@planar`, #2284).
 #[doc(hidden)]
 pub fn reject_non_symmetric_contraction(braiding: BraidingStyleKind) -> Result<(), OperationError> {
     require_symmetric_braiding(braiding, SymmetricBraidingOp::Contraction)

@@ -733,19 +733,21 @@ where
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        D::contract(lhs, rhs, spec)
+        D::contract(lhs, rhs, spec, planar)
     }
 
     fn contract_into<S: ContractExec<R, D>>(
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
         beta: D,
     ) -> Result<(), Error> {
-        D::contract_into(lhs, rhs, spec, destination, alpha, beta)
+        D::contract_into(lhs, rhs, spec, planar, destination, alpha, beta)
     }
 
     fn compose<S: ContractExec<R, D>>(
@@ -768,10 +770,11 @@ where
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError> {
         let output_axes = spec.output_axes();
         let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
-        let request = contract_request(lhs_operand, rhs_operand, spec, &output_axes);
+        let request = contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar);
         checked_generic_contract_owned(lhs, rhs, request)
     }
 
@@ -779,6 +782,7 @@ where
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
         beta: D,
@@ -798,7 +802,7 @@ where
                 rhs_operand,
                 transform_source_len(rhs.storage_body())?,
             ),
-            contract_request(lhs_operand, rhs_operand, spec, &output_axes),
+            contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar),
         )?;
         staged.require_destination(destination.logical_space().space())?;
         let destination = destination_storage_mut(destination)?;

@@ -162,6 +162,90 @@ function chain(category, label, W, Ls)
     end
 end
 
+# `planar_contract` (#2284): TensorKit `@planar` binary contractions, each
+# also asserted equal to `planarcontract!`'s explicit steps where the step
+# order is fixed. Every result is reported by `norm` and by `dot(P, C)` with a
+# probe `P` filled from the same entry hash ("p" ++ geometry) on C's space;
+# both are invariant under nothing but the recorded witness sign.
+function emit_planar(category, quantity, label, sign, C)
+    P = filled(label, sign, "p" * quantity, space(C))
+    emit(category, "planar_" * quantity * "_norm", "-", (norm(C),))
+    emit_complex(category, "planar_" * quantity * "_inner", "-", (dot(P, C),))
+end
+
+planar_rejects(ex) =
+    try
+        eval(ex)
+        false
+    catch err
+        err isa LoadError && err.error isa ArgumentError
+    end
+
+function planar_report(category, label, sign, V)
+    T(tag, cod, dom) = filled(label, sign, tag, cod ← dom)
+    # G1: the composition geometry, `A * B`.
+    A = T("a1", V ⊗ V, V ⊗ V); B = T("b1", V ⊗ V, V ⊗ V)
+    @planar C1[a b; e f] := A[a b; c d] * B[c d; e f]
+    @assert C1 ≈ A * B
+    emit_planar(category, "g1", label, sign, C1)
+    # G2: both operands transposed (`planarcontract!` + nothing rotated).
+    A = T("a2", V ⊗ V, V ⊗ V); B = T("b2", V ⊗ V, V ⊗ V)
+    @planar C2[b d; h f] := A[a b; c d] * B[c f; a h]
+    @assert C2 ≈ transpose(A, ((2, 4), (1, 3))) * transpose(B, ((3, 1), (4, 2)))
+    emit_planar(category, "g2", label, sign, C2)
+    # G3: the golden-chain H_eff step with a rotated output.
+    H = T("h3", V ⊗ V, V ⊗ V); θ = T("t3", V ⊗ V ⊗ V, V)
+    @planar C3[l s1 s2; r] := H[s1 s2; t1 t2] * θ[l t1 t2; r]
+    @assert C3 ≈ transpose(H * transpose(θ, ((2, 3), (1, 4))), ((3, 1, 2), (4,)))
+    emit_planar(category, "g3", label, sign, C3)
+    # G4: a full contraction to a scalar.
+    A = T("a4", V ⊗ V, V ⊗ V); B = T("b4", V ⊗ V, V ⊗ V)
+    s4 = @planar A[a b; c d] * B[c d; a b]
+    emit_complex(category, "planar_g4_scalar", "-", (s4,))
+    # G5: nothing contracted, the output a rotation of `A`'s boundary.
+    A = T("a5", V, V); B = T("b5", V, V)
+    @planar C5[a c; b d] := A[a; b] * B[c; d]
+    emit_planar(category, "g5", label, sign, C5)
+    # G6: a conjugated operand, read as the adjoint.
+    θ = T("t6", V ⊗ V ⊗ V, V)
+    @planar C6[a; b] := θ[l s1 s2; a] * conj(θ[l s1 s2; b])
+    @assert C6 ≈ transpose(θ' * θ, ((2,), (1,)))
+    emit_planar(category, "g6", label, sign, C6)
+    # `planarcontract!` into an existing destination, complex α and β ≠ 0:
+    # G1 directly, G3 as `@planar` then `α C + β D`.
+    α, β = 0.5 - 0.25im, 1.5 + 0.75im
+    A = T("a1", V ⊗ V, V ⊗ V); B = T("b1", V ⊗ V, V ⊗ V)
+    D1 = T("d1", V ⊗ V, V ⊗ V)
+    TensorKit.planarcontract!(D1, A, ((1, 2), (3, 4)), B, ((1, 2), (3, 4)), ((1, 2), (3, 4)), α, β)
+    emit_planar(category, "into_g1", label, sign, D1)
+    D3 = filled(label, sign, "d3", space(C3))
+    emit_planar(category, "into_g3", label, sign, α * C3 + β * D3)
+    # Negative controls: `@planar` rejects each at expansion.
+    A = T("a2", V ⊗ V, V ⊗ V); B = T("b2", V ⊗ V, V ⊗ V)
+    for (name, ex) in (
+            ("same_orientation", :(@planar X[b d; f h] := $A[a b; c d] * $B[a f; c h])),
+            ("not_an_arc", :(@planar X[b c; e f] := $A[a b; c d] * $B[a d; e f])),
+            ("not_a_rotation", :(@planar X[d b; h f] := $A[a b; c d] * $B[c f; a h])),
+        )
+        emit(category, "planar_reject_" * name, "-", (planar_rejects(ex) ? 1 : 0,))
+    end
+end
+
+# The fermionic planar contraction is the twist-free one (#2284 §1.4): a
+# fℤ₂ row in the cyclic geometry of the design probe, whose `@tensor`
+# differs. Parity labels 0, 1.
+function fermion_report()
+    label(a) = a.isodd ? 1 : 0
+    V = Vect[FermionParity](0 => 2, 1 => 2)
+    X = filled(label, no_sign, "fx", V ⊗ V ← V ⊗ V)
+    Y = filled(label, no_sign, "fy", V ⊗ V ← V ⊗ V)
+    @planar E[a z; c x] := X[a b; c d] * Y[x d; z b]
+    @tensor F[a z; c x] := X[a b; c d] * Y[x d; z b]
+    @assert norm(E - F) > 1.0e-3 * norm(E)
+    emit_planar("fz2", "cyclic", label, no_sign, E)
+    emit("fz2", "tensor_cyclic_norm", "-", (norm(F),))
+end
+
 const fib_labels = Dict(FibonacciAnyon(:I) => 1, FibonacciAnyon(:τ) => 2)
 fib_label(a) = fib_labels[a]
 report("fibonacci", fib_label, no_sign,
@@ -172,3 +256,7 @@ const ising_labels = Dict(IsingAnyon(:I) => 1, ψ => 2, σ => 3)
 ising_label(a) = ising_labels[a]
 report("ising", ising_label, gauge_sign, Vect[IsingAnyon](IsingAnyon(:I) => 1, ψ => 1, σ => 2))
 chain("ising", ising_label, Vect[IsingAnyon](σ => 1), 4:8)
+planar_report("fibonacci", fib_label, no_sign,
+              Vect[FibonacciAnyon](FibonacciAnyon(:I) => 1, FibonacciAnyon(:τ) => 2))
+planar_report("ising", ising_label, gauge_sign, Vect[IsingAnyon](IsingAnyon(:I) => 1, ψ => 1, σ => 2))
+fermion_report()

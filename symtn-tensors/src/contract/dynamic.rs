@@ -76,7 +76,8 @@ pub(super) fn source_layout_metadata_is_borrowable<HomSpaceMatches>(
 where
     HomSpaceMatches: FnOnce() -> bool,
 {
-    operation.kind() == TreeTransformOperationKind::Permute
+    // An identity transpose is the identity map, as an identity permute is.
+    operation.kind() != TreeTransformOperationKind::Braid
         && source_layout_permutation_is_borrowable(
             source_space,
             core_nout,
@@ -241,7 +242,8 @@ where
 {
     let reverse = plan.orientation() == FusionContractOrientation::RhsLhs;
     let core_right = if reverse { lhs_core } else { rhs_core };
-    let twisted = rhs_contract_requires_twist(rule, core_right, plan.core_axes().as_spec())?;
+    let twisted = plan.supertrace_twist()
+        && rhs_contract_requires_twist(rule, core_right, plan.core_axes().as_spec())?;
     source_borrowing(
         twisted,
         plan,
@@ -267,12 +269,13 @@ where
 {
     let reverse = plan.orientation() == FusionContractOrientation::RhsLhs;
     let core_right = if reverse { lhs_core } else { rhs_core };
-    let twisted = contract_axes_require_twist::<M, R>(
-        rule,
-        authority,
-        core_right.homspace(),
-        plan.core_axes().as_spec().rhs_contracting_axes(),
-    )?;
+    let twisted = plan.supertrace_twist()
+        && contract_axes_require_twist::<M, R>(
+            rule,
+            authority,
+            core_right.homspace(),
+            plan.core_axes().as_spec().rhs_contracting_axes(),
+        )?;
     Ok(source_borrowing(
         twisted,
         plan,

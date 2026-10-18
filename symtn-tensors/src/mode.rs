@@ -52,7 +52,7 @@ use crate::contract::{
     validate_checked_operand_relation, validate_fusion_contract_rule, CheckedAuthority,
     CheckedContractTxn, DynamicFusionCoreDstEntry, DynamicFusionMapSpace,
     DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact, FusionContractPlan,
-    FusionOperand, FusionOperandLayout, LayoutKeyBuilder, PlanTarget,
+    FusionOperand, FusionOperandLayout, LayoutKeyBuilder, PlanTarget, PlanarContractOrders,
     PreparedCheckedGenericDynamicSpace, StorageContractResolution, ValidatedCoreContract,
     CHECKED_CONTRACTION_REQUIRES_BOSONIC,
 };
@@ -526,13 +526,15 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
         Self::Scalar: DenseBlockScalar;
 
     /// The `DynamicTree` artifact of a contraction with a lazy-adjoint
-    /// operand, whose sources are read through logical-key projections.
+    /// operand, whose sources are read through logical-key projections,
+    /// over `plan` when the request fixes one (a planar contraction).
     fn prelowered_dynamic_tree_artifact(
         cache: &mut Self::StructureCache,
         target: PlanTarget<'_, R, Self::SpaceAuthority<'_>>,
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
+        plan: Option<&FusionContractPlan>,
     ) -> Result<DynamicTreeExecutionArtifact<Self::Scalar>, Self::Error>
     where
         Self::Scalar: DenseBlockScalar;
@@ -552,6 +554,14 @@ pub enum ContractRequest<'s> {
     },
     /// TensorKit `mul!`: `lhs.domain` glued to `rhs.codomain` in order.
     Compose,
+    /// TensorKit `planarcontract!` over `axes` (output as for `Contract`):
+    /// the admitted `orders`' transposes around the core GEMMs, no
+    /// supertrace twist and no R symbol. Multiplicity-free only.
+    Planar {
+        axes: TensorContractSpec<'s>,
+        codomain_rank: usize,
+        orders: &'s PlanarContractOrders,
+    },
 }
 
 /// One contraction operand: its logical space (the authority its
@@ -989,11 +999,12 @@ where
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
+        plan: Option<&FusionContractPlan>,
     ) -> Result<DynamicTreeExecutionArtifact<R::Scalar>, OperationError>
     where
         R::Scalar: DenseBlockScalar,
     {
-        compile_prelowered_dynamic_tree(planning, target, lhs, rhs, axes)
+        compile_prelowered_dynamic_tree(planning, target, lhs, rhs, axes, plan)
     }
 }
 
@@ -1017,9 +1028,16 @@ where
     > {
         let direct = !lhs_operand.storage_conjugate() && !rhs_operand.storage_conjugate();
         let destination = match request {
+            // A planar contraction's destination is its contraction's:
+            // TensorKit's `transpose(::HomSpace)` and `permute` both `select`.
             ContractRequest::Contract {
                 axes,
                 codomain_rank,
+            }
+            | ContractRequest::Planar {
+                axes,
+                codomain_rank,
+                ..
             } if direct => BoundDynamicFusionMapSpace::contracted_multiplicity_free_partitioned(
                 lhs,
                 rhs,
@@ -1031,6 +1049,11 @@ where
             ContractRequest::Contract {
                 axes,
                 codomain_rank,
+            }
+            | ContractRequest::Planar {
+                axes,
+                codomain_rank,
+                ..
             } => BoundDynamicFusionMapSpace::contracted_multiplicity_free_oriented(
                 lhs,
                 lhs_operand,
@@ -1762,6 +1785,7 @@ where
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
+        plan: Option<&FusionContractPlan>,
     ) -> Result<DynamicTreeExecutionArtifact<f64>, Self::Error> {
         compile_stored_dynamic_tree::<Self, R>(
             txn,
@@ -1775,6 +1799,7 @@ where
                 rhs.storage_space().structure(),
             ),
             axes,
+            plan,
         )
     }
 }

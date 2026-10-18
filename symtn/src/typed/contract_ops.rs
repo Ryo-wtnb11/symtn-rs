@@ -131,22 +131,33 @@ impl ContractSpec<'_> {
 
 /// The staged request of `spec` between `lhs` and `rhs`, whose output order
 /// is `output_axes` (`spec.output_axes()`) and whose conjugation flags are
-/// the operands'.
+/// the operands': the ordinary contraction, or with `planar` the planar one
+/// over those admitted orders.
 pub(super) fn contract_request<'a>(
     lhs: symtn_tensors::FusionOperand<'_>,
     rhs: symtn_tensors::FusionOperand<'_>,
     spec: &ContractSpec<'a>,
     output_axes: &'a [usize],
+    planar: Option<&'a symtn_tensors::PlanarContractOrders>,
 ) -> symtn_tensors::ContractRequest<'a> {
-    symtn_tensors::ContractRequest::Contract {
-        axes: symtn_tensors::TensorContractSpec::new_with_conjugation(
-            spec.lhs,
-            spec.rhs,
-            OutputAxisOrder::from_axes(output_axes),
-            lhs.storage_conjugate(),
-            rhs.storage_conjugate(),
-        ),
-        codomain_rank: spec.codomain.len(),
+    let axes = symtn_tensors::TensorContractSpec::new_with_conjugation(
+        spec.lhs,
+        spec.rhs,
+        OutputAxisOrder::from_axes(output_axes),
+        lhs.storage_conjugate(),
+        rhs.storage_conjugate(),
+    );
+    let codomain_rank = spec.codomain.len();
+    match planar {
+        None => symtn_tensors::ContractRequest::Contract {
+            axes,
+            codomain_rank,
+        },
+        Some(orders) => symtn_tensors::ContractRequest::Planar {
+            axes,
+            codomain_rank,
+            orders,
+        },
     }
 }
 
@@ -180,7 +191,8 @@ where
     /// defined by braiding legs into place, and the call carries no planar
     /// embedding or braid direction. The crossing-free case is exactly
     /// [`Self::compose`], which every braiding style admits; general planar
-    /// contraction is a separate operation (#1070). Behaviour change (#1372):
+    /// contraction is [`Self::planar_contract`] (TensorKit `@planar`).
+    /// Behaviour change (#1372):
     /// a canonical `NoBraiding` contraction was accepted before.
     ///
     /// For fermionic symmetric braiding this **twists**
@@ -365,7 +377,7 @@ where
             }
         }
         let (space, data) =
-            <R::Mode as TypedTensorContractDispatch<R, D>>::contract(self, other, spec)?;
+            <R::Mode as TypedTensorContractDispatch<R, D>>::contract(self, other, spec, None)?;
         Ok(self.published(space, data))
     }
 
@@ -493,6 +505,221 @@ where
             self,
             other,
             spec,
+            None,
+            destination,
+            alpha,
+            beta,
+        )
+    }
+
+    /// The admitted orders of a planar `spec` against `other`, after the
+    /// checks `planar_contract` shares with `contract`: placement (Host
+    /// only) and the planarity of `spec`.
+    fn planar_orders(
+        &self,
+        other: &Self,
+        spec: &ContractSpec<'_>,
+    ) -> Result<symtn_tensors::PlanarContractOrders, Error> {
+        if S::as_host(EXEC, self).is_none() || S::as_host(EXEC, other).is_none() {
+            return Err(Error::UnsupportedOnDevice(
+                "planar_contract has no device route; transfer with to_host()".to_owned(),
+            ));
+        }
+        let shape = |tensor: &Self| {
+            let space = tensor.logical_space().space();
+            (space.nout(), space.rank())
+        };
+        Ok(symtn_tensors::PlanarContractOrders::validate(
+            shape(self),
+            shape(other),
+            spec.lhs,
+            spec.rhs,
+            &spec.output_axes(),
+            spec.codomain.len(),
+        )?)
+    }
+
+    fn is_bosonic(&self) -> bool {
+        <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider())
+            == symtn_core::BraidingStyleKind::Bosonic
+    }
+
+    /// Planar contraction, TensorKit `@planar` for one pairwise contraction
+    /// (`planarcontract!` plus its output `planaradd!`): contracts
+    /// `spec.lhs` of `self` with `spec.rhs` of `other` without crossing any
+    /// legs, and returns the open legs as `spec.codomain ← spec.domain`, in
+    /// [`Self::contract`]'s leg roles ([`ContractSpec`]). Every braiding
+    /// style is admitted, `Anyonic` and `NoBraiding` included: no R symbol is
+    /// used.
+    ///
+    /// **Planarity.** A tensor's cyclic boundary is its codomain axes in
+    /// order followed by its domain axes reversed, as for
+    /// [`Self::transpose`]. `spec` is planar when `spec.lhs` is one arc of
+    /// `self`'s boundary and `spec.rhs` one arc of `other`'s, the pairing
+    /// walks the two arcs in opposite directions, and `spec.codomain`
+    /// followed by `spec.domain` reversed is a rotation of the boundary the
+    /// two open arcs leave (`self`'s open legs from just after its arc, then
+    /// `other`'s). The list order of `spec.lhs`/`spec.rhs` is free; only the
+    /// pairs matter. Like TensorKit's `@planar`, an output rotation is
+    /// admitted and fused into the call; `planarcontract!` alone asserts the
+    /// unrotated split.
+    ///
+    /// **Semantics by braiding style.** The result is `transpose(self)` onto
+    /// `(open | contracted)`, `transpose(other)` onto `(contracted | open)`,
+    /// [`Self::compose`], then one [`Self::transpose`] onto the requested
+    /// legs. For a Bosonic rule this is exactly [`Self::contract`] (a cyclic
+    /// transpose is a braid there), and the call runs `contract`'s planner
+    /// after the planarity check. For a **Fermionic** rule it is the
+    /// composition semantics, not the contraction: no supertrace twist is
+    /// applied, so it equals `compose` whenever `spec` is the composition
+    /// geometry and differs from `contract` by a sign on every dual
+    /// contracted leg carrying an odd sector (see [`Self::compose`]).
+    /// Planarity is checked for every style, Bosonic included (stricter than
+    /// `planarcontract!`, which skips it for Bosonic, and equal to `@planar`).
+    ///
+    /// **Cost.** The owned output is the only allocation; each operand
+    /// transpose writes Runtime-pooled scratch and is skipped when the
+    /// operand already has its planar core layout (TensorKit `A′ = A`), and
+    /// the output transpose is skipped when the requested order is the
+    /// core's. The work is TensorKit's `transpose!` ×2 + `mul!` +
+    /// `planaradd!`: the transposes' recoupling terms (F, pivotal and
+    /// Frobenius–Schur coefficients only) plus `Σ_c m_c n_c k_c` GEMM work.
+    ///
+    /// Host storage only; checked Generic providers are admitted for Bosonic
+    /// braiding (the ordinary contraction).
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::RuntimeMismatch`] when the operands belong to different
+    ///   runtimes.
+    /// - [`Error::UnsupportedOnDevice`] for CUDA storage.
+    /// - [`Error::Operation`] with the malformed-spec errors of
+    ///   [`Self::contract`]; then
+    ///   [`crate::typed::OperationError::InvalidAxisSet`] (`"lhs"` / `"rhs"`)
+    ///   when a contracted set is not one boundary arc or the pairing does
+    ///   not reverse orientation, and
+    ///   [`crate::typed::OperationError::InvalidPermutation`] when the output
+    ///   is not a rotation of the open boundary. All are reported before any
+    ///   provider work.
+    /// - Then the errors of [`Self::contract`] for the contracted legs and
+    ///   rule identities; a non-Bosonic checked Generic provider is
+    ///   [`crate::typed::OperationError::UnsupportedTensorContractScope`].
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use num_complex::Complex64;
+    /// use symtn::sector::{TableRule, TableSector};
+    /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
+    ///
+    /// let runtime = Runtime::builder().build()?;
+    /// let fib = Arc::new(TableRule::fibonacci());
+    /// let v = GradedSpace::try_new(Arc::clone(&fib), [(TableSector::new(2), 1)])?;
+    /// let b = GradedSpace::try_new(fib, [(TableSector::new(1), 2), (TableSector::new(2), 3)])?;
+    /// // Golden-chain two-site H_eff: θ′[l s1 s2; r] := H[s1 s2; t1 t2] θ[l t1 t2; r].
+    /// let h: TensorMap<_, Complex64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&v, &v], 1)?;
+    /// let theta: TensorMap<_, Complex64> =
+    ///     TensorMap::rand_with_seed(&runtime, [&b, &v, &v], [&b], 2)?;
+    /// // Open legs: s1 = 0, s2 = 1 (of h), l = 2, r = 3 (of θ).
+    /// let spec = ContractSpec { lhs: &[2, 3], rhs: &[1, 2], codomain: &[2, 0, 1], domain: &[3] };
+    /// let out = h.planar_contract(&theta, &spec)?;
+    /// assert_eq!(out.codomain_rank(), 3);
+    ///
+    /// // The same as transposing θ by hand and composing, then transposing.
+    /// let by_hand = h
+    ///     .compose(&theta.transpose(&[1, 2], &[0, 3])?)?
+    ///     .transpose(&[2, 0, 1], &[3])?;
+    /// let residual = out.axpby(Complex64::ONE, &by_hand, -Complex64::ONE)?.norm(2.0)?;
+    /// assert!(residual < 1e-12);
+    /// # Ok::<(), symtn::typed::Error>(())
+    /// ```
+    pub fn planar_contract<'a>(
+        &self,
+        other: impl Into<TensorRef<'a, R, D, S>>,
+        spec: &ContractSpec<'_>,
+    ) -> Result<Self, FacadeError<R>> {
+        let other = other.into().operand()?;
+        let other = &*other;
+        if !self.runtime.same_runtime(&other.runtime) {
+            return Err(Error::RuntimeMismatch.into());
+        }
+        let orders = self.planar_orders(other, spec)?;
+        if self.is_bosonic() {
+            return self.contract(other, spec);
+        }
+        let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
+            self,
+            other,
+            spec,
+            Some(&orders),
+        )?;
+        Ok(self.published(space, data))
+    }
+
+    /// `destination = alpha * self.planar_contract(other, spec) + beta *
+    /// destination`, TensorKit `planarcontract!(C, A, pA, B, pB, pAB, α, β)`
+    /// (with `@planar`'s output rotation fused in), preserving the
+    /// destination's provider, space, body and dense host allocation.
+    /// `destination` must have the space of that result. It takes every
+    /// operand [`Self::planar_contract`] takes and allocates nothing owned;
+    /// scratch is Runtime-pooled.
+    ///
+    /// `alpha` and `beta` ride the epilogue of whatever writes each element
+    /// (the core GEMMs, as `mul!(C, A′, B′, α, β)`, or the output transpose),
+    /// with [`Self::contract_into`]'s rules: `beta == 0` never reads
+    /// `destination`, `alpha == 0` never reads the operands. A Bosonic rule
+    /// runs [`Self::contract_into`] after the planarity check.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::RuntimeMismatch`]; [`Error::RuleMismatch`];
+    /// [`Error::InvalidArgument`] for a destination that is not owned dense
+    /// storage or aliases an operand; [`Error::UnsupportedOnDevice`] for CUDA
+    /// storage; then the planarity errors of [`Self::planar_contract`]; then the
+    /// remaining errors of [`Self::contract_into`] (`SpaceMismatch`, length,
+    /// [`Error::DestinationShared`]).
+    ///
+    /// # Failure
+    ///
+    /// A validation or capability error leaves `destination` bit-identical:
+    /// every check completes before the first write.
+    pub fn planar_contract_into<'a>(
+        &self,
+        other: impl Into<TensorRef<'a, R, D, S>>,
+        spec: &ContractSpec<'_>,
+        destination: &mut Self,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), FacadeError<R>> {
+        let other = other.into().operand()?;
+        let other = &*other;
+        if !self.runtime.same_runtime(&other.runtime)
+            || !self.runtime.same_runtime(&destination.runtime)
+        {
+            return Err(Error::RuntimeMismatch.into());
+        }
+        let identity = self.logical_space().space().admission().rule_identity();
+        if identity != other.logical_space().space().admission().rule_identity()
+            || identity
+                != destination
+                    .logical_space()
+                    .space()
+                    .admission()
+                    .rule_identity()
+        {
+            return Err(Error::RuleMismatch.into());
+        }
+        destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
+        destination_precheck(destination, &other.storage_body().data, S::NOUN)?;
+        let orders = self.planar_orders(other, spec)?;
+        if self.is_bosonic() {
+            return self.contract_into(other, spec, destination, alpha, beta);
+        }
+        <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            self,
+            other,
+            spec,
+            Some(&orders),
             destination,
             alpha,
             beta,

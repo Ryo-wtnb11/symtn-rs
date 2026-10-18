@@ -26,10 +26,13 @@ use super::dynamic_space::encoded_layout_primer;
 use super::dynamic_space::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, LayoutKeyBuilder,
 };
-use super::fusion::prepare_tensorcontract_fusion_plan_dyn_prelowered_canonical;
 #[cfg(test)]
 use super::fusion::FusionContractOrientation;
+use super::fusion::{
+    prepare_tensorcontract_fusion_plan_dyn_prelowered_canonical, FusionContractPlan,
+};
 use super::fusion_block::FusionBlockContractWorkspace;
+use super::planar::PlanarContractOrders;
 use super::resolution::try_compile_oriented_storage_contract_plan;
 use super::resolution::{
     try_compile_oriented_storage_contract_candidate_plan, ContractKind, ContractRoute, CopyCRoute,
@@ -1042,6 +1045,7 @@ where
             rhs,
             axes,
             false,
+            None,
         )
     }
 
@@ -1328,7 +1332,7 @@ where
 /// The output axes of a contraction request, as the planner reads them.
 fn staged_contract_axes<'a>(request: ContractRequest<'a>, rank: usize) -> Option<PlannedAxes<'a>> {
     match request {
-        ContractRequest::Contract { axes, .. } => Some((
+        ContractRequest::Contract { axes, .. } | ContractRequest::Planar { axes, .. } => Some((
             axes.lhs_contracting_axes(),
             axes.rhs_contracting_axes(),
             spec_output_axes(axes, rank),
@@ -1354,6 +1358,9 @@ where
         authority: parts.authority,
     };
     let (lhs, rhs) = staged.operands;
+    if let ContractRequest::Planar { orders, .. } = staged.request {
+        return try_planar_core_route::<X, St::M, R>(target, lhs, rhs, orders);
+    }
     let Some((lhs_axes, rhs_axes, output_axes)) =
         staged_contract_axes(staged.request, space.rank())
     else {
@@ -1394,6 +1401,23 @@ where
         ..
     } = stage.parts_mut();
     let (rule, space) = St::M::contract_destination(stage, lhs_authority);
+    if let ContractRequest::Planar { axes, orders, .. } = *request {
+        let plan =
+            FusionContractPlan::planar(orders, lhs.storage_conjugate(), rhs.storage_conjugate());
+        return compile_dynamic_tree_in::<St::M, R>(
+            St::M::contract_cache(planning, txn),
+            PlanTarget {
+                rule,
+                space,
+                authority: *authority,
+            },
+            *lhs,
+            *rhs,
+            axes,
+            X::IRREGULAR_CORE,
+            Some(&plan),
+        );
+    }
     let Some((lhs_axes, rhs_axes, output_axes)) = staged_contract_axes(*request, space.rank())
     else {
         return Err(OperationError::UnsupportedTensorContractScope {
@@ -1574,6 +1598,27 @@ where
     M: PlanningAlgebra<R>,
     M::Scalar: DenseBlockScalar,
 {
+    match compose_core_route::<X, M, R>(target, lhs, rhs)? {
+        CoreRoute::Hit(resolution) => Ok(resolution),
+        CoreRoute::Miss(_) => Err(OperationError::UnsupportedTensorContractScope {
+            message:
+                "storage-direct composition supports only canonical fully-direct oriented operands",
+        }
+        .into()),
+    }
+}
+
+/// The canonical core of `mul!(C, lhs, rhs)`: A's domain against B's
+/// codomain in order, the identity output, no twist.
+fn compose_core_route<X: ExecCaps, M, R>(
+    target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
+) -> Result<CoreRoute<M::Scalar>, M::Error>
+where
+    M: PlanningAlgebra<R>,
+    M::Scalar: DenseBlockScalar,
+{
     let (left, right) = (lhs.oriented_homspace(), rhs.oriented_homspace());
     let lhs_axes: Vec<usize> = (left.nout()..left.rank()).collect();
     let rhs_axes: Vec<usize> = (0..right.nout()).collect();
@@ -1584,14 +1629,33 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    match try_compile_core_route::<X, M, R>(target, lhs, rhs, axes, ContractKind::Compose)? {
-        CoreRoute::Hit(resolution) => Ok(resolution),
-        CoreRoute::Miss(_) => Err(OperationError::UnsupportedTensorContractScope {
-            message:
-                "storage-direct composition supports only canonical fully-direct oriented operands",
-        }
-        .into()),
+    try_compile_core_route::<X, M, R>(target, lhs, rhs, axes, ContractKind::Compose)
+}
+
+/// The first rung of a planar contraction, TensorKit `planarcontract!`: when
+/// no operand needs a transpose and the output is the core's, the
+/// composition core (`mul!` on both operands as stored); any other planar
+/// spec goes to the `DynamicTree` artifact of its fixed plan.
+fn try_planar_core_route<X: ExecCaps, M, R>(
+    target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
+    orders: &PlanarContractOrders,
+) -> Result<CoreRoute<M::Scalar>, M::Error>
+where
+    M: PlanningAlgebra<R>,
+    M::Scalar: DenseBlockScalar,
+{
+    let shape = |operand: FusionOperand<'_>| {
+        let homspace = operand.oriented_homspace();
+        (homspace.nout(), homspace.rank())
+    };
+    if !orders.is_composition(shape(lhs), shape(rhs)) {
+        return Ok(CoreRoute::Miss(CoreMiss {
+            requested_zero_copy: false,
+        }));
     }
+    compose_core_route::<X, M, R>(target, lhs, rhs)
 }
 
 /// [`TensorContractFusionExecutionContext::plan_contract`] in admission mode
@@ -1680,7 +1744,7 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    compile_dynamic_tree_in::<M, R>(cache, target, lhs, rhs, axes, X::IRREGULAR_CORE)
+    compile_dynamic_tree_in::<M, R>(cache, target, lhs, rhs, axes, X::IRREGULAR_CORE, None)
 }
 
 /// The `CopyC` route in `orientation`, or `None` when its temporary has
@@ -1783,7 +1847,8 @@ where
 ///
 /// `irregular_core`: the executor packs and scatters a core plan that is
 /// not fully direct ([`ExecCaps::IRREGULAR_CORE`]), as the artifact's core
-/// over a non-canonical destination tiling (#1517) is.
+/// over a non-canonical destination tiling (#1517) is. `plan` is the fixed
+/// plan of a planar contraction; `None` selects the contraction's.
 fn compile_dynamic_tree_in<M, R>(
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
@@ -1791,6 +1856,7 @@ fn compile_dynamic_tree_in<M, R>(
     rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     irregular_core: bool,
+    plan: Option<&FusionContractPlan>,
 ) -> Result<StorageContractResolution<M::Scalar>, M::Error>
 where
     M: PlanningAlgebra<R>,
@@ -1807,9 +1873,10 @@ where
             (lhs_space, lhs_space.structure()),
             (rhs_space, rhs_space.structure()),
             axes,
+            plan,
         )?
     } else {
-        M::prelowered_dynamic_tree_artifact(cache, target, lhs, rhs, axes)?
+        M::prelowered_dynamic_tree_artifact(cache, target, lhs, rhs, axes, plan)?
     };
     // Transformed sources are canonical coupled layouts, so only a
     // non-canonical destination tiling leaves the core plan not fully
@@ -1828,13 +1895,15 @@ where
 /// The `DynamicTree` artifact over two sources given as the logical space the
 /// plan is selected on and the storage structure replay reads: a direct
 /// operand's own space and structure, or (checked Generic) a lazy adjoint's
-/// logical space over its parent's storage.
+/// logical space over its parent's storage. `plan` fixes the plan instead of
+/// selecting one for `axes`.
 pub(crate) fn compile_stored_dynamic_tree<M, R>(
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     (lhs_space, lhs_structure): (&DynamicFusionMapSpace, &Arc<BlockStructure>),
     (rhs_space, rhs_structure): (&DynamicFusionMapSpace, &Arc<BlockStructure>),
     axes: TensorContractSpec<'_>,
+    plan: Option<&FusionContractPlan>,
 ) -> Result<super::dynamic::DynamicTreeExecutionArtifact<M::Scalar>, M::Error>
 where
     M: PlanningAlgebra<R>,
@@ -1845,12 +1914,20 @@ where
         space: dst_space,
         authority,
     } = target;
-    let plan = M::dynamic_tree_plan(rule, authority, dst_space, lhs_space, rhs_space, axes)?;
+    let selected;
+    let plan = match plan {
+        Some(plan) => plan,
+        None => {
+            selected =
+                M::dynamic_tree_plan(rule, authority, dst_space, lhs_space, rhs_space, axes)?;
+            &selected
+        }
+    };
     super::dynamic::compile_dynamic_tree_execution_artifact::<M, R>(
         cache,
         rule,
         authority,
-        &plan,
+        plan,
         dst_space,
         lhs_space,
         lhs_structure,
@@ -1861,13 +1938,14 @@ where
 
 /// The multiplicity-free `DynamicTree` artifact of a contraction with a
 /// lazy-adjoint operand: both operands prelowered to logical-key layouts
-/// under the destination's primer.
+/// under the destination's primer; `plan` as in [`compile_stored_dynamic_tree`].
 pub(crate) fn compile_prelowered_dynamic_tree<R>(
     planning: &mut TreeTransformPlanning,
     target: PlanTarget<'_, R>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
+    plan: Option<&FusionContractPlan>,
 ) -> Result<super::dynamic::DynamicTreeExecutionArtifact<R::Scalar>, OperationError>
 where
     R: MultiplicityFreeRigidSymbols + TreeTransformRuleCacheKey,
@@ -1880,19 +1958,26 @@ where
     } = target;
     let lhs_layout = lhs.prepare(rule, layout_primer)?;
     let rhs_layout = rhs.prepare(rule, layout_primer)?;
-    let plan = prepare_tensorcontract_fusion_plan_dyn_prelowered_canonical(
-        rule,
-        dst_space,
-        &lhs_layout,
-        &rhs_layout,
-        axes,
-        layout_primer,
-    )?;
+    let selected;
+    let plan = match plan {
+        Some(plan) => plan,
+        None => {
+            selected = prepare_tensorcontract_fusion_plan_dyn_prelowered_canonical(
+                rule,
+                dst_space,
+                &lhs_layout,
+                &rhs_layout,
+                axes,
+                layout_primer,
+            )?;
+            &selected
+        }
+    };
     super::dynamic::compile_prelowered_dynamic_tree_execution_artifact(
         planning,
         rule,
         layout_primer,
-        &plan,
+        plan,
         dst_space,
         &lhs_layout,
         &rhs_layout,

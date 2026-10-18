@@ -580,6 +580,7 @@ fn contract_multiplicity_free<R, D, S>(
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     spec: &ContractSpec<'_>,
+    planar: Option<&symtn_tensors::PlanarContractOrders>,
 ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>
 where
     R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
@@ -591,7 +592,7 @@ where
     #[cfg(test)]
     super::probe::hit(super::probe::Event::ContractSeamCall);
     contract_owned_multiplicity_free(lhs, rhs, |lhs, rhs| {
-        contract_request(lhs, rhs, spec, &output_axes)
+        contract_request(lhs, rhs, spec, &output_axes, planar)
     })
 }
 
@@ -604,6 +605,7 @@ fn contract_into_multiplicity_free<R, D, S>(
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     spec: &ContractSpec<'_>,
+    planar: Option<&symtn_tensors::PlanarContractOrders>,
     destination: &mut TensorMap<R, D, S>,
     alpha: D,
     beta: D,
@@ -629,7 +631,7 @@ where
             rhs_operand,
             transform_source_len(rhs.storage_body())?,
         ),
-        contract_request(lhs_operand, rhs_operand, spec, &output_axes),
+        contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar),
     )?;
     staged.require_destination(destination.logical_space().space())?;
     let destination = destination_storage_mut(destination)?;
@@ -667,19 +669,21 @@ where
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        contract_multiplicity_free(lhs, rhs, spec)
+        contract_multiplicity_free(lhs, rhs, spec, planar)
     }
 
     fn contract_into<S: ContractExec<R, Self>>(
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
+        planar: Option<&symtn_tensors::PlanarContractOrders>,
         destination: &mut TensorMap<R, Self, S>,
         alpha: Self,
         beta: Self,
     ) -> Result<(), Error> {
-        contract_into_multiplicity_free(lhs, rhs, spec, destination, alpha, beta)
+        contract_into_multiplicity_free(lhs, rhs, spec, planar, destination, alpha, beta)
     }
 
     fn compose<S: ContractExec<R, Self>>(
