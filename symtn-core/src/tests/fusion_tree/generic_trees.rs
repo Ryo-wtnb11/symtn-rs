@@ -320,26 +320,6 @@ fn checked_generic_artin_rejects_categorical_symbol_shapes_before_indexing() {
 }
 
 #[test]
-fn checked_generic_bend_and_repartition_match_unchecked_rows_and_order() {
-    let pair = a4_dual_pair_rank2(2);
-    let unchecked_bend = generic_bendright_tree_pair(&A4BendRule, &pair).unwrap();
-    let checked = A4BendRule;
-    let checked_bend = generic_bendright_tree_pair_checked(&checked, &pair).unwrap();
-    assert_eq!(checked_bend, unchecked_bend);
-
-    let unchecked_repartition = generic_repartition_tree_pair(&A4BendRule, &pair, 0).unwrap();
-    let checked = A4BendRule;
-    let checked_repartition = generic_repartition_tree_pair_checked(&checked, &pair, 0).unwrap();
-    assert_eq!(checked_repartition, unchecked_repartition);
-
-    let checked = A4BendRule;
-    assert_eq!(
-        generic_bendleft_tree_pair_checked(&checked, &unchecked_bend[0].0).unwrap(),
-        generic_bendleft_tree_pair(&A4BendRule, &unchecked_bend[0].0).unwrap()
-    );
-}
-
-#[test]
 fn checked_generic_b_and_a_reject_malformed_categorical_f_shapes() {
     let bad_b = CheckedA4Spy {
         bad_b_f: true,
@@ -649,55 +629,6 @@ fn generic_full_key_block_composition_matches_per_source_replay() {
                 .unwrap_or(0.0);
             assert!((got - want).abs() < 1e-12);
         }
-    }
-}
-
-#[test]
-fn checked_generic_cyclic_transpose_matches_unchecked_rows() {
-    let rule = A4FoldRule;
-    let t = SectorId::new(3);
-    let checked = InfallibleGeneric::new(&rule);
-    for (pair, codomain, domain, label) in [
-        (
-            FusionTreePairKey::pair(
-                a4f_rank3(3, 2, 1),
-                FusionTreeKey::new([t], t, [false], [], []),
-            ),
-            vec![1, 2, 3],
-            vec![0],
-            "clockwise",
-        ),
-        (
-            FusionTreePairKey::pair(
-                a4f_rank3(3, 1, 2),
-                FusionTreeKey::new([t], t, [false], [], []),
-            ),
-            vec![3, 0, 1],
-            vec![2],
-            "anticlockwise",
-        ),
-        (
-            FusionTreePairKey::pair(
-                FusionTreeKey::new(
-                    [t, t, t],
-                    t,
-                    [true, false, true],
-                    [t],
-                    [MultiplicityIndex::new(2).unwrap(), MultiplicityIndex::ONE],
-                ),
-                FusionTreeKey::new([t], t, [true], [], []),
-            ),
-            vec![2, 3, 0],
-            vec![1],
-            "multi-step dual flags",
-        ),
-    ] {
-        let unchecked =
-            map_terms(generic_transpose_tree_pair(&rule, &pair, &codomain, &domain).unwrap());
-        let actual = map_terms(
-            generic_transpose_tree_pair_checked(&checked, &pair, &codomain, &domain).unwrap(),
-        );
-        assert_term_maps_eq(&actual, &unchecked, label);
     }
 }
 

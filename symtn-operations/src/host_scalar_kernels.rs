@@ -2073,44 +2073,6 @@ mod tests {
             .collect()
     }
 
-    /// Test-only oracle: an independent column-major scalar loop.
-    #[allow(clippy::too_many_arguments)]
-    fn column_major_loop_reference<T>(
-        dst: &mut [T],
-        src: &[T],
-        shape: &[usize],
-        dst_strides: &[isize],
-        src_strides: &[isize],
-        dst_offset: isize,
-        src_offset: isize,
-        conjugate: bool,
-        action: RawStridedAction<T>,
-    ) where
-        T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue,
-    {
-        if shape.contains(&0) {
-            return;
-        }
-        if shape.is_empty() {
-            let (d, s) = (dst_offset as usize, src_offset as usize);
-            apply_raw_strided_action(&mut dst[d], src[s].maybe_conj(conjugate), action);
-            return;
-        }
-        raw_strided_combine_recurse_mapped(
-            shape.len() - 1,
-            dst,
-            src,
-            shape,
-            |axis| Ok(dst_strides[axis]),
-            |axis| Ok(src_strides[axis]),
-            dst_offset,
-            src_offset,
-            conjugate,
-            action,
-        )
-        .unwrap();
-    }
-
     const NAN_PAYLOAD: u64 = 0x7ff8_0000_0000_1234;
 
     fn special_reals() -> [f64; 12] {
@@ -2230,7 +2192,7 @@ mod tests {
                         let src = special_values(len, 1, &make);
                         let initial = special_values(len, 4, &make);
                         let mut expected = initial.clone();
-                        column_major_loop_reference(
+                        naive_combine(
                             &mut expected,
                             &src,
                             shape,
@@ -2405,7 +2367,7 @@ mod tests {
         assert!(!destination_axes_separated(&shape, &dst_strides));
 
         let mut expected = initial;
-        column_major_loop_reference(
+        naive_combine(
             &mut expected,
             &src,
             &shape,
@@ -2419,7 +2381,7 @@ mod tests {
         assert_eq!(expected[2], 0.0);
         for (alpha, beta) in [(1.0, 1.0), (1.0, 0.0), (2.0, 0.0)] {
             let mut want = initial;
-            column_major_loop_reference(
+            naive_combine(
                 &mut want,
                 &src,
                 &shape,
@@ -2510,7 +2472,7 @@ mod tests {
         )
         .unwrap();
         let mut want = vec![0.0; 512];
-        column_major_loop_reference(
+        naive_combine(
             &mut want,
             &src,
             &shape,
