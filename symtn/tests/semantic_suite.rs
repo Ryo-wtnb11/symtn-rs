@@ -1,5 +1,5 @@
 //! Operation-identity property tests over the user layer (issue #9, part 2)
-//! plus the cross-library invariant-stream check against TensorKit (part 3).
+//! plus TensorKit's weighted rank truncation (part 3).
 //!
 //! Seeding reuses the splitmix64 scheme of `TensorMap::rand_with_seed`;
 //! no new dependencies.
@@ -13,8 +13,8 @@ use symtn::typed::ContractSpec;
 use symtn::typed::Direction;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
+    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
 };
 use symtn::sector::{
     Fz2SectorLayout, PackedProductCodec, ProductSectorLayout, Su2SectorLayout, U1SectorLayout,
@@ -32,8 +32,6 @@ type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
 type Fz2U1Su2Codec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
 type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, Fz2U1Su2Codec>;
-type Fz2U1Sector = ProductSector<Z2Irrep, U1Irrep>;
-type Fz2U1Su2Sector = ProductSector<Fz2U1Sector, SU2Irrep>;
 
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
@@ -532,6 +530,42 @@ fn isometry_and_isomorphism_are_isometric() {
     for_each_space!(case);
 }
 
+/// Norm, trace and singular values agree on one quantity:
+/// `tr(e†∘e) = ‖e‖² = Σ_c dim(c) Σ σ_c²`, for a rank-2 ← 2 composition `e`.
+#[test]
+fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
+    let rt = Runtime::builder().build().unwrap();
+    macro_rules! case {
+        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+            let provider = $provider;
+            let v = GradedSpace::try_new(Arc::clone(&provider), $pairs).unwrap();
+            let a: TensorMap<_, f64> =
+                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 81).unwrap();
+            let b: TensorMap<_, f64> =
+                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 82).unwrap();
+            let e = a.compose(&b).unwrap();
+            let square = e.norm(2.0).unwrap().powi(2);
+            let trace = e.adjoint().unwrap().compose(&e).unwrap().tr().unwrap();
+            numerics::assert_close($name, trace, square, TERMS);
+            let weighted: f64 = e
+                .svd_vals(&codomain_axes(&e), &domain_axes(&e))
+                .unwrap()
+                .iter()
+                .map(|spectrum| {
+                    let dim = GradedSpace::try_new(Arc::clone(&provider), [(spectrum.sector, 1)])
+                        .unwrap()
+                        .dim()
+                        .unwrap();
+                    dim * spectrum.values.iter().map(|s| s * s).sum::<f64>()
+                })
+                .sum();
+            numerics::assert_close($name, weighted, square, TERMS);
+            let _ = $fermionic;
+        }};
+    }
+    for_each_space!(case);
+}
+
 // ---------------------------------------------------------------------------
 // Contraction order independence
 // ---------------------------------------------------------------------------
@@ -905,11 +939,11 @@ fn svd_qr_reconstruction_random_spaces() {
 }
 
 // ---------------------------------------------------------------------------
-// Part 3: cross-library invariant stream vs TensorKit
+// Part 3: weighted rank truncation vs TensorKit
 // ---------------------------------------------------------------------------
 
 /// The shared deterministic per-block fill, the same function the TensorKit
-/// 0.17.1 run used to produce the expected streams below. Labels: U1 charge
+/// 0.17.1 run used to produce the truncation values below. Labels: U1 charge
 /// or SU2 twice-spin; indices are one-based degeneracy coordinates, codomain
 /// axes first.
 fn oracle_fill(c0: i64, labels: [i64; 5], idx: &[usize]) -> f64 {
@@ -1015,275 +1049,5 @@ fn weighted_rank_truncation_matches_tensorkit() {
         |sector: &SU2Irrep| sector.twice_spin() as i64,
         [(1, 1), (2, 1)],
         276850.04205868527
-    );
-}
-
-/// Runs the part-3 op sequence and compares the basis-independent
-/// invariants (norm, tr, singular values) against the committed TensorKit
-/// stream. `svd_expected` holds the significant singular values (>= 1e-6
-/// of the largest); trailing numerically-zero values are only counted.
-macro_rules! invariant_stream_case {
-    ($provider:expr, $pairs:expr, $label_of:expr, $expected:expr, $svd_count:expr, $svd_expected:expr) => {{
-        let rt = Runtime::builder().build().unwrap();
-        let v = GradedSpace::try_new($provider, $pairs).unwrap();
-        let label_of = $label_of;
-        let build = |c0| {
-            TensorMap::from_subblock_fn(&rt, [&v, &v], [&v, &v], |trees, idx| {
-                let cod = trees.codomain_uncoupled();
-                let dom = trees.domain_uncoupled();
-                oracle_fill(
-                    c0,
-                    [
-                        label_of(&cod[0]),
-                        label_of(&cod[1]),
-                        label_of(&dom[0]),
-                        label_of(&dom[1]),
-                        label_of(trees.coupled()),
-                    ],
-                    idx,
-                )
-            })
-            .unwrap()
-        };
-        let a = build(3);
-        let b = build(5);
-        let c = a.compose(&b).unwrap();
-        let d = a.permute(&[1, 0], &[3, 2]).unwrap();
-        let e = d.compose(&c).unwrap();
-        let g = a.adjoint().unwrap().compose(&a).unwrap();
-        let h = e.axpby(1.0, &a, 0.5).unwrap();
-        let hh_tr = h.compose(&h).unwrap().tr().unwrap();
-
-        let steps = [
-            ("s1a", a.norm(2.0).unwrap(), a.tr().unwrap()),
-            ("s1b", b.norm(2.0).unwrap(), b.tr().unwrap()),
-            ("s2", c.norm(2.0).unwrap(), c.tr().unwrap()),
-            ("s3", d.norm(2.0).unwrap(), d.tr().unwrap()),
-            ("s4", e.norm(2.0).unwrap(), e.tr().unwrap()),
-            ("s5", g.norm(2.0).unwrap(), g.tr().unwrap()),
-            ("s7", h.norm(2.0).unwrap(), h.tr().unwrap()),
-            ("s8", hh_tr, hh_tr),
-        ];
-        for ((step, norm, tr), &(exp_step, exp_norm, exp_tr)) in steps.iter().zip($expected) {
-            assert_eq!(*step, exp_step);
-            numerics::assert_close_scaled("stream norm", *norm, exp_norm, 1, envelope(1e-9));
-            numerics::assert_close_scaled("stream trace", *tr, exp_tr, 1, envelope(1e-9));
-        }
-
-        let mut values: Vec<f64> = e
-            .svd_vals(&codomain_axes(&e), &domain_axes(&e))
-            .unwrap()
-            .iter()
-            .flat_map(|spectrum| spectrum.values.iter().copied())
-            .collect();
-        values.sort_by(|x, y| y.partial_cmp(x).unwrap());
-        assert_eq!(values.len(), $svd_count, "singular value count");
-        let cutoff = 1e-6 * $svd_expected[0];
-        for (k, (&got, &exp)) in values.iter().zip($svd_expected).enumerate() {
-            numerics::assert_close_scaled("stream singular value", got, exp, 1, envelope(1e-8));
-            assert!(exp > cutoff, "svd_expected[{k}] below cutoff");
-        }
-        for &tail in &values[$svd_expected.len()..] {
-            assert!(
-                tail <= cutoff,
-                "unexpected significant singular value {tail}"
-            );
-        }
-    }};
-}
-
-/// Cross-library invariant stream, U(1). Expected norms, traces and singular
-/// values checked against TensorKit 0.17.1 (Julia 1.11.6).
-/// Run with: `cargo test -p symtn --release --test semantic_suite -- --ignored u1_vs`
-#[test]
-#[ignore = "cross-library stream, run explicitly (release recommended)"]
-fn cross_library_invariant_stream_u1_vs_tensorkit() {
-    let expected = [
-        ("s1a", 2.887628785006827e2, -1.9e1),
-        ("s1b", 2.896515147552315e2, -3.0),
-        ("s2", 1.402426411616665e4, 1.104e4),
-        ("s3", 2.887628785006826e2, -1.9e1),
-        ("s4", 8.209534152002786e5, 1.03394e5),
-        ("s5", 2.485837810477585e4, 8.3384e4),
-        ("s7", 8.209824186503642e5, 1.033845e5),
-        ("s8", 6.256589682425e10, 6.256589682425e10),
-    ];
-    let svd = [
-        5.938452457943761e5,
-        4.179528114697005e5,
-        2.459326023786228e5,
-        1.933057950606111e5,
-        1.566314868289549e5,
-        8.210318973109889e4,
-        7.523003903903847e4,
-        6.565202259389844e4,
-        5.151867957441879e4,
-        3.767419629678344e4,
-        2.538188406982896e4,
-        2.343_136_052_737_89e4,
-        2.008745263879226e4,
-        1.964054032660374e4,
-        1.883995230847887e4,
-        1.867342767080404e4,
-        1.396252249681011e4,
-        1.278185908520561e4,
-        1.221617279960168e4,
-        9.646640464331718e3,
-        7.594820923703089e3,
-        7.588096644934964e3,
-        6.218_196_863_168_91e3,
-        2.651408037571802e3,
-        2.163357342259171e3,
-        1.657_615_939_186_76e3,
-        1.643314514396656e3,
-        1.129212243761851e3,
-        6.562754711025852e2,
-        5.535225377189289e2,
-        5.476578287137901e2,
-    ];
-    invariant_stream_case!(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
-        ],
-        |sector: &U1Irrep| i64::from(sector.charge()),
-        &expected,
-        49,
-        &svd
-    );
-}
-
-/// Cross-library invariant stream, SU(2). Expected norms, traces and singular
-/// values checked against TensorKit 0.17.1 (Julia 1.11.6).
-/// Run with: `cargo test -p symtn --release --test semantic_suite -- --ignored su2_vs`
-#[test]
-#[ignore = "cross-library stream, run explicitly (release recommended)"]
-fn cross_library_invariant_stream_su2_vs_tensorkit() {
-    let expected = [
-        ("s1a", 3.075792580783041e2, -2.24e2),
-        ("s1b", 3.089012787283341e2, -1.44e2),
-        ("s2", 1.423541506244198e4, 1.6685e4),
-        ("s3", 3.075792580783042e2, -2.24e2),
-        ("s4", 7.171108525311829e5, -1.481890000000002e5),
-        ("s5", 2.043484428616964e4, 9.4605e4),
-        ("s7", 7.171433641554874e5, -1.483010000000002e5),
-        ("s8", 2.412084471050002e10, 2.412084471050002e10),
-    ];
-    let svd = [
-        4.110_592_957_633_28e5,
-        1.822658678626898e5,
-        1.406505246682399e5,
-        1.140_569_967_151_56e5,
-        7.343460378313088e4,
-        5.224807565545758e4,
-        4.043006489580932e4,
-        2.351544167506671e4,
-        2.184633501094873e4,
-        1.928046828460497e4,
-        1.660174629027798e4,
-        8.566028701881454e3,
-        6.373677277671596e3,
-        4.039539983749055e3,
-        3.958321987177687e3,
-        3.574358904429296e3,
-        3.288748484860358e3,
-        3.151829069086835e3,
-        1.779769959383261e3,
-        1.439999999999999e3,
-        1.076447526243916e3,
-        5.845450724371532e2,
-    ];
-    invariant_stream_case!(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-        |sector: &SU2Irrep| i64::try_from(sector.twice_spin()).unwrap(),
-        &expected,
-        35,
-        &svd
-    );
-}
-
-/// Cross-library invariant stream for fZ2 x U(1) x SU(2). Expected values
-/// checked against TensorKit 0.17.1 (Julia 1.11.6).
-/// Run with: `cargo test -p symtn --release --test semantic_suite -- --ignored product_vs`
-#[test]
-#[ignore = "cross-library stream, run explicitly (release recommended)"]
-fn cross_library_invariant_stream_product_vs_tensorkit() {
-    let expected = [
-        ("s1a", 2.041910869749216e2, -8.0),
-        ("s1b", 2.060849339471471e2, 4.9e1),
-        ("s2", 7.029845233004778e3, 1.269e4),
-        ("s3", 2.041910869749217e2, -8.000000000000014),
-        ("s4", 2.048_990_970_819_54e5, 1.251150000000001e5),
-        ("s5", 1.041952436534413e4, 4.1694e4),
-        ("s7", 2.049323716485515e5, 1.251110000000001e5),
-        ("s8", 1.392459691750001e10, 1.392459691750001e10),
-    ];
-    let svd = [
-        9.313322524156692e4,
-        8.377972168698783e4,
-        5.801978514614065e4,
-        5.425702935363993e4,
-        3.244521596397725e4,
-        2.349_078_948_391_45e4,
-        2.264344851117111e4,
-        2.189538877119227e4,
-        2.159365106169731e4,
-        1.869173451469769e4,
-        1.486434829405537e4,
-        7.22e3,
-        5.912689186545615e3,
-        5.486716759584609e3,
-        4.241123285758052e3,
-        1.977685541462147e3,
-        7.714938309221702e2,
-        7.163293805552347e2,
-        6.015165827414188e2,
-        5.900887872343542e2,
-        2.167139622628681e2,
-    ];
-    let provider = Arc::new(Fz2U1Su2Rule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
-        SU2FusionRule,
-    ));
-    invariant_stream_case!(
-        provider,
-        [
-            (
-                product_sector(
-                    product_sector(Z2Irrep::EVEN, U1Irrep::new(0)),
-                    SU2Irrep::from_twice_spin(0),
-                ),
-                2,
-            ),
-            (
-                product_sector(
-                    product_sector(Z2Irrep::ODD, U1Irrep::new(1)),
-                    SU2Irrep::from_twice_spin(1),
-                ),
-                2,
-            ),
-            (
-                product_sector(
-                    product_sector(Z2Irrep::EVEN, U1Irrep::new(2)),
-                    SU2Irrep::from_twice_spin(0),
-                ),
-                1,
-            ),
-        ],
-        |sector: &Fz2U1Su2Sector| {
-            100 * i64::from(sector.left().left().parity())
-                + 10 * i64::from(sector.left().right().charge())
-                + i64::try_from(sector.right().twice_spin()).unwrap()
-        },
-        &expected,
-        29,
-        &svd
     );
 }

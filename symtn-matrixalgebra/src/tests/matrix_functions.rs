@@ -1112,27 +1112,9 @@ fn pinv_adjoint_parent_discards_unpublished_output_on_recomposition_failure() {
 // ============================================================================
 // Issue #577: general (non-Hermitian) matrix exponential.
 //
-// Oracle provenance. Every `*_matches_the_tensorkit_oracle` constant below is
-// TensorKit output for the same tensor, from
-// `~/.julia/packages/TensorKit/6Camk` (0.16.2) on Julia 1.11.6:
-//
-// ```julia
-// V = U1Space(0=>3, 1=>2)
-// t = zeros(T, V <- V)
-// for (c, b) in blocks(t), j in axes(b,2), i in axes(b,1)
-//     re = 0.5 + 0.25*(i-1) - 0.75*(j-1) + 0.125*convert(Int, c.charge)
-//     b[i,j] = (T <: Complex) ? complex(re, 0.125*(i-1) + 0.375*(j-1) - 0.25) : re
-// end
-// b .*= scale
-// exp(t)
-// ```
-//
-// The pinned 0.17.0 tree (`~/.julia/packages/TensorKit/jCjQQ`) was not the
-// resolved version, which does not weaken the oracle: `exp!`
-// (`src/tensors/linalg.jl:420-428`) is character-identical in the two trees and
-// contains no arithmetic — it checks `domain == codomain` and hands every block
-// to `LinearAlgebra.exp!`, so the numbers are Julia stdlib v1.11's, not
-// TensorKit's, in either tree.
+// Oracle. `series_exp` evaluates the defining series and shares nothing with
+// the Padé implementation; `exp_of_the_oracle_tensor_matches_tensorkit_anchors`
+// keeps two TensorKit blocks of the same fixture as convention anchors.
 //
 // Fixture certification: the fill is a closed formula in the coupled charge and
 // the two degeneracy indices, and `u1_block_endomorphism` places one fusion
@@ -1142,7 +1124,8 @@ fn pinv_adjoint_parent_discards_unpublished_output_on_recomposition_failure() {
 // is taken.
 // ============================================================================
 
-/// Relative Frobenius agreement with the TensorKit oracle, per the #577 design.
+/// Relative Frobenius agreement with the series oracle and the anchors, per the
+/// #577 design.
 const EXP_ORACLE_RTOL: f64 = 1e-12;
 
 /// Residual of `exp(A) exp(-A) - 1`, per the #577 design.
@@ -1300,141 +1283,133 @@ fn exp_of_a_real_skew_symmetric_block_is_the_analytic_rotation() {
     }
 }
 
-#[test]
-// Verbatim `%.17g` TensorKit output. Trimming the literals to the shortest
-// round-tripping form would obscure that provenance for no gain.
-#[allow(clippy::excessive_precision)]
-fn exp_of_a_multisector_u1_endomorphism_matches_the_tensorkit_oracle() {
-    // What: two coupled sectors of different order, at a scale below and above
-    // theta_13, against frozen TensorKit values.
-    for (scale, charge_zero, charge_one) in [
-        (
-            1.0,
-            &[
-                [
-                    (0.9849644284568706, 0.0),
-                    (-0.37626016105405391, 0.0),
-                    (-0.73748475056497831, 0.0),
-                ],
-                [
-                    (0.44650857769439511, 0.0),
-                    (0.82943202363305835, 0.0),
-                    (-0.78764453042827864, 0.0),
-                ],
-                [
-                    (0.90805272693191974, 0.0),
-                    (0.035124208320170609, 0.0),
-                    (0.16219568970842124, 0.0),
-                ],
-            ],
-            &[
-                [(1.7819357803578582, 0.0), (-0.18045636327066489, 0.0)],
-                [(1.2631945428946545, 0.0), (1.0601103272751986, 0.0)],
-            ],
-        ),
-        (
-            4.0,
-            &[
-                [
-                    (-0.6308945936141368, 0.0),
-                    (-0.27404909616219597, 0.0),
-                    (1.0827964012897446, 0.0),
-                ],
-                [
-                    (-1.1147351879032152, 0.0),
-                    (0.51577938090254927, 0.0),
-                    (0.14629394970831344, 0.0),
-                ],
-                [
-                    (-0.59857578219229368, 0.0),
-                    (-0.69439214203270549, 0.0),
-                    (0.20979149812688241, 0.0),
-                ],
-            ],
-            &[
-                [(6.8456187388272456, 0.0), (-1.9710572969428048, 0.0)],
-                [(13.797401078599625, 0.0), (-1.0386104489439727, 0.0)],
-            ],
-        ),
-    ] {
-        let tensor = exp_oracle_tensor::<f64>(scale);
-        let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-        let exponential = exp(
-            &mut dense,
-            &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
-        )
-        .unwrap();
-
-        assert_sector_matrix_matches(
-            &u1_block_matrix(exponential.tensor(), 0),
-            &charge_zero.iter().map(|row| &row[..]).collect::<Vec<_>>(),
-            EXP_ORACLE_RTOL,
-            &format!("f64 scale {scale} charge 0"),
-        );
-        assert_sector_matrix_matches(
-            &u1_block_matrix(exponential.tensor(), 1),
-            &charge_one.iter().map(|row| &row[..]).collect::<Vec<_>>(),
-            EXP_ORACLE_RTOL,
-            &format!("f64 scale {scale} charge 1"),
-        );
+/// `exp(A) = (Σ_{k≤30} (A/8)^k / k!)^8` in complex arithmetic.
+///
+/// The defining series at `||A/8||_1 ≤ 9/8`, where 30 terms are exact to the
+/// last bit, followed by three squarings. It shares no Padé table, no
+/// balancing, no `theta` dispatch and no dense solve with the implementation.
+fn series_exp(matrix: &[Complex64], order: usize) -> Vec<Complex64> {
+    let product = |left: &[Complex64], right: &[Complex64]| {
+        let mut out = vec![Complex64::zero(); order * order];
+        for column in 0..order {
+            for row in 0..order {
+                out[row + order * column] = (0..order)
+                    .map(|inner| left[row + order * inner] * right[inner + order * column])
+                    .sum();
+            }
+        }
+        out
+    };
+    let eighth: Vec<Complex64> = matrix.iter().map(|&entry| entry / 8.0).collect();
+    let mut term = vec![Complex64::zero(); order * order];
+    for index in 0..order {
+        term[index + order * index] = Complex64::new(1.0, 0.0);
     }
+    let mut result = term.clone();
+    for step in 1..=30 {
+        term = product(&term, &eighth)
+            .into_iter()
+            .map(|entry| entry / step as f64)
+            .collect();
+        for (accumulated, &value) in result.iter_mut().zip(&term) {
+            *accumulated += value;
+        }
+    }
+    for _ in 0..3 {
+        result = product(&result, &result);
+    }
+    result
 }
 
-#[test]
-// Verbatim `%.17g` TensorKit output. Trimming the literals to the shortest
-// round-tripping form would obscure that provenance for no gain.
-#[allow(clippy::excessive_precision)]
-fn exp_of_a_complex_nonnormal_u1_endomorphism_matches_the_tensorkit_oracle() {
-    // What: c64, nonnormal and non-Hermitian in both the real and imaginary
-    // parts — the arm where a real-arithmetic slip in the approximant shows up.
-    let tensor = exp_oracle_tensor::<Complex64>(1.0);
+/// Asserts `exp` of both coupled sectors of `exp_oracle_tensor::<D>(scale)`
+/// against [`series_exp`] of the blocks symtn stores.
+fn assert_exp_oracle_tensor_matches_the_series<D: FactorScalar>(scale: f64, what: &str) {
+    let tensor = exp_oracle_tensor::<D>(scale);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
     let exponential = exp(
         &mut dense,
         &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
     )
     .unwrap();
+    for (charge, order) in [(0, 3usize), (1, 2usize)] {
+        let input: Vec<Complex64> = u1_block_matrix(&tensor, charge)
+            .into_iter()
+            .map(FactorScalar::widen_complex)
+            .collect();
+        let expected = series_exp(&input, order);
+        let rows: Vec<Vec<(f64, f64)>> = (0..order)
+            .map(|row| {
+                (0..order)
+                    .map(|column| {
+                        let entry = expected[row + order * column];
+                        (entry.re, entry.im)
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_sector_matrix_matches(
+            &u1_block_matrix(exponential.tensor(), charge),
+            &rows.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+            EXP_ORACLE_RTOL,
+            &format!("{what} scale {scale} charge {charge}"),
+        );
+    }
+}
 
-    let charge_zero = [
-        [
-            (0.92690089541443432, -0.1610299101898417),
-            (-0.41081187668012081, -0.030497613725301645),
-            (-0.74852464877467562, 0.10003468273923843),
-        ],
-        [
-            (0.36740563761195039, 0.071261345504936915),
-            (0.73145191286879296, 0.12778526275599536),
-            (-0.9045018118743644, 0.18430918000705374),
-        ],
-        [
-            (0.80791037980946623, 0.30355260119971544),
-            (-0.12628429758229334, 0.28606813923729235),
-            (-0.060478974974053017, 0.26858367727486893),
-        ],
-    ];
-    let charge_one = [
-        [
-            (1.7454107392461176, -0.35809087573900988),
-            (-0.17904543786950494, 0.179045437869505),
-        ],
-        [
-            (1.2533180650865348, -0.17904543786950497),
-            (1.0292289877680976, 0.35809087573900988),
-        ],
-    ];
+#[test]
+fn exp_of_a_multisector_u1_endomorphism_matches_the_series() {
+    // What: two coupled sectors of different order, f64 and nonnormal,
+    // non-Hermitian c64, at a scale below theta_13 (1) and above it (4, where
+    // the scaling-and-squaring phase runs), against the defining series.
+    for scale in [1.0, 4.0] {
+        assert_exp_oracle_tensor_matches_the_series::<f64>(scale, "f64");
+        assert_exp_oracle_tensor_matches_the_series::<Complex64>(scale, "c64");
+    }
+}
+
+#[test]
+// Verbatim `%.17g` TensorKit output.
+#[allow(clippy::excessive_precision)]
+fn exp_of_the_oracle_tensor_matches_tensorkit_anchors() {
+    // What: the convention anchor for the series oracle above — the charge-1
+    // blocks as printed by TensorKit 0.16.2 (`exp!` hands every block to Julia
+    // 1.11.6 `LinearAlgebra.exp!`) for the fill of `exp_oracle_block`.
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+    let real = exp_oracle_tensor::<f64>(4.0);
+    let real = exp(
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &real),
+    )
+    .unwrap();
     assert_sector_matrix_matches(
-        &u1_block_matrix(exponential.tensor(), 0),
-        &charge_zero.iter().map(|row| &row[..]).collect::<Vec<_>>(),
+        &u1_block_matrix(real.tensor(), 1),
+        &[
+            &[(6.8456187388272456, 0.0), (-1.9710572969428048, 0.0)],
+            &[(13.797401078599625, 0.0), (-1.0386104489439727, 0.0)],
+        ],
         EXP_ORACLE_RTOL,
-        "c64 charge 0",
+        "f64 scale 4 charge 1",
     );
+    let complex = exp_oracle_tensor::<Complex64>(1.0);
+    let complex = exp(
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &complex),
+    )
+    .unwrap();
     assert_sector_matrix_matches(
-        &u1_block_matrix(exponential.tensor(), 1),
-        &charge_one.iter().map(|row| &row[..]).collect::<Vec<_>>(),
+        &u1_block_matrix(complex.tensor(), 1),
+        &[
+            &[
+                (1.7454107392461176, -0.35809087573900988),
+                (-0.17904543786950494, 0.179045437869505),
+            ],
+            &[
+                (1.2533180650865348, -0.17904543786950497),
+                (1.0292289877680976, 0.35809087573900988),
+            ],
+        ],
         EXP_ORACLE_RTOL,
-        "c64 charge 1",
+        "c64 scale 1 charge 1",
     );
 }
 
@@ -1978,8 +1953,6 @@ fn exp_balances_a_badly_scaled_block_before_the_pade_evaluation() {
 }
 
 #[test]
-// `%.17g` of a 400-bit BigFloat oracle; see the comment below.
-#[allow(clippy::excessive_precision)]
 fn exp_undoes_the_balancing_permutation_and_scaling_like_julia() {
     // What: the *undo* half of balancing, on a block that exercises both halves
     // of `gebal('B')` at once — a column that isolates an eigenvalue, so the
@@ -2006,7 +1979,7 @@ fn exp_undoes_the_balancing_permutation_and_scaling_like_julia() {
     // entry, and `exp(B)` is available in closed form — its `{1,3}` corner is
     // `[cosh 1, sinh 1; sinh 1, cosh 1]`, its `(2,2)` entry `e^3`, and the two
     // remaining entries are the integrals `e^3 (7 (1 - e^-2) -/+ 1.5 (1 - e^-4)) / 4`.
-    // The constants below are that oracle to 17 digits, cross-checked against a
+    // `expected` below is that closed form, cross-checked to 17 digits against a
     // 400-bit BigFloat scaling-and-squaring Taylor evaluation of `exp(B)` in
     // Julia. Recording a `Float64` `exp(A)` instead is what broke CI: the
     // fixture's own conditioning makes the answer platform-dependent in the
@@ -2044,15 +2017,19 @@ fn exp_undoes_the_balancing_permutation_and_scaling_like_julia() {
     )
     .unwrap();
 
-    let expected = [
-        [1.5430806348152437_f64, 0.0, 1.1752011936438014e16],
-        [
-            2.2998574860019004e-07,
-            20.085536923187668,
-            3778681797.1531172,
-        ],
-        [1.1752011936438015e-16, 0.0, 1.5430806348152437],
+    let (cosh, sinh, e3) = (1.0_f64.cosh(), 1.0_f64.sinh(), 3.0_f64.exp());
+    let (even, odd) = (
+        7.0 * (1.0 - (-2.0_f64).exp()),
+        1.5 * (1.0 - (-4.0_f64).exp()),
+    );
+    let exp_b = [
+        [cosh, 0.0, sinh],
+        [e3 * (even - odd) / 4.0, e3, e3 * (even + odd) / 4.0],
+        [sinh, 0.0, cosh],
     ];
+    let expected: [[f64; 3]; 3] = std::array::from_fn(|row| {
+        std::array::from_fn(|column| exp_b[row][column] * diagonal[row] / diagonal[column])
+    });
     let actual = u1_block_matrix(exponential.tensor(), 0);
     for (row, entries) in expected.iter().enumerate() {
         for (column, &want) in entries.iter().enumerate() {

@@ -23,20 +23,14 @@
 //! unscaled `Σ x²` and `Source/QSpace.cc:QSpace<TQ,TD>::norm2` (`:2258`) sums
 //! it over blocks, so QSpace has no overflow-safe path to compare against.
 //!
-//! # Oracle provenance
+//! # Oracle
 //!
-//! Constants were printed by TensorKit main `f87ca7f` (version 0.17.1) on
-//! Julia 1.11.6 from tensors filled block by
-//! block with the fills of `tk_norm_p.rs`, multiplied by the named scale:
-//!
-//! ```julia
-//! t = zeros(T, V ← W); for (c, b) in blocks(t), j in axes(b, 2), i in axes(b, 1)
-//!     b[i, j] = s * fill(i, j)
-//! end
-//! [norm(t, p) for p in (1, 2, 3, Inf)]
-//! ```
-//!
-//! Rows are indexed `[p = 1, 2, 3, Inf]`.
+//! The fills are dyadic, so every expected norm is the exact formula
+//! `‖t‖_p = (Σ_c dim(c) Σ_ij |x_ij|^p)^(1/p)` (and `max |x_ij|` at `p = Inf`)
+//! evaluated in the test by [`expected`]. TensorKit main `f87ca7f` (0.17.1) on
+//! Julia 1.11.6 prints the unit-scale rows kept in
+//! `formula_and_symtn_reproduce_tensorkit_at_unit_scale`, which anchor the
+//! formula's conventions (quantum-dimension weight, complex modulus).
 
 use std::sync::Arc;
 
@@ -171,189 +165,185 @@ fn scaled(scale: f64, row: [f64; 4]) -> [f64; 4] {
     row.map(|value| scale * value)
 }
 
+/// Coupled sectors of `V ← W` as `(dim(c), rows, columns)`, in block order.
+type Blocks = [(f64, usize, usize)];
+
+const U1: [(f64, usize, usize); 3] = [(1.0, 2, 5), (1.0, 3, 1), (1.0, 4, 2)];
+const U1_BIG: [(f64, usize, usize); 3] = [(1.0, 6, 5), (1.0, 5, 3), (1.0, 4, 2)];
+const FZ2: [(f64, usize, usize); 2] = [(1.0, 2, 5), (1.0, 3, 1)];
+const SU2: [(f64, usize, usize); 3] = [(1.0, 2, 5), (2.0, 3, 1), (3.0, 4, 2)];
+
+fn real_abs(indices: &[usize]) -> f64 {
+    real_fill(indices).abs()
+}
+
+fn complex_abs(indices: &[usize]) -> f64 {
+    complex_fill(indices).norm()
+}
+
+/// `[‖t‖_1, ‖t‖_2, ‖t‖_3, ‖t‖_Inf]` of the tensor whose block `b` holds
+/// `scale(b) * fill(i, j)`, by the defining formula. The largest scale is
+/// factored out first, so the formula neither overflows nor flushes to zero.
+fn expected(
+    blocks: &Blocks,
+    scale: impl Fn(usize) -> f64,
+    abs_fill: fn(&[usize]) -> f64,
+) -> [f64; 4] {
+    let entries: Vec<(f64, f64, f64)> = blocks
+        .iter()
+        .enumerate()
+        .flat_map(|(block, &(dim, rows, columns))| {
+            let scale = &scale;
+            (0..rows).flat_map(move |i| {
+                (0..columns).map(move |j| (dim, scale(block), abs_fill(&[i, j])))
+            })
+        })
+        .collect();
+    let top = entries.iter().map(|&(_, s, _)| s).fold(0.0, f64::max);
+    let power = |p: f64| {
+        let sum: f64 = entries
+            .iter()
+            .map(|&(dim, s, value)| dim * (s / top * value).powf(p))
+            .sum();
+        top * sum.powf(1.0 / p)
+    };
+    let max = entries
+        .iter()
+        .map(|&(_, s, value)| s * value)
+        .fold(0.0, f64::max);
+    [power(1.0), power(2.0), power(3.0), max]
+}
+
 #[test]
-fn unique_fusion_norms_match_tensorkit_at_1e200_and_1e_minus_200() {
-    let cases: [(&str, f64, [f64; 4], [f64; 4]); 2] = [
-        (
-            "1e200",
-            1e200,
-            [
-                2.5e201,
-                6.204836822995429e200,
-                4.0804042115227644e200,
-                2.4999999999999998e200,
-            ],
-            [
-                3.608814448804254e201,
-                8.145167278822456e200,
-                5.060139147568353e200,
-                2.6487025125521362e200,
-            ],
-        ),
-        (
-            "1e-200",
-            1e-200,
-            [
-                2.5000000000000002e-199,
-                6.204836822995428e-200,
-                4.0804042115227645e-200,
-                2.5e-200,
-            ],
-            [
-                3.6088144488042534e-199,
-                8.145167278822455e-200,
-                5.060139147568353e-200,
-                2.648702512552136e-200,
-            ],
-        ),
+#[allow(clippy::excessive_precision)]
+fn formula_and_symtn_reproduce_tensorkit_at_unit_scale() {
+    // TensorKit f87ca7f `[norm(t, p) for p in (1, 2, 3, Inf)]`.
+    let u1_big_f64 = [91.75, 13.975424859373685, 7.749999999999999, 3.5];
+    let su2_f64 = [55.5, 9.656603957913982, 5.588779616741119, 2.5];
+    let fz2_c64 = [
+        21.152860776507886,
+        6.002603601771485,
+        3.9970711168729895,
+        2.1830311495716224,
     ];
-    for (label, s, real, complex) in cases {
+    assert_rows::<f64>(
+        "formula u1big",
+        expected(&U1_BIG, |_| 1.0, real_abs),
+        u1_big_f64,
+        53,
+    );
+    assert_rows::<f64>(
+        "formula su2",
+        expected(&SU2, |_| 1.0, real_abs),
+        su2_f64,
+        21,
+    );
+    assert_rows::<f64>(
+        "formula fz2",
+        expected(&FZ2, |_| 1.0, complex_abs),
+        fz2_c64,
+        13,
+    );
+
+    assert_rows::<f64>(
+        "u1big",
+        norms!(tensor!(u1_big(), f64, |_, i| real_fill(i))),
+        u1_big_f64,
+        53,
+    );
+    assert_rows::<f64>(
+        "su2",
+        norms!(tensor!(su2(), f64, |_, i| real_fill(i))),
+        su2_f64,
+        21,
+    );
+    assert_rows::<Complex64>(
+        "fz2",
+        norms!(tensor!(fz2(), Complex64, |_, i| complex_fill(i))),
+        fz2_c64,
+        13,
+    );
+}
+
+#[test]
+fn unique_fusion_norms_rescale_at_1e200_and_1e_minus_200() {
+    // TensorKit agrees here: Julia's `generic_norm2` (U1, 21 entries) and
+    // OpenBLAS `nrm2` (U1_BIG, 53 entries, past NRM2_CUTOFF) both rescale.
+    for s in [1e200, 1e-200] {
         let f = tensor!(u1(), f64, |_, i| s * real_fill(i));
-        assert_rows::<f64>(&format!("u1 f64 x{label}"), norms!(f), real, 21);
+        assert_rows::<f64>(
+            &format!("u1 f64 x{s:e}"),
+            norms!(f),
+            expected(&U1, |_| s, real_abs),
+            21,
+        );
         let c = tensor!(u1(), Complex64, |_, i| complex_fill(i) * s);
-        assert_rows::<Complex64>(&format!("u1 c64 x{label}"), norms!(c), complex, 21);
-    }
-
-    // Past NRM2_CUTOFF: TensorKit's value comes from OpenBLAS `dnrm2`/`dznrm2`.
-    let big: [(f64, [f64; 4], [f64; 4]); 3] = [
-        (
-            1.0,
-            [91.75, 13.975424859373685, 7.749999999999999, 3.5],
-            [
-                121.05382556737885,
-                17.486602014113547,
-                9.417334153387264,
-                3.6763602924631855,
-            ],
-        ),
-        (
-            1e200,
-            [
-                9.174999999999999e201,
-                1.3975424859373685e201,
-                7.750000000000001e200,
-                3.5e200,
-            ],
-            [
-                1.2105382556737885e202,
-                1.7486602014113548e201,
-                9.417334153387263e200,
-                3.6763602924631856e200,
-            ],
-        ),
-        (
-            1e-200,
-            [
-                9.175e-199,
-                1.3975424859373686e-199,
-                7.749999999999999e-200,
-                3.4999999999999996e-200,
-            ],
-            [
-                1.2105382556737892e-198,
-                1.7486602014113548e-199,
-                9.417334153387264e-200,
-                3.676360292463185e-200,
-            ],
-        ),
-    ];
-    for (s, real, complex) in big {
+        assert_rows::<Complex64>(
+            &format!("u1 c64 x{s:e}"),
+            norms!(c),
+            expected(&U1, |_| s, complex_abs),
+            21,
+        );
         let f = tensor!(u1_big(), f64, |_, i| s * real_fill(i));
-        assert_rows::<f64>(&format!("u1big f64 x{s:e}"), norms!(f), real, 53);
+        assert_rows::<f64>(
+            &format!("u1big f64 x{s:e}"),
+            norms!(f),
+            expected(&U1_BIG, |_| s, real_abs),
+            53,
+        );
         let c = tensor!(u1_big(), Complex64, |_, i| complex_fill(i) * s);
-        assert_rows::<Complex64>(&format!("u1big c64 x{s:e}"), norms!(c), complex, 53);
+        assert_rows::<Complex64>(
+            &format!("u1big c64 x{s:e}"),
+            norms!(c),
+            expected(&U1_BIG, |_| s, complex_abs),
+            53,
+        );
     }
 }
 
 #[test]
-fn fermionic_norms_match_tensorkit_across_the_range() {
-    let rows: [(f64, [f64; 4], [f64; 4]); 3] = [
-        (
-            1.0,
-            [12.0, 3.840572873934304, 2.75068853282797, 2.0],
-            [
-                21.152860776507886,
-                6.002603601771485,
-                3.9970711168729895,
-                2.1830311495716224,
-            ],
-        ),
-        (
-            1e200,
-            [
-                1.1999999999999998e201,
-                3.840572873934304e200,
-                2.7506885328279704e200,
-                2.0e200,
-            ],
-            [
-                2.115286077650789e201,
-                6.002603601771484e200,
-                3.9970711168729895e200,
-                2.1830311495716225e200,
-            ],
-        ),
-        (
-            1e-200,
-            [
-                1.2000000000000002e-199,
-                3.840572873934304e-200,
-                2.7506885328279704e-200,
-                2.0e-200,
-            ],
-            [
-                2.1152860776507893e-199,
-                6.002603601771484e-200,
-                3.99707111687299e-200,
-                2.1830311495716225e-200,
-            ],
-        ),
-    ];
-    for (s, real, complex) in rows {
+fn fermionic_norms_rescale_across_the_range() {
+    for s in [1e200, 1e-200] {
         let f = tensor!(fz2(), f64, |_, i| s * real_fill(i));
-        assert_rows::<f64>(&format!("fz2 f64 x{s:e}"), norms!(f), real, 13);
+        assert_rows::<f64>(
+            &format!("fz2 f64 x{s:e}"),
+            norms!(f),
+            expected(&FZ2, |_| s, real_abs),
+            13,
+        );
         let c = tensor!(fz2(), Complex64, |_, i| complex_fill(i) * s);
-        assert_rows::<Complex64>(&format!("fz2 c64 x{s:e}"), norms!(c), complex, 13);
+        assert_rows::<Complex64>(
+            &format!("fz2 c64 x{s:e}"),
+            norms!(c),
+            expected(&FZ2, |_| s, complex_abs),
+            13,
+        );
     }
 }
-
-/// TensorKit's in-range SU(2) rows (`tk_norm_p.rs`), the base of the hand
-/// oracle `norm(s * t) = s * norm(t)`.
-const SU2_F64: [f64; 4] = [55.5, 9.656603957913982, 5.588779616741119, 2.5];
-const SU2_C64: [f64; 4] = [
-    70.83774683619109,
-    11.637090486887175,
-    6.51405041399105,
-    2.6487025125521364,
-];
 
 #[test]
 fn weighted_su2_norms_stay_representable_where_tensorkit_does_not() {
     // TensorKit f87ca7f prints, for p = (1, 2, 3, Inf):
     //   x1e200:  [5.55e201, Inf, Inf, 2.4999999999999998e200] (c64 alike)
     //   x1e-200: [5.550000000000001e-199, 0.0, 0.0, 2.5e-200]
-    // Its p = 1 and Inf entries agree with the hand oracle below; p = 2 and 3
-    // are its unscaled `dim(c) * norm(b)^p` overflowing or flushing.
+    // Its p = 1 and Inf entries agree with the formula; p = 2 and 3 are its
+    // unscaled `dim(c) * norm(b)^p` overflowing or flushing.
     for s in [1e200, 1e-200] {
         let f = tensor!(su2(), f64, |_, i| s * real_fill(i));
-        assert_rows::<f64>(
-            &format!("su2 f64 x{s:e}"),
-            norms!(f),
-            scaled(s, SU2_F64),
-            21,
-        );
+        let want = expected(&SU2, |_| s, real_abs);
+        assert_rows::<f64>(&format!("su2 f64 x{s:e}"), norms!(f), want, 21);
         let c = tensor!(su2(), Complex64, |_, i| complex_fill(i) * s);
         assert_rows::<Complex64>(
             &format!("su2 c64 x{s:e}"),
             norms!(c),
-            scaled(s, SU2_C64),
+            expected(&SU2, |_| s, complex_abs),
             21,
         );
         // A lazy adjoint reads its parent's payload.
         assert_rows::<f64>(
             &format!("lazy su2 f64 x{s:e}"),
             norms!(f.adjoint().unwrap()),
-            scaled(s, SU2_F64),
+            want,
             21,
         );
     }
@@ -361,75 +351,52 @@ fn weighted_su2_norms_stay_representable_where_tensorkit_does_not() {
 
 #[test]
 fn single_precision_norms_near_the_f32_range_edges() {
-    // U(1): TensorKit's own values (Float32 results, 21 entries, generic_norm2
-    // accumulating in Float64).
-    let u1_rows: [(f32, [f64; 4], [f64; 4]); 2] = [
-        (
-            1e30,
-            [2.5e31, 6.204837e30, 4.0804042e30, 2.5e30],
-            [3.6088148e31, 8.1451673e30, 5.060139e30, 2.6487024e30],
-        ),
-        (
-            1e-30,
-            [2.4999999e-29, 6.204837e-30, 4.0804042e-30, 2.5e-30],
-            [3.6088148e-29, 8.145167e-30, 5.060139e-30, 2.6487025e-30],
-        ),
-    ];
-    for (s, real, complex) in u1_rows {
+    // SU(2): TensorKit adds `dim(c) * norm(b)^2` in Float32 and prints
+    // [5.55f31, Inf, Inf, 2.5f30] at 1e30 and [5.55f-29, 0, 0, 2.5f-30] at
+    // 1e-30; symtn accumulates in f64, so the formula applies.
+    for s in [1e30_f32, 1e-30] {
+        let wide = f64::from(s);
         let f = tensor!(u1(), f32, |_, i| s * real_fill(i) as f32);
-        assert_rows::<f32>(&format!("u1 f32 x{s:e}"), norms!(f), real, 21);
+        assert_rows::<f32>(
+            &format!("u1 f32 x{s:e}"),
+            norms!(f),
+            expected(&U1, |_| wide, real_abs),
+            21,
+        );
         let c = tensor!(u1(), Complex32, |_, i| {
             let z = complex_fill(i);
             Complex32::new(z.re as f32, z.im as f32) * s
         });
-        assert_rows::<Complex32>(&format!("u1 c32 x{s:e}"), norms!(c), complex, 21);
-    }
-
-    // SU(2): TensorKit adds `dim(c) * norm(b)^2` in Float32 and prints
-    // [5.55f31, Inf, Inf, 2.5f30] at 1e30 and [5.55f-29, 0, 0, 2.5f-30] at
-    // 1e-30; symtn accumulates in f64, so the hand oracle applies.
-    for s in [1e30_f32, 1e-30] {
+        assert_rows::<Complex32>(
+            &format!("u1 c32 x{s:e}"),
+            norms!(c),
+            expected(&U1, |_| wide, complex_abs),
+            21,
+        );
         let f = tensor!(su2(), f32, |_, i| s * real_fill(i) as f32);
         assert_rows::<f32>(
             &format!("su2 f32 x{s:e}"),
             norms!(f),
-            scaled(f64::from(s), SU2_F64),
+            expected(&SU2, |_| wide, real_abs),
             21,
         );
     }
 }
 
 #[test]
-fn mixed_magnitudes_match_tensorkit() {
+fn mixed_magnitudes_keep_the_dominant_block() {
+    // Only the charge +1 block (block 2) is scaled.
     let plus_one =
         |trees: &symtn::typed::BlockFusionTrees<U1Irrep>| *trees.coupled() == U1Irrep::new(1);
-    let huge = tensor!(u1(), f64, |trees, i| if plus_one(trees) {
-        1e200 * real_fill(i)
-    } else {
-        real_fill(i)
-    });
-    assert_rows::<f64>(
-        "u1 +1 block x1e200",
-        norms!(huge),
-        [
-            1.3e201,
-            4.8733971724044814e200,
-            3.6120225619516305e200,
-            2.4999999999999998e200,
-        ],
-        21,
-    );
-    let tiny = tensor!(u1(), f64, |trees, i| if plus_one(trees) {
-        1e-200 * real_fill(i)
-    } else {
-        real_fill(i)
-    });
-    assert_rows::<f64>(
-        "u1 +1 block x1e-200",
-        norms!(tiny),
-        [12.0, 3.840572873934304, 2.75068853282797, 2.0],
-        21,
-    );
+    for s in [1e200, 1e-200] {
+        let t = tensor!(u1(), f64, |trees, i| if plus_one(trees) {
+            s * real_fill(i)
+        } else {
+            real_fill(i)
+        });
+        let want = expected(&U1, |block| if block == 2 { s } else { 1.0 }, real_abs);
+        assert_rows::<f64>(&format!("u1 +1 block x{s:e}"), norms!(t), want, 21);
+    }
 }
 
 #[test]

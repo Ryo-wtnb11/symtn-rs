@@ -42,7 +42,7 @@
 //! else. Pinning `norm` of the *input* against Julia therefore proves symtn's
 //! fixture is the tensor Julia exponentiated, before any of #577's code runs.
 //! The entrywise oracle for the same fixture lives one layer down, in
-//! `symtn-matrixalgebra`'s `exp_of_a_multisector_u1_endomorphism_matches_the_tensorkit_oracle`.
+//! `symtn-matrixalgebra`'s `exp_of_a_multisector_u1_endomorphism_matches_the_series`.
 
 use std::sync::Arc;
 
