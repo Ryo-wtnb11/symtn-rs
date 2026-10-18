@@ -60,7 +60,7 @@
 //! };
 //! let mut ws = Workspace::with_capacity(&x0, 5)?;
 //! let (values, _, _) =
-//!     krylov::eigsolve(&mut op, &x0, 1, Which::LargestReal, &Lanczos::new().krylovdim(5), &mut ws)?;
+//!     krylov::eigsolve(&mut op, &x0, 1, Which::LargestReal, &Lanczos::new(5, 100, 1e-12), &mut ws)?;
 //! assert!((values[0] - 3.0).abs() < 1e-10);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
