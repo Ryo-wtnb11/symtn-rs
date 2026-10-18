@@ -23,8 +23,9 @@ const BOUND: f64 = 256.0 * f64::EPSILON;
 
 /// TensorKitSectors 0.3.9 `D3Irrep` (Rep(S₃), `src/irreps/dnirrep.jl`):
 /// the crossing-free transpose-then-compose matrix on `x ⊗ x ⊗ x ← x` in the
-/// channel order `(xx) → A₁, A₂, E`, i.e. `F^{xxx}_x` in TensorKit's real
-/// gauge (checked against TensorKit 0.17.1). Only the moduli `1/2`, `1/√2`,
+/// channel order `(xx) → A₁, A₂, E`; it equals TensorKit's `F^{xxx}_x` up to
+/// the sign of the `A₂` column (checked against TensorKit 0.17.1). Only the
+/// moduli `1/2`, `1/√2`,
 /// `0` and the cross ratio are vertex-gauge invariant, and only those are
 /// compared.
 fn tensorkit_rep_s3_f(row: usize, column: usize) -> Complex64 {
