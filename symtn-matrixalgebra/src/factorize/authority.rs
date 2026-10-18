@@ -220,7 +220,7 @@ impl sealed::Sealed for CheckedGenericAdmissionMode {}
 
 impl<R> FactorMode<R> for MultiplicityFreeAdmissionMode
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     type Error = OperationError;
     type RootError = OperationError;
@@ -630,7 +630,7 @@ pub(crate) fn multiplicity_free_output_space<R>(
     homspace: FusionTreeHomSpace,
 ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     MfAuthority(space).output_space(homspace)
 }
@@ -643,7 +643,7 @@ impl<R> sealed::Sealed for CheckedAuthority<'_, R> {}
 
 impl<R> FactorSpaceAuthority<R> for MfAuthority<'_, R>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     type Error = OperationError;
     type Staged = BoundDynamicFusionMapSpace<R>;

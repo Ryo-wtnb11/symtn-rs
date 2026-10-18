@@ -106,7 +106,7 @@ pub(crate) fn left_null<E, R, D>(
 ) -> Result<BoundTensorMap<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let out = left_null_dyn(dense, &input.dynamic())?;
@@ -121,7 +121,7 @@ pub(crate) fn left_null_dyn<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     null_dense(dense, &MfAuthority(input.space()), input, FactorSide::Left)
@@ -138,7 +138,7 @@ pub(crate) fn right_null<E, R, D>(
 ) -> Result<BoundTensorMap<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let out = right_null_dyn(dense, &input.dynamic())?;
@@ -153,7 +153,7 @@ pub(crate) fn right_null_dyn<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     null_dense(dense, &MfAuthority(input.space()), input, FactorSide::Right)

@@ -177,7 +177,7 @@ pub(crate) fn eigh_full<E, R, D>(
 ) -> Result<EighFull<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let dynamic = input.dynamic();
@@ -201,7 +201,7 @@ pub fn eigh_full_dyn<E, R, D>(
 ) -> Result<EighFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();
@@ -249,7 +249,7 @@ pub(super) fn eigh_full_scattered<E, R, D, M>(
 ) -> Result<EighFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     M: SectorGeometry + Sync,
 {
@@ -318,7 +318,7 @@ pub(super) fn eigh_full_direct_regions<E, R, D>(
 ) -> Result<EighFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();
@@ -392,7 +392,7 @@ pub(super) fn eigh_full_diagonal_dyn<R, D>(
     hermitian_tol: HermitianTol,
 ) -> Result<EighFullDyn<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let bond =
@@ -556,7 +556,7 @@ pub(crate) fn eig_full<E, R, D>(
 ) -> Result<EigFull<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let dynamic = input.dynamic();
@@ -582,7 +582,7 @@ pub fn eig_full_dyn<E, R, D>(
 ) -> Result<EigFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();
@@ -632,7 +632,7 @@ pub(super) fn eig_full_diagonal_dyn<R, D>(
     spectrum: &[SectorSpectrum<D>],
 ) -> Result<EigFullDyn<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let bond = diagonal_bond(
@@ -892,7 +892,7 @@ pub(crate) fn eigh_vals<E, R, D>(
 ) -> Result<Vec<SectorSpectrum>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     eigh_vals_dyn(dense, &input.dynamic(), HermitianTol::DEFAULT)
@@ -933,7 +933,7 @@ pub(crate) fn eig_vals<E, R, D>(
 ) -> Result<Vec<SectorSpectrum<Complex64>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     eig_vals_dyn::<E, R, D>(dense, &input.dynamic())

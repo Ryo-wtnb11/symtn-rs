@@ -36,7 +36,7 @@ pub(super) fn build_bound_factor_space<R>(
     side: FactorSide,
 ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     let bond = FusionProductSpace::new([new_leg]);
     let hom = match side {
@@ -57,7 +57,7 @@ pub(super) fn build_left_right_bound_pair<R, D>(
     pairs: &mut [FactorPair<D>],
 ) -> Result<DynamicFactorPair<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let dimensions = pairs
@@ -91,7 +91,7 @@ pub(super) fn build_left_bound_factor<R, D, M>(
     pairs: &mut [FactorPair<D>],
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     M: SectorGeometry,
 {
@@ -118,7 +118,7 @@ pub(super) fn build_bound_factor<R, D, M>(
     side: FactorSide,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     M: SectorGeometry,
 {
@@ -144,7 +144,7 @@ pub(super) fn build_bound_factor_with_placement<R, D, M>(
     placement: FactorPlacement,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     M: SectorGeometry,
 {

@@ -484,6 +484,27 @@ where
     /// Checked factors use the source provider instance; a failure returns no
     /// factors.
     ///
+    /// The factorization is blockwise, so a rule with complex categorical
+    /// coefficients factorizes like any other (TensorKit `foreachblock`):
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use symtn::sector::{TableRule, TableSector};
+    /// use symtn::typed::{Complex64, GradedSpace, Runtime, Svd, TensorMap};
+    ///
+    /// let runtime = Runtime::builder().build()?;
+    /// let v = GradedSpace::try_new(
+    ///     Arc::new(TableRule::fibonacci()),
+    ///     [(TableSector::new(1), 1), (TableSector::new(2), 2)],
+    /// )?;
+    /// let t: TensorMap<TableRule, Complex64> =
+    ///     TensorMap::rand_with_seed(&runtime, [&v, &v], [&v], 7)?;
+    /// let Svd { u, s, vh } = t.svd_full(&[0, 1], &[2])?;
+    /// let rebuilt = u.compose(&s)?.compose(&vh)?;
+    /// assert!(rebuilt.axpby(Complex64::ONE, &t, -Complex64::ONE)?.norm(2.0)? < 1e-12);
+    /// # Ok::<(), symtn::typed::Error>(())
+    /// ```
+    ///
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).

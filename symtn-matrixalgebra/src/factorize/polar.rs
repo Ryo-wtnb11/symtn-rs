@@ -39,7 +39,7 @@ pub(crate) fn left_polar<E, R, D>(
 ) -> Result<LeftPolar<BoundTensorMap<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let LeftPolar { w, p } = left_polar_dyn(dense, &input.dynamic())?;
@@ -57,7 +57,7 @@ pub(crate) fn left_polar_dyn<E, R, D>(
 ) -> Result<LeftPolar<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let authority = MfAuthority(input.space());
@@ -83,7 +83,7 @@ pub(crate) fn right_polar<E, R, D>(
 ) -> Result<RightPolar<BoundTensorMap<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let RightPolar { p, wh } = right_polar_dyn(dense, &input.dynamic())?;
@@ -101,7 +101,7 @@ pub(crate) fn right_polar_dyn<E, R, D>(
 ) -> Result<RightPolar<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let authority = MfAuthority(input.space());

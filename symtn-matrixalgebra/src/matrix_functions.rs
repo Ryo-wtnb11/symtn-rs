@@ -33,7 +33,7 @@ pub(crate) fn exp<E, R, D>(
 ) -> Result<BoundTensorMap<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let out = exp_into_mf(dense, &input.dynamic())?;
@@ -844,7 +844,7 @@ pub(crate) fn pinv<E, R, D>(
 ) -> Result<BoundTensorMap<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let out = pinv_into_mf(dense, &input.dynamic(), rcond)?;
@@ -875,7 +875,7 @@ where
     RuleKey: Clone + Eq + Hash + Send + Sync + 'static,
     BT: TreeTransformBackend<D, f64>,
     BC: TensorContractBackend<D, f64>,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey<Key = RuleKey>,
+    R: MultiplicityFreeRigidSymbols + TreeTransformRuleCacheKey<Key = RuleKey>,
     D: FactorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
     let _ = context;
@@ -988,7 +988,7 @@ fn mf_output<R, D>(
     homspace: symtn_core::FusionTreeHomSpace,
 ) -> Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     crate::factorize::multiplicity_free_output_space(input.space(), homspace)
 }
@@ -1005,7 +1005,7 @@ pub(crate) fn exp_into_mf<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let output = mf_output(input, input.space().space().homspace().clone())?;
@@ -1019,7 +1019,7 @@ pub(crate) fn inv_into_mf<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let output = mf_output(input, swapped(input.space().space().homspace()))?;
@@ -1034,7 +1034,7 @@ pub(crate) fn pinv_into_mf<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let output = mf_output(input, swapped(input.space().space().homspace()))?;
@@ -1049,7 +1049,7 @@ pub(crate) fn pinv_adjoint_parent_into_mf<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let output = mf_output(parent, parent.space().space().homspace().clone())?;
@@ -1064,7 +1064,7 @@ pub(crate) fn solve_left_into_mf<E, R, D>(
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let output = mf_output(

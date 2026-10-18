@@ -152,7 +152,7 @@ pub(super) struct EighRoutePlan<R> {
 
 impl<R, D, S> EighFullPlan<R, D, S>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: TensorScalar,
     S: TensorStorage<D>,
 {
@@ -356,7 +356,7 @@ impl<R: SectorCodec, D, S> EighFullPlan<R, D, S> {
 
 impl<R, D, S> EighFullPlan<R, D, S>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: FactorizationScalar,
     S: FactorExec<R, D>,
 {
@@ -435,7 +435,7 @@ where
 
 impl<R, D> EighFullPlan<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: FactorizationScalar,
 {
     /// The Host call into `buffers`, allocated zeroed when absent; writes
@@ -668,7 +668,7 @@ fn publish_spectra<'v, S: Clone>(
 
 impl<R> EighRoutePlan<R>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
 {
     /// Compiles the eager plan from the structure: `eigh_full` keeps every
     /// eigenpair, so each coupled sector's rank is its full `n`.
