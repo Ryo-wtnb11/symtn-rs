@@ -41,10 +41,6 @@ pub(crate) enum Event {
     FusionOperandProjectionPrepare,
     /// A final result layout was built.
     FinalResultLayoutBuild,
-    /// A layout was built on the caller-supplied shapes path.
-    CallerShapePathBuild,
-    /// A scratch structure was built.
-    ScratchStructureBuild,
     /// A permuted or contracted HomSpace was built by a layout capability.
     DerivedHomspaceBuild,
     /// A fusion block matrix layout answered a group lookup.

@@ -14,8 +14,7 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
         FusionProductSpace::new([leg()]),
     );
     let canonical_typed =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace.clone(), [vec![2, 2]])
-            .unwrap();
+        DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
     let canonical = canonical_typed.clone();
     let canonical_block = canonical.structure().block(0).unwrap();
     let padded_structure = BlockStructure::from_blocks_with_rank(
@@ -296,7 +295,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
             FusionProductSpace::new([SectorLeg::new([(odd, 1)], codomain_dual)]),
             FusionProductSpace::new([SectorLeg::new([(odd, 1)], domain_dual)]),
         );
-        crate::DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, vec![vec![1, 1]]).unwrap()
+        crate::DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     };
     let lhs_space = make_space(true, false);
     // The externally dual RHS codomain requires the fermionic supertrace twist.
@@ -445,24 +444,16 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
     let leg = |dual| SectorLeg::new([(vacuum, 1), (charged, 1)], dual);
     let provider = Arc::new(rule);
     let bind_encoded = |homspace: FusionTreeHomSpace| {
-        let count = homspace.fusion_tree_keys(provider.as_ref()).len();
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&provider),
             homspace,
-            vec![vec![1; 3]; count],
         )
         .unwrap()
     };
     let bind_lowered = |homspace: FusionTreeHomSpace| {
-        let count = homspace
-            .prepare_fusion_tree_layout_checked(provider.as_ref())
-            .unwrap()
-            .commit()
-            .len();
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
             Arc::clone(&provider),
             homspace,
-            vec![vec![1; 3]; count],
         )
         .unwrap()
     };
@@ -729,12 +720,7 @@ fn storage_direct_contraction_refuses_mis_stacked_trees_before_gemm() {
         )
     };
     let keys = homspace().fusion_tree_keys(&rule);
-    let canonical = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        homspace(),
-        vec![vec![1; 4]; keys.len()],
-    )
-    .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace()).unwrap();
     let mut blocks = keys
         .iter()
         .map(|key| (key.clone(), vec![1; 4]))

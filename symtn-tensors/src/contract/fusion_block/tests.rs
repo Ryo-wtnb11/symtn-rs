@@ -66,10 +66,9 @@ fn incomplete_su2_grid_is_nonborrowed_and_keeps_sparse_group_clear() {
     // charged as RHS materialization and its packed matrix remains marked
     // for clearing before replay.
     let rule = SU2FusionRule;
-    let scalar = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let scalar = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([], []),
-        [vec![]],
     )
     .unwrap();
     let homspace = FusionTreeHomSpace::from_sector_ids(
@@ -97,12 +96,7 @@ fn incomplete_su2_grid_is_nonborrowed_and_keeps_sparse_group_clear() {
     .unwrap()
     .try_bind_rule(&rule)
     .unwrap();
-    let complete = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        homspace,
-        vec![vec![1; 8]; keys.len()],
-    )
-    .unwrap();
+    let complete = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
 
     let facts = crate::contract::prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
         &rule,
@@ -262,20 +256,19 @@ fn canonical_region_join_scales_missing_sector_without_layout_compile() {
     let rule = Z2FusionRule;
     let outer = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let inner = || SectorLeg::new([(SectorId::new(0), 1)], false);
-    let space = |codomain: SectorLeg, domain: SectorLeg, shapes| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = |codomain: SectorLeg, domain: SectorLeg| {
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([codomain]),
                 FusionProductSpace::new([domain]),
             ),
-            shapes,
         )
         .unwrap()
     };
-    let lhs = space(outer(), inner(), vec![vec![1, 1]]);
-    let rhs = space(inner(), outer(), vec![vec![1, 1]]);
-    let dst = space(outer(), outer(), vec![vec![1, 1], vec![1, 1]]);
+    let lhs = space(outer(), inner());
+    let rhs = space(inner(), outer());
+    let dst = space(outer(), outer());
 
     let layout_rec = probe::record();
     let plan = compile_fusion_block_contract_plan(
@@ -452,12 +445,7 @@ fn generic_multiplicity_grid_uses_canonical_region_gemm() {
         let homspace = homspace();
         let key_count = homspace.fusion_tree_keys_generic(&rule).unwrap().len();
         assert_eq!(key_count, 4);
-        DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-            &rule,
-            homspace,
-            vec![vec![1; 4]; key_count],
-        )
-        .unwrap()
+        DynamicFusionMapSpace::from_final_homspace_generic(&rule, homspace).unwrap()
     };
     let lhs = space();
     let rhs = space();
@@ -508,13 +496,12 @@ fn storage_direct_replay_runs_without_host_slice_contract() {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let fusion_space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg()]),
                 FusionProductSpace::new([leg()]),
             ),
-            [vec![1, 1], vec![1, 1]],
         )
         .unwrap()
     };
@@ -550,13 +537,12 @@ fn storage_direct_replay_matches_host_execute_raw() {
     let leg =
         |dims: usize| SectorLeg::new([(SectorId::new(0), dims), (SectorId::new(1), dims)], false);
     let fusion_space = |dims: usize| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg(dims)]),
                 FusionProductSpace::new([leg(dims)]),
             ),
-            [vec![dims, dims], vec![dims, dims]],
         )
         .unwrap()
     };
@@ -612,13 +598,12 @@ fn storage_direct_replay_matches_host_execute_raw() {
 fn z2_adjoint_mapping_spaces() -> (DynamicFusionMapSpace, DynamicFusionMapSpace) {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
-    let storage = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let storage = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![2, 2], vec![2, 2]],
     )
     .unwrap();
     let logical = storage
@@ -638,9 +623,7 @@ fn nonselfdual_u1_adjoint_projects_logical_order_to_parent_blocks() {
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let canonical =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace.clone(), vec![vec![1, 1]; 3])
-            .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
     let reversed_keys = (0..canonical.structure().block_count())
         .rev()
         .map(|index| canonical.structure().block(index).unwrap().key().clone())
@@ -688,9 +671,7 @@ fn z2_reordered_rank4() -> (DynamicFusionMapSpace, DynamicFusionMapSpace) {
     );
     let keys = homspace.fusion_tree_keys(&rule);
     let shapes = vec![vec![1; 4]; keys.len()];
-    let canonical =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace.clone(), shapes.clone())
-            .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
     let mut reordered = keys.iter().cloned().zip(shapes).collect::<Vec<_>>();
     let mut start = 0usize;
     while start < reordered.len() {
@@ -1097,8 +1078,7 @@ fn rank22_adjoint_reentry_keeps_matrix_orientation() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let shapes = vec![vec![2; 4]; homspace.fusion_tree_keys(&rule).len()];
-    let layout = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let layout = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let space = layout;
     let dst = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
         space.clone(),
@@ -1180,13 +1160,12 @@ fn storage_direct_replay_on_cuda_matches_host() {
 
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 3), (SectorId::new(1), 3)], false);
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![3, 3], vec![3, 3]],
     )
     .unwrap();
     let len = space.required_len().unwrap();

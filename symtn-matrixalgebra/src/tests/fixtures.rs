@@ -71,15 +71,16 @@ pub(super) fn assert_factor_layout_matches_per_tree_shapes<R>(
 ) where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
 {
-    // What: canonical factor construction has the exact block layout of an
-    // independent per-tree shape computation.
+    // What: canonical factor construction has the block layout of the
+    // ordinary final-HomSpace root, with every tree's shape equal to an
+    // independent per-tree computation from the final legs.
     let provider = Arc::clone(actual.provider_arc());
     let homspace = actual.space().homspace().clone();
     let shapes = homspace
         .fusion_tree_keys(provider.as_ref())
         .iter()
         .map(|key| {
-            homspace
+            let shape = homspace
                 .codomain()
                 .legs()
                 .iter()
@@ -95,30 +96,38 @@ pub(super) fn assert_factor_layout_matches_per_tree_shapes<R>(
                     leg.degeneracy(sector)
                         .expect("factor tree sector must belong to its final leg")
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (BlockKey::FusionTree(key.clone()), shape)
         })
         .collect::<Vec<_>>();
-    let per_tree =
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(provider, homspace, shapes).unwrap();
+    let canonical =
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(provider, homspace)
+            .unwrap();
     let actual_space = actual.space();
-    let per_tree_space = per_tree.space();
-    assert_eq!(actual_space.nout(), per_tree_space.nout());
-    assert_eq!(actual_space.nin(), per_tree_space.nin());
+    let canonical_space = canonical.space();
+    assert_eq!(actual_space.nout(), canonical_space.nout());
+    assert_eq!(actual_space.nin(), canonical_space.nin());
     assert_eq!(
         actual_space.required_len().unwrap(),
-        per_tree_space.required_len().unwrap()
+        canonical_space.required_len().unwrap()
     );
+    assert_eq!(actual_space.structure().block_count(), shapes.len());
     assert_eq!(
         actual_space.structure().block_count(),
-        per_tree_space.structure().block_count()
+        canonical_space.structure().block_count()
     );
     for index in 0..actual_space.structure().block_count() {
         let actual_block = actual_space.structure().block(index).unwrap();
-        let per_tree_block = per_tree_space.structure().block(index).unwrap();
-        assert_eq!(actual_block.key(), per_tree_block.key());
-        assert_eq!(actual_block.shape(), per_tree_block.shape());
-        assert_eq!(actual_block.strides(), per_tree_block.strides());
-        assert_eq!(actual_block.offset(), per_tree_block.offset());
+        let canonical_block = canonical_space.structure().block(index).unwrap();
+        let (_, expected_shape) = shapes
+            .iter()
+            .find(|(key, _)| key == actual_block.key())
+            .expect("factor block key must be a fusion tree of its final HomSpace");
+        assert_eq!(actual_block.shape(), expected_shape.as_slice());
+        assert_eq!(actual_block.key(), canonical_block.key());
+        assert_eq!(actual_block.shape(), canonical_block.shape());
+        assert_eq!(actual_block.strides(), canonical_block.strides());
+        assert_eq!(actual_block.offset(), canonical_block.offset());
     }
 }
 
@@ -266,12 +275,7 @@ pub(super) fn rectangular_svd_tensor(rows: usize, cols: usize) -> TestTensor<f64
         FusionProductSpace::new([SectorLeg::new([(even, rows)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, cols)], false)]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|_| vec![rows, cols])
-        .collect::<Vec<_>>();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     TestTensor::from_vec_with_fusion_space(
         (0..rows * cols)
             .map(|index| ((index * 11 + 2) % 19) as f64 - 7.0)
@@ -298,16 +302,7 @@ pub(super) fn mixed_rectangular_tensor(
             false,
         )]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|key| match key.codomain_tree().coupled() {
-            sector if sector == even => vec![even_shape.0, even_shape.1],
-            sector if sector == odd => vec![odd_shape.0, odd_shape.1],
-            sector => panic!("unexpected Z2 sector {sector:?}"),
-        })
-        .collect::<Vec<_>>();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     TestTensor::from_vec_with_fusion_space(
         (0..space.required_len().unwrap())
             .map(|index| ((index * 7 + 3) % 17) as f64 - 6.0)
@@ -343,16 +338,7 @@ pub(super) fn mixed_rectangular_c32_tensor() -> TestTensor<Complex32> {
         FusionProductSpace::new([SectorLeg::new([(even, 5), (odd, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 3), (odd, 4)], false)]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|key| match key.codomain_tree().coupled() {
-            sector if sector == even => vec![5, 3],
-            sector if sector == odd => vec![2, 4],
-            sector => panic!("unexpected Z2 sector {sector:?}"),
-        })
-        .collect::<Vec<_>>();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     TestTensor::from_vec_with_fusion_space(
         (0..space.required_len().unwrap())
             .map(|index| {
@@ -377,13 +363,7 @@ where
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = homspace.fusion_tree_keys(rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        rule,
-        homspace,
-        vec![vec![degeneracy; 4]; key_count],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     let len = space.required_len().unwrap();
     TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len)
@@ -477,13 +457,7 @@ where
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = homspace.fusion_tree_keys(rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        rule,
-        homspace,
-        vec![vec![degeneracy; 4]; key_count],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     // Symmetric under swapping the (codomain tree, row indices) and
     // (domain tree, column indices) labels, so every coupled sector matrix is
     // symmetric (real Hermitian).
@@ -739,9 +713,7 @@ pub(super) fn one_sector_rectangular_matrix<D: Clone>(
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, vec![vec![rows, cols]])
-            .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     TestTensor::from_vec_with_fusion_space(data, space).unwrap()
 }
 
@@ -923,19 +895,7 @@ pub(super) fn u1_cross_space_map<D: FactorScalar>(
         FusionProductSpace::new([codomain_leg.clone()]),
         FusionProductSpace::new([domain_leg.clone()]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&U1FusionRule)
-        .iter()
-        .map(|key| {
-            let coupled = key.codomain_tree().coupled();
-            vec![
-                codomain_leg.degeneracy(coupled).unwrap(),
-                domain_leg.degeneracy(coupled).unwrap(),
-            ]
-        })
-        .collect::<Vec<_>>();
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&U1FusionRule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&U1FusionRule, homspace).unwrap();
     TestTensor::from_block_fn_with_fusion_space(space, D::zero(), |_, indices| {
         if indices[0] == indices[1] {
             D::one()
@@ -977,20 +937,7 @@ where
         FusionProductSpace::new([leg.clone()]),
         FusionProductSpace::new([leg]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(rule)
-        .iter()
-        .map(|key| {
-            let coupled = key.codomain_tree().coupled();
-            let (_, dimension, data) = blocks
-                .iter()
-                .find(|(sector, _, _)| *sector == coupled)
-                .unwrap();
-            assert_eq!(data.len(), dimension * dimension);
-            vec![*dimension, *dimension]
-        })
-        .collect::<Vec<_>>();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     TestTensor::from_block_fn_with_fusion_space(space, D::zero(), |key, indices| {
         let BlockKey::FusionTree(tree) = key else {
             return D::zero();

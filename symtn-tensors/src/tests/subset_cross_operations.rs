@@ -14,9 +14,7 @@ where
         FusionProductSpace::new([leg()]),
         FusionProductSpace::new([leg()]),
     );
-    let block_count = homspace.fusion_tree_keys(rule).len();
-    DynamicFusionMapSpace::from_degeneracy_shapes(rule, homspace, vec![vec![1, 1]; block_count])
-        .unwrap()
+    DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap()
 }
 
 fn source_bytes(source: &TestTensor<f64>) -> Vec<u8> {

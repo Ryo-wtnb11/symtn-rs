@@ -18,14 +18,12 @@ fn fermionic_storage_contract_rejects_nonuniform_twist_before_gemm() {
         FusionProductSpace::new([leg(false)]),
         FusionProductSpace::new([leg(true), leg(true)]),
     );
-    let lhs_shapes = vec![vec![1; 3]; lhs_hom.fusion_tree_keys(&rule).len()];
-    let lhs = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, lhs_hom, lhs_shapes).unwrap();
+    let lhs = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom).unwrap();
     let rhs_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(true), leg(true)]),
         FusionProductSpace::new([leg(false)]),
     );
-    let rhs_shapes = vec![vec![1; 3]; rhs_hom.fusion_tree_keys(&rule).len()];
-    let rhs = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, rhs_hom, rhs_shapes).unwrap();
+    let rhs = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom).unwrap();
     let dst =
         crate::DynamicFusionMapSpace::contracted(&rule, &lhs, &rhs, &[1, 2], &[0, 1]).unwrap();
     let provider = Arc::new(rule);
@@ -149,7 +147,7 @@ fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
         .flat_map(|(lhs, rhs)| product(lhs, rhs))
         .collect::<Vec<_>>();
     let matrix_space = |rows, cols| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new(
@@ -161,7 +159,6 @@ fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
                     false,
                 )]),
             ),
-            [vec![rows, cols], vec![rows, cols]],
         )
         .unwrap()
     };
@@ -348,13 +345,12 @@ fn oriented_fermionic_storage_keeps_contract_and_compose_signs_distinct() {
     let provider = Arc::new(rule);
     let odd = SectorId::new(1);
     let space = |codomain_dual, domain_dual| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new([(odd, 1)], codomain_dual)]),
                 FusionProductSpace::new([SectorLeg::new([(odd, 1)], domain_dual)]),
             ),
-            [vec![1, 1]],
         )
         .unwrap()
     };

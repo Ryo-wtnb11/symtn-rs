@@ -142,13 +142,7 @@ fn single_precision_svd_and_eig_work_end_to_end() {
     };
     let space = || {
         let hom = homspace();
-        let key_count = hom.fusion_tree_keys(&rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(
-            &rule,
-            hom,
-            vec![vec![degeneracy; 4]; key_count],
-        )
-        .unwrap()
+        DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     };
     let f32_space = space();
     let len = f32_space.required_len().unwrap();

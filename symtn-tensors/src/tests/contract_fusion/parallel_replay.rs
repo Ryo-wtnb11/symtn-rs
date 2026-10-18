@@ -19,9 +19,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
             )
         };
         let space = |hom: FusionTreeHomSpace| {
-            let key_count = hom.fusion_tree_keys(rule).len();
-            let shapes = vec![vec![degeneracy; 4]; key_count];
-            DynamicFusionMapSpace::from_degeneracy_shapes(rule, hom, shapes).unwrap()
+            DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap()
         };
 
         let lhs_space = space(homspace());
@@ -157,13 +155,12 @@ fn tensorcontract_fusion_parallel_replay_keeps_fermion_twist_reference() {
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let space = |codomain_dual: bool, domain_dual: bool| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 2)], codomain_dual)]),
                 FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 2)], domain_dual)]),
             ),
-            [vec![1, 1], vec![2, 2]],
         )
         .unwrap()
     };

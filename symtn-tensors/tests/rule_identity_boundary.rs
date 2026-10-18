@@ -94,12 +94,8 @@ fn bound_scalar_space<R>(rule: &R) -> DynamicFusionMapSpace
 where
     R: MultiplicityFreeRigidSymbols,
 {
-    DynamicFusionMapSpace::from_degeneracy_shapes(
-        rule,
-        FusionTreeHomSpace::from_sector_ids([], []),
-        [vec![]],
-    )
-    .unwrap()
+    DynamicFusionMapSpace::from_final_homspace(rule, FusionTreeHomSpace::from_sector_ids([], []))
+        .unwrap()
 }
 
 fn unbound_scalar_space<R>(rule: &R) -> DynamicFusionMapSpace
@@ -274,10 +270,9 @@ fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
 fn dynamic_trace_rejects_same_type_rule_when_only_symbols_differ() {
     let first = SymbolOnlyRule::new(1.0);
     let second = SymbolOnlyRule::new(-1.0);
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = DynamicFusionMapSpace::from_final_homspace(
         &first,
         FusionTreeHomSpace::from_sector_ids([(0, 1)], []),
-        [vec![1]],
     )
     .unwrap();
 

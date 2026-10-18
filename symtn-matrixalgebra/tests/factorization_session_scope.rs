@@ -86,13 +86,7 @@ fn u1_tensor_with(charges: &[i32], rows: usize, cols: usize) -> BoundTensorMap {
         FusionProductSpace::new([leg(rows), leg(rows)]),
         FusionProductSpace::new([leg(cols), leg(cols)]),
     );
-    let keys = homspace.fusion_tree_keys(&rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        homspace,
-        vec![vec![rows, rows, cols, cols]; keys],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let len = space.required_len().unwrap();
     let data = (0..len)
         .map(|i| ((i * 11 + 5) % 29) as f64 * 0.25 - 3.0)

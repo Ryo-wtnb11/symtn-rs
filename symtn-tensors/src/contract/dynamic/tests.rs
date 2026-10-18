@@ -196,9 +196,7 @@ fn direct_prelowered_source_reuses_ordinary_transform_entry() {
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let canonical =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace.clone(), vec![vec![1, 1]; 3])
-            .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
     let reversed_keys = (0..canonical.structure().block_count())
         .rev()
         .map(|index| canonical.structure().block(index).unwrap().key().clone())
@@ -278,13 +276,9 @@ fn execution_layout_primer_runs_once_per_derivation() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let rule = SU2FusionRule;
     let homspace = FusionTreeHomSpace::from_sector_ids([(7, 3); 4], []);
-    let key_count = homspace.fusion_tree_keys(&rule).len();
-    let source =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, vec![vec![3; 4]; key_count])
-            .unwrap();
+    let source = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar_homspace = FusionTreeHomSpace::from_sector_ids([], []);
-    let scalar =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, scalar_homspace, [vec![]]).unwrap();
+    let scalar = DynamicFusionMapSpace::from_final_homspace(&rule, scalar_homspace).unwrap();
     let operation = TreeTransformOperation::permute([0, 2, 1, 3], []);
     let axes = TensorContractSpec::new(&[], &[], OutputAxisOrder::from_axes(&[0, 2, 1, 3]));
     let provider = Arc::new(rule);
@@ -414,10 +408,9 @@ fn borrowable_core_layout_accepts_equal_structure_across_intern_reset() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let rule = Z2FusionRule;
     let build = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]),
-            [vec![1, 1]],
         )
         .unwrap()
         .try_bind_rule(&rule)
@@ -446,10 +439,9 @@ fn borrowable_core_layout_defers_homspace_identity_until_after_cheap_gates() {
     // What: nonidentity and conjugating sources skip HomSpace identity,
     // while an otherwise borrowable identity layout performs one comparison.
     let rule = Z2FusionRule;
-    let layout = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let layout = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]),
-        [vec![1, 1]],
     )
     .unwrap()
     .try_bind_rule(&rule)

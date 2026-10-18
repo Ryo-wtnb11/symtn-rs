@@ -137,42 +137,7 @@ fn svd_full_gives_square_unitaries_and_reconstructs() {
         2,
     )
     .unwrap();
-    let u_structure = std::sync::Arc::clone(full.u.structure());
-    let s_structure = std::sync::Arc::clone(full.s.structure());
-    let shapes = us_hom
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|key| {
-            let sector = key.domain_tree().coupled();
-            let mut shape = None;
-            for index in 0..u_structure.block_count() {
-                let block = u_structure.block(index).unwrap();
-                let BlockKey::FusionTree(u_key) = block.key() else {
-                    continue;
-                };
-                if u_key.codomain_tree() == key.codomain_tree() {
-                    shape = Some(block.shape()[..2].to_vec());
-                    break;
-                }
-            }
-            let mut shape = shape.expect("U tree present");
-            let mut s_cols = 0;
-            for index in 0..s_structure.block_count() {
-                let block = s_structure.block(index).unwrap();
-                let BlockKey::FusionTree(s_key) = block.key() else {
-                    continue;
-                };
-                let s_sector = s_key.domain_tree().coupled();
-                if s_sector == sector {
-                    s_cols = block.shape()[1];
-                    break;
-                }
-            }
-            shape.push(s_cols);
-            shape
-        })
-        .collect::<Vec<_>>();
-    let us_space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, us_hom, shapes).unwrap();
+    let us_space = DynamicFusionMapSpace::from_final_homspace(&rule, us_hom).unwrap();
     let mut us = TestTensor::<f64>::from_vec_with_fusion_space(
         vec![0.0; us_space.required_len().unwrap()],
         us_space,

@@ -1782,8 +1782,7 @@ mod tests {
             [(0, dimensions[0]), (0, dimensions[1])],
             [(0, dimensions[2]), (0, dimensions[3])],
         );
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, homspace, [dimensions.to_vec()])
-            .unwrap()
+        DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap()
     }
 
     fn subset_copy(rule: &U1FusionRule, complete: &DynamicFusionMapSpace) -> DynamicFusionMapSpace {
@@ -2031,13 +2030,12 @@ mod tests {
         let rule = FermionParityFusionRule;
         let odd = SectorId::new(1);
         let space = |codomain_dual: bool, domain_dual: bool| {
-            DynamicFusionMapSpace::from_degeneracy_shapes(
+            DynamicFusionMapSpace::from_final_homspace(
                 &rule,
                 FusionTreeHomSpace::new(
                     FusionProductSpace::new([SectorLeg::new([(odd, 1)], codomain_dual)]),
                     FusionProductSpace::new([SectorLeg::new([(odd, 1)], domain_dual)]),
                 ),
-                [vec![1, 1]],
             )
             .unwrap()
         };
@@ -2198,25 +2196,23 @@ mod tests {
         let rule = U1FusionRule;
         let sector = symtn_core::U1Irrep::new(0).sector_id();
         let vector_space = || {
-            DynamicFusionMapSpace::from_degeneracy_shapes(
+            DynamicFusionMapSpace::from_final_homspace(
                 &rule,
                 FusionTreeHomSpace::new(
                     FusionProductSpace::new([SectorLeg::new([(sector, 1)], false)]),
                     FusionProductSpace::new(Vec::<SectorLeg>::new()),
                 ),
-                [vec![1]],
             )
             .unwrap()
         };
         let lhs = vector_space();
         let rhs = vector_space();
-        let dst = DynamicFusionMapSpace::from_degeneracy_shapes(
+        let dst = DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new([(sector, 1)], true)]),
                 FusionProductSpace::new([SectorLeg::new([(sector, 1)], true)]),
             ),
-            [vec![1, 1]],
         )
         .unwrap();
         let facts = prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
@@ -2275,10 +2271,9 @@ mod tests {
         // What: an identity-axis operand with an incomplete SU2 tree grid is
         // charged for the complete core layout instead of treated as borrowed.
         let rule = SU2FusionRule;
-        let lhs = DynamicFusionMapSpace::from_degeneracy_shapes(
+        let lhs = DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::from_sector_ids([], []),
-            [vec![]],
         )
         .unwrap();
         let rhs_hom = FusionTreeHomSpace::from_sector_ids([], [(1, 1), (1, 1), (1, 1), (1, 1)]);

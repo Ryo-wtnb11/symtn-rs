@@ -6,13 +6,12 @@ fn tensorcontract_fusion_lowers_lhs_categorical_adjoint_lazily() {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg()]),
                 FusionProductSpace::new([leg()]),
             ),
-            [vec![1, 1], vec![1, 1]],
         )
         .unwrap()
     };
@@ -75,13 +74,12 @@ fn tensorcontract_fusion_lowers_rhs_categorical_adjoint_lazily() {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg()]),
                 FusionProductSpace::new([leg()]),
             ),
-            [vec![1, 1], vec![1, 1]],
         )
         .unwrap()
     };
@@ -123,13 +121,12 @@ fn tensorcontract_fusion_lowers_both_categorical_adjoint_inputs_lazily() {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg()]),
                 FusionProductSpace::new([leg()]),
             ),
-            [vec![1, 1], vec![1, 1]],
         )
         .unwrap()
     };
@@ -153,9 +150,7 @@ fn tensorcontract_fusion_lowers_both_categorical_adjoint_inputs_lazily() {
         1,
     )
     .unwrap();
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![1, 1], vec![1, 1]])
-            .unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![Complex64::new(2.0, 1.0), Complex64::new(3.0, -1.0)],
         lhs_space,
@@ -194,8 +189,8 @@ fn tensorcontract_fusion_lowers_both_categorical_adjoint_inputs_lazily() {
 #[test]
 fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = Z2FusionRule;
-    let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
-    let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
+    let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
+    let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let lhs_adjoint_space = lhs_space
         .validate_rule(&rule)
         .and_then(|()| lhs_space.adjoint_view())
@@ -210,7 +205,7 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
         1,
     )
     .unwrap();
-    let dst_space = z2_matrix_space_with_homspace(dst_hom, vec![2, 2]);
+    let dst_space = z2_matrix_space_with_homspace(dst_hom);
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![
             Complex64::new(1.0, 1.0),
@@ -273,10 +268,8 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule;
-    let lhs_space =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
-    let rhs_space =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
+    let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
+    let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let lhs_adjoint_space = lhs_space
         .validate_rule(&rule)
         .and_then(|()| lhs_space.adjoint_view())
@@ -291,7 +284,7 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
         1,
     )
     .unwrap();
-    let dst_space = fermion_parity_matrix_space_with_homspace(dst_hom, vec![2, 2]);
+    let dst_space = fermion_parity_matrix_space_with_homspace(dst_hom);
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![
             Complex64::new(1.0, 1.0),
@@ -354,8 +347,8 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = Z2FusionRule;
-    let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
-    let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
+    let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
+    let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_adjoint_space = rhs_space
         .validate_rule(&rule)
         .and_then(|()| rhs_space.adjoint_view())
@@ -370,7 +363,7 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
         1,
     )
     .unwrap();
-    let dst_space = z2_matrix_space_with_homspace(dst_hom, vec![2, 2]);
+    let dst_space = z2_matrix_space_with_homspace(dst_hom);
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![
             Complex64::new(1.0, 1.0),
@@ -432,10 +425,8 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule;
-    let lhs_space =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
-    let rhs_space =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
+    let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
+    let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_adjoint_space = rhs_space
         .validate_rule(&rule)
         .and_then(|()| rhs_space.adjoint_view())
@@ -450,7 +441,7 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
         1,
     )
     .unwrap();
-    let dst_space = fermion_parity_matrix_space_with_homspace(dst_hom, vec![2, 2]);
+    let dst_space = fermion_parity_matrix_space_with_homspace(dst_hom);
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![
             Complex64::new(1.0, 1.0),
@@ -513,8 +504,8 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
     let rule = Z2FusionRule;
-    let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
-    let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
+    let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
+    let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let lhs_adjoint_space = lhs_space
         .validate_rule(&rule)
         .and_then(|()| lhs_space.adjoint_view())
@@ -533,7 +524,7 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
         1,
     )
     .unwrap();
-    let dst_space = z2_matrix_space_with_homspace(dst_hom, vec![2, 2]);
+    let dst_space = z2_matrix_space_with_homspace(dst_hom);
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![
             Complex64::new(1.0, 1.0),
@@ -595,10 +586,8 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule;
-    let lhs_space =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
-    let rhs_space =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
+    let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
+    let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let lhs_adjoint_space = lhs_space
         .validate_rule(&rule)
         .and_then(|()| lhs_space.adjoint_view())
@@ -617,7 +606,7 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
         1,
     )
     .unwrap();
-    let dst_space = fermion_parity_matrix_space_with_homspace(dst_hom, vec![2, 2]);
+    let dst_space = fermion_parity_matrix_space_with_homspace(dst_hom);
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![
             Complex64::new(1.0, 1.0),
@@ -681,31 +670,28 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
 fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
     let rule = Z2FusionRule;
     let sector = SectorId::new(0);
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(sector, 1)], false)]),
             FusionProductSpace::new(Vec::<SectorLeg>::new()),
         ),
-        [vec![1]],
     )
     .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(sector, 1)], false)]),
             FusionProductSpace::new(Vec::<SectorLeg>::new()),
         ),
-        [vec![1]],
     )
     .unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(sector, 1)], true)]),
             FusionProductSpace::new([SectorLeg::new([(sector, 1)], true)]),
         ),
-        [vec![1, 1]],
     )
     .unwrap();
     let lhs: TestTensor<Complex64> =
@@ -780,8 +766,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     };
     let fusion = || {
         let h = hom();
-        let count = h.fusion_tree_keys(&rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, h, vec![vec![2, 2]; count]).unwrap()
+        DynamicFusionMapSpace::from_final_homspace(&rule, h).unwrap()
     };
     let lhs_fusion = fusion();
     let rhs_fusion = fusion();
@@ -926,12 +911,9 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     }
 
     let typed_dst_hom = dst_space.homspace().clone();
-    let typed_dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        provider.as_ref(),
-        typed_dst_hom.clone(),
-        vec![vec![2, 2]; typed_dst_hom.fusion_tree_keys(provider.as_ref()).len()],
-    )
-    .unwrap();
+    let typed_dst_space =
+        DynamicFusionMapSpace::from_final_homspace(provider.as_ref(), typed_dst_hom.clone())
+            .unwrap();
     let lhs_typed =
         TestTensor::<Complex64>::from_vec_with_fusion_space(lhs_data.clone(), lhs_fusion).unwrap();
     let rhs_typed =

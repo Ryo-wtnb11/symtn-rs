@@ -64,11 +64,8 @@ where
             FusionProductSpace::new([leg(), leg()]),
         )
     };
-    let space = |hom: FusionTreeHomSpace| {
-        let key_count = hom.fusion_tree_keys(rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, hom, vec![vec![1; 4]; key_count])
-            .unwrap()
-    };
+    let space =
+        |hom: FusionTreeHomSpace| DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap();
     let lhs_space = space(homspace());
     let rhs_space = space(homspace());
     let lhs_data: Vec<f64> = (0..lhs_space.required_len().unwrap())

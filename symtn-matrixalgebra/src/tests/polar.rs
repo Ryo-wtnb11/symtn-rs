@@ -359,8 +359,7 @@ fn polar_complete_dimension_preflight_handles_empty_sides_and_empty_products() {
     let rule = U1FusionRule;
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    let shapes = vec![Vec::new(); homspace.fusion_tree_keys(&rule).len()];
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], space).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let input = bound_tensor(Arc::new(rule), &scalar);

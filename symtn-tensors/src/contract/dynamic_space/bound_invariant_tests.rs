@@ -28,18 +28,17 @@ fn lowered_product_rule() -> TripleRule {
 fn matrix_space() -> DynamicFusionMapSpace {
     let rule = Z2FusionRule;
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
-    DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![1, 1]]).unwrap()
+    DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap()
 }
 
 fn z2_matrix_space() -> DynamicFusionMapSpace {
     let leg = || SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false);
-    DynamicFusionMapSpace::from_degeneracy_shapes(
+    DynamicFusionMapSpace::from_final_homspace(
         &Z2FusionRule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![1, 1], vec![1, 1]],
     )
     .unwrap()
 }
@@ -848,7 +847,6 @@ fn bind_revalidates_complete_without_replacing_layout() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_structure_caches();
-    let scratch_structure_builds_rec = probe::record();
     let raw = z2_matrix_space();
     let structure = Arc::clone(raw.structure());
 
@@ -861,23 +859,17 @@ fn bind_revalidates_complete_without_replacing_layout() {
         FusionSpaceAdmission::Complete(_)
     ));
     assert!(Arc::ptr_eq(&structure, &bound.space.subblock_structure));
-    assert_eq!(
-        scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-        0
-    );
 
     let rule = lowered_product_rule();
     let pair = Fz2U1Codec::encode(Z2Irrep::ODD.sector_id(), U1Irrep::new(2).sector_id());
     let sector = TripleCodec::encode(pair, SU2Irrep::from_twice_spin(1).sector_id());
-    let layout = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let layout = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sectors([(sector, 1)], [(sector, 1)]),
-        [vec![1, 1]],
     )
     .unwrap();
     let raw = layout;
     let structure = Arc::clone(raw.structure());
-    let scratch_structure_builds_rec = probe::record();
 
     let bound =
         BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(raw, Arc::new(rule)).unwrap();
@@ -887,10 +879,6 @@ fn bind_revalidates_complete_without_replacing_layout() {
         FusionSpaceAdmission::Complete(_)
     ));
     assert!(Arc::ptr_eq(&structure, &bound.space.subblock_structure));
-    assert_eq!(
-        scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-        0
-    );
 }
 
 #[test]
@@ -936,7 +924,6 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
     };
 
     clear_structure_caches();
-    let scratch_structure_builds_rec = probe::record();
     let mut mismatched = base.clone();
     mismatched.admission = FusionSpaceAdmission::Subset(Z2FusionRule.rule_identity());
     assert!(matches!(
@@ -946,17 +933,12 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
         ),
         Err(OperationError::Core(CoreError::FusionRuleMismatch { .. }))
     ));
-    assert_eq!(
-        scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-        0
-    );
 
     for admission in [
         FusionSpaceAdmission::Subset(U1FusionRule.rule_identity()),
         FusionSpaceAdmission::Complete(U1FusionRule.rule_identity()),
     ] {
         clear_structure_caches();
-        let scratch_structure_builds_rec = probe::record();
         let mut raw = base.clone();
         raw.admission = admission.clone();
         let original = raw.clone();
@@ -972,10 +954,6 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
                 }
         ));
         assert_eq!(original.admission(), &admission);
-        assert_eq!(
-            scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-            0
-        );
     }
 }
 
@@ -1020,17 +998,12 @@ fn lowered_bind_preserves_omitted_product_codec_failure() {
         adjoint: OnceLock::new(),
     };
     clear_structure_caches();
-    let scratch_structure_builds_rec = probe::record();
 
     let error = BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(raw, Arc::new(rule))
         .unwrap_err();
     assert_eq!(
         error,
         OperationError::FusionAlgebra(Box::new(FusionAlgebraError::ProductCodec(expected)))
-    );
-    assert_eq!(
-        scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-        0
     );
 }
 
@@ -1061,7 +1034,6 @@ fn lowered_subset_to_complete_validates_grid_before_commit() {
         .unwrap();
     let raw = subset;
     let original = raw.clone();
-    let scratch_structure_builds_rec = probe::record();
 
     assert!(matches!(
         BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(raw, Arc::new(Z2FusionRule),),
@@ -1071,10 +1043,6 @@ fn lowered_subset_to_complete_validates_grid_before_commit() {
         original.admission(),
         FusionSpaceAdmission::Subset(_)
     ));
-    assert_eq!(
-        scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-        0
-    );
 }
 
 #[test]
@@ -1181,14 +1149,14 @@ fn bound_space_rejects_incoherent_structure_rank() {
 #[test]
 fn direct_bound_builders_keep_coherent_split_and_rank() {
     // What: direct multiplicity-free and Generic builders satisfy bound
-    // invariants, and final-HomSpace Generic layout exactly matches the
-    // caller-shape expert layout for a genuine outer multiplicity.
+    // invariants, and the final-HomSpace Generic layout of a genuine outer
+    // multiplicity is TensorKit's coupled block by hand: both vertex-labelled
+    // codomain trees (2 x 3 rows each) stack over one 4-column domain tree.
     let provider = Arc::new(Z2FusionRule);
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
-    let multiplicity_free = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let multiplicity_free = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&provider),
         homspace.clone(),
-        [vec![1, 1]],
     )
     .unwrap();
     let generic_provider = Arc::new(GenericMultiplicityRule);
@@ -1202,12 +1170,6 @@ fn direct_bound_builders_keep_coherent_split_and_rank() {
         .unwrap()
         .len();
     assert_eq!(generic_key_count, 2);
-    let expert = BoundDynamicFusionMapSpace::from_degeneracy_shapes_generic(
-        Arc::clone(&generic_provider),
-        generic_homspace.clone(),
-        vec![vec![2, 3, 4]; generic_key_count],
-    )
-    .unwrap();
     let generic =
         BoundDynamicFusionMapSpace::from_final_homspace_generic(generic_provider, generic_homspace)
             .unwrap();
@@ -1216,19 +1178,24 @@ fn direct_bound_builders_keep_coherent_split_and_rank() {
     assert_eq!(generic.space().nin(), 1);
     assert_eq!(multiplicity_free.space().structure().rank(), 2);
     assert_eq!(generic.space().structure().rank(), 3);
-    assert_eq!(generic.space().structure(), expert.space().structure());
+    assert_eq!(generic.space().required_len().unwrap(), 48);
+    let layout = (0..generic.space().structure().block_count())
+        .map(|index| {
+            let block = generic.space().structure().block(index).unwrap();
+            (
+                block.shape().to_vec(),
+                block.strides().to_vec(),
+                block.offset(),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        generic.space().required_len().unwrap(),
-        expert.space().required_len().unwrap()
+        layout,
+        [
+            (vec![2, 3, 4], vec![1, 2, 12], 0),
+            (vec![2, 3, 4], vec![1, 2, 12], 6),
+        ]
     );
-    for index in 0..expert.space().structure().block_count() {
-        let actual = generic.space().structure().block(index).unwrap();
-        let expected = expert.space().structure().block(index).unwrap();
-        assert_eq!(actual.key(), expected.key());
-        assert_eq!(actual.shape(), expected.shape());
-        assert_eq!(actual.strides(), expected.strides());
-        assert_eq!(actual.offset(), expected.offset());
-    }
 }
 
 #[test]
@@ -1245,12 +1212,8 @@ fn generic_completeness_requires_every_vertex_label() {
             .collect::<Vec<_>>(),
         [1, 2]
     );
-    let complete = DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-        provider.as_ref(),
-        homspace,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
+    let complete =
+        DynamicFusionMapSpace::from_final_homspace_generic(provider.as_ref(), homspace).unwrap();
     assert_eq!(complete.structure().block_count(), 2);
     assert!(matches!(
         complete.admission(),

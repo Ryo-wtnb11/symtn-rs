@@ -1,5 +1,4 @@
 use super::*;
-use crate::probe::{self, Event};
 use crate::test_support::CACHE_TEST_LOCK;
 use symtn_core::{
     clear_structure_caches, structure_cache_info, BraidingStyleKind, FusionAlgebraError,
@@ -351,7 +350,6 @@ fn checked_final_root_stage_failures_publish_no_layout_or_admission() {
     ] {
         symtn_core::clear_structure_caches();
         clear_structure_caches();
-        let scratch_structure_builds_rec = probe::record();
         let before = (
             structure_cache_info(StructureCacheKind::SectorStructure),
             structure_cache_info(StructureCacheKind::DegeneracyStructure),
@@ -370,10 +368,6 @@ fn checked_final_root_stage_failures_publish_no_layout_or_admission() {
                 structure_cache_info(StructureCacheKind::DegeneracyStructure),
             ),
             before
-        );
-        assert_eq!(
-            scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-            0
         );
     }
 }
@@ -469,7 +463,6 @@ fn checked_bind_failure_preserves_subset_admission_and_caches() {
         subset.admission = FusionSpaceAdmission::Subset(ExternalUniqueRule::new().rule_identity());
         let original = subset.clone();
 
-        let scratch_structure_builds_rec = probe::record();
         let before = (
             structure_cache_info(StructureCacheKind::SectorStructure),
             structure_cache_info(StructureCacheKind::DegeneracyStructure),
@@ -492,10 +485,6 @@ fn checked_bind_failure_preserves_subset_admission_and_caches() {
                 structure_cache_info(StructureCacheKind::DegeneracyStructure),
             ),
             before
-        );
-        assert_eq!(
-            scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-            0
         );
     }
 }

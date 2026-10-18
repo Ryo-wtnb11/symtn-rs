@@ -8,16 +8,8 @@ pub(super) fn z2_matrix_homspace() -> FusionTreeHomSpace {
     )
 }
 
-pub(super) fn z2_matrix_space_with_homspace(
-    homspace: FusionTreeHomSpace,
-    block_shape: Vec<usize>,
-) -> DynamicFusionMapSpace {
-    DynamicFusionMapSpace::from_degeneracy_shapes(
-        &Z2FusionRule,
-        homspace,
-        [block_shape.clone(), block_shape],
-    )
-    .unwrap()
+pub(super) fn z2_matrix_space_with_homspace(homspace: FusionTreeHomSpace) -> DynamicFusionMapSpace {
+    DynamicFusionMapSpace::from_final_homspace(&Z2FusionRule, homspace).unwrap()
 }
 
 pub(super) fn fermion_parity_matrix_homspace() -> FusionTreeHomSpace {
@@ -30,14 +22,8 @@ pub(super) fn fermion_parity_matrix_homspace() -> FusionTreeHomSpace {
 
 pub(super) fn fermion_parity_matrix_space_with_homspace(
     homspace: FusionTreeHomSpace,
-    block_shape: Vec<usize>,
 ) -> DynamicFusionMapSpace {
-    DynamicFusionMapSpace::from_degeneracy_shapes(
-        &FermionParityFusionRule,
-        homspace,
-        [block_shape.clone(), block_shape],
-    )
-    .unwrap()
+    DynamicFusionMapSpace::from_final_homspace(&FermionParityFusionRule, homspace).unwrap()
 }
 
 /// The device eager compose's route on Host storage: [`crate::plan_compose`]
@@ -69,7 +55,7 @@ fn bosonic_tensorcompose_matches_ordinary_contract() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     // What: coefficient-free bosonic composition and ordinary contraction
     // share one compiled Core resolution instead of retaining parallel plans.
-    let layout = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
+    let layout = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let source = layout;
     let dst = crate::DynamicFusionMapSpace::contracted(&Z2FusionRule, &source, &source, &[1], &[0])
         .unwrap();
@@ -134,7 +120,7 @@ fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoin
     // materialized adjoint produces as a direct operand. The payload is
     // element-distinct, so the per-block transpose the adjoint performs is
     // visible in every element of the result.
-    let layout = z2_matrix_space_with_homspace(z2_matrix_homspace(), vec![2, 2]);
+    let layout = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let source = layout;
     let provider = Arc::new(Z2FusionRule);
     let source_bound = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
@@ -197,8 +183,7 @@ fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
     // What: both cold and cached composition plans reject malformed source or
     // destination extents before beta scaling or grouped GEMM changes output.
     let rule = FermionParityFusionRule;
-    let layout =
-        fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace(), vec![2, 2]);
+    let layout = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let source = layout;
     let dst =
         crate::DynamicFusionMapSpace::contracted(&rule, &source, &source, &[1], &[0]).unwrap();
@@ -266,13 +251,12 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
     let rule = FermionParityFusionRule;
     let odd = SectorId::new(1);
     let typed_space = |codomain_dual: bool, domain_dual: bool| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new([(odd, 1)], codomain_dual)]),
                 FusionProductSpace::new([SectorLeg::new([(odd, 1)], domain_dual)]),
             ),
-            [vec![1, 1]],
         )
         .unwrap()
     };
@@ -432,7 +416,7 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
     assert_eq!(contract_gemm.scaled_alphas, [-1.0]);
 
     let mixed_space = |codomain_dual: bool, domain_dual: bool| {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new(
@@ -444,7 +428,6 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
                     domain_dual,
                 )]),
             ),
-            [vec![1, 1], vec![1, 1]],
         )
         .unwrap()
     };

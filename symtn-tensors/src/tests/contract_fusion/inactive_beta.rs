@@ -117,10 +117,8 @@ fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_or
     .unwrap();
     let lhs_space = source_space();
     let rhs_space = source_space();
-    let oracle_source_space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, source_homspace.clone(), [vec![1, 1]])
-            .unwrap()
-    };
+    let oracle_source_space =
+        || DynamicFusionMapSpace::from_final_homspace(&rule, source_homspace.clone()).unwrap();
     let lhs_dynamic = oracle_source_space();
     let rhs_dynamic = oracle_source_space();
     let lhs_data = vec![Complex64::new(2.0, 3.0)];

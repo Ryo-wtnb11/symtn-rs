@@ -1269,13 +1269,12 @@ mod tests {
             let provider = Arc::new($provider);
             let sectors: [(SectorId, usize); 2] = $sectors;
             let leg = SectorLeg::new(sectors, false);
-            let source = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+            let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
                 Arc::clone(&provider),
                 symtn_core::FusionTreeHomSpace::new(
                     FusionProductSpace::new([leg.clone()]),
                     FusionProductSpace::new([leg]),
                 ),
-                sectors.map(|(_, n)| vec![n, n]),
             )
             .unwrap();
             let operation = TreeTransformOperation::braid([1], [0], [0], [1]);
@@ -1369,13 +1368,12 @@ mod tests {
             (symtn_core::U1Irrep::new(1).sector_id(), 3),
         ];
         let leg = SectorLeg::new(sectors, false);
-        let source = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&provider),
             symtn_core::FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg.clone()]),
                 FusionProductSpace::new([leg]),
             ),
-            sectors.map(|(_, n)| vec![n, n]),
         )
         .unwrap();
         let operation = TreeTransformOperation::braid([1], [0], [0], [1]);
@@ -1470,13 +1468,12 @@ mod tests {
     fn compact_braid_declines_coefficients_outside_the_payload_dtype() {
         let provider = Arc::new(ExternalZ2::<2>);
         let leg = SectorLeg::new([(SectorId::new(1), 2)], false);
-        let source = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&provider),
             symtn_core::FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg.clone()]),
                 FusionProductSpace::new([leg]),
             ),
-            [vec![2, 2]],
         )
         .unwrap();
         let operation = TreeTransformOperation::braid([1], [0], [0], [1]);
@@ -1513,10 +1510,9 @@ mod tests {
         )
         .is_some());
         let underflow_provider = Arc::new(ExternalZ2::<1>);
-        let underflow_source = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        let underflow_source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&underflow_provider),
             source.space().homspace().clone(),
-            [vec![2, 2]],
         )
         .unwrap();
         let underflow_destination = underflow_source
@@ -1544,13 +1540,12 @@ mod tests {
     fn external_multiplicity_free_provider_matches_direct_transform() {
         let provider = Arc::new(ExternalZ2::<0>);
         let leg = SectorLeg::new([(SectorId::new(0), 2)], false);
-        let source = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&provider),
             symtn_core::FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg.clone()]),
                 FusionProductSpace::new([leg]),
             ),
-            [vec![2, 2]],
         )
         .unwrap();
         let operation = TreeTransformOperation::permute([1], [0]);
@@ -1589,22 +1584,20 @@ mod tests {
         let lhs_codomain = SectorLeg::new([(SectorId::new(0), 2)], false);
         let contracted = SectorLeg::new([(SectorId::new(0), 3)], false);
         let rhs_domain = SectorLeg::new([(SectorId::new(0), 4)], false);
-        let lhs = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&provider),
             symtn_core::FusionTreeHomSpace::new(
                 FusionProductSpace::new([lhs_codomain.clone()]),
                 FusionProductSpace::new([contracted.clone()]),
             ),
-            [vec![2, 3]],
         )
         .unwrap();
-        let rhs = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        let rhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::clone(&provider),
             symtn_core::FusionTreeHomSpace::new(
                 FusionProductSpace::new([contracted]),
                 FusionProductSpace::new([rhs_domain.clone()]),
             ),
-            [vec![3, 4]],
         )
         .unwrap();
         let lhs_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];

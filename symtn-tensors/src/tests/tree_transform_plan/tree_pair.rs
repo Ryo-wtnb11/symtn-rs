@@ -1067,18 +1067,8 @@ fn product_tree_transform_rebuilds_after_global_cache_reset_with_old_values_live
     let expected = dst.data().to_vec();
 
     symtn_core::clear_structure_caches();
-    let rebuilt_src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
-    let rebuilt_dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
+    let rebuilt_src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
+    let rebuilt_dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let rebuilt_src =
         TestTensor::<f64>::from_vec_with_fusion_space(src_data, rebuilt_src_space).unwrap();
     let mut rebuilt_dst =

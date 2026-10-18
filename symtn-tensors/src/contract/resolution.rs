@@ -963,8 +963,7 @@ mod tests {
             FusionProductSpace::new([SectorLeg::new([(sector, 1)], codomain_dual)]),
             FusionProductSpace::new([SectorLeg::new([(sector, 1)], domain_dual)]),
         );
-        let count = hom.fusion_tree_keys(rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, hom, vec![vec![1, 1]; count]).unwrap()
+        DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap()
     }
 
     #[test]

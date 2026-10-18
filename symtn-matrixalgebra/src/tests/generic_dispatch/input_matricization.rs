@@ -923,8 +923,7 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     let rule = Z2FusionRule;
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    let shapes = vec![Vec::new(); homspace.fusion_tree_keys(&rule).len()];
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar = TestTensor::<f64>::from_vec_with_fusion_space(vec![-3.0], space).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let svd = svd_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &scalar)).unwrap();

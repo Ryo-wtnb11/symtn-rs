@@ -132,7 +132,7 @@ where
     let structure = Arc::clone(space.structure());
     let prepared = dispatch_prepare(primer, rule, &adjoint_hom)?;
     let keys = prepared.keys(rule, &adjoint_hom);
-    let shapes = keys
+    let blocks = keys
         .iter()
         .map(|key| {
             let source_key = BlockKey::FusionTree(FusionTreePairKey::pair(
@@ -150,16 +150,20 @@ where
                 .shape();
             let mut shape = source_shape[nout..].to_vec();
             shape.extend_from_slice(&source_shape[..nout]);
-            Ok(shape)
+            Ok((key.clone(), shape))
         })
         .collect::<Result<Vec<_>, OperationError>>()?;
-
-    DynamicFusionMapSpace::from_degeneracy_shapes_with_key_builder(
+    // Why not the final-HomSpace builder: this oracle derives each adjoint
+    // block shape from the source storage, independently of the adjoint legs.
+    let adjoint_structure = BlockStructure::coupled_sector_matrix_with_keys(
         rule,
-        adjoint_hom,
-        shapes,
-        move |_, _| Ok(prepared),
+        adjoint_hom.codomain().len(),
+        adjoint_hom.rank(),
+        blocks,
     )
+    .map_err(OperationError::from_core_preserving_context)?;
+    DynamicFusionMapSpace::try_from_layout(adjoint_hom, adjoint_structure)
+        .map_err(OperationError::from_core_preserving_context)
 }
 
 fn validate_adjoint_data_extent(
@@ -590,7 +594,6 @@ mod generic_toy_fusion;
 #[cfg(test)]
 mod cache_tests {
     use super::*;
-    use crate::probe::{self, Event};
     use num_complex::Complex64;
     use std::cell::Cell;
     use std::ops::{Add, Mul};
@@ -685,8 +688,7 @@ mod cache_tests {
             FusionProductSpace::new([leg(true), leg(false)]),
         );
         checked_layout_primer(rule, &hom).unwrap();
-        let count = hom.fusion_tree_keys(rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, hom, vec![vec![1; 4]; count]).unwrap()
+        DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap()
     }
 
     fn counting_primer(
@@ -703,9 +705,7 @@ mod cache_tests {
         let sid = U1Irrep::new(charge).sector_id();
         let leg = || FusionProductSpace::new([SectorLeg::new([(sid, deg)], false)]);
         let hom = FusionTreeHomSpace::new(leg(), leg());
-        let count = hom.fusion_tree_keys(&rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, vec![vec![deg, deg]; count])
-            .unwrap()
+        DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     }
 
     fn rank_one_source<R>(rule: &R, sector: SectorId, deg: usize) -> DynamicFusionMapSpace
@@ -714,9 +714,7 @@ mod cache_tests {
     {
         let leg = || FusionProductSpace::new([SectorLeg::new([(sector, deg)], false)]);
         let hom = FusionTreeHomSpace::new(leg(), leg());
-        let count = hom.fusion_tree_keys(rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, hom, vec![vec![deg, deg]; count])
-            .unwrap()
+        DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap()
     }
 
     fn u1_rank_one_pair(charge: i32) -> FusionTreePairKey {
@@ -765,12 +763,7 @@ mod cache_tests {
             .unwrap()
             .len();
         assert_eq!(count, 2);
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes_generic(
-            provider,
-            homspace,
-            vec![vec![2, 3, 5]; count],
-        )
-        .unwrap()
+        BoundDynamicFusionMapSpace::from_final_homspace_generic(provider, homspace).unwrap()
     }
 
     fn u1_tensor() -> TestTensor<OutputObservedValue> {
@@ -778,10 +771,7 @@ mod cache_tests {
         let one = U1Irrep::new(1).sector_id();
         let leg = || FusionProductSpace::new([SectorLeg::new([(one, 2)], false)]);
         let homspace = FusionTreeHomSpace::new(leg(), leg());
-        let count = homspace.fusion_tree_keys(&rule).len();
-        let space =
-            DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, vec![vec![2, 2]; count])
-                .unwrap();
+        let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
         let len = space.required_len().unwrap();
         TestTensor::from_vec_with_fusion_space(vec![OutputObservedValue(1.0); len], space).unwrap()
     }
@@ -790,18 +780,7 @@ mod cache_tests {
     where
         R: MultiplicityFreeRigidSymbols,
     {
-        let structure = homspace
-            .coupled_subblock_structure_from_leg_degeneracies(rule)
-            .unwrap();
-        let shapes = homspace
-            .fusion_tree_keys(rule)
-            .iter()
-            .map(|key| {
-                let index = structure.find_block_index_by_fusion_tree_pair(key).unwrap();
-                structure.block(index).unwrap().shape().to_vec()
-            })
-            .collect::<Vec<_>>();
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, homspace, shapes).unwrap()
+        DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap()
     }
 
     fn assert_complete_structure_eq(actual: &BlockStructure, expected: &BlockStructure) {
@@ -1299,7 +1278,6 @@ mod cache_tests {
         for actual in [expected - 1, expected + 1] {
             LOWERED_PRIMER_CALLS.with(|calls| calls.set(0));
             OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-            let scratch_structure_builds_rec = probe::record();
             let data = vec![OutputObservedValue(1.0); actual];
 
             let error = adjoint_bound_dyn(&source, &data).unwrap_err();
@@ -1310,10 +1288,6 @@ mod cache_tests {
             );
             assert_eq!(LOWERED_PRIMER_CALLS.with(Cell::get), 0);
             assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
-            assert_eq!(
-                scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-                0
-            );
         }
     }
 
@@ -1366,36 +1340,12 @@ mod cache_tests {
         // layout is derived directly from the swapped final HomSpace.
         let source = toy_generic_bound::<1>();
         let source_space = source.space();
-        let source_structure = source_space.structure();
-        let source_nout = source_space.nout();
         let homspace = source_space.homspace();
         let adjoint_hom =
             FusionTreeHomSpace::new(homspace.domain().clone(), homspace.codomain().clone());
-        let keys = adjoint_hom
-            .fusion_tree_keys_generic(source.provider())
-            .unwrap();
-        let shapes = keys
-            .iter()
-            .map(|key| {
-                let source_key = BlockKey::FusionTree(FusionTreePairKey::pair(
-                    key.domain_tree().clone(),
-                    key.codomain_tree().clone(),
-                ));
-                let source_block = source_structure
-                    .find_block_index_by_key(&source_key)
-                    .and_then(|index| source_structure.block(index).ok())
-                    .unwrap();
-                let mut shape = source_block.shape()[source_nout..].to_vec();
-                shape.extend_from_slice(&source_block.shape()[..source_nout]);
-                shape
-            })
-            .collect::<Vec<_>>();
-        let reconstructed = DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-            source.provider(),
-            adjoint_hom,
-            shapes,
-        )
-        .unwrap();
+        let reconstructed =
+            DynamicFusionMapSpace::from_final_homspace_generic(source.provider(), adjoint_hom)
+                .unwrap();
 
         let canonical = adjoint_space_dyn_generic(source.provider(), source_space).unwrap();
 
@@ -1502,7 +1452,6 @@ mod cache_tests {
         .try_bind_rule(&rule)
         .unwrap();
         let source = layout;
-        let scratch_structure_builds_rec = probe::record();
 
         let error = adjoint_space_dyn_with_primer(
             &rule,
@@ -1512,9 +1461,5 @@ mod cache_tests {
         .unwrap_err();
 
         assert!(matches!(error, OperationError::MissingBlockKey { .. }));
-        assert_eq!(
-            scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
-            0
-        );
     }
 }

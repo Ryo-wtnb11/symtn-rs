@@ -797,8 +797,7 @@ mod tests {
             FusionProductSpace::new([SectorLeg::new([(vacuum, 3)], false)]),
         );
         let canonical =
-            DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace.clone(), [vec![2, 3]])
-                .unwrap();
+            DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
         let block = canonical.structure().only_block().unwrap();
         let padded_structure = BlockStructure::from_blocks_with_rank(
             2,
@@ -845,7 +844,7 @@ mod tests {
             FusionProductSpace::new([SectorLeg::new([(even, 3), (odd, 3)], false)]),
             FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 2)], false)]),
         );
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![3, 2], vec![3, 2]])
+        DynamicFusionMapSpace::from_final_homspace(&rule, homspace)
             .unwrap()
             .structure()
             .as_ref()

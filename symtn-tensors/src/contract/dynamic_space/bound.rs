@@ -481,66 +481,6 @@ where
         Self::from_derived_with_capability(Arc::clone(&source.provider), space, source.layout_build)
     }
 
-    /// Expert compatibility root from caller-supplied fusion-tree subblock
-    /// shapes, bound to a multiplicity-free provider in one checked pass.
-    pub fn from_degeneracy_shapes<Shapes>(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        let space =
-            DynamicFusionMapSpace::from_degeneracy_shapes(provider.as_ref(), homspace, shapes)?;
-        Self::from_derived(provider, space)
-    }
-
-    /// Test-only shape-admission bridge using lowered metadata (#586
-    /// demotion: external callers use the public final-homspace installer).
-    #[cfg(test)]
-    pub(crate) fn from_degeneracy_shapes_lowered<Shapes>(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        let layout_build = LayoutBuildCapability::checked();
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes_with_key_builder(
-            provider.as_ref(),
-            homspace,
-            shapes,
-            move |rule, homspace| layout_build.prepare(rule, homspace),
-        )?;
-        Self::from_derived_with_capability(provider, space, layout_build)
-    }
-
-    /// Expert compatibility root from caller-supplied fusion-tree subblock
-    /// shapes, bound to a multiplicity-aware provider in one checked pass.
-    pub fn from_degeneracy_shapes_generic<Shapes>(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        validate_generic_provider_style(provider.as_ref())?;
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-            provider.as_ref(),
-            homspace,
-            shapes,
-        )?;
-        Self::from_derived(provider, space)
-    }
-
     fn bind_subset_with_keys(
         mut space: DynamicFusionMapSpace,
         provider: Arc<R>,

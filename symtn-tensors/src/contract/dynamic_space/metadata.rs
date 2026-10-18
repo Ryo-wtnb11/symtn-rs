@@ -8,10 +8,12 @@ use symtn_core::{
 use crate::OperationError;
 use symtn_operations::TensorContractSpec;
 
+// Why not box the checked layout: the value lives on the stack for one
+// constructor call and is consumed by value, so boxing only adds an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum PreparedLayoutKeys {
     Encoded,
-    Staged(PreparedFusionTreeLayout),
     /// Checked staging: the one enumeration path, used by every
     /// multiplicity-free provider.
     Checked(PreparedFusionTreeLayout),
@@ -27,14 +29,14 @@ impl PreparedLayoutKeys {
         R: MultiplicityFreeFusionRule,
     {
         match self {
-            Self::Staged(prepared) | Self::Checked(prepared) => prepared.keys_arc(),
+            Self::Checked(prepared) => prepared.keys_arc(),
             Self::Encoded => homspace.fusion_tree_keys(rule),
         }
     }
 
     pub(super) fn commit(self) {
         let prepared = match self {
-            Self::Staged(prepared) | Self::Checked(prepared) => prepared,
+            Self::Checked(prepared) => prepared,
             Self::Encoded => return,
         };
         prepared.commit();
