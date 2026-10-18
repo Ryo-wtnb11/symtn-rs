@@ -1283,40 +1283,17 @@ fn exp_of_a_real_skew_symmetric_block_is_the_analytic_rotation() {
     }
 }
 
-/// `exp(A) = (Σ_{k≤30} (A/8)^k / k!)^8` in complex arithmetic.
+/// `exp(A) = (Σ_{k≤30} (A/8)^k / k!)^8`.
 ///
-/// The defining series at `||A/8||_1 ≤ 9/8`, where 30 terms are exact to the
-/// last bit, followed by three squarings. It shares no Padé table, no
-/// balancing, no `theta` dispatch and no dense solve with the implementation.
+/// The defining series ([`taylor_exp`]) at `||A/8||_1 ≤ 3/2`, where 30 terms
+/// are exact to the last bit, followed by three squarings. It shares no Padé
+/// table, no balancing, no `theta` dispatch and no dense solve with the
+/// implementation.
 fn series_exp(matrix: &[Complex64], order: usize) -> Vec<Complex64> {
-    let product = |left: &[Complex64], right: &[Complex64]| {
-        let mut out = vec![Complex64::zero(); order * order];
-        for column in 0..order {
-            for row in 0..order {
-                out[row + order * column] = (0..order)
-                    .map(|inner| left[row + order * inner] * right[inner + order * column])
-                    .sum();
-            }
-        }
-        out
-    };
     let eighth: Vec<Complex64> = matrix.iter().map(|&entry| entry / 8.0).collect();
-    let mut term = vec![Complex64::zero(); order * order];
-    for index in 0..order {
-        term[index + order * index] = Complex64::new(1.0, 0.0);
-    }
-    let mut result = term.clone();
-    for step in 1..=30 {
-        term = product(&term, &eighth)
-            .into_iter()
-            .map(|entry| entry / step as f64)
-            .collect();
-        for (accumulated, &value) in result.iter_mut().zip(&term) {
-            *accumulated += value;
-        }
-    }
+    let mut result = taylor_exp(&eighth, order, 30);
     for _ in 0..3 {
-        result = product(&result, &result);
+        result = matmul(&result, &result, order);
     }
     result
 }
@@ -1477,30 +1454,35 @@ const EXP_MULTITREE_SCALE: f64 = 0.3;
 /// misplaced tree block, which moves entries by O(1).
 const EXP_MULTITREE_TOL: f64 = 1e-11;
 
+/// Column-major `order x order` product, by hand.
+fn matmul(left: &[Complex64], right: &[Complex64], order: usize) -> Vec<Complex64> {
+    let mut out = vec![Complex64::zero(); order * order];
+    for column in 0..order {
+        for row in 0..order {
+            out[row + order * column] = (0..order)
+                .map(|inner| left[row + order * inner] * right[inner + order * column])
+                .sum();
+        }
+    }
+    out
+}
+
 /// `exp(A)` by its defining series `Σ_k A^k / k!`, summed to `terms`.
 ///
 /// Deliberately shares nothing with the implementation: no scaling, no
 /// squaring, no Padé coefficients, no dense solve — only GEMM by hand.
-fn taylor_exp(matrix: &[f64], order: usize, terms: usize) -> Vec<f64> {
-    let mut result = vec![0.0_f64; order * order];
-    let mut term = vec![0.0_f64; order * order];
+fn taylor_exp(matrix: &[Complex64], order: usize, terms: usize) -> Vec<Complex64> {
+    let mut term = vec![Complex64::zero(); order * order];
     for index in 0..order {
-        term[index + order * index] = 1.0;
-        result[index + order * index] = 1.0;
+        term[index + order * index] = Complex64::new(1.0, 0.0);
     }
-    let mut next = vec![0.0_f64; order * order];
+    let mut result = term.clone();
     for step in 1..=terms {
-        for column in 0..order {
-            for row in 0..order {
-                let mut sum = 0.0_f64;
-                for inner in 0..order {
-                    sum += term[row + order * inner] * matrix[inner + order * column];
-                }
-                next[row + order * column] = sum / step as f64;
-            }
-        }
-        term.copy_from_slice(&next);
-        for (accumulated, &value) in result.iter_mut().zip(term.iter()) {
+        term = matmul(&term, matrix, order)
+            .into_iter()
+            .map(|entry| entry / step as f64)
+            .collect();
+        for (accumulated, &value) in result.iter_mut().zip(&term) {
             *accumulated += value;
         }
     }
@@ -1563,7 +1545,11 @@ fn assert_multitree_exp_matches_the_series(
             (image_sector, image_order),
             "{what}: layout"
         );
-        let expected = taylor_exp(source, *order, 60);
+        let widened: Vec<Complex64> = source.iter().map(|&v| Complex64::new(v, 0.0)).collect();
+        let expected: Vec<f64> = taylor_exp(&widened, *order, 60)
+            .into_iter()
+            .map(|entry| entry.re)
+            .collect();
         let tolerance = EXP_MULTITREE_TOL * expected.iter().fold(1.0_f64, |m, v| m.max(v.abs()));
         for column in 0..*order {
             for row in 0..*order {
