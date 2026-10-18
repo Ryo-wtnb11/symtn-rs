@@ -253,12 +253,23 @@ are part of the Rust type and of the `ProductSector` label; `U(1) ⊠ fZ2` and
   legs, `restrict_leg` (also batched), `is_diagonal`, and the structural
   degeneracy operations behind the same bounds: compact
   `TensorMap::diagonal` and `expert::diagonal_spectrum`, `embed_leg`, `cat`
-  along either side, and serialization decode (`from_bytes_with`). Those
-  weights read the real
+  along either side, and serialization decode (`from_bytes_with`), and the
+  blockwise factorizations: `svd_vals`/`svd_compact`/`svd_full`, QR and LQ
+  (compact and full), left and right polar, `eigh_vals`/`eigh_full`,
+  `eig_vals`/`eig_full`, `left_null`/`right_null`, `exp`, `inv`, `pinv`,
+  `solve` and `map_diagonal`, together with truncation
+  (`GradedSpace::find_truncated`, then `restrict_leg`). Those weights,
+  truncation included, read the real
   quantum dimension: a `Complex64` dimension with a nonzero imaginary part
   is refused with `InvalidArgument`, since no unitary category has one.
-  Ordinary arbitrary-axis contraction, factorization, and general network
-  execution are not supported or claimed.
+  `TableRule` payloads are `Complex64` only, so the prepared batched
+  `EighFullPlan`, which admits real payloads only, refuses them with its
+  typed error. Ordinary arbitrary-axis contraction, `trace_pairs`, prepared
+  contraction and composition plans, twist, flip, and general network
+  execution are not supported or claimed; a planar contraction is the
+  crossing-free `transpose` of each operand followed by `compose`, as in
+  TensorKit's `planarcontract!`. CUDA storage does not accept complex-symbol
+  rules (a compile-time boundary).
   A fusion-only table reports `NoBraiding`: every operation that needs an
   R-symbol or a twist is rejected with its typed error before any provider
   call, and `r_symbol_scalar`/`twist_scalar` are defined only for a braided

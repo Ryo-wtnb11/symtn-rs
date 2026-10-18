@@ -152,7 +152,7 @@ pub(crate) struct BoundTensorMap<R, D> {
 #[cfg(test)]
 impl<R, D> BoundTensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     pub fn try_new(provider: Arc<R>, tensor: TestTensor<D>) -> Result<Self, OperationError> {
         let space = BoundDynamicFusionMapSpace::bind_multiplicity_free(
@@ -199,7 +199,7 @@ impl<R, D> std::ops::Deref for BoundTensorMap<R, D> {
 #[cfg(test)]
 impl<'a, R, D> BoundTensorMapRef<'a, R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     pub fn space(&self) -> &'a BoundDynamicFusionMapSpace<R> {
         self.space
@@ -299,7 +299,7 @@ pub(crate) fn adjoint_bound_factor<R, D>(
     factor: &BoundDynFactor<R, D>,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let (space, data) = symtn_tensors::adjoint_bound_dyn(factor.space(), factor.data())?;
@@ -313,7 +313,7 @@ pub(crate) fn typed_from_bound_factor<R, D>(
     factor: BoundDynFactor<R, D>,
 ) -> Result<BoundTensorMap<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     let (space, data) = factor.into_parts();
     let tensor = TestTensor::from_dyn(data, space.space().clone())

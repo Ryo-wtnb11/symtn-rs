@@ -553,7 +553,7 @@ where
         workspace: &mut EighFullWorkspace<R, D, Self>,
     ) -> Result<(), BatchError>
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec;
+        R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec;
 }
 
 impl<R, D> FactorExec<R, D> for Vec<D>
@@ -594,7 +594,7 @@ where
         workspace: &mut EighFullWorkspace<R, D>,
     ) -> Result<(), BatchError>
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     {
         plan.run_host(source, buffers, &mut workspace.sorted)
     }

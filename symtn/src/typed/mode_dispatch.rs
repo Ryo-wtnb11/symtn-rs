@@ -89,8 +89,10 @@ where
 impl<R> TypedTruncationDispatch<R> for MultiplicityFreeAdmissionMode
 where
     R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + MultiplicityFreeRigidSymbols
         + CheckedFusionAlgebra,
+    MultiplicityFreeAdmissionMode: symtn_tensors::RigidCoefficientAlgebra<R>
+        + symtn_tensors::CoefficientAlgebra<R, Error = symtn_tensors::OperationError>,
 {
     fn decide_bond_truncation<V>(
         provider: &R,

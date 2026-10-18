@@ -92,7 +92,7 @@ impl CompactFactorPlan {
         input: &BoundDynamicFusionMapSpace<R>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+        R: MultiplicityFreeRigidSymbols,
     {
         input.rebind_validated(&self.left_layout)
     }
@@ -103,7 +103,7 @@ impl CompactFactorPlan {
         input: &BoundDynamicFusionMapSpace<R>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+        R: MultiplicityFreeRigidSymbols,
     {
         input.rebind_validated(&self.right_layout)
     }
@@ -115,7 +115,7 @@ impl CompactFactorPlan {
         input: &BoundDynamicFusionMapSpace<R>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+        R: MultiplicityFreeRigidSymbols,
     {
         leg_bond_space::<MultiplicityFreeAdmissionMode, R>(
             input,
@@ -196,7 +196,7 @@ pub(super) fn compact_factor_plan<R>(
     input: &BoundDynamicFusionMapSpace<R>,
 ) -> Result<Option<CompactFactorPlan>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     build_compact_factor_plan(input, input.validated_layout())
 }
@@ -206,7 +206,7 @@ pub(super) fn build_compact_factor_plan<R>(
     source_layout: ValidatedDynamicFusionLayout,
 ) -> Result<Option<CompactFactorPlan>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     let space = input.space();
     let Some(regions) = checked_sector_regions(space.structure(), space.nout())? else {
@@ -238,7 +238,7 @@ pub fn compact_factor_routes<R>(
     input: &BoundDynamicFusionMapSpace<R>,
 ) -> Result<CompactFactorPlan, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     let space = input.space();
     let regions = checked_sector_regions(space.structure(), space.nout())?.ok_or(
@@ -255,7 +255,7 @@ fn route_compact_factors<R>(
     regions: Arc<[CoupledSectorRegion]>,
 ) -> Result<CompactFactorPlan, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     let space = input.space();
     let bond = compact_bond_leg(&regions);
@@ -397,7 +397,7 @@ pub(crate) fn compact_factor_plan_for_test<R>(
     input: &BoundDynamicFusionMapSpace<R>,
 ) -> Result<Option<CompactFactorPlan>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
 {
     compact_factor_plan(input)
 }

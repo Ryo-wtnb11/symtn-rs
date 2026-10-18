@@ -260,7 +260,7 @@ pub(crate) fn qr_full<E, R, D>(
 ) -> Result<Qr<BoundTensorMap<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let Qr { q, r } = qr_full_dyn(dense, &input.dynamic())?;
@@ -277,7 +277,7 @@ pub(crate) fn qr_full_dyn<E, R, D>(
 ) -> Result<Qr<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();
@@ -330,7 +330,7 @@ pub(crate) fn lq_full<E, R, D>(
 ) -> Result<Lq<BoundTensorMap<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let Lq { l, q } = lq_full_dyn(dense, &input.dynamic())?;
@@ -347,7 +347,7 @@ pub(crate) fn lq_full_dyn<E, R, D>(
 ) -> Result<Lq<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();
@@ -387,7 +387,7 @@ pub(crate) fn qr_compact<E, R, D>(
 ) -> Result<Qr<BoundTensorMap<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let Qr { q, r } = qr_compact_dyn(dense, &input.dynamic())?;
@@ -404,7 +404,7 @@ pub(crate) fn qr_compact_dyn<E, R, D>(
 ) -> Result<Qr<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     // Why the checked entry has no direct-region plan: a plan needs both
@@ -792,7 +792,7 @@ pub(crate) fn lq_compact_adjoint_dyn<E, R, D>(
 ) -> Result<Lq<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let parent_space = parent.space().space();
@@ -852,7 +852,7 @@ pub(crate) fn lq_full_adjoint_dyn<E, R, D>(
 ) -> Result<Lq<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let Some(AdjointLayout {
@@ -1062,7 +1062,7 @@ pub(crate) fn lq_compact<E, R, D>(
 ) -> Result<Lq<BoundTensorMap<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let Lq { l, q } = lq_compact_dyn(dense, &input.dynamic())?;
@@ -1079,7 +1079,7 @@ pub(crate) fn lq_compact_dyn<E, R, D>(
 ) -> Result<Lq<BoundDynFactor<R, D>>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     if let Some(plan) = compact_factor_plan(input.space())? {

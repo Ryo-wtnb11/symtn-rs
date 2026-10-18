@@ -52,7 +52,7 @@ pub(super) fn diagonal_bond_svd_factor<R, D, V>(
     to_scalar: &dyn Fn(V) -> D,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     V: Copy,
 {
@@ -327,7 +327,7 @@ pub(crate) fn svd_vals<E, R, D>(
 ) -> Result<Vec<SectorSpectrum>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_vals_dyn(dense, &input.dynamic())
@@ -450,7 +450,7 @@ pub(crate) fn svd_compact<E, R, D>(
 ) -> Result<SvdCompact<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let out = svd_compact_dyn(dense, &input.dynamic())?;
@@ -482,7 +482,7 @@ pub(crate) fn svd_compact_diagonal_factors_dyn<R, D>(
     spectrum: &[SectorSpectrum<D>],
 ) -> Result<SvdFactorsDyn<R, D>, OperationError>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let bond = diagonal_bond(
@@ -648,7 +648,7 @@ pub(crate) fn svd_compact_factors_dyn<E, R, D>(
 ) -> Result<SvdFactorsDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_compact_factors_dyn_with_gauge(dense, input, CompactSvdGauge::Left)
@@ -664,7 +664,7 @@ pub(crate) fn svd_compact_adjoint_factors_dyn<E, R, D>(
 ) -> Result<SvdFactorsDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_compact_factors_dyn_with_gauge(dense, input, CompactSvdGauge::AdjointLeft)
@@ -773,7 +773,7 @@ fn svd_compact_factors_dyn_with_gauge<E, R, D>(
 ) -> Result<SvdFactorsDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();
@@ -1235,7 +1235,7 @@ pub(crate) fn svd_compact_dyn<E, R, D>(
 ) -> Result<SvdCompactDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let (u, vh, singular_values) = svd_compact_factors_dyn(dense, input)?;
@@ -1379,7 +1379,7 @@ pub(crate) fn svd_full<E, R, D>(
 ) -> Result<SvdFull<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let out = svd_full_dyn(dense, &input.dynamic())?;
@@ -1398,7 +1398,7 @@ pub(crate) fn svd_full_dyn<E, R, D>(
 ) -> Result<SvdFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_full_oriented_dyn(dense, input, FactorPlacement::Direct)
@@ -1412,7 +1412,7 @@ pub(crate) fn svd_full_factors_dyn<E, R, D>(
 ) -> Result<SvdFullFactorsDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_full_oriented_factors_dyn(dense, input, FactorPlacement::Direct)
@@ -1425,7 +1425,7 @@ pub(crate) fn svd_full_adjoint_factors_dyn<E, R, D>(
 ) -> Result<SvdFullFactorsDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_full_oriented_factors_dyn(dense, input, FactorPlacement::Adjoint)
@@ -1439,7 +1439,7 @@ pub(crate) fn svd_full_adjoint_dyn<E, R, D>(
 ) -> Result<SvdFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     svd_full_oriented_dyn(dense, input, FactorPlacement::Adjoint)
@@ -1600,7 +1600,7 @@ pub(super) fn svd_full_oriented_dyn<E, R, D>(
 ) -> Result<SvdFullDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let parts = svd_full_oriented_factors_dyn(dense, input, placement)?;
@@ -1626,7 +1626,7 @@ fn svd_full_oriented_factors_dyn<E, R, D>(
 ) -> Result<SvdFullFactorsDyn<R, D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
     let space = input.space().space();

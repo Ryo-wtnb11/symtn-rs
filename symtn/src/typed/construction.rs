@@ -83,6 +83,12 @@ where
     /// One fusion-tree layout admission plus one `O(stored_len)` zeroed
     /// payload allocation.
     ///
+    /// A [`TableRule`](crate::sector::TableRule) payload is `Complex64` even
+    /// where F is real (Fibonacci, Ising). This is stricter than TensorKit,
+    /// which types real-F data by `fusionscalartype` and only braiding by
+    /// `braidingscalartype`: a symtn provider has one `Scalar` for F, R and
+    /// the twist, and an operation never changes the payload dtype implicitly.
+    ///
     /// ```compile_fail
     /// use std::sync::Arc;
     /// use symtn::sector::{TableRule, TableSector};
