@@ -245,6 +245,30 @@ fn ising_spectra_satisfy_weighted_trace_identities() {
     spectra_satisfy_weighted_trace_identities(&Case::ising());
 }
 
+/// Equal sector labels and, per sector, equal values in order.
+fn assert_same_spectra<U: Copy + Into<Complex64>, W: Copy + Into<Complex64>>(
+    what: &str,
+    got: &[SectorSpectrum<TableSector, U>],
+    want: &[SectorSpectrum<TableSector, W>],
+) {
+    assert_eq!(got.len(), want.len(), "{what}: sectors");
+    for (g, w) in got.iter().zip(want) {
+        assert_eq!(g.sector, w.sector, "{what}: sector labels");
+        assert_eq!(g.values.len(), w.values.len(), "{what}: {:?}", g.sector);
+        let scale = w
+            .values
+            .iter()
+            .fold(0.0_f64, |m, &v| m.max(v.into().norm()));
+        for (&x, &y) in g.values.iter().zip(&w.values) {
+            assert!(
+                (x.into() - y.into()).norm() <= 4096.0 * f64::EPSILON * scale.max(1.0),
+                "{what}: sector {:?}",
+                g.sector
+            );
+        }
+    }
+}
+
 /// Rank–nullity per coupled sector: the null space of a map whose `V ⊗ V`
 /// side has `dim_c(V⊗V)` states has `dim_c(V⊗V) − rank_c` of them, `rank_c`
 /// the number of nonzero singular values of the block.
@@ -338,11 +362,30 @@ fn decompositions_reconstruct(case: &Case) {
         &hermitian,
     );
     assert_isometry("eigh v", runtime, &eigh.v);
+    // The values-only spectra are the factor's diagonal, sector by sector.
+    assert_same_spectra(
+        "eigh_vals vs diag(eigh d)",
+        &hermitian
+            .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+            .unwrap(),
+        &eigh.d.diagview().unwrap(),
+    );
     let eig = t.eig_full(&[0, 1], &[2, 3]).unwrap();
     assert_near(
         "t v = v d",
         &t.compose(&eig.v).unwrap(),
         &eig.v.compose(&eig.d).unwrap(),
+    );
+    assert_same_spectra(
+        "eig_vals vs diag(eig d)",
+        &t.eig_vals(&[0, 1], &[2, 3]).unwrap(),
+        &eig.d.diagview().unwrap(),
+    );
+    // `t v = v d` alone holds for `v = 0`: `v` must be invertible.
+    assert_near(
+        "inv(eig v) eig v",
+        &eig.v.inv(&[0, 1], &[2]).unwrap().compose(&eig.v).unwrap(),
+        &identity(runtime, &eig.v.domain()),
     );
 
     // exp(h) = v exp(d) v^H; inv(t) t = id; t solve(t, y) = y.
@@ -435,7 +478,8 @@ fn ising_decompositions_reconstruct() {
 /// TensorKit's `SectorVector` truncation (`findtruncated`), written out over
 /// the `d_c`-weighted spectrum: every policy keeps a prefix of the values in
 /// descending order. `rank(n)` keeps values while the running `Σ d_c` stays
-/// `≤ n`; `absolute_cutoff(a)` keeps `σ > a`; an error budget `ε` discards
+/// `≤ n`; `absolute_cutoff(a)` keeps `σ ≥ a`
+/// (MatrixAlgebraKit `findtruncated_svd`, `searchsortedlast` with `rev = true`); an error budget `ε` discards
 /// from the smallest value while the discarded `Σ d_c σ²` stays `≤ ε²`. The
 /// reported error is `√(Σ_discarded d_c σ²)`.
 enum ByHand {
@@ -465,7 +509,7 @@ fn truncate_by_hand(
                 })
                 .count()
         }
-        ByHand::Cutoff(a) => flat.iter().take_while(|&&(s, _)| s > a).count(),
+        ByHand::Cutoff(a) => flat.iter().take_while(|&&(s, _)| s >= a).count(),
         ByHand::Error(eps) => {
             let mut discarded = 0.0;
             let dropped = flat
@@ -554,6 +598,20 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
             "{what}: distance"
         );
     }
+
+    // A cutoff exactly at a singular value keeps that value.
+    let at = spectrum[0].values[1];
+    let (want_dims, _) = truncate_by_hand(case, &spectrum, &ByHand::Cutoff(at));
+    let found = s.domain()[0]
+        .find_truncated(
+            &s.diagview().unwrap(),
+            &Truncation::absolute_cutoff(at).unwrap(),
+        )
+        .unwrap();
+    let s = s
+        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .unwrap();
+    assert_eq!(degeneracies(&s.domain()[0]), want_dims, "cutoff at σ");
 }
 
 #[test]
