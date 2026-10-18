@@ -1773,9 +1773,8 @@ fn exp_of_a_hermitian_endomorphism_is_the_spectral_route() {
     // Hermitian, as Julia's `exp!` publishes it.
     //
     // The reference is computed rather than frozen because a frozen one is a
-    // pin on the platform's LAPACK: the constants this test used to carry were
-    // right on macOS and a few ULP off on Linux, so CI failed on values that
-    // were never the point. The spy counters above are what catch a reroute onto
+    // pin on the platform's LAPACK: frozen constants right on macOS are a few
+    // ULP off on Linux, and CI would fail on values that are not the point. The spy counters above are what catch a reroute onto
     // Pade; the values check that the route publishes `v exp(d) v^H`.
     let tensor = hermitian_exp_fixture();
     let mut spy = ScriptedExecutor::<MatrixFunctionCallSpy>::default();
@@ -2250,10 +2249,10 @@ fn balancing_takes_its_machine_bounds_from_the_single_precision_component() {
 
 #[test]
 fn exp_of_a_single_precision_block_spanning_the_whole_f32_range() {
-    // What: the P1 regression, through the public facade. Every entry of
-    // `A = [0 3e38; 1e-45 0]` and of its exponential is a finite `f32`, but
-    // balancing with the *double* machine bounds produces a factor that is
-    // `inf` in `f32`, and the Pade evaluation behind it went to all-NaN.
+    // What: through the public facade, every entry of
+    // `A = [0 3e38; 1e-45 0]` and of its exponential is a finite `f32`.
+    // Balancing with the *double* machine bounds would produce a factor that
+    // is `inf` in `f32` and send the Pade evaluation to all-NaN.
     //
     // Oracle, Julia 1.11.6: `exp(Float32[0 3f38; 1f-45 0])` is
     // `Float32[1.0000002 3.0000004f38; 1.0f-45 1.0000002]`, and the `ComplexF32`
@@ -2396,8 +2395,8 @@ fn exp_rejects_a_block_whose_column_norm_overflows() {
     // factor of five of `f64::MAX`, which puts LAPACK's overflow guards (`ca`
     // and `ra` against `sfmax2`) in the way of any radix step, and the column
     // sum stays infinite. A block whose imbalance balancing *can* undo —
-    // `[1e308 1; 1e308 2]`, this fixture before #577's balancing existed — is
-    // no longer refused and is not meant to be: Julia reaches the same finite
+    // `[1e308 1; 1e308 2]` — is not refused (#577 balancing), and is not
+    // meant to be: Julia reaches the same finite
     // balanced norm on it and exponentiates it.
     let tensor = u1_block_endomorphism(&[(0, 2, vec![1e308_f64, 1e308, 2e307, 1e308])]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();

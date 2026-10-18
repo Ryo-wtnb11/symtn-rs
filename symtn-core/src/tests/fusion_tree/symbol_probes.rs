@@ -1,8 +1,8 @@
 use super::*;
 
-// --- Stage 0 spike: complex-`Scalar` fusion rule through the recoupling
-// engine. symtn-core has so far only ever instantiated `Scalar = f64`
-// providers; Fibonacci anyons need `Scalar = Complex64`. This probe rule
+// --- Probe: complex-`Scalar` fusion rule through the recoupling
+// engine. Most symtn-core providers use `Scalar = f64`; Fibonacci anyons
+// need `Scalar = Complex64`. This probe rule
 // is *not* a physical anyon model (its F-symbol is a constant 1, so it
 // makes no pentagon claim) — it exists purely to prove that
 // `multiplicity_free_braid_tree` / `FusionTermAccumulator` compile and
@@ -117,7 +117,7 @@ fn complex_scalar_braid_tree_expands_multichannel_loop_stage0_spike() {
     // d)` loop branch of `multiplicity_free_artin_braid_at_with_inverse`
     // (f_symbol_scalar * r_symbol_scalar * conj composition) —
     // this is the part of the engine Fibonacci's Simple-fusion braid
-    // actually needs (the rank-2 spike above only reaches the
+    // actually needs (the rank-2 probe above only reaches the
     // single-r-symbol `index == 0` branch).
     let rule = ComplexScalarProbeRule;
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [1], [1, 1])

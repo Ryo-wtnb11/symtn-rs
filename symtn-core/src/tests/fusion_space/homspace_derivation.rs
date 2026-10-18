@@ -44,7 +44,7 @@ where
 
 #[test]
 fn fusion_tree_keys_match_materialized_cartesian_oracle_across_ranks_and_duals() {
-    // What: public key enumeration keeps the old tuple order without
+    // What: public key enumeration keeps the Cartesian tuple order without
     // reusing the production visitor in the test oracle.
     let rule = Z4PointedRule;
     let leg = |sectors: &[usize], is_dual| {

@@ -1,4 +1,4 @@
-//! symtn's structure caches (#2014): process-global, byte-bounded, one
+//! symtn's structure caches: process-global, byte-bounded, one
 //! wrapper over `quick_cache` for every one of them, and one registry of all
 //! of them.
 //!
@@ -168,8 +168,7 @@ pub struct StructureCache<K, V: ?Sized> {
     /// therefore either wiped by the clear or refused by the epoch check.
     publication: RwLock<()>,
     /// The last admitted entry: a repeated hit compares keys (an `Arc`
-    /// pointer first) instead of hashing one. The former layout cache kept
-    /// the same front for the same reason. Why weak: the front must not keep
+    /// pointer first) instead of hashing one. Why weak: the front must not keep
     /// an entry alive once the budget evicted it, so it retains no charged
     /// bytes; an evicted entry no caller holds simply misses here.
     last: RwLock<Option<(K, Weak<V>)>>,
@@ -435,7 +434,7 @@ pub trait ErasedStructureCacheControl: Sync {
     fn set_byte_budget(&self, bytes: u64);
 }
 
-/// Process default of every structure cache's byte budget (#1993, D4).
+/// Process default of every structure cache's byte budget.
 pub(crate) const DEFAULT_STRUCTURE_CACHE_BYTE_BUDGET: u64 = 64 * 1024 * 1024;
 
 /// The slot of an externally owned kind: its owner registers on first use.

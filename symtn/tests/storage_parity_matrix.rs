@@ -1,8 +1,8 @@
 //! Cross-storage matrix for the typed methods unified over storage (#1756).
 //!
 //! Host rows always run; CUDA rows compare the device result with the Host
-//! result on the same fixture and need a real device. Each #1756 leaf adds
-//! its family.
+//! result on the same fixture and need a real device. Every unified family
+//! has rows here.
 //!
 //! Oracles are hand sums over the entries the fixtures write
 //! (`norm(t, p) = (Σ_c dim(c) Σ_ij |t_c[i,j]|^p)^(1/p)`, `norm(t, Inf) = max`,
@@ -533,7 +533,7 @@ fn cuda_rows_match_host() {
         let mut expected = owned_b_host.materialize().unwrap();
         lazy_a.axpby_into(&mut expected, alpha, beta).unwrap();
         same("lazy axpby_into", destination.clone(), expected);
-        // The destination checks still run first (#1756 L2).
+        // The destination checks still run first (#1756).
         let shared = destination.clone();
         assert_eq!(
             lazy_dev

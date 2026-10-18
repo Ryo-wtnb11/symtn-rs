@@ -176,7 +176,7 @@ where
     /// The payload a space-only rewrite (unit-leg insert/remove) may install
     /// in its new body: a dense payload is shared at pointer cost; a lazy
     /// adjoint or a compact spectrum goes through [`Self::materialize`] into
-    /// a **fresh** dense payload (one copy) — the #613 Group 4 contract.
+    /// a **fresh** dense payload (one copy) — the unit-leg payload contract (#613).
     ///
     /// Infallible for the reason [`TypedTensorBody::materialized_dense_data`]
     /// is: the diagonal fill is total on a bond space this module built from

@@ -520,7 +520,7 @@ const EXPERT: &[&str] = &[
     "reset_cpu_session_stats",
     "reset_cuda_transfer_stats",
 ];
-/// The one public control of the process-global structure caches (#2014-3).
+/// The one public control of the process-global structure caches.
 const CACHE: &[&str] = &[
     "StructureCacheInfo",
     "StructureCacheKind",

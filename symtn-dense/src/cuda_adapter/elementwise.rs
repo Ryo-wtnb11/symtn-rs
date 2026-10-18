@@ -192,8 +192,8 @@ pub(super) fn submit_region_axpby<D: CudaScalar>(
 /// operand (a context `1` or zero-template coefficient, or any
 /// [`cuda_region_zero`]) that is used from a
 /// thread other than the one that created it can force a device-wide
-/// synchronize per call. Today every such call happens under the device lease,
-/// which serializes them; a future multi-threaded device executor should keep
+/// synchronize per call. Every such call happens under the device lease,
+/// which serializes them; a multi-threaded device executor must keep
 /// operand creation and use on the same stream slot or pass its own
 /// coefficient buffer.
 #[allow(clippy::too_many_arguments)]
@@ -536,10 +536,9 @@ pub fn cuda_region_trace_accumulate<D: CudaScalar>(
 /// Copies the leading compact `rows x cols` block of a device buffer into a
 /// packed sub-region of `dst`.
 ///
-/// Tenferro 0.5.0's `copy_read_into` accepted an offset/strided destination
-/// view but required a compact source view at offset 0 (0.6.0 accepts strided
-/// sources, tenferro-rs#1836; adopting that is leaf M4), so the source is read
-/// from its start; the caller owns the proof that the destination region's tree layout
+/// The source is passed to tenferro's `copy_read_into` as a compact view at
+/// offset 0 (strided sources, tenferro-rs#1836, are not used here), so it is
+/// read from its start; the caller owns the proof that the destination region's tree layout
 /// is identical to what it reads (see `CompactFactorPlan::left_preserves_trees`). A source longer
 /// than the region is accepted because contiguity is a layout predicate: the
 /// leading `rows * cols` elements of a compact buffer are themselves compact,

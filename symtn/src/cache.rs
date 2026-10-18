@@ -25,12 +25,10 @@
 //! This mirrors TensorKit's `GLOBAL_CACHES` with `empty_globalcaches!` and
 //! `global_cache_info` (`caches.jl:1-11` @cfaa073).
 //!
-//! Since #2014-4 the composed coefficients are one process-global cache, so
-//! several Runtimes working on disjoint transforms share its one budget
-//! (before, each Runtime retained up to 64 MiB of per-group coefficients
-//! plus 64 MiB of per-structure plans). Its largest admissible entry is
-//! [`StructureCacheInfo::max_entry_bytes`]: 65,095,598 B at the default
-//! budget (the per-Runtime tiers admitted 67,108,864 B). Raise its budget
+//! The composed coefficients are one process-global cache, so several
+//! Runtimes working on disjoint transforms share its one budget. Its largest
+//! admissible entry is [`StructureCacheInfo::max_entry_bytes`]: 65,095,598 B
+//! at the default budget. Raise its budget
 //! with [`configure_budgets`] when a workload needs more.
 //!
 //! A cache hit is interchangeable with a rebuild, so clearing or sizing these

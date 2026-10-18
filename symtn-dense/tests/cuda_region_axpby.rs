@@ -1,6 +1,6 @@
 //! Device tests for `cuda_region_axpby` / `cuda_region_zero`, the strided
 //! N-D region primitive the device structural operations are built on
-//! (`reviews/gpu-phase-20260920/g2-design.md` §8, issue #1301).
+//! (issue #1301).
 //!
 //! The oracle in every value test is an independent host strided loop over the
 //! same index space; nothing here is derived from a symtn descriptor, and the
@@ -721,7 +721,7 @@ fn a_broadcast_source_axis_forms_an_outer_product() {
 
 /// The diagonal of a strided square block, read as one axis of stride
 /// `s_row + s_col` and written into a packed vector. This is the read view the
-/// device trace is built on; the sum over it is a later leaf.
+/// device trace is built on; the trace sums over it.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_diagonal_source_view_extracts_the_block_diagonal() {
@@ -1150,7 +1150,7 @@ fn a_descriptor_scale_multiplies_the_move_in_both_dtypes() {
 fn the_zero_coefficient_operand_multiplies_on_a_fresh_context() {
     // What: `CudaRegionCoefficient::Zero` is an exact zero *operand*, so the
     // source is still read and multiplied — a NaN survives it, where a
-    // descriptor scale of zero (now rejected) would have erased it. The context
+    // descriptor scale of zero (rejected) would erase it. The context
     // is fresh, so this also executes the lazy one-element template upload and
     // proves the second call needs none.
     let mut ctx = context();

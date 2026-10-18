@@ -24,12 +24,12 @@ Mirrors `benchmarks/operation_matrix.md`:
   one iteration. Nothing calls the operation before this: `bench` hands the
   first call's output back to the caller, which is what the correctness check
   consumes.
-  Since #1278, `Runtime` construction warms the tenferro backend libraries
-  (cuTENSOR, cuSOLVER/cuBLAS handles), so `cold` no longer contains that
-  one-time handle initialization; it happens before the fixture is built. What
-  a `cold` cell still carries beyond the warm cost is CubeCL's NVRTC compile of
-  each kernel family it first touches and the cuTENSOR plan for its shape.
-  Records taken before that change (`cuda-baseline-2026-09-20.md`) include the
+  `Runtime` construction warms the tenferro backend libraries (cuTENSOR,
+  cuSOLVER/cuBLAS handles, #1278), so `cold` does not contain that one-time
+  handle initialization; it happens before the fixture is built. What a `cold`
+  cell carries beyond the warm cost is CubeCL's NVRTC compile of each kernel
+  family it first touches and the cuTENSOR plan for its shape. The dated record
+  `cuda-baseline-2026-09-20.md` predates the warm-up and includes the
   initialization in every `cold` cell.
 - `first_after_setup`: used instead of `cold` for the two transfer rows, whose
   measured operation (`to_cuda`) also runs while the fixture is built. This
@@ -62,8 +62,8 @@ The header line `# runtime_build_ns first=... second=...` reports one
 observations rather than medians. `first` is the process's first CUDA Runtime
 and also pays CUDA context creation; `second` is a second fresh Runtime in the
 same process, whose CUDA context is warm but whose tenferro backend instance,
-and so whose #1278 warm-up, is new. The line exists so that the backend
-initialization the `cold` cells no longer carry stays visible.
+and so whose backend warm-up, is new. The line exists so that the backend
+initialization the `cold` cells do not carry stays visible.
 
 ### Synchronization and the completion barrier
 
@@ -93,7 +93,7 @@ buffers, not bytes retained.
 | Dimension | Values |
 |---|---|
 | provider | `U1`, `fZ2`, `SU2`, `U1xfZ2` (fermion parity x U(1) product) |
-| dtype | `f64`, `c64` (`qr_compact` rows are real-payload only, the pinned row set; device QR admits every payload since #1271) |
+| dtype | `f64`, `c64` (`qr_compact` rows are real-payload only, the pinned row set; device QR admits every payload, #1271) |
 | family | `many-small`, `few-large` |
 | operation | `to_cuda`, `to_host`, `contract_direct`, `contract_lazy_adjoint_lhs`, `compose`, `scale`, `add_owned`, `add_lazy_fold`, `norm`, `inner`, `svd_compact`, `svd_trunc_composition`, `eigh_full`, `qr_compact`, `network_chain3` |
 | target | `cuda`, `host` |
@@ -106,9 +106,8 @@ codomain against whole domain, canonical order, identity output order).
 uses `Truncation::rank(degeneracy)`; `network_chain3` is the canonical three-tensor
 `[p; s] = a[p; q] * b[q; r] * c[r; s]` chain, run with `Network::contract`.
 
-`svd_trunc_composition` replaces the `svd_trunc_rank` row of earlier
-revisions (#1297). The truncated SVD is no longer an operation of its own
-(#1534); both arms measure the composition. The `cuda` arm runs device
+The truncated SVD is not an operation of its own (#1534), so
+`svd_trunc_composition` measures the composition in both arms. The `cuda` arm runs device
 `svd_compact`, a D2H of all three factors, then the Host `diagview` /
 `find_truncated` / `restrict_leg` chain; the `host` arm
 runs the same chain on Host `svd_compact`. The two arms are therefore not the

@@ -1,4 +1,4 @@
-//! `StackedTensorMap` transfers on a real device (#1497, leaf L1 of #1287).
+//! `StackedTensorMap` transfers on a real device (#1497).
 //!
 //! Its own binary with one test, because `cuda_transfer_stats` is
 //! process-wide. Run with `cargo test -p symtn --no-default-features

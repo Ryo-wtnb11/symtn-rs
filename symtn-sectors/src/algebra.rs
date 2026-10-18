@@ -287,7 +287,7 @@ pub trait CanonicalUnitFusionRule: FusionRule {}
 /// Marks a checked Generic provider with the same canonical vacuum laws.
 ///
 /// This is the fallible-provider counterpart of [`CanonicalUnitFusionRule`];
-/// it intentionally does not require the legacy infallible [`FusionRule`].
+/// it intentionally does not require the infallible [`FusionRule`].
 pub trait CheckedCanonicalUnitFusionRule: CheckedGenericFusion {}
 
 #[non_exhaustive]
@@ -588,7 +588,7 @@ impl<Coefficient> From<FusionAlgebraError> for PhysicalBasisError<Coefficient> {
 /// multiplicities is complete on the product carrier space.
 ///
 /// There is intentionally no `FusionRule` supertrait: checked Generic
-/// providers do not implement that legacy infallible interface. Tensor engines
+/// providers do not implement that infallible interface. Tensor engines
 /// compose this capability with the provider's applicable structural trait.
 pub trait PhysicalFusionBasis {
     type Scalar: CategoricalScalar + Send + Sync;
@@ -873,7 +873,7 @@ impl<Scalar> GenericRMatrix<Scalar> {
 ///
 /// This trait is intentionally independent of [`FusionRule`]. Generated
 /// providers can therefore reject an unavailable sector or bounded-table
-/// lookup without first manufacturing a value for the infallible legacy path.
+/// lookup without first manufacturing a value for the infallible path.
 /// Symbol and rigidity queries are deliberately absent: structural admission
 /// does not inspect F/R/A/B data.
 ///
@@ -1066,7 +1066,7 @@ pub trait CheckedGenericPivotal: CheckedGenericRigidSymbols {
 ///
 /// A wrapper, rather than a blanket implementation on `R`, leaves a future
 /// fallible provider free to implement [`CheckedGenericFusion`] without a
-/// coherence conflict with the legacy traits.
+/// coherence conflict with the infallible traits.
 pub struct InfallibleGeneric<'a, R>(&'a R);
 
 impl<'a, R> InfallibleGeneric<'a, R> {
@@ -1214,11 +1214,9 @@ pub trait GenericFusionSymbols: FusionRule {
 /// an additive identity and an exact-zero test.
 ///
 /// [`MultiplicityFreeFusionSymbols::Scalar`] and `CheckedGenericRigidSymbols::Scalar`
-/// both bound on this one trait (issue #972). It used to be two shapes: a
-/// provider method pair (`scalar_one`/`scalar_conj`, unable to depend on the
-/// provider because every implementation just returns the scalar unit and
-/// conjugate) and a separate free trait carrying `zero`/`is_zero` for the
-/// Generic Artin braid's `coeff += Rmat1[ν,ρ] * conj(Fmat[κ,λ,μ,ρ]) *
+/// both bound on this one trait (issue #972). The unit and conjugate live
+/// here rather than on the provider because they cannot depend on the
+/// provider; `zero`/`is_zero` serve the Generic Artin braid's `coeff += Rmat1[ν,ρ] * conj(Fmat[κ,λ,μ,ρ]) *
 /// conj(Rmat2[σ,κ])` accumulation and its `iszero(...) && continue` prune
 /// (`braiding_manipulations.jl:179-184`). `zero`/`is_zero` stay on this one
 /// trait rather than splitting into a base/extension pair: the multiplicity-
@@ -1530,12 +1528,11 @@ impl core::fmt::Display for ProductSectorCodecError {
 
 impl std::error::Error for ProductSectorCodecError {}
 
-/// Cantor-pairing product codec retained for expert compatibility.
+/// Cantor-pairing product codec.
 ///
-/// This remains the default codec parameter of core's `ProductFusionRule` so
-/// explicitly constructed expert rules keep their historical behavior.
+/// This is the default codec parameter of core's `ProductFusionRule`.
 /// Built-in user-layer product spaces use [`PackedProductCodec`] instead.
-/// Cantor pairing preserves the older numeric IDs, but nested decoding is
+/// Nested Cantor decoding is
 /// magnitude-dependent and its representable component domain shrinks as
 /// pairing is nested.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]

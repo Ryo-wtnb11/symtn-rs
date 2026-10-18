@@ -332,7 +332,7 @@ impl<'a> OrientedFusionTreeHomSpace<'a> {
     }
 
     /// Checked Generic sibling of [`Self::select`] that preserves provider
-    /// failures without requiring the legacy `CheckedFusionAlgebra` contract.
+    /// failures without requiring the `CheckedFusionAlgebra` contract.
     #[doc(hidden)]
     pub fn try_select_generic_checked<R>(
         self,

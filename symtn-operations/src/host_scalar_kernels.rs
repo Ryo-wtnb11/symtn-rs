@@ -1286,8 +1286,8 @@ enum OffsetError {
 
 impl From<OffsetError> for OperationError {
     fn from(err: OffsetError) -> Self {
-        // Map to the exact variants/messages these helpers emitted before #230
-        // so every `?` call site stays observably identical.
+        // Map to the exact OperationError variants and messages every `?` call
+        // site reports.
         match err {
             OffsetError::ElementCount => OperationError::ElementCountOverflow,
             OffsetError::Offset => OperationError::OffsetOverflow { value: usize::MAX },
@@ -1357,8 +1357,8 @@ mod tests {
         assert!(std::mem::size_of::<Result<usize, OffsetError>>() <= 16);
     }
 
-    // What: the offset helpers still emit the exact OperationError variants they
-    // did before #230, so `?` call sites are observably unchanged.
+    // What: the offset helpers emit the exact OperationError variants their
+    // `?` call sites report.
     #[test]
     fn offset_helpers_map_to_original_operation_errors() {
         // isize::MAX * 2 overflows the checked_mul -> ElementCountOverflow.

@@ -1,6 +1,6 @@
-//! The process-global completed-transformer cache (cache 3 of #2014), the
-//! composed-coefficient cache (cache 4, [`coefficients`]) a cache-3 miss
-//! consults per source group, and the multiplicity-free resolution paths.
+//! The process-global completed-transformer cache, the composed-coefficient
+//! cache ([`coefficients`]) a completed-transformer miss consults per source
+//! group, and the multiplicity-free resolution paths.
 //!
 //! Reference: TensorKit `cfaa073e` `treetransformers.jl:treetransposer` /
 //! `treebraider` (`@cached`, `:156-180`) memoize one completed transformer

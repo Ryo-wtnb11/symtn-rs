@@ -1,5 +1,4 @@
-//! `StackedTensorMap::restrict_leg` on a real device (#1503, leaf L5b of
-//! #1287).
+//! `StackedTensorMap::restrict_leg` on a real device (#1503).
 //!
 //! Its own binary with one test, because `cuda_transfer_stats` is
 //! process-wide. Run with `cargo test -p symtn --no-default-features

@@ -442,7 +442,7 @@ fn native_full_svd_executor() -> Option<symtn_dense::DefaultDenseExecutor> {
     None
 }
 
-/// Native full SVD only: no legacy SVD, completion QR, EIGH or GEMM.
+/// Native full SVD only: no compact SVD, completion QR, EIGH or GEMM.
 pub(super) struct NativeFullSvdSpy;
 
 fn script_native_full_svd(script: &mut Script, svd: &'static str, qr: &'static str) {

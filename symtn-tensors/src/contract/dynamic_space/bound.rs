@@ -579,7 +579,7 @@ where
 
     /// Checked built-in admission using transactional lowered tree metadata.
     ///
-    /// Matching legacy Subset and Complete stamps are revalidated; publication
+    /// Matching unchecked Subset and Complete stamps are revalidated; publication
     /// occurs only after structural, algebraic, and complete-grid proofs pass.
     #[cfg(test)]
     pub(crate) fn bind_multiplicity_free_lowered(
@@ -617,7 +617,7 @@ where
     /// Structural, algebraic, and complete-grid proofs run before any layout
     /// or admission state is published, and the provider only needs to certify
     /// [`CheckedFusionAlgebra`] rather than the sealed built-in lowered codec.
-    /// Matching legacy Subset and Complete stamps are revalidated.
+    /// Matching unchecked Subset and Complete stamps are revalidated.
     pub fn bind_multiplicity_free_checked(
         mut space: DynamicFusionMapSpace,
         provider: Arc<R>,

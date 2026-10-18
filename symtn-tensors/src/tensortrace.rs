@@ -1826,8 +1826,8 @@ where
 }
 
 /// Checked lowered dynamic trace. Built-in lowered rules should use this
-/// entry point when typed machine-boundary errors are required; the legacy
-/// wrapper above remains available to custom fusion rules.
+/// entry point when typed machine-boundary errors are required; the unchecked
+/// wrapper above is available to custom fusion rules.
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn tensortrace_fusion_dyn_into_checked<R, D>(
@@ -2208,7 +2208,7 @@ where
     trace_preflight::<MultiplicityFreeAdmissionMode, R>(src, axes, dst_nout)
 }
 
-/// Checked lowered trace entry point. The legacy dynamic API intentionally
+/// Checked lowered trace entry point. The unchecked dynamic API intentionally
 /// keeps its `MultiplicityFreeRigidSymbols` bound for custom rules; lowered
 /// built-in callers use this wrapper to validate metadata before compilation.
 #[allow(clippy::too_many_arguments)]

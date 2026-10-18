@@ -19,12 +19,12 @@ use super::structure::{
     TensorContractStructure,
 };
 
-/// Legacy/current tensor-contraction execution contract over host-accessible data.
+/// Tensor-contraction execution contract over host-accessible data.
 ///
-/// The raw replay methods take host slices. New code that specifically depends
-/// on this host-slice contract may use `HostTensorContractBackend`; future
-/// placement-aware/device/MPI contraction traits should not inherit from this
-/// raw-slice API.
+/// The raw replay methods take host slices. Code that specifically depends on
+/// this host-slice contract may use `HostTensorContractBackend`. Placement-aware
+/// (device or distributed) contraction traits do not inherit from this raw-slice
+/// API.
 pub trait TensorContractBackend<D, C = f64>
 where
     D: DenseBlockScalar + ConjugateValue + RecouplingCoefficientAction<C>,
@@ -158,12 +158,12 @@ where
     }
 }
 
-/// Explicit marker for the legacy host-slice tensor-contract backend family.
+/// Explicit marker for the host-slice tensor-contract backend family.
 ///
-/// `TensorContractBackend` keeps the existing method-bearing public trait for
-/// source compatibility. This marker means “implements the host-slice replay
-/// contract,” not necessarily “physically CPU-native.” Future device/MPI
-/// contraction backends should use separate placement-aware execution traits.
+/// `TensorContractBackend` carries the methods; this marker means “implements the
+/// host-slice replay contract,” not necessarily “physically CPU-native.”
+/// Device or distributed contraction backends use separate placement-aware
+/// execution traits.
 pub trait HostTensorContractBackend<D, C = f64>: TensorContractBackend<D, C>
 where
     D: DenseBlockScalar + ConjugateValue + RecouplingCoefficientAction<C>,

@@ -130,7 +130,7 @@ fn greedy_order(ir: &NetworkIR, cost_model: &DenseCostModel) -> Result<Vec<Contr
 /// parser, plan validation, and executors.
 ///
 /// ```text
-/// use symtn_contract::prelude::*;
+/// use symtn_network::*;
 ///
 /// let ir = NetworkIR::from_labels(vec![vec!["a".into(), "b".into()], vec!["b".into(), "c".into()]], vec!["a".into(), "c".into()])?;
 /// let infos = vec![
@@ -174,7 +174,7 @@ impl DenseContractionOptimizer for GreedyDenseOptimizer {
 /// APIs that motivated this boundary.
 ///
 /// ```text
-/// use symtn_contract::prelude::*;
+/// use symtn_network::*;
 ///
 /// let ir = NetworkIR::from_labels(vec![vec!["a".into(), "b".into()], vec!["b".into(), "c".into()], vec!["c".into(), "d".into()]], vec!["a".into(), "d".into()])?;
 /// let infos = vec![

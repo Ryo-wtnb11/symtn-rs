@@ -3,7 +3,7 @@
 //! without `cuda`. CI's `cuda-check` compiles this file under `cuda`, where a
 //! Host/CUDA twin pair would be `E0034`-ambiguous.
 //!
-//! Each #1756 leaf adds the names it unifies.
+//! Every method unified over storage has a row here.
 
 use std::sync::Arc;
 

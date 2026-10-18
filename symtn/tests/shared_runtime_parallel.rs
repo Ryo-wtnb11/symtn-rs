@@ -1,5 +1,5 @@
 //! Standalone ops on a SHARED `Runtime` must be correct and deterministic when
-//! driven from many threads at once (#155): each op now leases a per-rule
+//! driven from many threads at once (#155): each op leases a per-rule
 //! execution context (and, for factorizations, a dense executor) from a pool
 //! instead of holding the coarse runtime lock, so this exercises that the
 //! pooled machinery never leaks state across concurrent ops.
@@ -66,7 +66,7 @@ fn shared_runtime_concurrent_ops_match_serial_bit_for_bit() {
     let seeds: Vec<u64> = (0..8).map(|t| 100 + t * 2).collect();
     let refs: Vec<(f64, f64)> = seeds.iter().map(|&s| work(&rt, s)).collect();
 
-    // Same ops, now from 8 threads sharing the one runtime, each looping so the
+    // Same ops, from 8 threads sharing the one runtime, each looping so the
     // pools churn (lease/return under contention). Every result must equal its
     // serial reference exactly.
     let rt = Arc::new(rt);

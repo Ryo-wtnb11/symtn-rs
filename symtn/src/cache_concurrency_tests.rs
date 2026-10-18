@@ -1,5 +1,5 @@
 //! Release-mode concurrency gates of the process-global completed-transformer
-//! and composed-coefficient caches (#2014-3 §5, #2014-4 §6): no
+//! and composed-coefficient caches (#2014): no
 //! single-flight, so no caller parks on another's build, even when work
 //! stealing re-enters a caller's Rayon region. Each case runs in its own
 //! process (the counters are process-global) under a watchdog, issues one

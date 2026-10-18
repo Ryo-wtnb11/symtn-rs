@@ -428,7 +428,7 @@ fn lazy_add_allocation_count_is_pinned_across_block_counts() {
         counts.push((mixed, pair));
     }
     // Mixed: payload `Vec`, `Arc<TypedData>` and `Arc<TypedTensorBody>`,
-    // three, measured identical on the per-element kernel before #1399. Two
+    // three, the same as the per-element kernel (#1399). Two
     // lazy operands give a lazy adjoint of the parents' sum (A10): those
     // three plus its `Arc<TypedAdjointView>` header.
     assert_eq!(counts, vec![(3, 4); 4]);
@@ -597,10 +597,8 @@ fn first_lazy_materialization_allocates_once_per_payload_not_per_block() {
     let _measurement = counting_alloc::serial();
     // What: `materialize_adjoint_data_dyn` (the payload behind `materialize`
     // and behind `materialized_tensor_uncached`) performs exactly one payload
-    // allocation and no per-block work on the heap (#1201). Before #1201 the
-    // kernel allocated four `Vec`s plus two cloned fusion trees per block, so
-    // the count grew with the block count; now materialization costs the same
-    // fixed number of allocations for one block or many.
+    // allocation and no per-block work on the heap (#1201): materialization
+    // costs the same fixed number of allocations for one block or many.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let mut reference: Option<u64> = None;
     for (rank, radius, degeneracy) in [(2, 0, 8), (2, 6, 2), (4, 3, 2), (6, 1, 2)] {
@@ -626,8 +624,7 @@ fn first_lazy_materialization_allocates_once_per_payload_not_per_block() {
         );
     }
     // Payload `Vec`, the `Arc<TypedData>` wrapping it and the
-    // `Arc<TypedTensorBody>`: three, whatever the block count (before #1201:
-    // 3 + 6 per block).
+    // `Arc<TypedTensorBody>`: three, whatever the block count.
     assert_eq!(reference, Some(3));
 }
 

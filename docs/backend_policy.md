@@ -168,9 +168,9 @@ device then fails (for example without a GPU); every other CubeCL client in
 the process, including wgpu, also gets one stream; and a later
 `CubeClRuntimeConfig::set` panics, since CubeCL allows setting it only once.
 
-Cost: GPU work of different threads no longer overlaps on the device (it
+Cost: GPU work of different threads does not overlap on the device (it
 serializes on the stream, not only at enqueue), and Tenferro's cross-thread
-host `synchronize()` no longer happens because every thread shares one slot.
+host `synchronize()` does not happen because every thread shares one slot.
 
 ## Device test runner
 
@@ -201,17 +201,14 @@ CUDA_VISIBLE_DEVICES=<free ordinal> scripts/run-device-tests.sh
 |---|---|---|
 | `typed_cuda_into_rejects_a_foreign_device_destination_untouched`, `a_spectrum_from_another_device_is_rejected_by_every_consumer` | Skipped unless `--two-gpu` (then `CUDA_VISIBLE_DEVICES` must list two free devices); the summary prints `NOT RUN` | Needs device 1 as well as device 0 |
 
-**Evidence rule.** At each milestone that touches CUDA paths, run the script on
-the milestone commit and record the SHA, the device line, the counts and the
-`RESULT` line as a comment on the milestone's tracking issue (for CUDA
-execution: #1139). A milestone with a failing or `NOT RUN` entry beyond the
-table above is not recorded as passing.
+**Evidence rule.** At each roadmap milestone that touches CUDA paths, run the
+script on the milestone commit and record the SHA, the device line, the counts
+and the `RESULT` line as a comment on the CUDA roadmap tracking issue (#1139).
+A milestone with a failing or `NOT RUN` entry beyond the table above is not
+recorded as passing.
 
-## Historical context
-
-Issues #155 and #176 record earlier implementation work; they are not current
-Tenferro 0.5 scaling evidence. Any scaling claim needs fresh, pinned provider,
-revision, configuration, and raw measurement evidence.
+**Scaling claims.** Any scaling claim needs fresh, pinned provider, revision,
+configuration, and raw measurement evidence.
 
 ## Adding a backend (checklist)
 

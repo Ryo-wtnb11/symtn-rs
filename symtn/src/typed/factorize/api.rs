@@ -330,7 +330,7 @@ where
     /// Transfers, exactly: host to device, one zero upload per factor
     /// (`u`, `s`, `vh`: the dense output sizes, `s` being `Σ_c k_c²`
     /// elements, since a host zero buffer is the only device allocation
-    /// path until #740) plus one upload of `max_c rows_c` `i64` gauge weights
+    /// path, #740) plus one upload of `max_c rows_c` `i64` gauge weights
     /// when any route is nonempty. Device to host, no tensor payload: one
     /// real scalar, the finite-input scan's sum over the payload (a host
     /// sync); the singular values never cross to the host, so the call ends

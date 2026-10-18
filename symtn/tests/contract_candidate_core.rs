@@ -4,8 +4,7 @@
 //! rhs-sorted pairings in both operand orders, and
 //! `has_shared_permute(::AdjointTensorMap)` (indexmanipulations.jl L282)
 //! makes a lazy adjoint free when its permuted order is its natural adjoint
-//! order. The audit probes of `reviews/contract-candidate-selection-audit`
-//! are free in TensorKit only after that sort or swap:
+//! order. The probes below are free in TensorKit only after that sort or swap:
 //!
 //! - C1 `A[3,2]·B[1,0]`, C2 `A[0,1]·B[2,3] → [2,3,0,1]` (owned);
 //! - L3 `P'[3,2]·B[1,0]`, L5 `A[0,1]·P'[2,3] → [2,3,0,1]`,
@@ -864,9 +863,9 @@ fn large_output_from_small_operands_copies_the_operands_not_c() {
 /// Warm DynamicTree calls on the inactive-destination inputs, each after the
 /// previous result was dropped, as in a sweep: the destination's coupled
 /// regions are then recompiled on a fresh structure wrapper every call, so
-/// their per-sector cost is visible (#1488). Base d90bfd17 made 191 calls
-/// for X1 and X4; the regions now cost one allocation per coupled sector
-/// and a run of inactive sectors one scale layout.
+/// their per-sector cost is visible (#1488). The regions cost one allocation
+/// per coupled sector and a run of inactive sectors one scale layout, not a
+/// per-tree cost (191 calls for X1 and X4 at d90bfd17).
 #[test]
 fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
     let _guard = counting_alloc::serial();
@@ -875,7 +874,7 @@ fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
         let (calls, bytes, _) = warm(&runtime, &case);
         let name = case.name;
         eprintln!("U(1) {name}: {calls} calls, {bytes} B with a fresh destination");
-        // What: 13 destination sectors no longer cost ~10 allocations each.
+        // What: 13 destination sectors do not cost ~10 allocations each.
         assert!(calls <= 70, "{name}: {calls} warm allocation calls");
     }
 }

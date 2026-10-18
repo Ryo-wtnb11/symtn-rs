@@ -282,12 +282,10 @@ Structure caches (`symtn::cache::stats` reports them):
 | Completed tree transformer | rule, mode, coefficient type, scope, operation, orientation, basis order, storage conjugation, logical source, dst and src content ids | `symtn-tensors` (`tree_transform/cache.rs`) | process-global | `treetransposer` / `treebraider` |
 | Transformation coefficients (`TreeTransformCoefficients`), Simple and Generic fusion | rule, mode, coefficient type, scope, operation, orientation, source group (uncoupled sectors and duals) and its ordered source tree pairs; no degeneracies, content ids or storage conjugation | `symtn-tensors` (`tree_transform/cache/coefficients.rs`) | process-global | `fstranspose` / `fsbraid` (Unique is `NoCache`, as in TensorKit). Trace groups (`_trace_permute!`'s `permute(::FusionTreeBlock)` plus its per-row split, `g₁ == g₂` and channel factor) use scope `TraceTerms { open_codomain_rank }` with a presence-preserving sparse column value over the lowered open tree pairs (#2149); Unique trace stays uncached |
 
-The complete-HomSpace owner replaces the separate block-structure and
-HomSpace intern tables (#2014 PR 2); the completed-transformer owner replaces
-the Runtime structures tier, the context-local `TreeTransformCache` and the
-`DynamicFusionSpaceCache` of derived spaces (#2014 PR 3); the
-composed-coefficient owner replaces the Runtime plans and groups tiers
-(#2014 PR 4).
+The complete-HomSpace owner is the one intern table for block structures and
+HomSpaces; the completed-transformer owner is the one store of completed
+transformers and their derived spaces; the composed-coefficient owner is the
+one store of per-group coefficients and plans (#2014).
 
 Outside the four, by design:
 
@@ -324,11 +322,10 @@ Outside the four, by design:
 ## Current deviations (tracked)
 
 - **Product symbols composed in symtn.** `ProductFusionRule` composes the
-  symbols of a product from its factors' in symtn until fusion-symbols'
-  planned `product` module ships; every factor's symbols come from
-  fusion-symbols. Abelian groups, fermion parity and CU(1) moved in #2280;
-  Fibonacci and its tables moved in #2016; the generic `TableRule` replaced
-  both Fibonacci providers in #2277.
+  symbols of a product from its factors' in symtn, because fusion-symbols
+  has no `product` module; every factor's symbols, including abelian groups,
+  fermion parity, CU(1) and the table categories (`TableRule`), come from
+  fusion-symbols.
 - **A tenferro type in symtn's public API.** `symtn-dense` re-exports
   `tenferro_cpu::CpuBackendKind`, and it reaches the facade through
   `symtn::expert` and the `Runtime` builder (`gemm_kind`).

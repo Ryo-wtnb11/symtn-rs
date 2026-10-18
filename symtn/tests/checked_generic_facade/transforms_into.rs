@@ -1,4 +1,4 @@
-//! Checked Generic tree-transform `_into` (#1870 leaf A1): the eager op's
+//! Checked Generic tree-transform `_into` (#1870): the eager op's
 //! staging and commit around a write into the caller's buffer.
 
 use super::*;

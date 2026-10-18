@@ -1,5 +1,5 @@
 //! Device tests for `cuda_region_trace_accumulate`, the partial-trace region
-//! primitive (G2c-4, issue #1349): a source block read through one merged
+//! primitive (issue #1349): a source block read through one merged
 //! diagonal axis per traced pair, contracted against the context ones
 //! template and accumulated into a strided destination.
 //!

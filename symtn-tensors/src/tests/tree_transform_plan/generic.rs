@@ -2,14 +2,14 @@ use super::*;
 use crate::probe::{self, Event};
 
 // ======================================================================
-// Stage B2c: Generic-fusion (outer-multiplicity) plan compile.
+// Generic-fusion (outer-multiplicity) plan compile.
 // A minimal Generic rule with one self-dual outer-multiplicity sector (1):
 // N(1,1,1)=2 makes the rule genuinely Generic, while the tree pairs used
 // below couple [1,1] to the vacuum (N(1,1,0)=1), so the rank-2 codomain
 // braid is a pure 1×1 R-symbol — no bends, no F-moves. This exercises the
 // `build_generic_tree_pair_transform_group_plan` wiring (style guard, group
 // iteration, shared assembly, core-row dispatch) without an external symbol
-// table; the recoupling math itself is proven in symtn-core's B2c tests.
+// table; the recoupling math itself is proven in symtn-core's Generic recoupling tests.
 // ======================================================================
 
 #[derive(Clone, Copy)]

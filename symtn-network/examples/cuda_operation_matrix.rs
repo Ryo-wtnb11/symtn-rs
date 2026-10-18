@@ -4,7 +4,7 @@
 //! `Runtime` per row, the fixture built before the timer, one cold call then a
 //! warm-up then `--iterations` measured calls, correctness checked after the
 //! timer, environment header lines, a CSV table, and caller-thread allocation
-//! counters. It adds the device columns this leaf exists for: host/device
+//! counters. It adds the device columns: host/device
 //! transfer calls and bytes, device buffer allocations, GEMM submissions and
 //! cuSOLVER calls, read from `symtn::expert::cuda_transfer_stats`.
 //!
@@ -542,10 +542,9 @@ mod device {
              downloads are recorded, in the barrier_* columns, and none of its traffic is \
              included in the phase columns"
         );
-        // #1278 moved the tenferro backend library initialization
-        // (cuTENSOR, cuSOLVER/cuBLAS handles) from the first submission to
-        // Runtime construction, so the cost that used to sit in every `cold`
-        // cell is reported here instead of disappearing. `first` is this
+        // The tenferro backend library initialization (cuTENSOR,
+        // cuSOLVER/cuBLAS handles) happens at Runtime construction (#1278),
+        // so that cost is reported here rather than in the `cold` cells. `first` is this
         // process's first CUDA Runtime and also pays CUDA context creation;
         // `second` is a second fresh Runtime in the same process, where the
         // context is warm but the backend instance, and therefore the
@@ -1410,7 +1409,7 @@ mod device {
 
     /// `qr_compact` rows, kept apart from `run_dtype` and real-payload only so
     /// the pinned baseline CSVs keep their row set; device QR itself admits
-    /// every `CudaFactorizationPayload` since #1271.
+    /// every `CudaFactorizationPayload` (#1271).
     fn run_qr<R, D>(
         config: &Config,
         provider: &str,

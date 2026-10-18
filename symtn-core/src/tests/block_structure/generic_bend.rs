@@ -1,8 +1,8 @@
 use super::*;
 
 // ===================================================================
-// ADVERSARIAL REFUTATION (refute/b1-verify2): stress the nontrivial-F
-// path that the B1 round-trip tests deliberately avoid (F forced = I).
+// ADVERSARIAL CHECKS: stress the nontrivial-F path that the Artin-braid
+// round-trip tests deliberately avoid (F forced = I).
 // ===================================================================
 
 // Same structure as UnitaryToyOmRule, but F(a,a,a,a,c,c) — the block the
@@ -234,8 +234,8 @@ fn refute_roundtrip_matches_analytic_not_identity_when_f_nontrivial() {
     // For a NON-hexagon-consistent F, forward-then-inverse does NOT recover
     // the input for the index>0 path: the composite = M_inv * M_fwd, which
     // analytically is R(theta)^T . R(phi) . R(theta) . R(phi) = R(2*phi)
-    // (commuting SO(2)), = I iff phi=0 (F=I). This is exactly why B1's own
-    // round-trip test forces F=I; it is NOT a bug. Here we confirm the impl
+    // (commuting SO(2)), = I iff phi=0 (F=I). This is exactly why the braid's
+    // own round-trip test forces F=I; it is NOT a bug. Here we confirm the impl
     // reproduces the analytic composite (independent M_inv . M_fwd) and that
     // it deviates from identity by precisely R(2*phi).
     let rule = RefuteOmRule;
@@ -969,8 +969,9 @@ fn refute_b2a_b_symbol_is_not_transposed() {
 
 #[test]
 fn refute_b2a_a_symbol_is_not_transposed() {
-    // The A derivation is UNUSED by any other B2a test (fold is B2b), so this
-    // is the ONLY thing exercising its κ↔λ index order today.
+    // No other bend test uses the A derivation (fold tests do, through the
+    // A4 oracle whose A is I₂), so this is the only check of its κ↔λ index
+    // order.
     let rule = TransposeProbeRule;
     let s = SectorId::new(1);
     let a = a_symbol(&rule, s, s, s);

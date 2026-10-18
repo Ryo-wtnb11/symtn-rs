@@ -6,7 +6,7 @@ contraction-order search (greedy / optimal / auto-hq / **hyper**) and slicing
 decisions (slice / reconfigure / forest-reconfigure). Built-in greedy is the
 default; the pure-Rust `opt-einsum-path` optimizers are optional. Cotengra adds the
 hyper-optimization tier (KaHyPar hypergraph partitioning + Bayesian
-hyper-parameter search) that has no pure-Rust equivalent yet.
+hyper-parameter search) that has no pure-Rust equivalent.
 
 ## Why a Python subprocess
 

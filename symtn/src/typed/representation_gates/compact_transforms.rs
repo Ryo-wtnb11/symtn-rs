@@ -355,7 +355,7 @@ fn transform_seam_calls<T>(operation: impl FnOnce() -> T) -> usize {
 
 #[test]
 fn exact_identity_transforms_share_unique_and_simple_bodies() {
-    // What (#689 PR A): exact identity permute/braid/transpose/repartition
+    // What (#689): exact identity permute/braid/transpose/repartition
     // never reach the transform seam and return the same body allocation.
     // Body identity also pins zero payload copies more directly than an
     // allocator byte count can.
@@ -497,7 +497,7 @@ fn scalar_transpose_shares_the_body() {
 
 #[test]
 fn twist_on_a_compact_spectrum_stays_compact() {
-    // What (#580 PR 5, gate 5): the compact twist arm scales
+    // What (#580): the compact twist arm scales
     // spectrum-per-sector and keeps `TypedData::Diagonal` — the space is
     // unchanged, so O(Σ_c k_c) storage survives — and its own identity
     // answer (θ ≡ 1 across the spectrum's sectors) is a body-sharing

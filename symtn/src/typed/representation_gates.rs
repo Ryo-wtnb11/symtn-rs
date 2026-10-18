@@ -27,7 +27,7 @@ mod overwrite;
 mod preflight_order;
 
 /// The innermost message of an error chain: the cause both fusion modes must
-/// agree on, below each mode's own wrapper context (#1862 D4).
+/// agree on, below each mode's own wrapper context (#1862).
 fn root_cause(error: &(dyn std::error::Error + 'static)) -> String {
     std::iter::successors(Some(error), |&error| error.source())
         .last()
@@ -575,15 +575,10 @@ fn fz2_fixture() -> TensorMap<symtn_core::FermionParityFusionRule, f64> {
 #[test]
 fn unit_insert_and_remove_share_the_dense_payload_arc() {
     let densified = probe::record();
-    // What (#580 PR 5, gate 5): the O(1) property the PR 0 gate
-    // `a_body_on_a_different_space_reuses_the_payload_allocation` proved
-    // by hand-constructing a body, now proved through the real
-    // operations it anticipated — a dense payload's `Arc` is shared
+    // What (#580): payload reuse at pointer cost under a rewritten space,
+    // through the real operations — a dense payload's `Arc` is shared
     // unchanged through an insert→remove round trip, and the fresh
-    // bodies start with cold caches. Supersedes that PR 0 gate: this one
-    // checks everything it did (payload reuse at pointer cost under a
-    // rewritten space) minus the hand-built struct shape, which the real
-    // operations now compile against anyway.
+    // bodies start with cold caches.
     let tensor = fixture();
     let inserted = tensor.insert_unit(1, Side::Domain, Duality::Plain).unwrap();
     assert!(!Arc::ptr_eq(owned(&tensor), owned(&inserted)));
@@ -601,9 +596,9 @@ fn unit_insert_and_remove_share_the_dense_payload_arc() {
 
 #[test]
 fn a_compact_payload_materializes_exactly_once_for_the_unit_ops() {
-    // What (#580 PR 5, gate 5): the compact half of the #613 Group 4
+    // What (#580, #613): the compact half of the unit-leg payload
     // contract — a `Diagonal` payload is materialized into a *fresh*
-    // dense payload (one copy), and the follow-up remove shares that
+    // dense payload (one copy), and the subsequent remove shares that
     // dense `Arc` rather than copying again.
     let s = fixture().svd_compact(&[0], &[1]).unwrap().s;
     let inserted = s.insert_unit(0, Side::Domain, Duality::Plain).unwrap();
@@ -616,7 +611,7 @@ fn a_compact_payload_materializes_exactly_once_for_the_unit_ops() {
 
 #[test]
 fn twist_identity_short_circuit_shares_the_whole_body() {
-    // What (#580 PR 5, gate 5): both identity answers allocate nothing —
+    // What (#580): both identity answers allocate nothing —
     // the bosonic O(1) arm (Z2) and the fermionic per-block scan when no
     // requested leg touches a twisted sector (fZ2, even-only leg 0) both
     // return a body-sharing clone; a leg that does touch the odd sector

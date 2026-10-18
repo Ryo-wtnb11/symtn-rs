@@ -280,8 +280,7 @@ fn sun2_twice(label: &[i64]) -> usize {
 #[test]
 fn compact_dense_and_lazy_reductions_agree_across_modes_f64() {
     // What: one reduction body serves both modes; a checked Generic compact
-    // operand reduces (it used to be rejected) and `norm(p != 2)` exists on
-    // checked Generic (it used to be rejected).
+    // operand reduces and `norm(p != 2)` exists on checked Generic.
     let real = |z: Complex64| z.re;
     let mf = reductions!(SU2FusionRule, su2, su2_twice, f64, real);
     let checked = reductions!(SUNFusionRule::new(2).unwrap(), sun2, sun2_twice, f64, real);

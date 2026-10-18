@@ -1283,8 +1283,8 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
     // What: the rustdoc's cost of the gauge. Per nonempty route, 13 ops for
     // the phases, 2 per aligned side (broadcast, mul) or 1 per non-aligned
     // side (the selector's embed_diagonal), and 1 conj for a complex left
-    // side. Per call, one gauge-weight upload replaces the old per-route
-    // identity selectors; nothing is downloaded.
+    // side. Per call, one gauge-weight upload (no per-route identity
+    // selectors); nothing is downloaded.
     let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -1356,7 +1356,7 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
     check::<Complex64>(&runtime, &leg, 32);
 }
 
-/// `s` exactly as `svd_compact` built it before #1536: each nonempty
+/// An independent reference for `s` (#1536): each nonempty
 /// sector's cuSOLVER spectrum, downloaded and placed on a host zero
 /// buffer by [`fill_diagonal_values`]. Returned as widened bits.
 #[cfg(feature = "cuda")]
@@ -1534,7 +1534,7 @@ fn assert_device_svd_diagonal_every_dtype<R>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitwise() {
-    // What: `s` is now written by a device strided copy of each sector's
+    // What: `s` is written by a device strided copy of each sector's
     // spectrum; it must equal, bit for bit, the host-filled `s` built from
     // the same solver's downloaded spectra, across symmetries, dtypes,
     // multi-tree (non-aligned) sectors and an empty coupled sector.
@@ -1705,8 +1705,8 @@ fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runt
         (FiniteInputOp::Eigh, 8, 8),
     ];
     if <D as symtn_dense::CudaScalar>::IS_COMPLEX && <D as FactorScalar>::epsilon() < 1e-10 {
-        // Above 1024 rows cuSOLVER's SVD is `gesvd`, which returned NaN
-        // factors for a nonfinite input before #2038.
+        // Above 1024 rows cuSOLVER's SVD is `gesvd`, which returns NaN
+        // factors for a nonfinite input unless symtn rejects it first (#2038).
         cases.push((FiniteInputOp::Svd, 1100, 4));
     }
     for (op, rows, cols) in cases {

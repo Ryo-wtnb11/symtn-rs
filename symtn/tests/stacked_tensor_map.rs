@@ -1,4 +1,4 @@
-//! `StackedTensorMap` on Host (#1497, leaf L1 of #1287).
+//! `StackedTensorMap` on Host (#1497).
 
 use num_complex::Complex64;
 use std::sync::Arc;

@@ -83,7 +83,7 @@ fn assert_vec(got: &[f64], want: &[f64], label: &str) {
 // TensorKit.multi_Fmove exactly, INCLUDING the coefficient VECTORS. The
 // inner=3 rows exercise the non-trivial F(3,3,3,3,3,3) block, so the vector
 // machinery (F-slice selection, μ/ν/κ vertex indexing, λ free axis) is fully
-// discriminated here — unlike the B2a bend oracle whose A/B are I₂.
+// discriminated here — unlike the A4 bend oracle, whose A/B are I₂.
 #[test]
 fn b2b_a4_multi_fmove_matches_tensorkit() {
     let rule = A4FoldRule;
@@ -617,8 +617,7 @@ fn b2b_a4_cycle_round_trip_identity() {
     }
 }
 
-// Residual (c): domain-rank ≥ 2. All prior generic bend/fold tests use a
-// rank-1 domain; these exercise multi_Fmove_inv on a rank-2 domain (its
+// Domain rank ≥ 2. The other generic bend/fold tests use a rank-1 domain; these exercise multi_Fmove_inv on a rank-2 domain (its
 // candidates are rank-3, so the associator F-chain runs on the domain side)
 // and the rank-2-domain bend surgery. Round-trip identities, all A4 vertex
 // assignments enumerated.
@@ -955,7 +954,7 @@ fn a4_pair_rank2_1(mu: usize) -> FusionTreePairKey {
     FusionTreePairKey::pair(cod, dom)
 }
 
-// Gate B2c-1: transpose (planar cyclic permutation) round-trips to the
+// Gate 5: transpose (planar cyclic permutation) round-trips to the
 // identity. `generic_transpose_tree_pair` chains repartition + the fold/bend
 // A-move (`generic_cycle_*`); applying the swap [1],[0] and then its inverse
 // [1],[0] again must return the original pair with coefficient 1. Run on
@@ -975,7 +974,7 @@ fn b2c_generic_transpose_round_trips_to_identity() {
     assert_identity_term_map(&totals, &pair, "A4 transpose round-trip");
 }
 
-// Gate B2c-2: braid with the IDENTITY permutation is the identity map on an
+// Gate 6: braid with the IDENTITY permutation is the identity map on an
 // outer-multiplicity tree pair. The braid decomposes to zero swaps, so the
 // composer runs repartition-to-all-codomain and back (a verified bend
 // round-trip) around a no-op braid, plus the tree-pair reconstruction
@@ -992,14 +991,15 @@ fn b2c_generic_braid_identity_permutation_is_identity() {
     }
 }
 
-// Gate B2c-3: `generic_permute_tree_pair` == `generic_braid_tree_pair` under
+// Gate 7: `generic_permute_tree_pair` == `generic_braid_tree_pair` under
 // the identity level order (the definitional relation the mult-free path
 // relies on), and the symmetric-braiding guard is honored. Uses the identity
 // permutation because a non-trivial multi-leg *braid* needs a fully-modeled
-// braiding generic rule (the SU(3) provider, Stage B3); the composition
-// itself is a line-for-line mirror of the fully-tested
+// braiding generic rule (the SU(3) provider); the composition itself is a
+// line-for-line mirror of the fully-tested
 // `multiplicity_free_braid_tree_pair`, and its braid step
-// (`generic_braid_tree`) is independently adversarially verified in B1.
+// (`generic_braid_tree`) is tested independently by the Artin-braid
+// round-trip tests.
 #[test]
 fn b2c_generic_permute_agrees_with_default_level_braid() {
     let rule = A4BendRule; // Bosonic ⇒ symmetric braiding.

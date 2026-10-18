@@ -842,7 +842,7 @@ fn complete_and_subset_spaces_are_mathematically_equal() {
 
 #[test]
 fn bind_revalidates_complete_without_replacing_layout() {
-    // What: a legacy Complete stamp gains checked algebra proof, commits
+    // What: an unchecked Complete stamp gains checked algebra proof, commits
     // one lowered capability, and retains the caller's exact block layout.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -895,7 +895,7 @@ fn bind_revalidates_complete_without_replacing_layout() {
 
 #[test]
 fn lowered_bind_failure_publishes_no_layout_or_admission() {
-    // What: finite U1 nonclosure revalidates matching legacy Subset and
+    // What: finite U1 nonclosure revalidates matching unchecked Subset and
     // Complete stamps, returns the exact algebra failure, and commits no state.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()

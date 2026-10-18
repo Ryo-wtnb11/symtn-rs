@@ -2,10 +2,8 @@ use super::super::scratch::DynamicFusionScratchWorkspace;
 use super::*;
 use crate::tests::TestTensor;
 
-// Reference contraction path. Its only production caller
-// (`tensorcontract_fusion_dynamic_into_context`) was removed as dead code.
-// Kept as the allocation/output reference the `run_host_reference` tests
-// compare against, so it is test-only now.
+// Reference contraction path, test-only: the allocation/output reference the
+// `run_host_reference` tests compare against.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensorcontract_fusion_dynamic_plan_into_context<RuleKey, BT, BC, R, D>(

@@ -657,8 +657,8 @@ fn block_structure_rejects_duplicate_keys() {
 
 #[test]
 fn block_structure_validates_degeneracy_before_sector_keys() {
-    // What: preparing an owned block structure preserves the historical
-    // error order when both degeneracy metadata and sector keys are bad.
+    // What: preparing an owned block structure reports degeneracy errors
+    // first when both degeneracy metadata and sector keys are bad.
     let key = BlockKey::opaque([7]);
     let first = BlockSpec::column_major_with_key(key.clone(), vec![2, 2], 0).unwrap();
     let malformed = BlockSpec {

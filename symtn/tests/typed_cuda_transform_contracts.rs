@@ -1,5 +1,5 @@
 //! Transfer, allocation, statistics and rejection contracts of the typed
-//! device structural transforms (issue #1322, G2b-2).
+//! device structural transforms (issue #1322).
 //!
 //! These read the calling thread's `symtn::expert::cuda_transfer_stats`
 //! counters, so device work another test submits concurrently does not
@@ -271,7 +271,7 @@ fn device_transform_short_circuits_do_no_device_work() {
     }
 
     // A rank-0 tensor has no legs to build from, so it comes from a full Host
-    // trace (device `trace` is a separate leaf) and is then uploaded.
+    // trace (this file does not test device `trace`) and is then uploaded.
     let v = leg();
     let endomorphism: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&v], [&v], |_, indices| indices[0] as f64 + 1.0)
@@ -405,7 +405,7 @@ fn a_cold_device_transform_uploads_one_coefficient_payload_per_structure() {
 }
 
 // ---------------------------------------------------------------------------
-// `*_into` contracts (issue #1329, G2b-3)
+// `*_into` contracts (issue #1329)
 // ---------------------------------------------------------------------------
 
 /// The device wording of a Host message. The device mirrors Host's error
@@ -540,7 +540,7 @@ fn a_warm_device_into_transfers_nothing_and_allocates_nothing() {
     });
     assert_transfer_free(&warm);
 
-    // A lazy-adjoint source (#1870 leaf D) is read through its parent's
+    // A lazy-adjoint source (#1870) is read through its parent's
     // device payload: warm, it materializes nothing and transfers nothing.
     let lazy = source.adjoint().unwrap();
     let mut from_lazy = fixture(&runtime)
@@ -756,7 +756,7 @@ fn device_into_rejections_happen_before_any_device_work() {
     }
 
     // 5b. A lazy-adjoint source aliasing its parent's payload: the alias
-    //     check runs against the source's stored body (#1870 leaf D).
+    //     check runs against the source's stored body (#1870).
     let mut parent_alias = source.clone();
     let mut host_parent_alias = host.clone();
     {
@@ -856,7 +856,7 @@ fn device_into_rejections_happen_before_any_device_work() {
 }
 
 // ---------------------------------------------------------------------------
-// `twist` in both directions contracts (issue #1330, G2b-t)
+// `twist` in both directions contracts (issue #1330)
 // ---------------------------------------------------------------------------
 
 /// fZ2 with both parities on every leg, so a twist really scales blocks.

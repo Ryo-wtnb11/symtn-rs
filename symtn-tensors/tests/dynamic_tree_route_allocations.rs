@@ -1,8 +1,8 @@
-//! #1859 Host H1: allocation calls and bytes of the Host DynamicTree route,
-//! eager and member (B = 1, 17), cold and warm, on one thread.
+//! Allocation calls and bytes of the Host DynamicTree route, eager and member
+//! (B = 1, 17), cold and warm, on one thread (#1859).
 //!
-//! Call-count upper bounds, recorded on `d416b1a2` before the eager and
-//! member replays became one executor; bytes are reported, not asserted.
+//! Call-count upper bounds are those recorded on `d416b1a2`, a revision with
+//! separate eager and member replays; bytes are reported, not asserted.
 
 use std::sync::Arc;
 

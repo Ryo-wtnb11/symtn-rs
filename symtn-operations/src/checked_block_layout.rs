@@ -664,8 +664,8 @@ mod tests {
                     let initial: Vec<T> = (0..40)
                         .map(|i| values[(i * 7 + 3) % values.len()])
                         .collect();
-                    // Oracle: the two per-element scalar-kernel passes the
-                    // lazy add ran before #1401.
+                    // Oracle: two independent per-element scalar-kernel
+                    // passes.
                     let mut expected = initial.clone();
                     for (source, strides_of, offset, conjugate, a, b) in [
                         (

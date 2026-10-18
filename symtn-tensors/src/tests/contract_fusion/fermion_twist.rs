@@ -329,8 +329,8 @@ fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
             axes,
         )
         .unwrap();
-    // What: the selected LhsRhs candidate materializes only A for the twist
-    // (before #1351: B, 10 elements).
+    // What: the selected LhsRhs candidate materializes only A for the twist,
+    // not B (10 elements).
     assert_eq!(
         facts[0].orientation(),
         crate::contract::FusionContractOrientation::LhsRhs

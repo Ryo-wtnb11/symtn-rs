@@ -1,17 +1,15 @@
-//! #586 sweep guard: cold lowered enumeration + cold contraction plan-build
-//! allocation, measured relatively (no absolute byte pins — platform
-//! allocators differ; see #611 lesson on frozen bit pins).
+//! Cold lowered enumeration + cold contraction plan-build allocation,
+//! measured relatively (no absolute byte pins: platform allocators differ,
+//! #611).
 //!
 //! Two properties are pinned:
 //! 1. The genuine cold mechanism (`prepare_fusion_tree_layout_lowered`)
 //!    stays streaming — enumeration bytes track the admitted key count, not
 //!    the candidate sector product — and builds the layout exactly once
 //!    (a committed layout makes the second prepare a cache lookup).
-//! 2. The tensor-wide fusion route's cold plan build: the E1 baseline.
-//!    While both context entries existed this compared the `_lowered`
-//!    delegate against the plain twin (E1 evidence: byte-identical); with the
-//!    delegate removed, the plain entry is the production route and this
-//!    test pins its cold/warm plan-build behavior.
+//! 2. The tensor-wide fusion route's cold plan build: the plain entry is the
+//!    production route and this test pins its cold/warm plan-build
+//!    behavior.
 
 use std::sync::Arc;
 
@@ -180,9 +178,7 @@ fn run_route() -> RouteRun {
     let axes = || TensorContractSpec::new(&[0], &[2], OutputAxisOrder::from_axes(&[2, 0, 3, 1]));
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let mut output = vec![0.0; fixture.dst.space().required_len().unwrap()];
-    // The `_lowered` context twin (a verbatim delegate) was removed by the
-    // #586 sweep after E1 proved entry parity; the plain entry is the
-    // production route and the one this guard pins.
+    // The plain entry is the production route and the one this guard pins.
     let run =
         |output: &mut [f64],
          context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>| {
@@ -249,9 +245,7 @@ fn cold_contract_plan_build_stays_cached_after_first_run() {
     );
 
     // Cold plan-build allocation is deterministic run to run: the relative
-    // baseline any future entry-point change must reproduce (E1 held this
-    // between the lowered delegate and the plain entry before the delegate
-    // was removed).
+    // baseline any entry-point change must reproduce.
     assert_eq!(
         (second.cold_bytes, second.cold_allocations),
         (first.cold_bytes, first.cold_allocations),

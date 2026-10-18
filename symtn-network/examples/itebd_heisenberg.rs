@@ -172,7 +172,7 @@ impl State {
     /// per unit cell: bond B-A carries charge 0, bond A-B charges ±1.
     ///
     /// (A strict Neel product state — phys leg populated only in `+1` on A /
-    /// `-1` on B — also works now that legs carry per-sector degeneracies;
+    /// `-1` on B — also works, because legs carry per-sector degeneracies;
     /// see the `neel_product_state_contracts_with_the_full_gate` test. The
     /// entangled start is kept because it converges faster.)
     fn init(rt: &Runtime, p: &GradedSpace<U1FusionRule>) -> Result<Self, Error> {

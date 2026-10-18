@@ -165,7 +165,7 @@ fn data(len: usize, salt: usize) -> Vec<f64> {
 }
 
 /// `(name, lhs lazy, rhs lazy, lhs axes, rhs axes, output, orientation)`:
-/// the audit probes C1, C2, L3, L5, L7 plus the literal controls C0, L4.
+/// the probes C1, C2, L3, L5, L7 plus the literal controls C0, L4.
 type Probe = (
     &'static str,
     bool,

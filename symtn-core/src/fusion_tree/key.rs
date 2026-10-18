@@ -6,7 +6,7 @@ use super::*;
 /// Held as the pair's two tree handles, of which only `uncoupled` and
 /// `is_dual` are ever read, so [`FusionTreePairKey::group_key`] is two
 /// refcount bumps across arenas too. Eq, Ord, Hash and Debug are written by
-/// hand to keep the derived form of the former four-slice struct: order
+/// hand to match what deriving them over four slices would give: order
 /// interleaved (codomain sectors, domain sectors, codomain duals, domain
 /// duals) and the structural slice hash, not a stored one.
 #[derive(Clone)]
@@ -57,7 +57,7 @@ impl fmt::Debug for FusionTreeGroupKey {
 }
 
 impl FusionTreeGroupKey {
-    /// The codomain tree handle, whose arena a Rule O holder charges.
+    /// The codomain tree handle, whose arena its holder charges (single-arena ownership).
     #[doc(hidden)]
     #[inline]
     pub fn codomain_tree(&self) -> &FusionTreeKey {
@@ -232,8 +232,8 @@ impl fmt::Debug for FusionTreeKey {
 }
 
 impl FusionTreeKey {
-    /// Heap bytes of the tree arena this key keeps alive. Under Rule O
-    /// (#2192) every key of one holder points into the holder's own arena,
+    /// Heap bytes of the tree arena this key keeps alive. Under single-arena
+    /// ownership (#2192) every key of one holder points into the holder's own arena,
     /// so the holder charges this once, through any of its keys.
     #[doc(hidden)]
     #[inline]

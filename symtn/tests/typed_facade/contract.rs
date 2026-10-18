@@ -754,7 +754,7 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4, slice 1: `TensorMap::braid`.
+// `TensorMap::braid`.
 // ---------------------------------------------------------------------------
 
 #[test]

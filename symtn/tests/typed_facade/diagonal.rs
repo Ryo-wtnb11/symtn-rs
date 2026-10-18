@@ -93,7 +93,7 @@ fn compact_add_matches_pointwise_values_on_both_arms() {
 
 #[test]
 fn compose_takes_the_compact_paths_and_reconstructs_the_source() {
-    // What: `u * s * vh` now runs through the bond-scaling arms rather than a
+    // What: `u * s * vh` runs through the bond-scaling arms rather than a
     // dense GEMM, and still reproduces the source — plus `s * s`, the
     // diagonal-times-diagonal arm.
     let _guard = cache_lock();
@@ -1223,8 +1223,8 @@ fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum
 }
 
 // ---------------------------------------------------------------------------
-// Issue #604: the compact full-pair trace arm. The typed `trace_pairs` used to
-// densify a compact spectrum factor unconditionally. The value sweep here
+// Issue #604: the compact full-pair trace arm. The typed `trace_pairs` keeps
+// a compact spectrum factor compact. The value sweep here
 // covers the same rules, orientations, and variants against a forced-dense
 // typed route. The storage claim lives in `typed_diagonal_allocations.rs`.
 // ---------------------------------------------------------------------------
@@ -1488,8 +1488,8 @@ fn compact_trace_boundary_geometries_keep_their_existing_routes() {
     // returns the source (the pre-guard short-circuit), and a malformed pair
     // list errors before the arm can run — the same validation order as on
     // dense storage. The dense geometries
-    // outside the guard (rank > 2, partial pairs) are pinned by the Phase 5
-    // `trace_pairs` tests above, which this issue must keep green.
+    // outside the guard (rank > 2, partial pairs) are pinned by the
+    // `trace_pairs` tests above.
     let _guard = cache_lock();
     let runtime = runtime();
     let s = z2_bond(&runtime);

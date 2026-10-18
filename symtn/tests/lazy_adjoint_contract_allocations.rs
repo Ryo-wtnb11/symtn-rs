@@ -24,13 +24,12 @@ fn allocations<T>(f: impl FnOnce() -> T) -> (u64, T) {
 }
 
 /// Warm `contract_conj` may exceed the owned `contract` by at most this many
-/// allocation calls. It was 5 to 8 before #1419 (the per-call adjoint HomSpace,
-/// storage map, axis-check Vecs and, for SU2, the contracted HomSpace compare);
-/// it is now 0 on these rows. Why not exact pins: allocator and std
+/// allocation calls: 0 on these rows, so no per-call adjoint HomSpace, storage
+/// map, axis-check Vecs or, for SU2, contracted HomSpace compare (#1419). Why not exact pins: allocator and std
 /// differences move the absolute counts between platforms by the same offset.
 const LAZY_ADJOINT_SLACK: u64 = 0;
 /// Upper bound on warm `contract_conj` allocation calls. Recompiling the
-/// oriented plan per call cost 474 or more on every E1 row.
+/// oriented plan per call would cost 474 or more on every row.
 const LAZY_ADJOINT_CEILING: u64 = 64;
 
 /// `A: V⊗V ← V⊗V` with three sectors of degeneracy four (the E1 `r4_s3_d4`

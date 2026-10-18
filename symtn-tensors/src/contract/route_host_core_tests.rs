@@ -1,4 +1,4 @@
-//! #1859 Host H2: Core and CopyC routes on the one Host executor.
+//! Core and CopyC routes on the one Host executor (#1859).
 //!
 //! The eager characterization compares, bit for bit and on the machine
 //! running the test, every eager Core / CopyC replay with `e6e9cac8`'s eager

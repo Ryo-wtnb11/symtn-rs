@@ -70,7 +70,7 @@ fn expert_layout_transformers_are_rebuilt_per_call_and_never_published() {
     // What: a packed expert layout is not canonical (no complete-HomSpace
     // entry owns it), so its keys are lookup-only: every call builds, the
     // same context included, nothing is published, and the result is the
-    // same each time (#2014-3 publishability rule).
+    // same each time (only canonical content is publishable).
     let activity = crate::probe::take_completed_transformer_activity();
     assert_eq!(
         (activity.hits, activity.builds, activity.publications),

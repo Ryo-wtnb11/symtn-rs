@@ -4,16 +4,11 @@
 //! at once, so adding or removing one fails here and is reviewed as an API
 //! change. Every name below is used by another workspace crate, by an
 //! integration test or example of this crate, or by a retained public
-//! signature. The 2026-10-14 maintainer decision (#2222, superseding A14)
-//! deletes the static-rank layer: the `facade.rs` entries and their backend
-//! traits (leaf (a)), the static contraction context, plan and replay
-//! entries (leaf (b)), and the `symtn_core::TensorMap`-taking `adjoint` and
-//! `tensorcontract_structure` (leaf (c)) are gone; every remaining entry takes
-//! a dynamic space. The structure caches, the
-//! dynamic-rank `*_dyn_owned` / `*_dyn_into` test entries and the re-exports of
-//! `symtn_operations` internals were narrowed to `pub(crate)`; #2215 deleted
-//! the dead entries and narrowed every name without a consumer outside this
-//! crate except those an integration test or example of this crate uses.
+//! signature. There is no static-rank layer (#2222): every entry takes a
+//! dynamic space. The structure caches, the dynamic-rank `*_dyn_owned` /
+//! `*_dyn_into` test entries, the re-exports of `symtn_operations` internals
+//! and every name without a consumer outside this crate (other than an
+//! integration test or example of this crate) are `pub(crate)`.
 //!
 //! Why a source scan and not an import list: an import list only proves
 //! presence, not absence.
@@ -174,7 +169,7 @@ fn symtn_tensors_exports_exactly_the_pinned_names() {
         // bound_tensor
         "BoundDynamicTensorRef",
         // tree_transform: the process-global completed-transformer owner
-        // (doc-hidden cross-crate seams, #2014-3)
+        // (doc-hidden cross-crate seams)
         "TreeTransformOperationView",
         "admit_exact_tree_pair_layout",
         "exact_layout_tree_pair_hit",

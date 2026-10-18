@@ -16,7 +16,7 @@ use crate::{OperationError, TreeTransformOperation};
 
 /// Internal contraction operand separating categorical and storage authority.
 ///
-/// Naming note (#586): `prelowered` in the `*_prelowered_*` contraction entry
+/// Naming note: `prelowered` in the `*_prelowered_*` contraction entry
 /// points names THIS lazy-adjoint operand split — logical geometry prepared
 /// separately from parent storage before plan compilation. It is unrelated to
 /// the `*_lowered` layout-staging family (`prepare_fusion_tree_layout_lowered`

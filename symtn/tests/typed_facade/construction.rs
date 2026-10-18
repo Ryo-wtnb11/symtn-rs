@@ -126,7 +126,7 @@ fn checked_construction_failure_publishes_no_cache_state() {
 }
 
 // ---------------------------------------------------------------------------
-// Slice 6: `from_subblock_fn` and inspection.
+// `from_subblock_fn` and inspection.
 // ---------------------------------------------------------------------------
 
 /// Numeric stand-in for a Z3 charge, so a fill value can depend on the labels
@@ -347,7 +347,7 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
 }
 
 // ---------------------------------------------------------------------------
-// Slice 7: cross-cutting gates.
+// Cross-cutting gates.
 // ---------------------------------------------------------------------------
 
 #[test]

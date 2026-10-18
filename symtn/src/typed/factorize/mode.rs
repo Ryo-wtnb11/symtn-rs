@@ -2,8 +2,7 @@ use super::*;
 
 /// The facade half of a fusion mode's factorization contract. Every
 /// factorization has one body over it; the mode chooses only what differs by
-/// design or is still owned by a unification leaf (#1862, table in its body):
-/// the error type and provider-label decode (D4, permanent). The lazy-adjoint
+/// design (#1862): the error type and provider-label decode. The lazy-adjoint
 /// rule is the mode-independent [`FactorOp::adjoint_rule`] (#1755). The
 /// numerical stages and factor spaces come from the matrix-algebra
 /// [`FactorMode`](symtn_matrixalgebra::seam::FactorMode).

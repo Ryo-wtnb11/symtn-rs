@@ -15,13 +15,12 @@ pub(super) struct TypedTensorBody<R, D, S = Vec<D>> {
     /// reusing one under a rewritten non-bond space would leave `spectrum()`
     /// returning `Some` and send `exp`/`inv`/`pinv`/`scale` down their compact
     /// elementwise arms on a tensor that is no longer an endomorphism. The
-    /// Group 4 (#580) contract is therefore: materialize a compact payload to
+    /// unit-leg payload contract (#580) is therefore: materialize a compact payload to
     /// dense *before* changing the space, exactly as the references do —
     /// TensorKit 0.17 shares `t.data` only for ordinary `TensorMap` and routes
     /// `DiagonalTensorMap` through the generic similar+block-copy branch
-    /// (`src/tensors/indexmanipulations.jl:124-136,158-195`). The Group 4
-    /// slice (#580 PR 5) holds that contract in
-    /// [`TensorMap::shareable_dense_payload`]: a dense
+    /// (`src/tensors/indexmanipulations.jl:124-136,158-195`).
+    /// [`TensorMap::shareable_dense_payload`] holds that contract: a dense
     /// payload is shared at pointer cost, a compact one is materialized into
     /// a *fresh* dense payload (one copy). And `TypedData::Diagonal` must not be
     /// broadened to non-bond spaces without separately proving every compact
@@ -49,7 +48,7 @@ impl<R, D, S> TypedTensorBody<R, D, S> {
 
     /// A body installing an already-shared payload under a (usually
     /// rewritten) space — the unit-leg operations' O(1) dense reuse
-    /// (#580 PR 5).
+    /// (#580).
     pub(super) fn with_shared_payload(
         space: BoundDynamicFusionMapSpace<R>,
         data: Arc<TypedData<D, S>>,
@@ -159,8 +158,8 @@ impl<'a, R, D, S> From<&'a TensorMap<R, D, S>> for TensorRef<'a, R, D, S> {
 
 impl<'a, R, D, S> TensorRef<'a, R, D, S> {
     /// The operand an owned-lazy-adjoint call would have received. A plain
-    /// view is its base, unchanged, so `&t` keeps today's behavior, including
-    /// the owned lazy adjoint's implicit materialization until #1548. An
+    /// view is its base, unchanged, so `&t` behaves as the owned tensor, including
+    /// the owned lazy adjoint's implicit materialization (#1548). An
     /// adjoint view is `adjoint(base)`, marked so that the materialization
     /// path refuses it.
     pub(super) fn operand(self) -> Result<std::borrow::Cow<'a, TensorMap<R, D, S>>, Error> {
@@ -786,7 +785,7 @@ where
     /// # Complexity
     ///
     /// One output allocation for owned dense inputs plus `O(min-prefix)`
-    /// overwrites per shared block. A lazy input currently adds one
+    /// overwrites per shared block. A lazy input adds one
     /// operation-local logical payload, released with the operation.
     ///
     /// # Errors
@@ -916,8 +915,8 @@ where
     ///
     /// # Errors
     ///
-    /// None today; the `Result` leaves room for future fallible dimension
-    /// providers without changing the method shape.
+    /// Returns an error when a sector's quantum dimension is not real (its
+    /// dimension scalar's `real_dimension()` is `None`).
     pub fn leg_dims(&self) -> Result<Vec<usize>, Error> {
         let hom = self.logical_space().space().homspace();
         let provider = self.logical_space().provider();

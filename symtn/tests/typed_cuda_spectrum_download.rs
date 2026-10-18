@@ -3,7 +3,7 @@
 //!
 //! - Compact SVD writes each sector's singular values into `s` on the device
 //!   (#1536): it downloads nothing, and uploads only the three zero-initialized
-//!   factors (the only device allocation path until #740), so `s` costs no
+//!   factors (the only device allocation path, #740), so `s` costs no
 //!   upload beyond its zero initialization.
 //! - Full EIGH must read its eigenvalues on the host (non-finite check, ascending
 //!   order, factor-space plan), all sectors' with one download (#1484), and

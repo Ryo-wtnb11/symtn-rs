@@ -1,9 +1,9 @@
 //! #1614: an intermediate network step whose next-use orientation moves legs
 //! across the codomain/domain split is one contraction into one retained
-//! buffer. Before #1614 the step contracted into one retained buffer and then
-//! made a separate permute call into a second one. On the copyC route the
-//! data moved is the same (GEMM into the pooled temporary, then one
-//! transform); the saving is the separate call and its second buffer.
+//! buffer, not a contraction followed by a separate permute call into a
+//! second one. On the copyC route the data moved is the same (GEMM into the
+//! pooled temporary, then one transform); the saving is the separate call and
+//! its second buffer.
 //!
 //! This test, with the step loop's structure (no permute path per step), is
 //! the evidence for #1614's gate: symtn-network has no transform-seam
@@ -32,7 +32,7 @@ static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAl
 
 type Map = TensorMap<U1FusionRule, f64>;
 
-/// Lookups of the process-global completed-transformer cache (#2014-3); this
+/// Lookups of the process-global completed-transformer cache; this
 /// binary runs one test, so only it moves them.
 fn transform_lookups(_: &Runtime) -> usize {
     let info = completed_transformers();

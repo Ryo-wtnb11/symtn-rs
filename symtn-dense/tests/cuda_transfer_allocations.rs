@@ -16,8 +16,8 @@ use symtn_dense::{cuda_transfer_stats, CudaDenseContext, CudaDenseStorage, CudaS
 
 /// Payload-sized host allocations a download makes on the caller thread: the
 /// one vector Tenferro decodes the readback bytes into, handed straight back.
-/// Measured on an A100 with Tenferro 0.5.0: 2 before this change (symtn copied
-/// that vector once more), 1 after, for both f64 and `Complex64`.
+/// Measured on an A100: 1 for both f64 and `Complex64`; a second copy of that
+/// vector by symtn would make it 2.
 ///
 /// Payload-sized host allocations an owned upload makes, measured on the same
 /// host: CubeCL's own staging, which symtn does not control but must not add

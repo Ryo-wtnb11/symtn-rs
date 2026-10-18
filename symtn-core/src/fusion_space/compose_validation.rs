@@ -181,7 +181,7 @@ where
     if valid {
         return Ok(());
     }
-    // Preserve the historical error variant and first mismatching sector only
+    // Report the exact error variant and first mismatching sector only
     // on an invalid request. The valid hot path never sorts or rebuilds a leg.
     validate_composed_leg(
         &lhs_domain.materialize(rule),

@@ -199,7 +199,7 @@ fn canonical_su2_innerline_grid_matches_literal_sector_matrices() {
 #[test]
 fn expert_cantor_product_keeps_the_encoded_fallback() {
     // What: custom-codec/expert product construction remains available via
-    // the unchanged encoded public entry and preserves its historical IDs.
+    // the encoded public entry and keeps its Cantor-pairing IDs.
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     let rule = Rule::new(FermionParityFusionRule, U1FusionRule);
     let sector = TensorKitProductCodec::encode(z2_odd(), u1(2));
@@ -873,7 +873,7 @@ fn fusion_tree_groups_preserve_structure_order_and_ignore_internal_tree_data() {
             legacy_groups.push(FusionTreeBlockGroup::new(group_key, vec![index]));
         }
     }
-    // What: construction-time metadata is exactly the former eager
+    // What: construction-time metadata is exactly the eager
     // first-appearance grouping, including interleaved storage indices.
     assert_eq!(sector_groups, legacy_groups);
     assert_eq!(sector_groups.len(), 2);
@@ -1063,7 +1063,7 @@ fn a_structure_owns_its_tree_arena_and_reuses_only_a_complete_canonical_one() {
     let layout_arena = Arc::clone(&keys[0].codomain_tree().arena);
 
     // What: the layout keys already use their whole canonical arena, so a
-    // structure over all of them takes it without a copy (Rule O, #2192).
+    // structure over all of them takes it without a copy (single-arena ownership, #2192).
     let full = SectorStructure::from_keys(4, keys.iter().cloned()).unwrap();
     assert!(Arc::ptr_eq(&tree_arena_of(&full, 0), &layout_arena));
 
@@ -1227,7 +1227,7 @@ fn u1_charge(id: usize) -> i64 {
 #[test]
 fn shared_runs_survive_a_content_hash_collision_of_different_lengths() {
     // What: [a] and [b1, b2, b3] are valid U(1) uncoupled runs whose run
-    // hashes collide (found by lattice reduction, review r3). Sharing must
+    // hashes collide (found by lattice reduction). Sharing must
     // compare stored length and content, never read past the stored run:
     // the structure builds and every key is found as itself.
     let (a, b1, b2, b3) = (

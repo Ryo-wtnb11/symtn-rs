@@ -11,7 +11,7 @@ pub trait FactorScalar: DenseRecouplingScalar {
 
     fn dense_slice(tensor: &DenseTensor) -> Result<&[Self], DenseError>;
     /// Consuming implementations may transfer backend-owned host storage.
-    /// Custom scalar implementations retain the former borrowed-copy behavior.
+    /// The default implementation copies from the borrowed slice.
     fn dense_into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
         Self::dense_slice(&tensor).map(ToOwned::to_owned)
     }

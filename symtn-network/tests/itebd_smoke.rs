@@ -159,10 +159,10 @@ fn run_itebd(chi: usize, schedule: &[(f64, usize)]) -> f64 {
 /// Each site tensor has a physical leg whose spaces contain both charges but
 /// where one charge participates in NO fusion tree on that tensor (the
 /// singleton bond legs fix the total charge): site A populates only `up`,
-/// site B only `dn`. Legs used to carry sector sets without degeneracies, so
-/// leg dimensions and result-block shapes were derived from populated blocks
-/// only, and the contraction with the gate's full physical leg was rejected.
-/// With graded legs (sector -> degeneracy on the leg itself) it must work.
+/// site B only `dn`. Deriving leg dimensions and result-block shapes from
+/// populated blocks only would reject the contraction with the gate's full
+/// physical leg; with graded legs (sector -> degeneracy on the leg itself) it
+/// must work.
 #[test]
 fn neel_product_state_contracts_with_the_full_gate() {
     let rt = Runtime::builder().build().unwrap();
@@ -191,7 +191,7 @@ fn neel_product_state_contracts_with_the_full_gate() {
     .unwrap();
     assert!((psi.norm(2.0).unwrap() - 1.0).abs() < 1e-12);
 
-    // theta = h |psi>: this contraction used to be rejected with a leg
+    // theta = h |psi>: this contraction must not be rejected with a leg
     // dimension mismatch against the gate's full physical leg.
     let theta = net(
         &[

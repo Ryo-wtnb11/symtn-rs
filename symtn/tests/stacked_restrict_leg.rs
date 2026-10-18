@@ -1,4 +1,4 @@
-//! `StackedTensorMap::restrict_leg` on Host (#1503, leaf L5b of #1287).
+//! `StackedTensorMap::restrict_leg` on Host (#1503).
 //!
 //! The oracle is eager `TensorMap::restrict_leg` applied to each member: the
 //! stacked result must equal it bit for bit, with the same space, and reject

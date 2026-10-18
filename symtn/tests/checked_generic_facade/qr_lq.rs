@@ -286,7 +286,7 @@ fn checked_compact_diagonal_qr_lq_all_modes_use_hand_phase_and_magnitude() {
 /// A nonfinite compact diagonal is refused by the shared finite-input stage
 /// (as dense input is, #1986), and a finite one is
 /// factorized on its input bond without consulting the provider, so a failing
-/// provider no longer fails `qr_full` (approval A1, #1751).
+/// provider does not fail `qr_full` (#1751).
 #[test]
 fn checked_compact_diagonal_qr_rejects_nonfinite_and_skips_the_provider_when_finite() {
     let _cache = cache_shared();

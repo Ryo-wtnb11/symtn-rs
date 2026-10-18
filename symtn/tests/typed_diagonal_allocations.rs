@@ -481,7 +481,7 @@ fn the_rank_one_swap_keeps_its_source_and_its_result_compact() {
 
 #[test]
 fn exact_identity_keeps_compact_storage_and_braid_publishes_dense_output() {
-    // What (#689 PR A): exact identities return the source body without
+    // What: exact identities return the source body without
     // allocating or materializing its compact spectrum. An explicit braid
     // reads compact input and publishes an owned dense output.
     let _measurement = counting_alloc::serial();
@@ -536,7 +536,7 @@ fn compact_is_posdef_never_builds_a_dense_payload() {
 
 #[test]
 fn pr3_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
-    // What (issue #580 PR 3): `zeros_like`, `to_c64` and `re`/`im` are one
+    // What: `zeros_like`, `to_c64` and `re`/`im` are one
     // element-wise pass — on a compact spectrum factor the result stays
     // compact (far below one dense payload).
     let _measurement = counting_alloc::serial();
@@ -562,7 +562,7 @@ fn pr3_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
 
 #[test]
 fn pr3_dense_conversions_allocate_only_their_own_output() {
-    // What (issue #580 PR 3): on a dense payload, `to_c64` allocates its c64
+    // What: on a dense payload, `to_c64` allocates its c64
     // output (twice the f64 bytes) and nothing more; `re`/`im` allocate their
     // f64 output and nothing more. The ceilings reject any hidden second
     // payload.
@@ -589,7 +589,7 @@ fn pr3_dense_conversions_allocate_only_their_own_output() {
 
 #[test]
 fn pr3_inspections_allocate_no_payload() {
-    // What (issue #580 PR 3): the rank family reads the space structure and
+    // What: the rank family reads the space structure and
     // allocates nothing; `leg_dims` owns only its `Vec<usize>` of rank
     // entries, never a payload.
     let _measurement = counting_alloc::serial();
@@ -650,7 +650,7 @@ fn the_full_bond_trace_reduces_the_spectrum_without_materializing() {
 
 #[test]
 fn contract_keeps_the_compact_storage_outcomes() {
-    // What (issue #580 PR 6, gate 3): `contract` keeps the compact-storage
+    // What: `contract` keeps the compact-storage
     // outcomes documented by its rustdoc.
     let _measurement = counting_alloc::serial();
 
@@ -690,8 +690,8 @@ fn contract_keeps_the_compact_storage_outcomes() {
         "ordered s * s densified its result"
     );
 
-    // `s · s` with `[1] ← [0]` is the product spectrum and one swap (#1870
-    // B1; it used to decline to the dense route): the swap keeps it
+    // `s · s` with `[1] ← [0]` is the product spectrum and one swap (#1870):
+    // the swap keeps it
     // compact, as TensorKit's `DiagonalTensorMap` result (`diagonal.jl:291`),
     // and the whole contraction costs less than one dense payload.
     let e = spectrum(0x5eed_0062);

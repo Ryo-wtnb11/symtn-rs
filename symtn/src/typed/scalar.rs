@@ -48,11 +48,10 @@ use super::*;
 ///
 /// # Annotate the payload dtype
 ///
-/// With `f64` the only real payload, a float literal used to select it on its
-/// own. With two, inference waits for the end-of-function `f64` fallback,
-/// which arrives too late for method resolution: a payload dtype taken
-/// *solely* from float literals, whose result then has a method called on it,
-/// now fails with `E0689 ambiguous numeric type {float}`. It affects
+/// With two real payloads, a float literal does not select one on its own:
+/// inference waits for the end-of-function `f64` fallback, which arrives too
+/// late for method resolution, so a payload dtype taken *solely* from float
+/// literals, whose result then has a method called on it, fails with `E0689 ambiguous numeric type {float}`. It affects
 /// [`TensorMap::diagonal`], [`TensorMap::from_subblock_fn`] closures returning
 /// literals, and `scale`/`axpby` coefficients on an un-annotated
 /// `zeros`/`isomorphism`/`rand_with_seed`:
@@ -195,14 +194,13 @@ impl TensorScalar for num_complex::Complex32 {}
 /// # Source compatibility
 ///
 /// The `E0689` note on [`TensorScalar`] applies here too, one level further
-/// in: a payload dtype taken *solely* from float literals used to be pinned to
-/// `f64` by calling a factorization on it, because `f64` and
-/// [`num_complex::Complex64`] were the only implementors. With four, inference
-/// waits for the end-of-function fallback, which is too late for a method call
+/// in: a payload dtype taken *solely* from float literals is not pinned to
+/// `f64` by calling a factorization on it, because four payload types
+/// implement it. Inference waits for the end-of-function fallback, which is too late for a method call
 /// on the result — `t.eigh_full(&[0], &[1], HermitianTol::DEFAULT)?.d.diagview()?[0].values[0].abs()` on an
-/// un-annotated `from_subblock_fn` tensor now needs the payload dtype written
+/// un-annotated `from_subblock_fn` tensor needs the payload dtype written
 /// down. The same holds for [`GradedSpace::find_truncated`], whose spectrum
-/// type is `SpectrumMagnitude` and now has four implementors.
+/// type is `SpectrumMagnitude` and has four implementors.
 ///
 /// A caller generic over the base marker cannot reach a factorization:
 ///
@@ -247,8 +245,8 @@ impl TensorScalar for num_complex::Complex32 {}
 /// }
 /// ```
 ///
-/// This marker still does not *by itself* carry the device factorizations:
-/// those are `CudaFactorizationPayload`, which every payload of this marker now
+/// This marker does not *by itself* carry the device factorizations:
+/// those are `CudaFactorizationPayload`, which every payload of this marker
 /// implements (<https://github.com/Ryo-wtnb11/symtn-rs/issues/1341>), device QR
 /// included (<https://github.com/Ryo-wtnb11/symtn-rs/issues/1271>). The examples below
 /// only compile under the `cuda` feature, so a host-only CI run does not
@@ -440,10 +438,10 @@ impl CudaPayload for num_complex::Complex32 {}
 /// factorizations by accident: those two admissions say nothing about the
 /// device SVD gauge, the device Hermitian admission rule or the host-side
 /// truncation composition at that dtype. All four payloads are admitted here
-/// since <https://github.com/Ryo-wtnb11/symtn-rs/issues/1341> (leaf C4) supplied
-/// that evidence for `f32` and [`num_complex::Complex32`].
-/// Device `qr_compact` joined all four in
-/// <https://github.com/Ryo-wtnb11/symtn-rs/issues/1271>.
+/// because <https://github.com/Ryo-wtnb11/symtn-rs/issues/1341> supplied that
+/// evidence for `f32` and [`num_complex::Complex32`]; device `qr_compact`
+/// covers all four
+/// (<https://github.com/Ryo-wtnb11/symtn-rs/issues/1271>).
 ///
 /// Sealed through [`CudaPayload`].
 #[cfg(feature = "cuda")]

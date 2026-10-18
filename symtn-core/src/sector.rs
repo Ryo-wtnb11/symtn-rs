@@ -126,7 +126,7 @@ impl Eq for SectorLeg {}
 
 impl Hash for SectorLeg {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // Same fields in the same order as the former derived hash, so hashes
+        // Same fields in the same order as a derived hash would use, so hashes
         // depend on content only, never on which storage a leg shares.
         let (sectors, degeneracies) = self.map();
         sectors.hash(state);

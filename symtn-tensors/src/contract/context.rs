@@ -1128,7 +1128,7 @@ where
     }
 }
 
-/// A legacy conjugation flag on an owned space requests its categorical
+/// A conjugation flag on an owned space requests its categorical
 /// adjoint, with `axes` indexing the stored tensor's legs (TensorOperations'
 /// `conjA`): the lazy-adjoint operand of the space ([`legacy_operand`]), its
 /// contracted axes mapped onto the adjoint's legs here. Without a flag the
@@ -1147,7 +1147,7 @@ fn lower_legacy_axes(
     )
 }
 
-/// The operand an owned space and a legacy conjugation flag request: the flag
+/// The operand an owned space and a conjugation flag request: the flag
 /// asks for the categorical adjoint, which is the lazy adjoint of the space.
 fn legacy_operand(space: &DynamicFusionMapSpace, conjugate: bool) -> FusionOperand<'_> {
     if conjugate {
@@ -2028,7 +2028,7 @@ where
 
 #[cfg(test)]
 /// Canonical storage contraction over parent buffers with lazy operand
-/// orientation. A miss is unsupported; this device leaf never prepares
+/// orientation. A miss is unsupported; this device route never prepares
 /// logical-key projections or source transforms.
 ///
 /// Free function, not a context method: the storage-direct route resolves and

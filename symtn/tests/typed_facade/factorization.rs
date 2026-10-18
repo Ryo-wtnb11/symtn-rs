@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// Phase 5: decompositions (issue #567).
+// Decompositions (issue #567).
 //
 // Factorizations are checked through their mathematical contracts.
 // ---------------------------------------------------------------------------
@@ -493,7 +493,7 @@ fn decompositions_carry_an_external_provider_with_its_own_labels() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 (issue #568), slice 1: `TensorMap::axpby` and `TensorMap::scale`.
+// `TensorMap::axpby` and `TensorMap::scale`.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -531,7 +531,7 @@ fn add_applies_each_real_coefficient_to_the_right_operand() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #570), slice 2: the Hermitian eigendecompositions.
+// The Hermitian eigendecompositions.
 // ---------------------------------------------------------------------------
 
 /// A typed Hermitian endomorphism: `p = t + t†`, so `eigh` is defined
@@ -655,7 +655,7 @@ fn eigh_reports_a_non_hermitian_input_rather_than_a_wrong_answer() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #570), slice 3: the general eigendecompositions.
+// The general eigendecompositions.
 // ---------------------------------------------------------------------------
 
 /// The typed c64 endomorphism `eig` needs: [`z2_complex_tensor`] is rank
@@ -771,7 +771,7 @@ fn eig_vals_are_label_ordered_and_trunc_reports_the_discarded_norm() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #570), slice 4: the `is_hermitian` / `project_*` family.
+// The `is_hermitian` / `project_*` family.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1117,8 +1117,7 @@ fn typed_polar_carries_an_external_provider() {
 }
 
 // ---------------------------------------------------------------------------
-// Slice: typed inspection, scalar, zeros_like and dtype conversions,
-// issue #580 PR 3.
+// Typed inspection, scalar, zeros_like and dtype conversions.
 // ---------------------------------------------------------------------------
 
 #[test]

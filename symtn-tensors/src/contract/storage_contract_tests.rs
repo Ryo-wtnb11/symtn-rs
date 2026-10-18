@@ -1,6 +1,6 @@
 //! The Host compile entry of the storage (device) contraction route, and —
 //! with the `cuda` feature, on a real device — its executor replaying the
-//! Host `DynamicTree` artifact (G2c-1a, #1345).
+//! Host `DynamicTree` artifact (#1345).
 //!
 //! The device tests force every orientation and axis-order candidate through
 //! the test-only plan builder, which the typed API cannot reach, and compare
@@ -1474,7 +1474,8 @@ where
         FusionContractOrientation::LhsRhs,
         "{what}"
     );
-    // (A copied by layout, B copied by layout, A twisted, total before #1351).
+    // (A copied by layout, B copied by layout, A twisted, total when the twist
+    // always materializes B).
     let (a_copied, b_copied, twist_a, before) = match role {
         RoleCase::ACopied => (true, false, true, e_a + e_b),
         RoleCase::Canonical => (false, false, true, e_b),
@@ -1609,8 +1610,8 @@ fn the_fermionic_twist_rides_on_the_operand_already_copied_or_the_smaller() {
             check_twist_role(role, &case, &format!("fZ2xSU2 {role:?}")),
         ));
     }
-    // What: the E_B-sized materialization is gone exactly where only A was
-    // copied (A copied: E_A + E_B -> E_A; canonical with A smaller:
+    // What: twisting the operand already copied (#1351) removes the E_B-sized
+    // materialization exactly where only A is copied (A copied: E_A + E_B -> E_A; canonical with A smaller:
     // E_B -> E_A); B copied and both copied are unchanged.
     for (role, (after, before)) in totals {
         match role {
@@ -1794,8 +1795,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
 }
 
 /// The geometry of `symtn/tests/contract_cases::su2_core_form_lazy_cases`:
-/// the Host eager entry takes TensorKit's `copyC` (the planner), where the
-/// Host ladder took its dense `Structure` route before #1858; the
+/// the Host eager entry takes TensorKit's `copyC` (the planner); the
 /// copyC-free storage ladder compiles the prelowered `DynamicTree` artifact.
 #[test]
 fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tree() {
@@ -1912,8 +1912,8 @@ fn a_fermionic_dual_contracted_leg_on_a_transformed_operand_reports_the_twist() 
             TensorContractSpec::new(&lhs_axes, &rhs_axes, OutputAxisOrder::identity()),
         )
         .unwrap();
-    // What: the twist travels in the artifact, which the device now replays
-    // with destination scales (G2c-2).
+    // What: the twist travels in the artifact, which the device replays
+    // with destination scales.
     assert!(resolution.is_dynamic_tree());
     assert!(resolution.requires_source_twist());
 }
@@ -2561,10 +2561,9 @@ fn square_case<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 
 /// #1858: Host eager and the device planner take the same route on every
 /// fixture, owned and lazy, Core, CopyC and DynamicTree, bosonic and
-/// fermionic (the table pinned the Host ladder's routes before #1858). The
-/// one route change: a fermionic twist uniform within each RHS coupled-sector
-/// matrix rides the core as per-job GEMM alpha, where the Host ladder took
-/// DynamicTree to copy and twist an operand, as TensorKit's `blas_contract!`
+/// fermionic. A fermionic twist uniform within each RHS coupled-sector matrix
+/// rides the core as per-job GEMM alpha rather than a DynamicTree copy and
+/// twist of an operand, as TensorKit's `blas_contract!`
 /// (`tensoroperations.jl:399-429` @cfaa073) does.
 #[test]
 fn host_eager_and_the_device_planner_take_the_same_route() {
@@ -2848,12 +2847,12 @@ fn the_planner_walks_the_requested_order_once() {
         (RouteKind::Core, 1)
     );
     // CopyC: the requested order, the A·B default order (found), the
-    // temporary's own core. Four before #1858.
+    // temporary's own core.
     assert_eq!(
         walks(&square_case(&u1, u1_v, [3, 2], [1, 0], [1, 0, 3, 2])),
         (RouteKind::CopyC, 3)
     );
-    // DynamicTree: the requested order and both default orders. Four before.
+    // DynamicTree: the requested order and both default orders.
     assert_eq!(walks(&u1_case()), (RouteKind::DynamicTree, 3));
 }
 

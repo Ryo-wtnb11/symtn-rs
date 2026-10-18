@@ -2365,8 +2365,8 @@ where
 }
 
 #[cfg(test)]
-/// Generic-fusion (outer-multiplicity) tree-pair plan compile — the Stage B2c
-/// dispatch receptacle for outer-multiplicity rules. Parallel entry to
+/// Generic-fusion (outer-multiplicity) tree-pair plan compile — the dispatch
+/// receptacle for outer-multiplicity rules. Parallel entry to
 /// `build_multiplicity_free_tree_pair_transform_group_plan`: non-identity groups
 /// are compiled as one ordered block map over full tree-pair keys, while the
 /// identity path keeps the existing identity assembly.

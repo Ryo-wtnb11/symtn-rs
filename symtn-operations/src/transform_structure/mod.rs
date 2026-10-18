@@ -54,12 +54,11 @@ pub use self::schedule::*;
 /// references its spec's shared matrix, and every binding of one categorical
 /// plan shares that plan's payload, so binding never copies a coefficient.
 ///
-/// Migration: code that previously read the public `blocks` or `layouts`
-/// fields must use the same-named accessor methods. The flat
-/// `recoupling_coefficients_dst_src` view no longer exists: read one block
-/// with [`Self::block_coefficients`], or copy the whole payload explicitly
-/// with [`Self::gather_recoupling_coefficients_into`]. Post-compilation
-/// mutation is no longer supported.
+/// Blocks and layouts are read through the [`Self::blocks`] and
+/// [`Self::layouts`] accessors. Read one block's coefficients with
+/// [`Self::block_coefficients`], or copy the whole payload explicitly with
+/// [`Self::gather_recoupling_coefficients_into`]. A compiled structure is
+/// immutable.
 #[derive(Clone, Debug)]
 pub struct TreeTransformStructure<T> {
     core: Arc<TreeTransformReplay<T>>,
@@ -249,11 +248,9 @@ impl<T: Copy> TreeTransformStructure<T> {
     /// (source-permuted, unnormalized) shapes and strides are not available:
     /// a completed transform retains only the geometry replay executes.
     ///
-    /// Migration: `TreeTransformLayoutTable::{shape, strides, packed_strides}`
-    /// were removed. Their raw geometry is the destination and source
-    /// `BlockStructure` blocks with the spec's `source_axes` applied to the
-    /// source; [`Self::layouts`] still gives each entry's offset and element
-    /// count.
+    /// The raw geometry is the destination and source `BlockStructure`
+    /// blocks with the spec's `source_axes` applied to the source;
+    /// [`Self::layouts`] gives each entry's offset and element count.
     pub fn layout_diagnostics(&self) -> TreeTransformLayoutDiagnostics {
         self.core.layouts.diagnostics(&self.core.blocks)
     }

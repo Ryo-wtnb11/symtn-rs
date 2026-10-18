@@ -121,7 +121,7 @@ mod tests {
 
     /// `tensor_size` (and thus `pair_cost`) must SATURATE on overflow instead of
     /// wrapping. With five legs of dimension 2^14 the true element count is
-    /// 2^70, far beyond `usize::MAX` (2^64-1 on this target): the old `.product()`
+    /// 2^70, far beyond `usize::MAX` (2^64-1 on this target): a plain `.product()`
     /// would wrap to a tiny value and mislead the optimizer; the saturating
     /// fold must clamp at `usize::MAX`.
     #[test]

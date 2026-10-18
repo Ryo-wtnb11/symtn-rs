@@ -225,9 +225,8 @@ macro_rules! coupled_sector_count {
 #[test]
 fn warmed_checked_generic_reductions_do_not_allocate() {
     // What: checked Generic reductions take their `dim(c)` weights
-    // through one fallible closure and never build a per-call weight map.
-    // Before #1219 every warm call allocated once (a std `HashMap`) for owned
-    // and lazy-adjoint inputs alike.
+    // through one fallible closure and never build a per-call weight map
+    // (a std `HashMap`, #1219), for owned and lazy-adjoint inputs alike.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
@@ -311,8 +310,8 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
 /// SU(N) checked `dim` allocates per query (`symtn-sectors/src/sun.rs::
 /// decode_dynkin`'s `Vec<i64>` plus fusion-symbols' own irrep decode), so the
 /// reductions still pay the provider's cost once per coupled sector; the
-/// reduction owners themselves add none (before #1219: one map allocation on
-/// top of the G provider queries).
+/// reduction owners themselves add none on top of the G provider queries
+/// (#1219).
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {

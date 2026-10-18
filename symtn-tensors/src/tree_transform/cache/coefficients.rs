@@ -1,4 +1,4 @@
-//! The process-global composed-coefficient cache (cache 4 of #2014): the
+//! The process-global composed-coefficient cache: the
 //! transform specs of one source fusion-tree group, keyed on sectors and
 //! trees only.
 //!
@@ -350,7 +350,7 @@ impl ReuseContext {
         coefficient_groups().get(&view).ok_or(hash)
     }
 
-    /// Rule O (#2192): the owned key of a freshly built group and its value
+    /// Single-arena ownership (#2192): the owned key of a freshly built group and its value
     /// point into one arena the entry owns, never into the source structure,
     /// so an entry retains and is charged only its own trees. The returned
     /// re-homer then yields `value_pairs`' new keys, in order.
@@ -567,7 +567,7 @@ where
     }
 }
 
-/// Rule O (#2192): an entry's key and value trees all point into the one
+/// Single-arena ownership: an entry's key and value trees all point into the one
 /// arena the entry owns, the group key's.
 fn owns_one_arena<'k>(
     key: &'k CoefficientGroupKey,
@@ -581,7 +581,7 @@ fn owns_one_arena<'k>(
 }
 
 /// What one entry's key retains, fixed at staging: its own fields and the
-/// entry arena, which by Rule O also holds every value tree.
+/// entry arena, which by single-arena ownership also holds every value tree.
 fn charged_key_bytes(key: &CoefficientGroupKey) -> usize {
     core::mem::size_of::<CoefficientGroupKey>()
         .saturating_add(ENTRY_OVERHEAD_BYTES)

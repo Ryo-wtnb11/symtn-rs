@@ -230,7 +230,7 @@ fn simple_prepared_braid_has_runtime_rank_schedule() {
 
 #[test]
 fn borrowed_unique_artin_lowering_matches_materialized_replay() {
-    // What: operation-local inverse positions preserve the former
+    // What: operation-local inverse positions reproduce the
     // materialized Artin word and inverse flag for every small-rank
     // permutation, not only a selected reverse ordering.
     for rank in 0..=8 {
@@ -382,7 +382,7 @@ fn packed_product_codec_reports_invalid_components_and_widths() {
 
 #[test]
 fn packed_and_tensorkit_codecs_remain_distinct_compatible_options() {
-    // What: the expert Cantor codec keeps its historical IDs while the
+    // What: the expert Cantor codec keeps its Cantor-pairing IDs while the
     // packed codec has a distinct rule identity and round-trips the same
     // semantic components.
     type PackedCodec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;

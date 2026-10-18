@@ -1,14 +1,13 @@
 //! Device oracle for `cuda_copy_region_into` at arbitrary destination offsets
 //! (#1320, #1376).
 //!
-//! Tenferro 0.5.0's `copy_read_into` folded a view's element offset into the
-//! operand pointer but advertised the allocation's 256-byte alignment to
-//! cuTENSOR (`tenferro-gpu-0.5.0/src/cubecl/permutation.rs:755`), so cuTENSOR
-//! could select a vectorized kernel the shifted pointer cannot satisfy and the
-//! launch failed with `cudaErrorMisalignedAddress` (observed on an A100 at
-//! `f64` offset 9, `2x2`). Tenferro 0.6.0 reports the shifted address's true
-//! alignment (`device_address_alignment`, `permutation.rs:771`), and the
-//! adapter now sends every offset through that copy.
+//! `copy_read_into` folds a view's element offset into the operand pointer.
+//! Advertising the allocation's 256-byte alignment for that shifted pointer
+//! would let cuTENSOR select a vectorized kernel the pointer cannot satisfy,
+//! and the launch fails with `cudaErrorMisalignedAddress` (observed on an A100
+//! at `f64` offset 9, `2x2`). Tenferro reports the shifted address's true
+//! alignment (`device_address_alignment`), and the adapter sends every offset
+//! through that copy.
 //!
 //! The oracle therefore drives the direct copy — it asserts one copy and no
 //! `dot_general` fallback — at destination byte offsets that are not a

@@ -4,8 +4,8 @@ use symtn_network::{
     GreedyDenseOptimizer, LabelOrderDenseOptimizer, NetworkIR, SliceLabels, TemporaryLabel,
 };
 
-// Captured with the corresponding old public constructors and both old slice
-// functions on origin/main 98c9f4a8 before the API migration.
+// Fixed reference outputs (captured at 98c9f4a8) the plan constructors and
+// slice functions must keep reproducing.
 const DENSE_PATH: &str =
     "symtn-contract-plan-v1\ntensor_count 3\noutput a d\nstep 0 1 3 32 a c\nstep 2 3 4 50 a d\n";
 const DENSE_GREEDY: &str =

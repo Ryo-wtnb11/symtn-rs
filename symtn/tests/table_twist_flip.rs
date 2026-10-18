@@ -1,4 +1,4 @@
-//! `twist` and `flip` of complex-symbol rules (#2281 leaf D) on Fibonacci and
+//! `twist` and `flip` of complex-symbol rules (#2281) on Fibonacci and
 //! Ising through `TableRule`, against TensorKit 0.17.1
 //! (`fixtures/tensorkit_table_twist_flip.jl`), a closed-form θ hand oracle,
 //! TensorKit's inverse identities, and the lazy adjoint; and the unchanged

@@ -393,7 +393,7 @@ where
     /// `d` and `v` are reused across calls at the same `B`. A new `B`, or a
     /// call after [`EighFullWorkspace::take_output`], allocates both with one
     /// zero upload each (`B · Σ n²` and `B · L_v` elements, the only device
-    /// allocation path until #740); `d`'s off-diagonal entries are never
+    /// allocation path, #740); `d`'s off-diagonal entries are never
     /// written.
     ///
     /// # Errors

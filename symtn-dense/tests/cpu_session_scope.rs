@@ -22,7 +22,7 @@ fn assert_close(got: f64, want: f64, tol: f64) {
     assert!((got - want).abs() <= tol, "{got} != {want} (tol {tol})");
 }
 
-// S1a session-scope evidence. `cpu_session_stats` is a process-wide counter,
+// Session-scope evidence. `cpu_session_stats` is a process-wide counter,
 // so every test that reads a delta takes this lock; they must not run
 // concurrently with one another (other tests never touch the counter).
 static CPU_SESSION_COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

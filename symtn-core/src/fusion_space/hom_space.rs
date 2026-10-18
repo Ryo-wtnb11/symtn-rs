@@ -1052,11 +1052,11 @@ impl FusionTreeHomSpace {
     /// `source`'s resident cache entry memoizes this permutation and the
     /// destination's own entry is resident, that hit with no further
     /// provider query ([`Permuted::Memo`]); otherwise `before_derive`, the
-    /// provider derivation and the usual cache-1/cache-2 tail
+    /// provider derivation and the usual sector-structure / degeneracy-structure cache tail
     /// ([`Permuted::Derived`], whose ticket publishes after the caller's
     /// commit).
     ///
-    /// Why the memo hit skips cache 1: the destination's sector admission was
+    /// Why the memo hit skips the sector-structure cache: the destination's sector admission was
     /// proven when the memo was published, which required its complete entry.
     #[doc(hidden)]
     pub fn prepare_complete_permuted_generic_checked<R, E>(
@@ -1268,7 +1268,7 @@ impl FusionTreeHomSpace {
     /// Generic-fusion (outer-multiplicity) sibling of [`Self::fusion_tree_keys`]:
     /// enumerates multiplicity-aware block keys (codomain × domain tree pairs)
     /// for a `FusionRule` whose `nsymbol` can exceed 1. Not cached —
-    /// the Generic path is not on any hot loop yet (mirrors the non-memoized
+    /// the Generic path is not on any hot loop (mirrors the non-memoized
     /// add a cache only when a Generic workload measures a benefit.
     ///
     /// Bounded-table semantics (Option A, refute/b3b-verify): the result is

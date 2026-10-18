@@ -629,7 +629,7 @@ mod failure_tests {
         // What: on the CUDA CopyC route, an error after the core GEMMs have
         // written the temporary and before the output transform (injected:
         // the member replay checks every operand length before its first
-        // submission, so a corrupted stack no longer reaches the device)
+        // submission, so a corrupted stack never reaches the device)
         // keeps the temporary and the output in the workspace, so the next
         // call uploads neither and recovers.
         let runtime = Runtime::builder().cuda(0).build().unwrap();

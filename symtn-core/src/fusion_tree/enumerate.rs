@@ -399,9 +399,9 @@ where
         Ok(result) => result,
         Err(CheckedGenericStructureError::Provider(never)) => match never {},
         Err(CheckedGenericStructureError::Core(error)) => {
-            // The legacy API only reports the bounded-table failure after the
+            // The infallible API only reports the bounded-table failure after the
             // aggregate is built. All other core failures are impossible for
-            // a structurally valid legacy FusionRule walk.
+            // a structurally valid infallible FusionRule walk.
             panic!("legacy Generic structural walk failed unexpectedly: {error}")
         }
     }

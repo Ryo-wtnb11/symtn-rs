@@ -223,8 +223,8 @@ fn large_tree_pair_syntax_validation_does_not_allocate() {
         black_box(())
     });
 
-    // What: rank-19 syntax preflight, beyond the former per-axis `[usize; 8]`
-    // scratch size, remains allocation-free on successful validation.
+    // What: rank-19 syntax preflight, beyond any rank-8 inline scratch,
+    // remains allocation-free on successful validation.
     assert_eq!(allocations, 0);
 }
 

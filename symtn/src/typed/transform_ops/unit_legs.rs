@@ -126,8 +126,8 @@ where
     /// exactly as TensorKit's `copy = false` default shares `t.data` for an
     /// ordinary `TensorMap`. A lazy dense adjoint is first converted to a
     /// fresh dense tensor. A compact spectrum factor materializes
-    /// into a fresh dense payload first (one copy) — the #613 Group 4
-    /// contract; TensorKit routes its `DiagonalTensorMap` through the generic
+    /// into a fresh dense payload first (one copy) — the unit-leg payload
+    /// contract (#613); TensorKit routes its `DiagonalTensorMap` through the generic
     /// similar+block-copy branch for the same reason. No device arm.
     ///
     /// The provider must certify that its vacuum obeys the canonical unit

@@ -1,4 +1,4 @@
-//! Checked Generic trace F3 (#2054): first-provider-error order, query and
+//! Checked Generic trace (#2054): first-provider-error order, query and
 //! validation counts, on the actual checked SU(3) provider behind a
 //! recording, key-selective failure wrapper.
 
@@ -489,18 +489,16 @@ fn group_admission_validates_each_member_once_in_block_order() {
     assert_ne!(calls[after..after + per_member[0].len()], per_member[0][..]);
 }
 
-/// What: a cold checked compile makes exactly the provider queries and
-/// produces the same term sequence as a04e59c2 (before #2072): routing
-/// through cache 4 changes nothing on a miss. #2150 lowered the ledger from
-/// 2031 to 1519 queries (the term bits are unchanged): each lowering split
-/// now admits its input once instead of admitting the input and both
-/// outputs twice each. #2149 lowers a group whole right after composing it,
-/// so the same multiset of queries (`sorted`, pinned before and after) comes
-/// in group order rather than source-block order (`ledger`). #2075 asks
-/// each trace channel factor for `Dim(c)`, `Dim(first)` instead of
-/// `SqrtDim(c)`, `InvSqrtDim(first)` (16 factors: 208/144/0 to 192/128/32
-/// SqrtDim/InvSqrtDim/Dim queries, same count); its 0–3 ulp term changes
-/// are below `portable`'s `f32` rounding. The ledger is exact; term values
+/// What: a cold checked compile makes exactly the pinned provider queries
+/// and produces the term sequence of a04e59c2, a revision without the
+/// composed-coefficient cache: routing through cache 4 changes nothing on a
+/// miss. Each lowering split admits its input once (#2150), 1519 queries in
+/// all. A group is lowered whole right after composing it (#2149), so the
+/// queries come in group order (`ledger`); `sorted` pins their multiset
+/// independently of order. Each trace channel factor asks for `Dim(c)`,
+/// `Dim(first)` (#2075): 192/128/32 SqrtDim/InvSqrtDim/Dim queries over 16
+/// factors; the 0–3 ulp difference from the `SqrtDim` form is below
+/// `portable`'s `f32` rounding. The ledger is exact; term values
 /// go through `portable` (fusion-symbols SU(3) coefficients round their last bits
 /// differently on Linux and macOS).
 #[test]

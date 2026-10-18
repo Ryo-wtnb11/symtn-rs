@@ -1703,7 +1703,7 @@ where
             parent_space,
             parent_spectrum,
         } => {
-            // Why not `build_adjoint`: every mode now takes the adjoint of a
+            // Why not `build_adjoint`: every mode takes the adjoint of a
             // compact diagonal as an owned compact diagonal, so a v1 record
             // written by an earlier lazy checked-Generic adjoint keeps its
             // meaning but re-encodes as `Diagonal`.

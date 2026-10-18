@@ -941,8 +941,8 @@ pub fn save_plan_cache(runtime: &Runtime) -> String {
         // is cold (once per process, at shutdown/checkpoint) while `disk` is
         // read on every cache miss, so paying the sort here keeps the hot
         // lookup path's hash lookup unchanged. Without this, the iteration
-        // order (hash order, now recency order) made the saved bytes vary run
-        // to run for identical content, breaking reproducible builds and
+        // order (recency order) would make the saved bytes vary run to run
+        // for identical content, breaking reproducible builds and
         // content-addressed/git-diffed cache blobs (issue #151).
         let mut entries: Vec<(&String, &crate::plan::ContractionPlan)> =
             cache.disk.iter().collect();
@@ -976,7 +976,7 @@ pub fn save_plan_cache(runtime: &Runtime) -> String {
 /// persistence on for this runtime. From then on a topology that has a
 /// persisted order replays it instead of searching, on a cold miss *and* on a
 /// [`ReplanPolicy::DriftFactor`] drift-replan: drift still rebuilds the plan
-/// for the current dimensions, but it no longer re-searches the order.
+/// for the current dimensions, but it does not re-search the order.
 pub fn load_plan_cache(runtime: &Runtime, text: &str) -> usize {
     let mut lines = text.lines();
     // An empty blob is a fresh persistence file (first run): activate
@@ -1182,7 +1182,7 @@ where
             let dynamic = OptEinsumPathOptimizer::new(PathStrategy::DynamicProgramming);
             network.plan_with_optimizer_fallbacks(tensors, &dynamic, &[&GreedyDenseOptimizer])
         }
-        // Legacy `default_dense_plan` fallback chain: auto-hq -> auto -> dp
+        // Fallback chain: auto-hq -> auto -> dp
         // -> greedy. Upstream `opt-einsum-path` errors on some all-dim-1
         // networks, so each failed driver falls through to the next.
         #[cfg(feature = "opt-path")]
@@ -1672,7 +1672,7 @@ mod tests {
         }
     }
 
-    /// G3c-1 (#1274): an execution that fails after the lease quarantines the
+    /// #1274: an execution that fails after the lease quarantines the
     /// leased workspace instead of recycling buffers the failure may have
     /// disturbed, and the next call builds a fresh one. After the #1371
     /// preflight only a runtime fault fails an execution, so the fault is
@@ -1883,10 +1883,9 @@ mod tests {
         }
     }
 
-    /// #2022 review: `Network` labels are arbitrary strings, so a label
-    /// holding the key's separators must not make two topologies share a
-    /// persisted key. Under the unescaped format both of these were
-    /// `0:1:1:a,b`.
+    /// #2022: `Network` labels are arbitrary strings, so a label holding the
+    /// key's separators must not make two topologies share a persisted key.
+    /// Unescaped, both of these would be `0:1:1:a,b`.
     #[test]
     fn topology_text_keeps_separator_labels_distinct() {
         let topology = |labels: &[&str]| super::NetworkTopology {

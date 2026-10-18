@@ -787,7 +787,7 @@ where
         });
     }
     // Why not rely on the step-major compact execution for malformed inputs:
-    // the legacy public API reports the first error in source-major order.
+    // the public API reports the first error in source-major order.
     preflight_compact_repartition_source_major(
         &group,
         current_codomain_rank,

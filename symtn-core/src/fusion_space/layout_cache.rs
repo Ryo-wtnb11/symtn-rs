@@ -166,7 +166,7 @@ pub(crate) fn charged_fusion_tree_layout_bytes(
     let key_bytes = std::mem::size_of::<FusionTreeHomSpaceCacheKey>()
         .saturating_add(identity.homspace.charged_retained_bytes())
         .saturating_add(identity.rule.charged_retained_bytes());
-    // Rule O (#2192): the layout keys point into one canonical arena, which
+    // Single-arena ownership (#2192): the layout keys point into one canonical arena, which
     // the sector structure reuses. Charge it here only when that structure
     // does not, so it is charged exactly once per entry.
     let arena = layout.keys.first().map(|key| &key.codomain_tree().arena);
@@ -408,7 +408,7 @@ pub(crate) fn admit_complete_hom_space_structure(
         degeneracy_structure_cache().publish(&key, entry, charged_bytes, epoch);
     // Only real residency makes content canonical: an oversize, reset-refused
     // or zero-budget build gets a fresh id on every call, and keys over it
-    // must not take completed-transformer slots (#2014-3).
+    // must not take completed-transformer slots (#2014).
     if resident {
         published.structure.content_key().mark_canonical();
     }

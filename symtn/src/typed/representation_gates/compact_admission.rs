@@ -63,7 +63,7 @@ macro_rules! row {
     ($result:expr, $map:expr) => {
         match $result {
             Ok(value) => $map(value),
-            // The facade error type is per mode by design (#1862 D4); the
+            // The facade error type is per mode by design (#1862); the
             // root cause is what both must agree on.
             Err(error) => Route::Failed(super::root_cause(&error)),
         }
@@ -333,7 +333,7 @@ fn finite_compact_diagonals_route_alike_on_every_rule_and_layout() {
 
 #[test]
 fn retained_subnormals_stay_compact_with_ieee_reciprocals() {
-    // MF semantics (#1800 A6, TensorKit `pinv(::DiagonalTensorMap)`): a
+    // MF semantics (#1800, TensorKit `pinv(::DiagonalTensorMap)`): a
     // retained subnormal is inverted to `Inf`, not sent to a dense SVD.
     let rows = agreed_matrix([5e-324_f64, 1.0], [2.0, 1e-310, -1.0], 0.0);
     assert_eq!(

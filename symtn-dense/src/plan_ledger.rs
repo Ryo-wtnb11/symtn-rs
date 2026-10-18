@@ -3,8 +3,8 @@
 //! Pure host arithmetic, compiled and tested without the `cuda` feature. The
 //! context applies the bound it computes to its Tenferro backend.
 
-/// Entries of a cuTENSOR contraction plan cost about this much retained state
-/// (`g2-design.md` §4). Used only to bound how far the plan entry cap is
+/// Entries of a cuTENSOR contraction plan cost about this much retained state.
+/// Used only to bound how far the plan entry cap is
 /// raised.
 pub(crate) const CUTENSOR_PLAN_BYTES: usize = 14 * 1024;
 

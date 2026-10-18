@@ -330,7 +330,7 @@ fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
                 TensorMap::rand_with_seed(&runtime, [&v, &w], [&v, &w], 3).unwrap();
             shared_suite!(a, b, s, $alpha, $beta, $what);
 
-            // Contraction, its `_into` (#1870 B1) and composition consume
+            // Contraction, its `_into` (#1870) and composition consume
             // the view as the owned lazy adjoint (#1865).
             let lazy = b.adjoint().unwrap();
             let spec = ContractSpec { lhs: &[2], rhs: &[0], codomain: &[0, 1], domain: &[2, 3] };

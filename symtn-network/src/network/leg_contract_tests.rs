@@ -68,7 +68,7 @@ impl SectorCodec for CollapsingDual {
     }
 }
 
-/// #1371 review P2-A: the allocation-free leg comparison enforces the dual
+/// #1371: the allocation-free leg comparison enforces the dual
 /// round trip, so a non-involutive provider is rejected with
 /// `GradedSpace::try_dual`'s own error rather than accepted.
 #[test]

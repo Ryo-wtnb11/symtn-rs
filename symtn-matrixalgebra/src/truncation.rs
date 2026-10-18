@@ -1,6 +1,6 @@
 //! Spectrum truncation policies for the fusion-tensor factorizations.
 //!
-//! Design (informed by MatrixAlgebraKit / the legacy `TruncationStrategy`, but
+//! Design (informed by MatrixAlgebraKit's `TruncationStrategy`, but
 //! intentionally narrower): every policy here is a magnitude rule over
 //! per-sector spectra of non-negative magnitudes in the factorization's
 //! stored order, which need not be descending (`eigh` publishes ascending
@@ -604,8 +604,8 @@ fn kept_masks(spectra: &[WeightedSpectrum<'_>], truncation: &Truncation) -> Vec<
             // Relative to `budget`, so a power-of-two rescaling cannot move a
             // decision; any other rescaling can move one only for a tail
             // whose exact weight lies within about this slack of the budget.
-            // The former absolute `1e-15` swamped tiny spectra and vanished
-            // for large ones. `f64::EPSILON` because every quantity here is
+            // An absolute slack such as `1e-15` would swamp tiny spectra and
+            // vanish for large ones. `f64::EPSILON` because every quantity here is
             // `f64` at every payload dtype (see the type-level docs).
             //
             // MatrixAlgebraKit `_truncerr_impl` uses no slack and a strict
@@ -1135,7 +1135,7 @@ mod tests {
     use super::*;
 
     /// The rule the test spectra's sector ids belong to. `select_truncation`
-    /// now takes one; any stable identity works for the magnitude-driven
+    /// takes one; any stable identity works for the magnitude-driven
     /// policies, which never look at a sector.
     struct TestRule;
 
@@ -2135,7 +2135,7 @@ mod tests {
     fn a_zero_budget_discards_exactly_the_zero_values_even_when_squares_underflow() {
         // What: `relative_error(0)` keeps every positive value (its type-level
         // contract). `1e-170^2` underflows to zero, so an unscaled budget of
-        // zero used to discard it; the error is then zero, not `1e-170`.
+        // zero would discard it; the error is zero, not `1e-170`.
         let entries = [(1.0, vec![1e-170, 0.0]), (2.0, vec![3e-200])];
         let decision = select(
             &spectra(&entries),
@@ -2188,7 +2188,7 @@ mod tests {
             // Exact: one dyadic term, `sqrt(w)` rounded once.
             assert_eq!(decision.error, weight.sqrt() * 2f64.powi(500));
         }
-        // The same window with both values in one sector (the review repro).
+        // The same window with both values in one sector.
         let entries = [(1.0, vec![2f64.powi(530), 2f64.powi(500)])];
         let decision = select(
             &spectra(&entries),

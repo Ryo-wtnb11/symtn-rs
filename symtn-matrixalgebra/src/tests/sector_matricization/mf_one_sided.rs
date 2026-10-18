@@ -560,8 +560,8 @@ fn mf_one_sided_many_tree_fallback_indexes_each_populated_sector_once() {
             assert_eq!(index, PlacementIndexProbe::default());
 
             // All eight sectors populated, reversed: F = T = 64 over
-            // G_s = 8 in one table (formerly one per sector), so 128
-            // hashes replace the former 8 * 8 * 8 = 512 key comparisons.
+            // G_s = 8 in one table (not one per sector), so 128 hashes
+            // instead of 8 * 8 * 8 = 512 key comparisons.
             let (_, mut reversed) = fresh();
             reversed.reverse();
             let mut pairs = staged(&reversed);
@@ -824,7 +824,7 @@ fn mf_one_sided_fallbacks_match_canonical_output_and_keep_buffers() {
     assert_buffers_intact(&pairs, side);
 
     // Padded source geometry: the even factor carries one extra leading
-    // row that no tree covers, so tree offsets no longer start at zero.
+    // row that no tree covers, so tree offsets do not start at zero.
     let (_, mut padded) = z2_two_sector_geometry::<f64>();
     padded[0].rows += 1;
     for tree in &mut padded[0].row_trees {

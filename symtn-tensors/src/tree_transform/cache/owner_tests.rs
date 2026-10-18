@@ -1,4 +1,4 @@
-//! The process-global completed-transformer owner (#2014-3): key
+//! The process-global completed-transformer owner: key
 //! completeness, canonical-only publication, the reset epoch and failure
 //! non-publication, and concurrent cold misses.
 
@@ -469,7 +469,7 @@ fn a_zero_degeneracy_budget_admits_no_completed_transformer() {
         symtn_core::structure_cache_info(symtn_core::StructureCacheKind::CompletedTreeTransformer)
     };
     let before = completed();
-    // What (#2014-3 N1): with nothing resident in the degeneracy cache no
+    // What: with nothing resident in the degeneracy cache no
     // content is canonical, so every transformer key is lookup-only.
     let (dst, src, operation) = fixture(6);
     assert!(!dst.is_canonical() && !src.is_canonical());

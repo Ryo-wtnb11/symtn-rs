@@ -77,7 +77,7 @@ eigendecomposition.
 
 `StackedTensorMap` is an expert fixed-stride representation for homogeneous
 members. It is not a required batch type for ordinary tensor operations.
-General member-batched contract is not public yet
+General member-batched contract is not public API
 ([#1506](https://github.com/Ryo-wtnb11/symtn-rs/issues/1506)). Public prepared
 APIs remain operation-specific; there is no general public work graph or
 mandatory logical batch type.

@@ -105,11 +105,9 @@ fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u
     );
 }
 
-// Total allocations of one warmed owned U(1) contraction measured on the
-// pre-change path (origin/main 9467383f, dense_threads(1), debug build):
-// f64 38 calls / 2380 bytes with one 136-byte zeroed payload; Complex64 38
-// calls / 2516 bytes with no zeroed payload (symtn-side fill). After #1212:
-// f64 38 / 2380, Complex64 38 / 2516, each with exactly one zeroed payload.
+// Total allocations of one warmed owned U(1) contraction (dense_threads(1),
+// debug build): f64 38 calls / 2380 bytes, Complex64 38 / 2516, each with
+// exactly one allocator-zeroed payload (#1212).
 const TOTAL_ALLOCATIONS_U1: u64 = 38;
 
 #[test]
@@ -157,8 +155,7 @@ fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
 
 #[test]
 fn owned_su2_contraction_with_inactive_sectors_is_one_allocator_zeroed_payload() {
-    // Pre-change: 36 calls / 3468 bytes, one 1088-byte zeroed payload;
-    // unchanged after #1212.
+    // 36 calls / 3468 bytes, one 1088-byte zeroed payload.
     su2_compose_measurement::<f64>(1_212_003);
 }
 

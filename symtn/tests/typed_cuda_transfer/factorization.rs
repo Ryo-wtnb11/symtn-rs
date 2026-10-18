@@ -304,7 +304,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
 
     // Same canary for a device structural transform (#1322). This provider's
     // `dim_scalar` re-enters `lease_cuda`, so any provider callback made while
-    // the device lease is held deadlocks on a non-re-entrant mutex. Today the
+    // the device lease is held deadlocks on a non-re-entrant mutex. The
     // transform's compile needs F and R symbols but no dimension for this
     // one-sector rule, so the counter is not asserted to move — what is
     // guarded is that a future edit which does need a dimension cannot make
@@ -960,14 +960,12 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
 /// device buffer.
 ///
 /// The aligned whole-factor route copies each block straight into its sector
-/// region, and Tenferro 0.5.0 told cuTENSOR that an offset destination view is
-/// 256-byte aligned when it is not (0.6.0 reports the true alignment, so the
-/// copy now runs at every offset), so on 0.5.0 the launch faulted with
-/// `cudaErrorMisalignedAddress` at the next synchronizing call. Every
+/// region, so the copy must report each offset destination view's true
+/// alignment to cuTENSOR; claiming 256-byte alignment for an unaligned view
+/// faults with `cudaErrorMisalignedAddress` at the next synchronizing call. Every
 /// degeneracy pair here puts the second sector's block at an offset whose byte
 /// product is not a multiple of 256: `(3, 2)` at element 9, `(5, 2)` at 25,
-/// `(3, 3)` at 9. The `(4, 2)` and `(2, 2)` pairs are the controls that passed
-/// before the fix.
+/// `(3, 3)` at 9. The `(4, 2)` and `(2, 2)` pairs are aligned controls.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_factorizations_handle_blocks_at_unaligned_offsets() {

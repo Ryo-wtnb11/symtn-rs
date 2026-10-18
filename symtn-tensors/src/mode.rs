@@ -1482,7 +1482,7 @@ where
         Ok(true)
     }
 
-    /// The entry's answer (U15): a contraction entry read the braiding style
+    /// The entry's answer: a contraction entry read the braiding style
     /// once, before staging, and admits Bosonic only. Composition never
     /// asks; asked without an answer, it fails closed.
     fn contract_twist_possible(
@@ -1723,7 +1723,7 @@ where
     }
 
     /// None: a twist is never possible once the entry admitted Bosonic
-    /// braiding (U15).
+    /// braiding.
     fn contract_twist_scales(
         rule: &R,
         authority: CheckedAuthority<'_, R>,

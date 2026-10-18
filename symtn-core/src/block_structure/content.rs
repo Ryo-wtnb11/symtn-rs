@@ -135,7 +135,7 @@ pub struct BlockStructureContent {
 /// Set when this content becomes the resident value of a complete-HomSpace
 /// cache entry (`admit_complete_hom_space_structure`). It stays set after
 /// eviction or a reset: the id is still unique, and live holders may still
-/// reuse it. Completed-transformer publication (cache 3) requires it on every
+/// reuse it. Completed-transformer publication requires it on every
 /// keyed content, so per-call views, staged candidates and expert layouts,
 /// whose ids die with the call, never enter that bounded cache.
 #[derive(Debug, Default)]
@@ -310,7 +310,7 @@ impl BlockStructureContent {
 impl SectorStructure {
     /// Heap bytes this sector structure retains, its tree arena once.
     pub(crate) fn charged_heap_bytes(&self) -> usize {
-        // Why memoised although the census no longer allocates: parked
+        // Why memoised although the census does not allocate: parked
         // network workspaces re-charge their layouts on every park, and the
         // census is O(blocks).
         *self
@@ -319,7 +319,7 @@ impl SectorStructure {
     }
 
     fn count_heap_bytes(&self) -> usize {
-        // Rule O (#2192): every fusion-tree key here, group keys included,
+        // Single-arena ownership (#2192): every fusion-tree key here, group keys included,
         // points into `trees`, so that one arena is the whole key charge.
         debug_assert!(self.holds_only_own_trees());
         let sector_blocks = self
