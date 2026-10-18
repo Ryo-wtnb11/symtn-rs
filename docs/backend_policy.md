@@ -174,9 +174,12 @@ host `synchronize()` does not happen because every thread shares one slot.
 
 ## Device test runner
 
-CI has no GPU, so the CUDA device suite (the `#[ignore]` tests that need a real
-device, plus the non-ignored tests and doctests built with `cuda`) runs only
-through one command, on a host with a free GPU:
+Device tests are an explicit, unsupported CI scope: hosted runners have no GPU
+and qg1 has no CI runner, so no workflow runs them, and they run on qg1 at each
+CUDA milestone under the evidence rule below. The CUDA device suite (the
+`#[ignore]` tests that need a real device, plus the non-ignored tests and
+doctests built with `cuda`) runs only through one command, on a host with a
+free GPU:
 
 ```sh
 CUDA_VISIBLE_DEVICES=<free ordinal> scripts/run-device-tests.sh

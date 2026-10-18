@@ -1,0 +1,107 @@
+name: Cross-library
+
+# Tests whose oracle is an external library. Why not PR CI: they need Julia
+# with a pinned TensorKit, or a pinned Python cotengra, and take minutes the
+# PR gate does not need for every change. A failure fails the scheduled run.
+#
+# CUDA device tests are outside CI: hosted runners have no GPU and qg1 has no
+# CI runner. They run through scripts/run-device-tests.sh at each CUDA
+# milestone (docs/backend_policy.md, "Device test runner").
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 4 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tensorkit:
+    name: TensorKit invariant streams
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: symtn
+      - name: Record source revisions
+        run: |
+          git -C symtn log -1 --format='symtn %H'
+      # The Julia version and the TensorKit revision are pinned by
+      # benchmarks/tensorkit_oracle/{Project,Manifest}.toml.
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.11.6'
+      - name: Instantiate the pinned TensorKit environment
+        run: julia --project=benchmarks/tensorkit_oracle -e 'using Pkg; Pkg.instantiate(); Pkg.status()'
+        working-directory: symtn
+      # The Rust streams hardcode values from the committed oracle output, so
+      # TensorKit must still reproduce that output for them to be its oracle.
+      # Why not an exact diff: the runner's BLAS differs from the recording
+      # host in the last digits and in the ~1e-11 noise singular values. Text
+      # must match exactly; numbers within rtol 1e-9 (the streams' own norm
+      # tolerance) plus atol 1e-8.
+      - name: TensorKit reproduces the committed oracle output
+        run: |
+          sha256sum -c benchmarks/tensorkit_semantic_oracle.sha256
+          julia --project=benchmarks/tensorkit_oracle benchmarks/tensorkit_semantic_oracle.jl > "$RUNNER_TEMP/oracle.out"
+          python3 - benchmarks/tensorkit_semantic_oracle.out "$RUNNER_TEMP/oracle.out" <<'EOF'
+          import re, sys
+          num = re.compile(r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?")
+          want, got = (open(p).read().splitlines() for p in sys.argv[1:])
+          bad = [] if len(want) == len(got) else [f"line count {len(want)} != {len(got)}"]
+          for n, (w, g) in enumerate(zip(want, got), 1):
+              ws, gs = num.split(w), num.split(g)
+              wv, gv = map(float, num.findall(w)), map(float, num.findall(g))
+              if ws != gs or any(abs(a - b) > 1e-9 * max(abs(a), abs(b)) + 1e-8 for a, b in zip(wv, gv)):
+                  bad.append(f"line {n}:\n  committed {w}\n  TensorKit {g}")
+          print("\n".join(bad) or "TensorKit output matches the committed oracle")
+          sys.exit(bool(bad))
+          EOF
+        working-directory: symtn
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: symtn
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: cross-library-tensorkit
+      - name: symtn invariant streams match TensorKit
+        run: cargo test --locked --release -p symtn --test semantic_suite -- --ignored _vs_tensorkit
+        working-directory: symtn
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: '0'
+
+  cotengra:
+    name: cotengra Python planner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: symtn
+      - name: Record source revisions
+        run: |
+          git -C symtn log -1 --format='symtn %H'
+      - uses: astral-sh/setup-uv@v6
+      # cotengra and its partitioners are pinned by tools/cotengra-python/uv.lock.
+      - name: Sync the pinned cotengra environment
+        run: |
+          uv sync --locked --project tools/cotengra-python
+          uv run --locked --project tools/cotengra-python python -c 'import cotengra, kahypar, optuna; print("cotengra", cotengra.__version__)'
+        working-directory: symtn
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: symtn
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          key: cross-library-cotengra
+      - name: symtn-network plans through the installed cotengra
+        run: |
+          export SYMTN_COTENGRA_UV_PROJECT="$PWD/tools/cotengra-python"
+          cargo test --locked -p symtn-network --no-default-features --features "cotengra-python,cpu-faer" --lib -- --ignored --exact cotengra_python::tests::runs_installed_cotengra_when_requested
+        working-directory: symtn
+        env:
+          SYMTN_RUN_COTENGRA_PYTHON_TEST: '1'
+          CARGO_PROFILE_TEST_DEBUG: '0'
