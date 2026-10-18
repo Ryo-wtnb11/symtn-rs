@@ -1,7 +1,7 @@
 //! The shared operands of the complex-symbol (#2281) test targets: the
-//! tree-hash entries the TensorKit fixtures also evaluate, and a real-symbol
-//! rule embedded in `Complex64` (optionally with a non-real quantum
-//! dimension).
+//! tree-hash entries on which tests hardcode values checked against
+//! TensorKit 0.17.1, and a real-symbol rule embedded in `Complex64`
+//! (optionally with a non-real quantum dimension).
 //!
 //! Test targets include this file with `#[macro_use] #[path = "support/table_fixture.rs"] mod table_fixture;`.
 
