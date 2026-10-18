@@ -321,12 +321,12 @@ fn checked_generic_bound_guards_preserve_typed_errors_before_commit() {
     let prepared = source
         .prepare_final_homspace_generic_with_checked(&checker, homspace())
         .unwrap();
-    let legacy = BoundDynamicFusionMapSpace::from_final_homspace_generic(
+    let unchecked = BoundDynamicFusionMapSpace::from_final_homspace_generic(
         Arc::new(FailAtCallRule::with_identity(identity.clone())),
         homspace(),
     )
     .unwrap();
-    let error = legacy
+    let error = unchecked
         .commit_final_homspace_generic_bound_checked(prepared)
         .unwrap_err();
     assert!(matches!(error, OperationError::StructureMismatch { .. }));
@@ -400,7 +400,7 @@ fn checked_generic_bound_prepare_commit_builds_identity_once() {
 
 #[test]
 #[allow(clippy::arc_with_non_send_sync)] // The bound API requires Arc; the single-threaded spy uses Cell counters.
-fn checked_generic_preparation_rejects_legacy_binding_before_checker_algebra_queries() {
+fn checked_generic_preparation_rejects_unchecked_binding_before_checker_algebra_queries() {
     let source_provider = Arc::new(FailAtCallRule::new());
     let checker = FailAtCallRule::new();
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
@@ -409,7 +409,7 @@ fn checked_generic_preparation_rejects_legacy_binding_before_checker_algebra_que
             .unwrap();
 
     let error = match source.prepare_final_homspace_generic_with_checked(&checker, homspace) {
-        Ok(_) => panic!("legacy binding was accepted as checked authority"),
+        Ok(_) => panic!("unchecked binding was accepted as checked authority"),
         Err(error) => error,
     };
 

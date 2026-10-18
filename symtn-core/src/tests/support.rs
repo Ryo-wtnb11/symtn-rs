@@ -361,7 +361,7 @@ impl MultiplicityFreeRigidSymbols for SplitOnlyCountingRule {
     }
 }
 
-pub(super) fn legacy_split_only_tree_pair_route<R>(
+pub(super) fn split_only_tree_pair_route_composition_oracle<R>(
     rule: &R,
     source: &FusionTreePairKey,
     target_codomain_rank: usize,
@@ -488,7 +488,7 @@ pub(super) fn sector_ids(sectors: &[SectorId]) -> Vec<usize> {
 pub(super) struct CheckedTreeProbe {
     pub(super) channel_calls: AtomicUsize,
     pub(super) nsymbol_calls: AtomicUsize,
-    pub(super) legacy_nsymbol_calls: AtomicUsize,
+    pub(super) unchecked_nsymbol_calls: AtomicUsize,
 }
 
 impl FusionRule for CheckedTreeProbe {
@@ -513,7 +513,7 @@ impl FusionRule for CheckedTreeProbe {
     }
 
     fn nsymbol(&self, _left: SectorId, _right: SectorId, _coupled: SectorId) -> usize {
-        self.legacy_nsymbol_calls.fetch_add(1, Ordering::Relaxed);
+        self.unchecked_nsymbol_calls.fetch_add(1, Ordering::Relaxed);
         1
     }
 }
@@ -794,7 +794,7 @@ pub(super) fn materialized_leg_tuple_oracle(space: &FusionProductSpace) -> Vec<V
     out
 }
 
-pub(super) fn legacy_select<R: FusionRule>(
+pub(super) fn reference_select<R: FusionRule>(
     rule: &R,
     homspace: &FusionTreeHomSpace,
     codomain_axes: &[usize],
@@ -814,7 +814,7 @@ pub(super) fn legacy_select<R: FusionRule>(
     )
 }
 
-fn legacy_tensorcontract_homspace<R: FusionRule>(
+fn reference_tensorcontract_homspace<R: FusionRule>(
     rule: &R,
     lhs: &FusionTreeHomSpace,
     rhs: &FusionTreeHomSpace,
@@ -829,13 +829,13 @@ fn legacy_tensorcontract_homspace<R: FusionRule>(
     let rhs_open = (0..rhs.rank())
         .filter(|axis| !rhs_axes.contains(axis))
         .collect::<Vec<_>>();
-    let lhs = legacy_select(rule, lhs, &lhs_open, lhs_axes);
-    let rhs = legacy_select(rule, rhs, rhs_axes, &rhs_open);
+    let lhs = reference_select(rule, lhs, &lhs_open, lhs_axes);
+    let rhs = reference_select(rule, rhs, rhs_axes, &rhs_open);
     let composed = FusionTreeHomSpace::compose(rule, &lhs, &rhs).unwrap();
-    legacy_select(rule, &composed, &output_axes[..nout], &output_axes[nout..])
+    reference_select(rule, &composed, &output_axes[..nout], &output_axes[nout..])
 }
 
-pub(super) fn assert_direct_contract_matches_legacy<R: CheckedFusionAlgebra>(
+pub(super) fn assert_direct_contract_matches_reference<R: CheckedFusionAlgebra>(
     rule: &R,
     lhs: &FusionTreeHomSpace,
     rhs: &FusionTreeHomSpace,
@@ -845,7 +845,7 @@ pub(super) fn assert_direct_contract_matches_legacy<R: CheckedFusionAlgebra>(
     nout: usize,
 ) {
     let expected =
-        legacy_tensorcontract_homspace(rule, lhs, rhs, lhs_axes, rhs_axes, output_axes, nout);
+        reference_tensorcontract_homspace(rule, lhs, rhs, lhs_axes, rhs_axes, output_axes, nout);
     let actual = FusionTreeHomSpace::tensorcontract_homspace(
         rule,
         lhs,
@@ -921,7 +921,7 @@ pub(super) fn assert_direct_contract_matches_legacy<R: CheckedFusionAlgebra>(
     }
 }
 
-pub(super) fn legacy_leg_degeneracy_structure<R>(
+pub(super) fn reference_leg_degeneracy_structure<R>(
     rule: &R,
     homspace: &FusionTreeHomSpace,
 ) -> Arc<BlockStructure>
@@ -2111,7 +2111,7 @@ pub(super) fn assert_rigid_provider_error(
     ));
 }
 
-// ============ REFUTE(b2a): μ↔ν / κ↔λ transpose discriminator ============
+// ============ REFUTE: μ↔ν / κ↔λ transpose discriminator ============
 //
 // The A4 oracle CANNOT catch a B-matrix (or A-matrix) index transpose: for
 // A4Irrep(3) both Bsymbol and Asymbol are the 2×2 IDENTITY, which is its own

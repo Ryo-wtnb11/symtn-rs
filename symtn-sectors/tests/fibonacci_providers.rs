@@ -126,7 +126,7 @@ fn ulps(actual: &str, recorded: &str) -> u64 {
 /// derivations, so `TableRule::fibonacci()` reproduces its 98 rows of
 /// `VALUES_957CCC05` bit for bit.
 #[test]
-fn every_value_matches_the_previous_table_provider_bit_for_bit() {
+fn every_value_matches_the_recorded_table_golden_bit_for_bit() {
     let actual = dump("table", &table());
     let recorded: Vec<&str> = VALUES_957CCC05
         .lines()
@@ -263,7 +263,7 @@ fn unit_associators_are_bitwise_one() {
 }
 
 #[test]
-fn table_codec_round_trips_every_object_with_the_previous_ids() {
+fn table_codec_round_trips_every_object_with_the_recorded_ids() {
     let fib = table();
     for id in [0, 1] {
         let label = TableSector::new(id as u16 + 1);

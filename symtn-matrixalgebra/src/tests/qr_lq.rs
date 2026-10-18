@@ -437,8 +437,8 @@ fn assert_rectangular_direct_qr(rows: usize, cols: usize) {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_qr_copy_rec = crate::probe::record();
     let Qr { q, r } = qr_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
-    assert_factor_layout_matches_legacy_shapes(q.space());
-    assert_factor_layout_matches_legacy_shapes(r.space());
+    assert_factor_layout_matches_per_tree_shapes(q.space());
+    assert_factor_layout_matches_per_tree_shapes(r.space());
     let probe = compact_qr_copy_rec.compact_qr_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
@@ -500,8 +500,8 @@ fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
     let compact_lq_copy_rec = crate::probe::record();
     let Lq { l: left, q: right } =
         lq_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
-    assert_factor_layout_matches_legacy_shapes(left.space());
-    assert_factor_layout_matches_legacy_shapes(right.space());
+    assert_factor_layout_matches_per_tree_shapes(left.space());
+    assert_factor_layout_matches_per_tree_shapes(right.space());
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
@@ -672,8 +672,8 @@ where
         &bound_tensor_ref!(Arc::new((*rule).clone()), &tensor),
     )
     .unwrap();
-    assert_factor_layout_matches_legacy_shapes(q.space());
-    assert_factor_layout_matches_legacy_shapes(r.space());
+    assert_factor_layout_matches_per_tree_shapes(q.space());
+    assert_factor_layout_matches_per_tree_shapes(r.space());
     let reconstructed = contract_pair(rule, &tensor, &q, &r);
     assert_svd_blocks_match(&tensor, &reconstructed);
 }
@@ -723,8 +723,8 @@ where
         &bound_tensor_ref!(Arc::new((*rule).clone()), &tensor),
     )
     .unwrap();
-    assert_factor_layout_matches_legacy_shapes(left.space());
-    assert_factor_layout_matches_legacy_shapes(right.space());
+    assert_factor_layout_matches_per_tree_shapes(left.space());
+    assert_factor_layout_matches_per_tree_shapes(right.space());
     let reconstructed = contract_pair(rule, &tensor, &left, &right);
     assert_svd_blocks_match(&tensor, &reconstructed);
 }

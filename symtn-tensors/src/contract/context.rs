@@ -455,13 +455,13 @@ where
                 init,
             );
         }
-        let lowered = lower_legacy_axes(lhs_space.space(), rhs_space.space(), axes)?;
+        let lowered = lower_conjugated_axes(lhs_space.space(), rhs_space.space(), axes)?;
         self.tensorcontract_prelowered_into(
             dst_space,
             dst_data,
-            legacy_operand(lhs_space.space(), axes.lhs_conjugate()),
+            conjugation_operand(lhs_space.space(), axes.lhs_conjugate()),
             lhs_data,
-            legacy_operand(rhs_space.space(), axes.rhs_conjugate()),
+            conjugation_operand(rhs_space.space(), axes.rhs_conjugate()),
             rhs_data,
             lowered.as_spec(),
             alpha,
@@ -488,7 +488,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        let lowered = lower_legacy_axes(lhs_space, rhs_space, axes)?;
+        let lowered = lower_conjugated_axes(lhs_space, rhs_space, axes)?;
         let axes = lowered.as_spec();
         let output_axes = spec_output_axes(axes, dst_space.rank());
         self.tensorcontract_planned_raw_into::<MultiplicityFreeAdmissionMode, R>(
@@ -499,8 +499,14 @@ where
                 authority: encoded_layout_primer::<R>,
             },
             dst_data,
-            (legacy_operand(lhs_space, axes.lhs_conjugate()), lhs_data),
-            (legacy_operand(rhs_space, axes.rhs_conjugate()), rhs_data),
+            (
+                conjugation_operand(lhs_space, axes.lhs_conjugate()),
+                lhs_data,
+            ),
+            (
+                conjugation_operand(rhs_space, axes.rhs_conjugate()),
+                rhs_data,
+            ),
             PlannedContraction::Contract((
                 axes.lhs_contracting_axes(),
                 axes.rhs_contracting_axes(),
@@ -528,7 +534,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        let lowered = lower_legacy_axes(lhs_space, rhs_space, axes)?;
+        let lowered = lower_conjugated_axes(lhs_space, rhs_space, axes)?;
         let axes = lowered.as_spec();
         let output_axes = spec_output_axes(axes, dst_space.rank());
         self.plan_contract_raw::<super::resolution::HostEagerExecutor, R>(
@@ -537,8 +543,8 @@ where
                 space: dst_space,
                 authority: encoded_layout_primer::<R>,
             },
-            legacy_operand(lhs_space, axes.lhs_conjugate()),
-            legacy_operand(rhs_space, axes.rhs_conjugate()),
+            conjugation_operand(lhs_space, axes.lhs_conjugate()),
+            conjugation_operand(rhs_space, axes.rhs_conjugate()),
             (
                 axes.lhs_contracting_axes(),
                 axes.rhs_contracting_axes(),
@@ -1130,10 +1136,10 @@ where
 
 /// A conjugation flag on an owned space requests its categorical
 /// adjoint, with `axes` indexing the stored tensor's legs (TensorOperations'
-/// `conjA`): the lazy-adjoint operand of the space ([`legacy_operand`]), its
+/// `conjA`): the lazy-adjoint operand of the space ([`conjugation_operand`]), its
 /// contracted axes mapped onto the adjoint's legs here. Without a flag the
 /// axes are unchanged.
-fn lower_legacy_axes(
+fn lower_conjugated_axes(
     lhs: &DynamicFusionMapSpace,
     rhs: &DynamicFusionMapSpace,
     axes: TensorContractSpec<'_>,
@@ -1149,7 +1155,7 @@ fn lower_legacy_axes(
 
 /// The operand an owned space and a conjugation flag request: the flag
 /// asks for the categorical adjoint, which is the lazy adjoint of the space.
-fn legacy_operand(space: &DynamicFusionMapSpace, conjugate: bool) -> FusionOperand<'_> {
+fn conjugation_operand(space: &DynamicFusionMapSpace, conjugate: bool) -> FusionOperand<'_> {
     if conjugate {
         FusionOperand::adjoint(space)
     } else {

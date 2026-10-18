@@ -115,7 +115,7 @@ where
 }
 
 #[test]
-fn legacy_coefficient_free_calls_infer_f64() {
+fn coefficient_free_calls_infer_f64() {
     let structure = Arc::new(BlockStructure::packed_column_major(1, [vec![1]]).unwrap());
     let _ = FusionBlockContractPlan::from_parts(
         Arc::clone(&structure),

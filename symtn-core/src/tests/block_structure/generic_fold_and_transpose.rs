@@ -1,11 +1,11 @@
 use super::*;
 
-struct LegacyA4FPolicyProbe {
+struct CountingA4FoldRule {
     n_calls: std::cell::Cell<usize>,
     f_calls: std::cell::Cell<usize>,
 }
 
-impl FusionRule for LegacyA4FPolicyProbe {
+impl FusionRule for CountingA4FoldRule {
     fn rule_identity(&self) -> RuleIdentity {
         FusionRule::rule_identity(&A4FoldRule)
     }
@@ -30,7 +30,7 @@ impl FusionRule for LegacyA4FPolicyProbe {
     }
 }
 
-impl GenericFusionSymbols for LegacyA4FPolicyProbe {
+impl GenericFusionSymbols for CountingA4FoldRule {
     type Scalar = f64;
 
     fn f_symbol_generic(
@@ -85,7 +85,7 @@ fn assert_vec(got: &[f64], want: &[f64], label: &str) {
 // machinery (F-slice selection, μ/ν/κ vertex indexing, λ free axis) is fully
 // discriminated here — unlike the A4 bend oracle, whose A/B are I₂.
 #[test]
-fn b2b_a4_multi_fmove_matches_tensorkit() {
+fn a4_multi_fmove_matches_tensorkit() {
     let rule = A4FoldRule;
     let s = 1.0 / 3.0_f64.sqrt();
     let m = -1.0 / (2.0 * 3.0_f64.sqrt());
@@ -201,7 +201,7 @@ fn b2b_a4_multi_fmove_matches_tensorkit() {
 }
 
 #[test]
-fn legacy_generic_associator_keeps_raw_f_shape_policy() {
+fn infallible_generic_associator_keeps_raw_f_shape_policy() {
     let long = a4f_rank3(3, 2, 1);
     let tail = generic_multi_fmove_tree(&A4FoldRule, &long)
         .unwrap()
@@ -209,7 +209,7 @@ fn legacy_generic_associator_keeps_raw_f_shape_policy() {
         .find(|(tree, _)| tree.coupled().id() == 3 && tree.vertices()[0].get() == 1)
         .unwrap()
         .0;
-    let probe = LegacyA4FPolicyProbe {
+    let probe = CountingA4FoldRule {
         n_calls: std::cell::Cell::new(0),
         f_calls: std::cell::Cell::new(0),
     };
@@ -220,7 +220,7 @@ fn legacy_generic_associator_keeps_raw_f_shape_policy() {
     assert_eq!(
         probe.n_calls.get(),
         1,
-        "legacy access must not add four F-shape Nsymbol queries"
+        "infallible access must not add four F-shape Nsymbol queries"
     );
 }
 
@@ -443,7 +443,7 @@ fn foldright_map(
 // Gate 4b (A4 oracle): tree-level foldright U-matrix vs TensorKit.foldright.
 // rank-2 codomain: dst domain first leg dualized, U == I₂ (A4 Asymbol=I₂).
 #[test]
-fn b2b_a4_foldright_rank2_matches_tensorkit() {
+fn a4_foldright_rank2_matches_tensorkit() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     for mu in 1..=2 {
@@ -485,7 +485,7 @@ fn b2b_a4_foldright_rank2_matches_tensorkit() {
 // exercises F(3,3,3,3,3,3) combined with the √dim coeff factors (the ±√3/2 =
 // ±0.8660 entries). This is the strongest fold discriminator available.
 #[test]
-fn b2b_a4_foldright_rank3_matches_tensorkit() {
+fn a4_foldright_rank3_matches_tensorkit() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     let dom = FusionTreeKey::new([t], t, [false], [], []);
@@ -555,7 +555,7 @@ fn b2b_a4_foldright_rank3_matches_tensorkit() {
 // original pair with coefficient 1 (A-unitarity: A A† = I on the bent
 // triple). Enumerated over all rank-3 A4 vertex assignments.
 #[test]
-fn b2b_a4_fold_round_trip_identity() {
+fn a4_fold_round_trip_identity() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     let dom = FusionTreeKey::new([t], t, [false], [], []);
@@ -591,7 +591,7 @@ fn b2b_a4_fold_round_trip_identity() {
 
 // Gate 2: cycle round-trip. cycleclockwise then cycleanticlockwise == id.
 #[test]
-fn b2b_a4_cycle_round_trip_identity() {
+fn a4_cycle_round_trip_identity() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     let dom = FusionTreeKey::new([t], t, [false], [], []);
@@ -622,7 +622,7 @@ fn b2b_a4_cycle_round_trip_identity() {
 // and the rank-2-domain bend surgery. Round-trip identities, all A4 vertex
 // assignments enumerated.
 #[test]
-fn b2b_a4_fold_round_trip_domain_rank2() {
+fn a4_fold_round_trip_domain_rank2() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     for cod_mu in 1..=2 {
@@ -666,7 +666,7 @@ fn b2b_a4_fold_round_trip_domain_rank2() {
 }
 
 #[test]
-fn b2b_a4_bend_round_trip_domain_rank2() {
+fn a4_bend_round_trip_domain_rank2() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     for cod_mu in 1..=2 {
@@ -711,7 +711,7 @@ fn b2b_a4_bend_round_trip_domain_rank2() {
 // domain vertices ν. coeff(out ν) = coeff0·A[μ,ν] = U[μ,ν]. A missing conj
 // or a μ↔ν swap would produce conj(U)/Uᵀ — distinct complex numbers.
 #[test]
-fn refute_b2b_complex_foldright_reads_a_row_unconjugated() {
+fn refute_complex_foldright_reads_a_row_unconjugated() {
     let rule = ComplexUnitaryRule;
     let s = SectorId::new(1);
     let u = cx_u();
@@ -755,7 +755,7 @@ fn refute_b2b_complex_foldright_reads_a_row_unconjugated() {
 // Round-trip with a COMPLEX unitary A: foldright∘foldleft == id requires
 // U U† = I, so the conj in the return fold must be exactly right.
 #[test]
-fn b2b_complex_fold_round_trip_identity() {
+fn complex_fold_round_trip_identity() {
     let rule = ComplexUnitaryRule;
     let s = SectorId::new(1);
     for mu in 1..=2usize {
@@ -795,7 +795,7 @@ fn b2b_complex_fold_round_trip_identity() {
 
 // Bend round-trip with a COMPLEX unitary B: bendright∘bendleft == id.
 #[test]
-fn b2b_complex_bend_round_trip_identity() {
+fn complex_bend_round_trip_identity() {
     let rule = ComplexUnitaryRule;
     let s = SectorId::new(1);
     for mu in 1..=2usize {
@@ -839,7 +839,7 @@ fn su3_bfwd() -> [[f64; 2]; 2] {
 // NON-DIAGONAL SU(3) B to the domain vertices ν. A μ↔ν swap would emit
 // COLUMN μ; B is non-symmetric (B[0,1]≠B[1,0]) so the two are distinct.
 #[test]
-fn b2b_su3_bendright_uses_b_row_not_column() {
+fn su3_bendright_uses_b_row_not_column() {
     let rule = Su3BendRule;
     let s42 = SectorId::new(1);
     let s31 = SectorId::new(2);
@@ -879,7 +879,7 @@ fn b2b_su3_bendright_uses_b_row_not_column() {
 // Round-trip with a real non-diagonal SU(3) B: bendright∘bendleft == id
 // (B_fwd · B_ret = I₂), exercising the non-trivial off-diagonal mixing.
 #[test]
-fn b2b_su3_bend_round_trip_identity() {
+fn su3_bend_round_trip_identity() {
     let rule = Su3BendRule;
     let s42 = SectorId::new(1);
     let s31 = SectorId::new(2);
@@ -961,7 +961,7 @@ fn a4_pair_rank2_1(mu: usize) -> FusionTreePairKey {
 // A4FoldRule, whose A-move is a genuinely non-diagonal outer-multiplicity
 // move, so any coefficient error in the composition breaks the identity.
 #[test]
-fn b2c_generic_transpose_round_trips_to_identity() {
+fn generic_transpose_round_trips_to_identity() {
     let rule = A4FoldRule;
     let pair = a4_pair_rank1_1();
     let forward = generic_transpose_tree_pair(&rule, &pair, &[1], &[0]).unwrap();
@@ -980,7 +980,7 @@ fn b2c_generic_transpose_round_trips_to_identity() {
 // round-trip) around a no-op braid, plus the tree-pair reconstruction
 // closure. Run on A4BendRule (rigid, OM); no braid R-symbol is invoked.
 #[test]
-fn b2c_generic_braid_identity_permutation_is_identity() {
+fn generic_braid_identity_permutation_is_identity() {
     let rule = A4BendRule;
     for mu in 1..=2 {
         let pair = a4_pair_rank2_1(mu);
@@ -1001,7 +1001,7 @@ fn b2c_generic_braid_identity_permutation_is_identity() {
 // (`generic_braid_tree`) is tested independently by the Artin-braid
 // round-trip tests.
 #[test]
-fn b2c_generic_permute_agrees_with_default_level_braid() {
+fn generic_permute_agrees_with_default_level_braid() {
     let rule = A4BendRule; // Bosonic ⇒ symmetric braiding.
     for mu in 1..=2 {
         let pair = a4_pair_rank2_1(mu);

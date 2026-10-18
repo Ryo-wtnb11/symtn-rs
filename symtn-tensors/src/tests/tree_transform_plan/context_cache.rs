@@ -136,7 +136,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (group_count, 0)
     );
@@ -159,7 +159,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (groups.misses, 0)
     );
@@ -180,7 +180,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (0, 0)
     );

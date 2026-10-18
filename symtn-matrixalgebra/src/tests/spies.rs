@@ -462,7 +462,7 @@ impl Observer for NativeFullSvdSpy {
     fn script(script: &mut Script) {
         script_native_full_svd(
             script,
-            "native full SVD must not use the legacy SVD route",
+            "native full SVD must not use the compact SVD route",
             "native full SVD must not use orthonormal completion",
         );
     }
@@ -481,7 +481,7 @@ impl Observer for FailSecondOwnedFullSvd {
     fn script(script: &mut Script) {
         script_native_full_svd(
             script,
-            "claimed native full SVD must not retry the legacy route",
+            "claimed native full SVD must not retry the compact SVD route",
             "claimed native full SVD must not use completion",
         );
         script.fail(

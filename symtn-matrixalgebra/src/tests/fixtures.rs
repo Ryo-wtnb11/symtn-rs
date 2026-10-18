@@ -66,8 +66,9 @@ pub(super) fn assert_svd_blocks_match(lhs: &TestTensor<f64>, rhs: &TestTensor<f6
     }
 }
 
-pub(super) fn assert_factor_layout_matches_legacy_shapes<R>(actual: &BoundDynamicFusionMapSpace<R>)
-where
+pub(super) fn assert_factor_layout_matches_per_tree_shapes<R>(
+    actual: &BoundDynamicFusionMapSpace<R>,
+) where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
 {
     // What: canonical factor construction has the exact block layout of an
@@ -97,27 +98,27 @@ where
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let legacy =
+    let per_tree =
         BoundDynamicFusionMapSpace::from_degeneracy_shapes(provider, homspace, shapes).unwrap();
     let actual_space = actual.space();
-    let legacy_space = legacy.space();
-    assert_eq!(actual_space.nout(), legacy_space.nout());
-    assert_eq!(actual_space.nin(), legacy_space.nin());
+    let per_tree_space = per_tree.space();
+    assert_eq!(actual_space.nout(), per_tree_space.nout());
+    assert_eq!(actual_space.nin(), per_tree_space.nin());
     assert_eq!(
         actual_space.required_len().unwrap(),
-        legacy_space.required_len().unwrap()
+        per_tree_space.required_len().unwrap()
     );
     assert_eq!(
         actual_space.structure().block_count(),
-        legacy_space.structure().block_count()
+        per_tree_space.structure().block_count()
     );
     for index in 0..actual_space.structure().block_count() {
         let actual_block = actual_space.structure().block(index).unwrap();
-        let legacy_block = legacy_space.structure().block(index).unwrap();
-        assert_eq!(actual_block.key(), legacy_block.key());
-        assert_eq!(actual_block.shape(), legacy_block.shape());
-        assert_eq!(actual_block.strides(), legacy_block.strides());
-        assert_eq!(actual_block.offset(), legacy_block.offset());
+        let per_tree_block = per_tree_space.structure().block(index).unwrap();
+        assert_eq!(actual_block.key(), per_tree_block.key());
+        assert_eq!(actual_block.shape(), per_tree_block.shape());
+        assert_eq!(actual_block.strides(), per_tree_block.strides());
+        assert_eq!(actual_block.offset(), per_tree_block.offset());
     }
 }
 

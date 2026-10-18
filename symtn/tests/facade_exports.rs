@@ -190,7 +190,7 @@ fn assert_exports(module: &str, actual: &BTreeSet<String>, expected: &[&str]) {
 }
 
 #[test]
-fn facade_exports_are_exactly_the_reviewed_names() {
+fn facade_exports_are_exactly_the_listed_names() {
     let (root, inline) = module_exports("lib.rs");
     assert_exports("symtn", &root, ROOT);
     let inline: Vec<&str> = inline.iter().map(|(name, _)| name.as_str()).collect();

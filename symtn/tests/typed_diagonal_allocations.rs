@@ -535,7 +535,7 @@ fn compact_is_posdef_never_builds_a_dense_payload() {
 }
 
 #[test]
-fn pr3_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
+fn diagonal_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
     // What: `zeros_like`, `to_c64` and `re`/`im` are one
     // element-wise pass — on a compact spectrum factor the result stays
     // compact (far below one dense payload).
@@ -561,7 +561,7 @@ fn pr3_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
 }
 
 #[test]
-fn pr3_dense_conversions_allocate_only_their_own_output() {
+fn diagonal_dense_conversions_allocate_only_their_own_output() {
     // What: on a dense payload, `to_c64` allocates its c64
     // output (twice the f64 bytes) and nothing more; `re`/`im` allocate their
     // f64 output and nothing more. The ceilings reject any hidden second
@@ -588,7 +588,7 @@ fn pr3_dense_conversions_allocate_only_their_own_output() {
 }
 
 #[test]
-fn pr3_inspections_allocate_no_payload() {
+fn diagonal_inspections_allocate_no_payload() {
     // What: the rank family reads the space structure and
     // allocates nothing; `leg_dims` owns only its `Vec<usize>` of rank
     // entries, never a payload.

@@ -320,22 +320,22 @@ fn checked_generic_artin_rejects_categorical_symbol_shapes_before_indexing() {
 }
 
 #[test]
-fn checked_generic_bend_and_repartition_match_legacy_rows_and_order() {
+fn checked_generic_bend_and_repartition_match_unchecked_rows_and_order() {
     let pair = a4_dual_pair_rank2(2);
-    let legacy_bend = generic_bendright_tree_pair(&A4BendRule, &pair).unwrap();
+    let unchecked_bend = generic_bendright_tree_pair(&A4BendRule, &pair).unwrap();
     let checked = A4BendRule;
     let checked_bend = generic_bendright_tree_pair_checked(&checked, &pair).unwrap();
-    assert_eq!(checked_bend, legacy_bend);
+    assert_eq!(checked_bend, unchecked_bend);
 
-    let legacy_repartition = generic_repartition_tree_pair(&A4BendRule, &pair, 0).unwrap();
+    let unchecked_repartition = generic_repartition_tree_pair(&A4BendRule, &pair, 0).unwrap();
     let checked = A4BendRule;
     let checked_repartition = generic_repartition_tree_pair_checked(&checked, &pair, 0).unwrap();
-    assert_eq!(checked_repartition, legacy_repartition);
+    assert_eq!(checked_repartition, unchecked_repartition);
 
     let checked = A4BendRule;
     assert_eq!(
-        generic_bendleft_tree_pair_checked(&checked, &legacy_bend[0].0).unwrap(),
-        generic_bendleft_tree_pair(&A4BendRule, &legacy_bend[0].0).unwrap()
+        generic_bendleft_tree_pair_checked(&checked, &unchecked_bend[0].0).unwrap(),
+        generic_bendleft_tree_pair(&A4BendRule, &unchecked_bend[0].0).unwrap()
     );
 }
 
@@ -362,7 +362,7 @@ fn checked_generic_b_and_a_reject_malformed_categorical_f_shapes() {
 }
 
 #[test]
-fn refute_b2a_bendright_uses_b_row_not_column() {
+fn refute_bendright_uses_b_row_not_column() {
     // End-to-end: bend the codomain vertex μ; the ν output distribution must
     // equal ROW μ of B (coeff = coeff0·Bmat[μ,ν], coeff0=1 here). A μ↔ν swap
     // in the Bmat.get(μ,ν) call would emit COLUMN μ instead.
@@ -534,7 +534,7 @@ impl GenericRigidSymbols for Coeff2ConjRule {
 
 // Test A: `multi_Fmove_inv` alone returns conj(associator) on complex F.
 #[test]
-fn refute_b2b_multi_fmove_inv_is_conj_associator_complex() {
+fn refute_multi_fmove_inv_is_conj_associator_complex() {
     let rule = Coeff2ConjRule;
     let s1 = SectorId::new(1);
     let s3 = SectorId::new(3);
@@ -559,7 +559,7 @@ fn refute_b2b_multi_fmove_inv_is_conj_associator_complex() {
 // Test B: foldright net observable = raw associator w (the two conjs cancel).
 // A single dropped conj at EITHER site would surface as conj(w).
 #[test]
-fn refute_b2b_foldright_net_is_raw_associator_complex() {
+fn refute_foldright_net_is_raw_associator_complex() {
     let rule = Coeff2ConjRule;
     let s1 = SectorId::new(1);
     let s2 = SectorId::new(2);
@@ -653,7 +653,7 @@ fn generic_full_key_block_composition_matches_per_source_replay() {
 }
 
 #[test]
-fn checked_generic_cyclic_transpose_matches_legacy_rows() {
+fn checked_generic_cyclic_transpose_matches_unchecked_rows() {
     let rule = A4FoldRule;
     let t = SectorId::new(3);
     let checked = InfallibleGeneric::new(&rule);
@@ -692,12 +692,12 @@ fn checked_generic_cyclic_transpose_matches_legacy_rows() {
             "multi-step dual flags",
         ),
     ] {
-        let legacy =
+        let unchecked =
             map_terms(generic_transpose_tree_pair(&rule, &pair, &codomain, &domain).unwrap());
         let actual = map_terms(
             generic_transpose_tree_pair_checked(&checked, &pair, &codomain, &domain).unwrap(),
         );
-        assert_term_maps_eq(&actual, &legacy, label);
+        assert_term_maps_eq(&actual, &unchecked, label);
     }
 }
 

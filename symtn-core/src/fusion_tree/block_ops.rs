@@ -886,7 +886,7 @@ where
 type MultiplicityFreeTreePairBlockRows<S> = Vec<Vec<(FusionTreePairKey, S)>>;
 
 #[cfg(test)]
-fn multiplicity_free_foldright_tree_pair_legacy_oracle<R>(
+fn multiplicity_free_foldright_tree_pair_stepwise_oracle<R>(
     rule: &R,
     tree_pair: &FusionTreePairKey,
 ) -> Result<Vec<(FusionTreePairKey, R::Scalar)>, CoreError>
@@ -913,12 +913,12 @@ where
 
     let mut terms = FusionTermAccumulator::new();
     for (codomain_prime, coeff1) in
-        multiplicity_free_multi_fmove_tree_legacy_oracle(rule, codomain)?
+        multiplicity_free_multi_fmove_tree_stepwise_oracle(rule, codomain)?
     {
         let b = codomain_prime.coupled();
         let a_symbol = rule.a_symbol_scalar(a, b, c);
         let coeff0 = rule.sqrt_dim_scalar(c) * rule.inv_sqrt_dim_scalar(b);
-        for (domain_prime, coeff2) in multiplicity_free_multi_fmove_inv_tree_legacy_oracle(
+        for (domain_prime, coeff2) in multiplicity_free_multi_fmove_inv_tree_stepwise_oracle(
             rule,
             rule.dual(a),
             b,
@@ -940,7 +940,7 @@ where
 }
 
 #[cfg(test)]
-fn multiplicity_free_foldleft_tree_pair_legacy_oracle<R>(
+fn multiplicity_free_foldleft_tree_pair_stepwise_oracle<R>(
     rule: &R,
     tree_pair: &FusionTreePairKey,
 ) -> Result<Vec<(FusionTreePairKey, R::Scalar)>, CoreError>
@@ -953,7 +953,7 @@ where
         tree_pair.codomain_tree().clone(),
     );
     Ok(
-        multiplicity_free_foldright_tree_pair_legacy_oracle(rule, &swapped)?
+        multiplicity_free_foldright_tree_pair_stepwise_oracle(rule, &swapped)?
             .into_iter()
             .map(|(folded, coefficient)| {
                 (
@@ -969,7 +969,7 @@ where
 }
 
 #[cfg(test)]
-fn multiplicity_free_cycle_clockwise_tree_pair_legacy_oracle<R>(
+fn multiplicity_free_cycle_clockwise_tree_pair_stepwise_oracle<R>(
     rule: &R,
     tree_pair: &FusionTreePairKey,
 ) -> Result<Vec<(FusionTreePairKey, R::Scalar)>, CoreError>
@@ -982,11 +982,11 @@ where
             .into_iter()
             .collect()
     } else {
-        multiplicity_free_foldright_tree_pair_legacy_oracle(rule, tree_pair)?
+        multiplicity_free_foldright_tree_pair_stepwise_oracle(rule, tree_pair)?
     };
     if tree_pair.codomain_tree().uncoupled().is_empty() {
         compose_terms(first, |key| {
-            multiplicity_free_foldright_tree_pair_legacy_oracle(rule, key)
+            multiplicity_free_foldright_tree_pair_stepwise_oracle(rule, key)
         })
     } else {
         compose_terms(first, |key| multiplicity_free_bendleft_tree_pair(rule, key))
@@ -994,7 +994,7 @@ where
 }
 
 #[cfg(test)]
-fn multiplicity_free_cycle_anticlockwise_tree_pair_legacy_oracle<R>(
+fn multiplicity_free_cycle_anticlockwise_tree_pair_stepwise_oracle<R>(
     rule: &R,
     tree_pair: &FusionTreePairKey,
 ) -> Result<Vec<(FusionTreePairKey, R::Scalar)>, CoreError>
@@ -1007,11 +1007,11 @@ where
             .into_iter()
             .collect()
     } else {
-        multiplicity_free_foldleft_tree_pair_legacy_oracle(rule, tree_pair)?
+        multiplicity_free_foldleft_tree_pair_stepwise_oracle(rule, tree_pair)?
     };
     if tree_pair.domain_tree().uncoupled().is_empty() {
         compose_terms(first, |key| {
-            multiplicity_free_foldleft_tree_pair_legacy_oracle(rule, key)
+            multiplicity_free_foldleft_tree_pair_stepwise_oracle(rule, key)
         })
     } else {
         compose_terms(first, |key| {
@@ -1077,10 +1077,10 @@ where
     let (basis, columns) = run_cycles(repartitioned, cycle, |(basis, columns), direction| {
         compose_block_terms(&basis, &columns, |key| match direction {
             PreparedCycleDirection::Clockwise => {
-                multiplicity_free_cycle_clockwise_tree_pair_legacy_oracle(rule, key)
+                multiplicity_free_cycle_clockwise_tree_pair_stepwise_oracle(rule, key)
             }
             PreparedCycleDirection::Anticlockwise => {
-                multiplicity_free_cycle_anticlockwise_tree_pair_legacy_oracle(rule, key)
+                multiplicity_free_cycle_anticlockwise_tree_pair_stepwise_oracle(rule, key)
             }
         })
     })?;

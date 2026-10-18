@@ -234,7 +234,7 @@ impl<'a> FusionOperandLayout<'a> {
         R: MultiplicityFreeRigidSymbols,
     {
         let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
-        let capability = LayoutBuildCapability::Legacy(primer);
+        let capability = LayoutBuildCapability::KeyBuilder(primer);
         let (homspace, prepared) =
             capability.permute(rule, self.homspace(), codomain_axes, domain_axes)?;
         DynamicFusionMapSpace::from_final_homspace_with_prepared(rule, homspace, prepared)

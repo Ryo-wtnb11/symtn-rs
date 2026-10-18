@@ -366,7 +366,7 @@ fn tree_pair_block_apis_reject_invalid_later_vertex_before_symbols() {
 }
 
 #[test]
-fn split_only_su2_braid_matches_legacy_composition_in_both_directions() {
+fn split_only_su2_braid_matches_composition_oracle_in_both_directions() {
     // What: SU(2) 2|2 -> 3|1 and 2|2 -> 1|3 retain the exact tree keys,
     // dual flags, and bend coefficients of the all-codomain reference route.
     let source = FusionTreePairKey::try_pair_from_sector_ids(
@@ -395,7 +395,8 @@ fn split_only_su2_braid_matches_legacy_composition_in_both_directions() {
         )
         .unwrap();
         let expected =
-            legacy_split_only_tree_pair_route(&SU2FusionRule, &source, target_rank).unwrap();
+            split_only_tree_pair_route_composition_oracle(&SU2FusionRule, &source, target_rank)
+                .unwrap();
         assert_eq!(actual.len(), expected.len());
         for ((actual_key, actual_coefficient), (expected_key, expected_coefficient)) in
             actual.iter().zip(&expected)

@@ -107,7 +107,7 @@ fn fibonacci_multi_fmove_forward_and_inverse_call_only_admissible_f() {
 }
 
 #[test]
-fn grouped_multi_fmove_matches_legacy_order_and_reuses_stage_symbols() {
+fn grouped_multi_fmove_matches_stepwise_order_and_reuses_stage_symbols() {
     let rule = FibonacciFAdmissibilityProbe::with_complex_f_phase();
     let tau = SectorId::new(1);
     let trees = collect_fusion_trees_for_coupled(&rule, &[tau; 6], &[false; 6], &[tau; 6], tau);
@@ -115,21 +115,21 @@ fn grouped_multi_fmove_matches_legacy_order_and_reuses_stage_symbols() {
     for tree in trees {
         let grouped = SimpleK(&rule).multi_fmove(&tree).unwrap();
         let grouped_calls = rule.take_calls();
-        let legacy = multiplicity_free_multi_fmove_tree_legacy_oracle(&rule, &tree).unwrap();
-        let legacy_calls = rule.take_calls();
-        if grouped_calls.len() < legacy_calls.len() {
-            fixture = Some((tree, grouped, grouped_calls, legacy, legacy_calls));
+        let stepwise = multiplicity_free_multi_fmove_tree_stepwise_oracle(&rule, &tree).unwrap();
+        let stepwise_calls = rule.take_calls();
+        if grouped_calls.len() < stepwise_calls.len() {
+            fixture = Some((tree, grouped, grouped_calls, stepwise, stepwise_calls));
             break;
         }
     }
-    let (tree, grouped, grouped_calls, legacy, legacy_calls) =
+    let (tree, grouped, grouped_calls, stepwise, stepwise_calls) =
         fixture.expect("rank-six Fibonacci must repeat stage-local F arguments");
 
     // What: grouped forward execution preserves the ungrouped oracle's candidate order
     // and coefficients while evaluating one complete F sextuple per stage.
-    assert_eq!(grouped, legacy);
+    assert_eq!(grouped, stepwise);
     assert_eq!(grouped_calls.len(), 7);
-    assert_eq!(legacy_calls.len(), 18);
+    assert_eq!(stepwise_calls.len(), 18);
     assert_fibonacci_f_calls_are_admissible(&grouped_calls);
     assert!(grouped
         .iter()
@@ -144,7 +144,7 @@ fn grouped_multi_fmove_matches_legacy_order_and_reuses_stage_symbols() {
         .multi_fmove_inv(tau, tree.coupled(), &tail, false)
         .unwrap();
     let grouped_inverse_calls = rule.take_calls();
-    let legacy_inverse = multiplicity_free_multi_fmove_inv_tree_legacy_oracle(
+    let stepwise_inverse = multiplicity_free_multi_fmove_inv_tree_stepwise_oracle(
         &rule,
         tau,
         tree.coupled(),
@@ -152,12 +152,12 @@ fn grouped_multi_fmove_matches_legacy_order_and_reuses_stage_symbols() {
         false,
     )
     .unwrap();
-    let legacy_inverse_calls = rule.take_calls();
+    let stepwise_inverse_calls = rule.take_calls();
 
     // What: inverse execution uses the same canonical candidates and applies
     // conjugation after the same grouped associator products.
-    assert_eq!(grouped_inverse, legacy_inverse);
-    assert!(grouped_inverse_calls.len() <= legacy_inverse_calls.len());
+    assert_eq!(grouped_inverse, stepwise_inverse);
+    assert!(grouped_inverse_calls.len() <= stepwise_inverse_calls.len());
     assert_fibonacci_f_calls_are_admissible(&grouped_inverse_calls);
     assert!(grouped_inverse
         .iter()
@@ -488,7 +488,7 @@ fn split_only_tree_pair_braid_uses_only_the_required_bend() {
 }
 
 #[test]
-fn split_only_nested_product_braid_matches_legacy_composition() {
+fn split_only_nested_product_braid_matches_composition_oracle() {
     // What: a non-Abelian fZ2 x U(1) x SU(2) tree preserves the product
     // bend sign and duality bookkeeping of the all-codomain reference route in
     // both split directions.
@@ -517,7 +517,7 @@ fn split_only_nested_product_braid_matches_legacy_composition() {
 
     let forward =
         multiplicity_free_braid_tree_pair(&rule, &source, &[0, 2], &[1], &[0], &[1, 2]).unwrap();
-    let expected = legacy_split_only_tree_pair_route(&rule, &source, 2).unwrap();
+    let expected = split_only_tree_pair_route_composition_oracle(&rule, &source, 2).unwrap();
     assert_eq!(forward.len(), expected.len());
     assert!(forward[0].1 < 0.0);
     for ((actual_key, actual_coefficient), (expected_key, expected_coefficient)) in
@@ -531,7 +531,8 @@ fn split_only_nested_product_braid_matches_legacy_composition() {
     let reverse =
         multiplicity_free_braid_tree_pair(&rule, reverse_source, &[0], &[2, 1], &[0, 1], &[2])
             .unwrap();
-    let reverse_expected = legacy_split_only_tree_pair_route(&rule, reverse_source, 1).unwrap();
+    let reverse_expected =
+        split_only_tree_pair_route_composition_oracle(&rule, reverse_source, 1).unwrap();
     assert_eq!(reverse.len(), reverse_expected.len());
     assert!(reverse[0].1 < 0.0);
     for ((actual_key, actual_coefficient), (expected_key, expected_coefficient)) in

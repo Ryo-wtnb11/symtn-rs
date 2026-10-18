@@ -429,11 +429,11 @@ fn multiplicity_free_product_tree_pair_plan_builder_handles_fz2_u1_su2_blocks() 
 }
 
 #[test]
-fn eager_product_tree_pair_plan_bypasses_legacy_row_assembly() {
+fn eager_product_tree_pair_plan_bypasses_row_callback_assembly() {
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     let operation = TreeTransformOperation::permute([1, 0], [2]);
     let group_count = src_space.structure().fusion_tree_groups().len();
-    let legacy = build_tree_transform_group_plan(
+    let row_callback = build_tree_transform_group_plan(
         &rule,
         operation.clone(),
         src_space.structure(),
@@ -451,11 +451,11 @@ fn eager_product_tree_pair_plan_bypasses_legacy_row_assembly() {
     // What: the eager Simple builder reproduces the per-row assembler's plan while
     // consuming one core ordered map per whole group instead of rebuilding
     // full-key rows per source column.
-    assert_eq!(direct, legacy);
+    assert_eq!(direct, row_callback);
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (group_count, 0)
     );
@@ -636,7 +636,7 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (3, 0)
     );
@@ -727,7 +727,7 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
 }
 
 #[test]
-fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
+fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
     let source0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -750,7 +750,7 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
     )
     .unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let legacy =
+    let row_callback =
         build_tree_transform_group_plan(&SU2FusionRule, operation.clone(), &structure, |source| {
             symtn_core::multiplicity_free_braid_tree_pair(
                 &SU2FusionRule,
@@ -771,7 +771,7 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
     // coefficients by different routes, so the entry form, keys and axes
     // match exactly and the coefficients within the tolerance rule (a rank-4
     // recoupling chain).
-    assert_eq!(direct.specs().len(), legacy.specs().len());
+    assert_eq!(direct.specs().len(), row_callback.specs().len());
     // The Single/Multi entry form is private to symtn-operations; its Debug
     // tag is the only test-visible witness, and it is compared, not parsed.
     let entry_form = |spec: &dyn std::fmt::Debug| {
@@ -784,14 +784,14 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
             panic!("unrecognized spec entry form: {text}")
         }
     };
-    for (actual, expected) in direct.specs().iter().zip(legacy.specs()) {
+    for (actual, expected) in direct.specs().iter().zip(row_callback.specs()) {
         assert_eq!(entry_form(actual), entry_form(expected));
         assert_eq!(actual.group_key(), expected.group_key());
         assert_eq!(actual.src_keys(), expected.src_keys());
         assert_eq!(actual.dst_keys(), expected.dst_keys());
         assert_eq!(actual.source_axes(), expected.source_axes());
         crate::test_numerics::numerics::assert_slices_close(
-            "direct vs legacy recoupling coefficients",
+            "direct vs row-callback recoupling coefficients",
             actual.recoupling_coefficients_dst_src(),
             expected.recoupling_coefficients_dst_src(),
             4,
@@ -800,7 +800,7 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (1, 0)
     );
@@ -818,19 +818,19 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
         structure.clone(),
     )
     .unwrap();
-    let mut legacy_dst =
+    let mut row_callback_dst =
         TestTensor::<f64>::from_vec_with_structure(vec![0.0, 0.0], space, structure.clone())
             .unwrap();
     let direct_structure = direct
         .compile_structures(direct_dst.structure(), src.structure())
         .unwrap();
-    let legacy_structure = legacy
-        .compile_structures(legacy_dst.structure(), src.structure())
+    let row_callback_structure = row_callback
+        .compile_structures(row_callback_dst.structure(), src.structure())
         .unwrap();
     let mut direct_backend = DenseTreeTransformOperations::default();
-    let mut legacy_backend = DenseTreeTransformOperations::default();
+    let mut row_callback_backend = DenseTreeTransformOperations::default();
     let mut direct_workspace = TreeTransformWorkspace::default();
-    let mut legacy_workspace = TreeTransformWorkspace::default();
+    let mut row_callback_workspace = TreeTransformWorkspace::default();
     replay_into(
         &mut direct_backend,
         &mut direct_workspace,
@@ -842,10 +842,10 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
     )
     .unwrap();
     replay_into(
-        &mut legacy_backend,
-        &mut legacy_workspace,
-        &legacy_structure,
-        &mut legacy_dst,
+        &mut row_callback_backend,
+        &mut row_callback_workspace,
+        &row_callback_structure,
+        &mut row_callback_dst,
         &src,
         1.0,
         0.0,
@@ -853,9 +853,9 @@ fn eager_su2_dense_tree_pair_plan_matches_legacy_replay() {
     .unwrap();
     // Each destination entry sums the two recoupled source trees.
     crate::test_numerics::numerics::assert_slices_close(
-        "direct vs legacy replay",
+        "direct vs row-callback replay",
         direct_dst.data(),
-        legacy_dst.data(),
+        row_callback_dst.data(),
         2,
     );
 }

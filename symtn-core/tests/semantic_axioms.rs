@@ -306,11 +306,11 @@ fn triple_sectors(charge_window: i32, max_twice_spin: usize) -> Vec<SectorId> {
     sectors
 }
 
-type LegacyU1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule>;
-type LegacyFz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type LegacyTripleRule = ProductFusionRule<LegacyFz2U1Rule, SU2FusionRule>;
+type CantorU1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule>;
+type CantorFz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+type CantorTripleRule = ProductFusionRule<CantorFz2U1Rule, SU2FusionRule>;
 
-fn legacy_u1_fz2_sectors(window: i32) -> Vec<SectorId> {
+fn cantor_u1_fz2_sectors(window: i32) -> Vec<SectorId> {
     let mut sectors = Vec::new();
     for q in -window..=window {
         for p in 0..2usize {
@@ -323,14 +323,14 @@ fn legacy_u1_fz2_sectors(window: i32) -> Vec<SectorId> {
     sectors
 }
 
-fn legacy_triple_rule() -> LegacyTripleRule {
+fn cantor_triple_rule() -> CantorTripleRule {
     ProductFusionRule::new(
         ProductFusionRule::new(FermionParityFusionRule, U1FusionRule),
         SU2FusionRule,
     )
 }
 
-fn legacy_triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
+fn cantor_triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
     let inner = TensorKitProductCodec::encode(
         SectorId::new(usize::from(parity & 1)),
         U1Irrep::new(charge).sector_id(),
@@ -338,12 +338,12 @@ fn legacy_triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId 
     TensorKitProductCodec::encode(inner, SU2Irrep::from_twice_spin(twice_spin).sector_id())
 }
 
-fn legacy_triple_sectors(charge_window: i32, max_twice_spin: usize) -> Vec<SectorId> {
+fn cantor_triple_sectors(charge_window: i32, max_twice_spin: usize) -> Vec<SectorId> {
     let mut sectors = Vec::new();
     for p in 0..2u8 {
         for q in -charge_window..=charge_window {
             for j in 0..=max_twice_spin {
-                sectors.push(legacy_triple_sector(p, q, j));
+                sectors.push(cantor_triple_sector(p, q, j));
             }
         }
     }
@@ -408,15 +408,15 @@ fn axioms_fz2_u1_su2() {
     check_all("fZ2xU1xSU2", &triple_rule(), &triple_sectors(1, 1));
 }
 
-/// Historical Cantor codecs remain a coherent expert compatibility option.
+/// The Cantor product codecs are a coherent expert option.
 #[test]
-fn axioms_legacy_cantor_product_compatibility() {
-    let pair = LegacyU1Fz2Rule::new(U1FusionRule, FermionParityFusionRule);
-    check_all("legacy Cantor U1xfZ2", &pair, &legacy_u1_fz2_sectors(1));
+fn axioms_cantor_product_codec() {
+    let pair = CantorU1Fz2Rule::new(U1FusionRule, FermionParityFusionRule);
+    check_all("Cantor U1xfZ2", &pair, &cantor_u1_fz2_sectors(1));
     check_all(
-        "legacy Cantor fZ2xU1xSU2",
-        &legacy_triple_rule(),
-        &legacy_triple_sectors(1, 1),
+        "Cantor fZ2xU1xSU2",
+        &cantor_triple_rule(),
+        &cantor_triple_sectors(1, 1),
     );
 }
 

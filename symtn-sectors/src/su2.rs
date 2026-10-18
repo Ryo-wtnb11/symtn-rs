@@ -393,7 +393,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn racah_twist_matches_former_constant() {
+    fn racah_twist_is_exactly_one() {
         for dj in 0..=40 {
             assert_eq!(
                 SU2FusionRule.twist_scalar(SectorId::new(dj)).to_bits(),

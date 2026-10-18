@@ -14,7 +14,7 @@ same run. The script
 3. replays it against FIFO and LRU at larger caps, and prints the tables;
 4. replays it against the #2014 bounds (the degeneracy-structure cache: no
    entry cap, 64 MiB over 2 shards, so the largest entry is 32 MiB; the
-   cache now uses one shard, `symtn-core/src/cache.rs`, which this model
+   cache uses one shard, `symtn-core/src/cache.rs`, which this model
    does not reflect) and
    exits non-zero if any warm miss is not
    compulsory or any E1/conj row evicts in a warm call. The FIFO model is

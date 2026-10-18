@@ -37,7 +37,7 @@ fn dense(ir: &NetworkIR, sizes: [[usize; 2]; 3]) -> DenseCostModel {
 }
 
 #[test]
-fn migrated_plan_entries_match_old_text() {
+fn plan_entries_match_recorded_text() {
     let ir = chain_ir();
     let cost = dense(&ir, [[2, 3], [3, 4], [4, 5]]);
     let path = [ActivePair::new(0, 1), ActivePair::new(0, 1)];

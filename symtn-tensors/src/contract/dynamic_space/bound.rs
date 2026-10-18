@@ -680,7 +680,7 @@ where
             &rhs.space,
             axes,
             None,
-            lhs.layout_build.legacy_dispatch(),
+            lhs.layout_build.key_builder(),
         )?;
         Self::from_derived_like(lhs, space)
     }
@@ -749,7 +749,7 @@ where
             &rhs.space,
             axes,
             codomain_rank,
-            lhs.layout_build.legacy_dispatch(),
+            lhs.layout_build.key_builder(),
         )?;
         Self::from_derived_like(lhs, space)
     }
@@ -1043,7 +1043,7 @@ where
         let space = self.space.transformed_with_primer(
             self.provider.as_ref(),
             operation,
-            self.layout_build.legacy_dispatch(),
+            self.layout_build.key_builder(),
         )?;
         Self::from_derived_like(self, space)
     }
@@ -1111,12 +1111,12 @@ where
     }
 
     pub(crate) fn layout_primer(&self) -> LayoutKeyBuilder<R> {
-        self.layout_build.legacy_dispatch()
+        self.layout_build.key_builder()
     }
 
     #[cfg(test)]
     pub(crate) fn with_test_layout_primer(mut self, primer: LayoutKeyBuilder<R>) -> Self {
-        self.layout_build = LayoutBuildCapability::Legacy(primer);
+        self.layout_build = LayoutBuildCapability::KeyBuilder(primer);
         self
     }
 
