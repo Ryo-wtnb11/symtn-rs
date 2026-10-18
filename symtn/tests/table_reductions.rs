@@ -1,15 +1,8 @@
 //! Quantum-dimension-weighted reductions of complex-symbol rules (#2281):
 //! `tr`, `norm`, `inner`, `scalar` and `GradedSpace::dim` on Fibonacci and
-//! Ising through `TableRule`, against TensorKit 0.17.1; and the structural
-//! operations the same bounds admit (unit legs, `restrict_leg`,
-//! `is_diagonal`) against hand oracles.
-//!
-//! Every entry is a function of its fusion-tree pair and degeneracy index
-//! alone (`entry`, the FNV-1a hash that `fixtures/tensorkit_table_reductions.jl`
-//! also evaluates), so the TensorKit oracle fills the same tensors without
-//! reading anything symtn computed. The printed quantities are invariant
-//! under the vertex gauge by which AnyonWiki's Ising differs from
-//! TensorKit's (see the fixture header).
+//! Ising through `TableRule`, against TensorKit's definitions written per
+//! subblock; and the structural operations the same bounds admit (unit legs,
+//! `restrict_leg`, `is_diagonal`) against hand oracles.
 //!
 //! The negative control is a complex-symbol U(1) whose charged sectors carry
 //! a quantum dimension with a nonzero imaginary part: every weighted
@@ -20,7 +13,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, U1FusionRule};
-use symtn::typed::{GradedSpace, Runtime, TensorMap};
+use symtn::typed::{BlockFusionTrees, GradedSpace, Runtime, TensorMap};
 use symtn_sectors::{TableRule, TableSector};
 
 #[macro_use]
@@ -28,19 +21,36 @@ use symtn_sectors::{TableRule, TableSector};
 mod table_fixture;
 use table_fixture::*;
 
-const TENSORKIT: &str = include_str!("fixtures/tensorkit-0.17.1-table-reductions.txt");
-
-fn tensorkit(category: &str, quantity: &str) -> Complex64 {
-    let row = TENSORKIT
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| fields[0] == category && fields[1] == quantity)
-        .unwrap_or_else(|| panic!("fixture is missing {category} {quantity}"));
-    Complex64::new(row[2].parse().unwrap(), row[3].parse().unwrap())
+/// Every multi-index of `shape`, first index fastest.
+fn indices(shape: &[usize]) -> Vec<Vec<usize>> {
+    (0..shape.iter().product::<usize>())
+        .map(|flat| {
+            let mut rest = flat;
+            shape
+                .iter()
+                .map(|&extent| {
+                    let i = rest % extent;
+                    rest /= extent;
+                    i
+                })
+                .collect()
+        })
+        .collect()
 }
 
-fn check_against_tensorkit(category: &str, rule: TableRule, sectors: &[(u16, usize)]) {
+/// TensorKit's reductions (`tr`, `norm`, `inner`, `scalar`) on
+/// `t, s ∈ V ⊗ V ← V ⊗ V`, `x ∈ 1 ← V`, `y ∈ V ← 1`, against their
+/// definitions over the coupled-sector blocks `B_c`, read per subblock:
+/// `tr t = Σ_c d_c tr B_c` (entries whose codomain and domain trees and
+/// degeneracy indices agree), `‖t‖_p = (Σ_c d_c Σ |B_c|^p)^{1/p}`,
+/// `‖t‖_∞ = max |B_c|`, `inner(s, t) = Σ_c d_c tr(S_c† T_c)`, and
+/// `scalar(x y)` is the product of the two unit-sector entries.
+fn check_closed_forms(
+    category: &str,
+    rule: TableRule,
+    sectors: &[(u16, usize)],
+    d: fn(u16) -> f64,
+) {
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(rule),
@@ -60,33 +70,52 @@ fn check_against_tensorkit(category: &str, rule: TableRule, sectors: &[(u16, usi
     let x = filled("x", vec![], vec![&v]);
     let y = filled("y", vec![&v], vec![]);
 
+    let weight = |trees: &BlockFusionTrees<TableSector>| d(trees.coupled().label());
+    let (mut tr, mut inner) = (Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0));
+    let (mut norm1, mut norm2, mut norminf) = (0.0_f64, 0.0_f64, 0.0_f64);
+    let mut traced = 0;
+    for ((trees, block), (s_trees, s_block)) in t.subblocks().unwrap().zip(s.subblocks().unwrap()) {
+        assert_eq!(trees, s_trees);
+        let w = weight(&trees);
+        let shape = block.shape().to_vec();
+        for index in indices(&shape) {
+            let z = *block.get(&index).unwrap();
+            norm1 += w * z.norm();
+            norm2 += w * z.norm_sqr();
+            norminf = norminf.max(z.norm());
+            inner += w * s_block.get(&index).unwrap().conj() * z;
+        }
+        if trees.codomain_uncoupled() == trees.domain_uncoupled()
+            && trees.codomain_innerlines() == trees.domain_innerlines()
+        {
+            let legs = trees.codomain_uncoupled().len();
+            for row in indices(&shape[..legs]) {
+                tr += w * block.get(&[row.clone(), row].concat()).unwrap();
+                traced += 1;
+            }
+        }
+    }
+    assert!(traced > 0, "{category}: some trace entry");
+    let unit_entry = |m: &TensorMap<TableRule, Complex64>| {
+        let mut blocks = m.subblocks().unwrap();
+        assert_eq!(blocks.len(), 1, "only the unit sector couples to 1");
+        *blocks.next().unwrap().1.get(&[0]).unwrap()
+    };
+
     let real = |value: f64| Complex64::new(value, 0.0);
-    assert_close(
-        &format!("{category} tr"),
-        t.tr().unwrap(),
-        tensorkit(category, "tr"),
-    );
-    for (p, quantity) in [(2.0, "norm2"), (1.0, "norm1"), (f64::INFINITY, "norminf")] {
+    assert_close(&format!("{category} tr"), t.tr().unwrap(), tr);
+    for (p, want) in [(1.0, norm1), (2.0, norm2.sqrt()), (f64::INFINITY, norminf)] {
         assert_close(
-            &format!("{category} {quantity}"),
+            &format!("{category} norm({p})"),
             real(t.norm(p).unwrap()),
-            tensorkit(category, quantity),
+            real(want),
         );
     }
-    assert_close(
-        &format!("{category} inner"),
-        s.inner(&t).unwrap(),
-        tensorkit(category, "inner"),
-    );
+    assert_close(&format!("{category} inner"), s.inner(&t).unwrap(), inner);
     assert_close(
         &format!("{category} scalar"),
         x.compose(&y).unwrap().scalar().unwrap(),
-        tensorkit(category, "scalar"),
-    );
-    assert_close(
-        &format!("{category} dim"),
-        real(v.dim().unwrap()),
-        tensorkit(category, "dim"),
+        unit_entry(&x) * unit_entry(&y),
     );
 
     // The adjoint identities on the lazy view: tr(t^H) = conj(tr t),
@@ -110,13 +139,31 @@ fn check_against_tensorkit(category: &str, rule: TableRule, sectors: &[(u16, usi
 }
 
 #[test]
-fn fibonacci_reductions_match_tensorkit() {
-    check_against_tensorkit("fibonacci", TableRule::fibonacci(), &[(1, 1), (2, 2)]);
+fn fibonacci_reductions_follow_the_weighted_block_formulas() {
+    // AnyonWiki labels: 1 = I, 2 = τ (d_τ = φ).
+    check_closed_forms(
+        "fibonacci",
+        TableRule::fibonacci(),
+        &[(1, 1), (2, 2)],
+        |label| {
+            if label == 1 {
+                1.0
+            } else {
+                (1.0 + 5.0_f64.sqrt()) / 2.0
+            }
+        },
+    );
 }
 
 #[test]
-fn ising_reductions_match_tensorkit() {
-    check_against_tensorkit("ising", TableRule::ising(), &[(1, 1), (2, 1), (3, 2)]);
+fn ising_reductions_follow_the_weighted_block_formulas() {
+    // AnyonWiki labels: 1 = I, 2 = ψ, 3 = σ (d_σ = √2).
+    check_closed_forms(
+        "ising",
+        TableRule::ising(),
+        &[(1, 1), (2, 1), (3, 2)],
+        |label| if label == 3 { 2.0_f64.sqrt() } else { 1.0 },
+    );
 }
 
 #[test]

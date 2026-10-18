@@ -8,9 +8,8 @@
 #
 # TensorKit's own factorizations, truncation and planar contraction on
 # Fibonacci and Ising tensors whose every entry is a function of its
-# fusion-tree pair and degeneracy index alone (`entry`, the hash of
-# `tensorkit_table_reductions.jl`; `table_factorizations.rs` computes the same
-# function). Sectors are written with AnyonWiki's labels, which `TableRule`
+# fusion-tree pair and degeneracy index alone (`entry`, the FNV-1a hash
+# below; `support/table_fixture.rs` computes the same function). Sectors are written with AnyonWiki's labels, which `TableRule`
 # uses: Fibonacci 1 = I, 2 = τ; Ising 1 = I, 2 = ψ, 3 = σ.
 #
 # AnyonWiki's Ising gauge differs from TensorKit's by the vertex sign
