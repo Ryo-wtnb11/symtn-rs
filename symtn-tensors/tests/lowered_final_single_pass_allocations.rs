@@ -23,7 +23,7 @@ fn cold_lowered_allocations(sector_count: i32) -> usize {
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
     counting_alloc::start();
-    let result = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let result = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::new(U1FusionRule),
         homspace(sector_count),
     )

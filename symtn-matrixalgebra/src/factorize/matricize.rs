@@ -449,7 +449,7 @@ where
 //   1. bound: `MultiplicityFreeRigidSymbols` -> `FusionRule` (or
 //      `GenericRigidSymbols` where the truncation weight needs rigid data);
 //   2. key enumeration: `fusion_tree_keys` -> `fusion_tree_keys_generic` and
-//      `from_degeneracy_shapes` -> `from_degeneracy_shapes_generic`, so the
+//      `from_final_homspace` -> `from_final_homspace_generic`, so the
 //      factor spaces carry multiplicity-aware (vertex-labelled) trees — the
 //      matricization already stacks ALL trees of a coupled sector into one
 //      dense block (TensorKit `block(t, c)`), so outer multiplicity rides the

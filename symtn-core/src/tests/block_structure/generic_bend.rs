@@ -875,8 +875,13 @@ fn a4_bendright_tree_table_matches_tensorkit() {
 
     // --- rank 2: cod [3,3]->3 (μ), dom [3]->3.  TK (probe5.jl):
     //   μ=1 -> dom vertex 1, coeff 1 ;  μ=2 -> dom vertex 2, coeff 1.
+    // The checked entry also validates the pair; repartitioning the rank-2
+    // codomain to rank 1 is TensorKit's single bendright.
     for mu in 1..=2 {
-        let out = generic_bendright_tree_pair(&rule, &a4_pair_rank2(mu)).unwrap();
+        let out = generic_bendright_tree_pair_checked(&rule, &a4_pair_rank2(mu)).unwrap();
+        let repartitioned =
+            generic_repartition_tree_pair_checked(&rule, &a4_pair_rank2(mu), 1).unwrap();
+        assert_eq!(repartitioned, out, "rank2 μ={mu} repartition");
         let nonzero: Vec<_> = out.iter().filter(|(_, c)| c.abs() > 1e-10).collect();
         assert_eq!(nonzero.len(), 1, "rank2 μ={mu} expects one nonzero");
         let (key, coeff) = nonzero[0];
@@ -907,7 +912,8 @@ fn a4_bendright_tree_table_matches_tensorkit() {
         (3, 2, 2, 2, 2, 1.0),
     ];
     for (inner, v1, v2, cod_vtx, dom_vtx, coeff) in table {
-        let out = generic_bendright_tree_pair(&rule, &a4_pair_rank3(inner, v1, v2)).unwrap();
+        let out =
+            generic_bendright_tree_pair_checked(&rule, &a4_pair_rank3(inner, v1, v2)).unwrap();
         let nonzero: Vec<_> = out.iter().filter(|(_, c)| c.abs() > 1e-10).collect();
         assert_eq!(nonzero.len(), 1, "rank3 ({inner},{v1},{v2}) one nonzero");
         let (key, got) = nonzero[0];

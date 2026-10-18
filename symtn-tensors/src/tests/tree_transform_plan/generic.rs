@@ -985,11 +985,8 @@ fn generic_multiplicity_monomial_rows_compile_and_execute_as_direct_singles() {
     let tree_pair_lowering_calls_rec = probe::record();
     let plan = build_generic_tree_pair_transform_group_plan(&rule, operation, &structure).unwrap();
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (structure.fusion_tree_groups().len(), 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        structure.fusion_tree_groups().len()
     );
     assert_eq!(plan.specs().len(), 2);
     assert_eq!(plan.specs()[0].recoupling_coefficients_dst_src(), &[2.0]);

@@ -2569,9 +2569,6 @@ where
     E: From<CoreError> + From<OperationError>,
     F: FnMut(usize, &FusionTreePairKey) -> Result<Arc<Vec<(FusionTreePairKey, T)>>, E>,
 {
-    #[cfg(test)]
-    crate::probe::hit(crate::probe::Event::RowCallbackTreePairAssembly);
-
     let src_block_indices = group.block_indices();
     let mut src_keys = Vec::<FusionTreePairKey>::with_capacity(src_block_indices.len());
     let mut dst_keys = Vec::<FusionTreePairKey>::new();

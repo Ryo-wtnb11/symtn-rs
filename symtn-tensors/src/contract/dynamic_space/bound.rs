@@ -481,66 +481,6 @@ where
         Self::from_derived_with_capability(Arc::clone(&source.provider), space, source.layout_build)
     }
 
-    /// Expert compatibility root from caller-supplied fusion-tree subblock
-    /// shapes, bound to a multiplicity-free provider in one checked pass.
-    pub fn from_degeneracy_shapes<Shapes>(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        let space =
-            DynamicFusionMapSpace::from_degeneracy_shapes(provider.as_ref(), homspace, shapes)?;
-        Self::from_derived(provider, space)
-    }
-
-    /// Test-only shape-admission bridge using lowered metadata (#586
-    /// demotion: external callers use the public final-homspace installer).
-    #[cfg(test)]
-    pub(crate) fn from_degeneracy_shapes_lowered<Shapes>(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        let layout_build = LayoutBuildCapability::checked();
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes_with_key_builder(
-            provider.as_ref(),
-            homspace,
-            shapes,
-            move |rule, homspace| layout_build.prepare(rule, homspace),
-        )?;
-        Self::from_derived_with_capability(provider, space, layout_build)
-    }
-
-    /// Expert compatibility root from caller-supplied fusion-tree subblock
-    /// shapes, bound to a multiplicity-aware provider in one checked pass.
-    pub fn from_degeneracy_shapes_generic<Shapes>(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        validate_generic_provider_style(provider.as_ref())?;
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-            provider.as_ref(),
-            homspace,
-            shapes,
-        )?;
-        Self::from_derived(provider, space)
-    }
-
     fn bind_subset_with_keys(
         mut space: DynamicFusionMapSpace,
         provider: Arc<R>,
@@ -870,27 +810,6 @@ where
         Self::from_derived(provider, space)
     }
 
-    #[doc(hidden)]
-    pub fn from_final_homspace_multiplicity_free_lowered(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra,
-    {
-        let layout_build = LayoutBuildCapability::checked();
-        let prepared = layout_build.prepare(provider.as_ref(), &homspace)?;
-        // Why not route this ordinary constructor through the caller-shape
-        // expert API: the final HomSpace already owns every leg degeneracy,
-        // and the prepared lowered layout owns the matching tree enumeration.
-        let space = DynamicFusionMapSpace::from_final_homspace_with_prepared(
-            provider.as_ref(),
-            homspace,
-            prepared,
-        )?;
-        Self::from_derived_with_capability(provider, space, layout_build)
-    }
-
     /// Ordinary multiplicity-free root/output layout for an external provider,
     /// derived from the final hom space's stored leg degeneracies.
     ///
@@ -1127,56 +1046,6 @@ where
         homspace: &FusionTreeHomSpace,
     ) -> Result<(), OperationError> {
         self.layout_build.prime(self.provider.as_ref(), homspace)
-    }
-
-    /// Builds caller-defined per-tree shapes from this binding's authoritative
-    /// key order, then consumes those same keys for the storage layout.
-    #[doc(hidden)]
-    pub fn derive_from_fusion_tree_shapes<BuildShapes, Shapes>(
-        &self,
-        homspace: FusionTreeHomSpace,
-        build_shapes: BuildShapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        BuildShapes: FnOnce(&[FusionTreePairKey]) -> Result<Shapes, OperationError>,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        let prepared = self
-            .layout_build
-            .prepare(self.provider.as_ref(), &homspace)?;
-        let keys = prepared.keys(self.provider.as_ref(), &homspace);
-        let shapes = build_shapes(keys.as_ref())?;
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes_with_key_builder(
-            self.provider.as_ref(),
-            homspace,
-            shapes,
-            move |_, _| Ok(prepared),
-        )?;
-        Self::from_derived_like(self, space)
-    }
-
-    /// Internal expert shape bridge preserving this binding's build strategy.
-    #[doc(hidden)]
-    pub fn derive_from_degeneracy_shapes<Shapes>(
-        &self,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        let layout_build = self.layout_build;
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes_with_key_builder(
-            self.provider.as_ref(),
-            homspace,
-            shapes,
-            move |rule, homspace| layout_build.prepare(rule, homspace),
-        )?;
-        Self::from_derived_like(self, space)
     }
 
     /// Builds an ordinary derived layout from the final hom space's leg

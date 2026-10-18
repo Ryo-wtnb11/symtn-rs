@@ -126,10 +126,9 @@ fn single_block<const NOUT: usize, const NIN: usize>(
     value: Complex64,
 ) -> TestTensor<Complex64> {
     let rule = AlternatingZ3SquaredRule;
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids(codomain.map(|s| (s, 1)), domain.map(|s| (s, 1))),
-        [vec![1; NOUT + NIN]],
     )
     .unwrap();
     TestTensor::from_vec_with_fusion_space(vec![value], space).unwrap()

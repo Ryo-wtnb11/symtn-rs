@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use symtn_core::{BlockKey, FusionTreeHomSpace, SU2FusionRule};
 use symtn_tensors::{
-    prepare_tensorcontract_fusion_plan_dyn, BoundDynamicFusionMapSpace, DynamicFusionMapSpace,
-    OutputAxisOrder, RuleIdentity, TensorContractFusionExecutionContext, TensorContractSpec,
-    TreeTransformExecutionContext,
+    prepare_tensorcontract_fusion_plan_dyn, BoundDynamicFusionMapSpace, ContractDestinationInit,
+    DynamicFusionMapSpace, FusionOperand, OutputAxisOrder, RuleIdentity,
+    TensorContractFusionExecutionContext, TensorContractSpec, TreeTransformExecutionContext,
 };
 
 fn main() {
@@ -52,32 +52,11 @@ fn main() {
         println!("{i}: {key:?}");
     }
 
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let lhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_core_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let rhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_core_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![2, 2]]).unwrap();
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom).unwrap();
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom).unwrap();
+    let lhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_core_hom).unwrap();
+    let rhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_core_hom).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     print_structure("lhs_structure", lhs_space.structure());
     print_structure("rhs_structure", rhs_space.structure());
     print_structure("lhs_core_structure", lhs_core_space.structure());
@@ -126,16 +105,16 @@ fn main() {
     println!("lhs_core_data {lhs_core_data:?}");
     println!("rhs_core_data {rhs_core_data:?}");
     TensorContractFusionExecutionContext::<_, RuleIdentity>::default()
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_planned_into(
             &dst_bound,
             &mut dst_data,
-            &lhs_bound,
-            &lhs_data,
-            &rhs_bound,
-            &rhs_data,
-            axes,
+            (FusionOperand::direct(lhs_bound.space()), &lhs_data),
+            (FusionOperand::direct(rhs_bound.space()), &rhs_data),
+            axes.lhs_contracting_axes(),
+            axes.rhs_contracting_axes(),
+            &[0, 1],
             -1.5,
-            0.25,
+            ContractDestinationInit::Axpby(0.25),
         )
         .unwrap();
     println!("dst_data {dst_data:?}");
@@ -152,24 +131,23 @@ fn main() {
     )
     .unwrap();
     let tensorkit_dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, tensorkit_dst_hom, [vec![2, 2]])
-            .unwrap();
+        DynamicFusionMapSpace::from_final_homspace(&rule, tensorkit_dst_hom).unwrap();
     print_structure(
         "tensorkit_order_dst_structure",
         tensorkit_dst_space.structure(),
     );
     let mut tensorkit_order_dst = vec![2.0, -1.0, 4.0, -3.0];
     TensorContractFusionExecutionContext::<_, RuleIdentity>::default()
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_planned_into(
             &bind(tensorkit_dst_space.clone()),
             &mut tensorkit_order_dst,
-            &lhs_bound,
-            &lhs_data,
-            &rhs_bound,
-            &rhs_data,
-            tensorkit_axes,
+            (FusionOperand::direct(lhs_bound.space()), &lhs_data),
+            (FusionOperand::direct(rhs_bound.space()), &rhs_data),
+            tensorkit_axes.lhs_contracting_axes(),
+            tensorkit_axes.rhs_contracting_axes(),
+            &[1, 0],
             -1.5,
-            0.25,
+            ContractDestinationInit::Axpby(0.25),
         )
         .unwrap();
     println!("tensorkit_order_dst_data {tensorkit_order_dst:?}");

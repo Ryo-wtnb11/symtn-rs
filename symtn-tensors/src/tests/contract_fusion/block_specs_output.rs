@@ -4,22 +4,19 @@ use super::*;
 fn tensorcontract_fusion_block_specs_enumerates_su2_innerline_blocks_from_homspace() {
     let rule = SU2FusionRule;
     let half = SectorId::new(1);
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1)], [(1, 1)]),
-        [vec![1, 1, 1, 1], vec![1, 1, 1, 1]],
     )
     .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([(1, 1)], [(1, 1)]),
-        [vec![1, 1]],
     )
     .unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1)], [(1, 1)]),
-        [vec![1, 1, 1, 1], vec![1, 1, 1, 1]],
     )
     .unwrap();
 
@@ -53,22 +50,20 @@ fn tensorcontract_fusion_block_specs_enumerates_su2_innerline_blocks_from_homspa
 fn tensorcontract_fusion_block_specs_rejects_missing_destination_subblock() {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![1, 1], vec![1, 1]],
     )
     .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![1, 1], vec![1, 1]],
     )
     .unwrap();
     let dst_hom = FusionTreeHomSpace::new(
@@ -103,22 +98,20 @@ fn tensorcontract_fusion_block_specs_rejects_missing_destination_subblock() {
 fn tensorcontract_fusion_block_specs_rejects_source_tree_transform_terms() {
     let rule = Z2FusionRule;
     let leg = |is_dual| SectorLeg::new([(SectorId::new(0), 1)], is_dual);
-    let fusion_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let fusion_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg(false)]),
             FusionProductSpace::new([leg(false)]),
         ),
-        [vec![1, 1]],
     )
     .unwrap();
-    let transformed_dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let transformed_dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg(true)]),
             FusionProductSpace::new([leg(true)]),
         ),
-        [vec![1, 1]],
     )
     .unwrap();
 
@@ -157,22 +150,20 @@ fn tensorcontract_fusion_block_specs_rejects_source_tree_transform_terms() {
 fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
     let rule = Z2FusionRule;
     let leg = |is_dual| SectorLeg::new([(SectorId::new(0), 1)], is_dual);
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let src_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg(false)]),
             FusionProductSpace::new([leg(false)]),
         ),
-        [vec![1, 1]],
     )
     .unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg(true)]),
             FusionProductSpace::new([leg(true)]),
         ),
-        [vec![1, 1]],
     )
     .unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], src_space.clone()).unwrap();
@@ -304,10 +295,9 @@ fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
     .unwrap()
     .try_bind_rule(&rule)
     .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([], []),
-        [vec![]],
     )
     .unwrap();
     let dst_space = DynamicFusionMapSpace::try_from_layout(
@@ -662,32 +652,11 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     )
     .unwrap();
 
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let lhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_core_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let rhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_core_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![2, 2]]).unwrap();
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom).unwrap();
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom).unwrap();
+    let lhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_core_hom).unwrap();
+    let rhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_core_hom).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let lhs_data = (0..32)
         .map(|index| 1.0 + 0.125 * index as f64)
         .collect::<Vec<_>>();

@@ -561,7 +561,7 @@ fn diagonal_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
 }
 
 #[test]
-fn diagonal_dense_conversions_allocate_only_their_own_output() {
+fn dense_conversions_allocate_only_their_own_output() {
     // What: on a dense payload, `to_c64` allocates its c64
     // output (twice the f64 bytes) and nothing more; `re`/`im` allocate their
     // f64 output and nothing more. The ceilings reject any hidden second
@@ -588,7 +588,7 @@ fn diagonal_dense_conversions_allocate_only_their_own_output() {
 }
 
 #[test]
-fn diagonal_inspections_allocate_no_payload() {
+fn rank_and_leg_inspections_allocate_no_payload() {
     // What: the rank family reads the space structure and
     // allocates nothing; `leg_dims` owns only its `Vec<usize>` of rank
     // entries, never a payload.

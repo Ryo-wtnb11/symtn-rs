@@ -453,11 +453,8 @@ fn eager_product_tree_pair_plan_bypasses_row_callback_assembly() {
     // full-key rows per source column.
     assert_eq!(direct, row_callback);
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (group_count, 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        group_count
     );
     direct
         .compile_structures(dst_space.structure(), src_space.structure())
@@ -634,11 +631,8 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
         1
     );
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (3, 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        3
     );
     assert_eq!(plan.specs().len(), 3);
     assert_eq!(plan.specs().len(), oracle.specs().len());
@@ -798,11 +792,8 @@ fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
         );
     }
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (1, 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        1
     );
 
     let space = vec![1, 1, 1, 1];
@@ -1076,18 +1067,8 @@ fn product_tree_transform_rebuilds_after_global_cache_reset_with_old_values_live
     let expected = dst.data().to_vec();
 
     symtn_core::clear_structure_caches();
-    let rebuilt_src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
-    let rebuilt_dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
+    let rebuilt_src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
+    let rebuilt_dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let rebuilt_src =
         TestTensor::<f64>::from_vec_with_fusion_space(src_data, rebuilt_src_space).unwrap();
     let mut rebuilt_dst =

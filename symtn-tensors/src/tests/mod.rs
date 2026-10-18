@@ -821,18 +821,8 @@ fn fz2_u1_su2_tree_pair_fixture() -> (
         ]),
         FusionProductSpace::new([SectorLeg::new([(c0, 1), (c1, 1)], false)]),
     );
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
 
     (rule, src_space, dst_space, [c0, c1])
 }

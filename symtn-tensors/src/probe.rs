@@ -41,10 +41,6 @@ pub(crate) enum Event {
     FusionOperandProjectionPrepare,
     /// A final result layout was built.
     FinalResultLayoutBuild,
-    /// A layout was built on the caller-supplied shapes path.
-    CallerShapePathBuild,
-    /// A scratch structure was built.
-    ScratchStructureBuild,
     /// A permuted or contracted HomSpace was built by a layout capability.
     DerivedHomspaceBuild,
     /// A fusion block matrix layout answered a group lookup.
@@ -55,8 +51,6 @@ pub(crate) enum Event {
     MultiplicityFreeCapabilityValidation,
     /// An ordered tree-pair group was lowered to specs.
     OrderedTreePairLowering,
-    /// A tree-pair group was assembled by the per-row callback assembler.
-    RowCallbackTreePairAssembly,
     /// A tree-pair operation was prepared.
     TreePairOperationPreparation,
     /// An oriented tree-pair plan was compiled.

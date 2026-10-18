@@ -72,7 +72,7 @@ impl Sample for Complex64 {
 }
 
 /// `conj(lhs)` contracted on its parent codomain axis with `rhs`'s codomain,
-/// i.e. `lhs† ∘ rhs`, through the ordinary conjugated-source entry point.
+/// i.e. `lhs† ∘ rhs`, with `lhs` as a lazy-adjoint operand.
 fn conjugated_contract<R, D>(
     context: &mut TensorContractFusionExecutionContext<D, R::Key>,
     dst: &BoundDynamicFusionMapSpace<R>,
@@ -88,22 +88,22 @@ where
 {
     let mut out = vec![D::zero(); dst.space().required_len().unwrap()];
     context
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             dst,
             &mut out,
-            lhs,
+            crate::FusionOperand::adjoint(lhs.space()),
             lhs_data,
-            rhs,
+            crate::FusionOperand::direct(rhs.space()),
             rhs_data,
             TensorContractSpec::new_with_conjugation(
-                &[0],
+                &[1],
                 &[0],
                 OutputAxisOrder::identity(),
                 true,
                 false,
             ),
             D::one(),
-            D::zero(),
+            crate::ContractDestinationInit::Axpby(D::zero()),
         )
         .unwrap();
     out

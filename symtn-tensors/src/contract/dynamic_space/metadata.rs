@@ -2,16 +2,18 @@ use std::sync::Arc;
 
 use symtn_core::{
     CheckedFusionAlgebra, CheckedFusionSpaceError, FusionRule, FusionTreeHomSpace,
-    FusionTreePairKey, MultiplicityFreeFusionRule, PreparedFusionTreeLayout, SectorLeg,
+    FusionTreePairKey, MultiplicityFreeFusionRule, PreparedFusionTreeLayout,
 };
 
 use crate::OperationError;
 use symtn_operations::TensorContractSpec;
 
+// Why not box the checked layout: the value lives on the stack for one
+// constructor call and is consumed by value, so boxing only adds an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum PreparedLayoutKeys {
     Encoded,
-    Staged(PreparedFusionTreeLayout),
     /// Checked staging: the one enumeration path, used by every
     /// multiplicity-free provider.
     Checked(PreparedFusionTreeLayout),
@@ -27,21 +29,20 @@ impl PreparedLayoutKeys {
         R: MultiplicityFreeFusionRule,
     {
         match self {
-            Self::Staged(prepared) | Self::Checked(prepared) => prepared.keys_arc(),
+            Self::Checked(prepared) => prepared.keys_arc(),
             Self::Encoded => homspace.fusion_tree_keys(rule),
         }
     }
 
     pub(super) fn commit(self) {
         let prepared = match self {
-            Self::Staged(prepared) | Self::Checked(prepared) => prepared,
+            Self::Checked(prepared) => prepared,
             Self::Encoded => return,
         };
         prepared.commit();
     }
 }
 
-#[allow(dead_code)]
 pub(crate) enum MetadataRequest<'a> {
     Prepare {
         homspace: &'a FusionTreeHomSpace,
@@ -70,17 +71,6 @@ pub(crate) enum MetadataRequest<'a> {
         dst_codomain_rank: usize,
         expected: &'a FusionTreeHomSpace,
     },
-    Select {
-        homspace: &'a FusionTreeHomSpace,
-        codomain_axes: &'a [usize],
-        domain_axes: &'a [usize],
-    },
-    OutwardLeg {
-        homspace: &'a FusionTreeHomSpace,
-        axis: usize,
-        dualize: bool,
-        tensor: &'static str,
-    },
 }
 
 pub(crate) enum MetadataOutput {
@@ -90,7 +80,6 @@ pub(crate) enum MetadataOutput {
         prepared: PreparedLayoutKeys,
     },
     Matches(bool),
-    Leg(SectorLeg),
 }
 
 pub(crate) type LayoutKeyBuilder<R> =
@@ -109,7 +98,6 @@ impl<R> Clone for LayoutBuildCapability<R> {
     }
 }
 
-#[allow(dead_code)]
 impl<R> LayoutBuildCapability<R>
 where
     R: FusionRule,
@@ -194,48 +182,6 @@ where
         )? {
             MetadataOutput::HomSpace { homspace, prepared } => Ok((homspace, prepared)),
             _ => unreachable!("metadata dispatcher returned a non-HomSpace response"),
-        }
-    }
-
-    pub(crate) fn select(
-        self,
-        rule: &R,
-        homspace: &FusionTreeHomSpace,
-        codomain_axes: &[usize],
-        domain_axes: &[usize],
-    ) -> Result<(FusionTreeHomSpace, PreparedLayoutKeys), OperationError> {
-        match (self.key_builder())(
-            rule,
-            MetadataRequest::Select {
-                homspace,
-                codomain_axes,
-                domain_axes,
-            },
-        )? {
-            MetadataOutput::HomSpace { homspace, prepared } => Ok((homspace, prepared)),
-            _ => unreachable!("metadata dispatcher returned a non-HomSpace response"),
-        }
-    }
-
-    pub(crate) fn outward_leg(
-        self,
-        rule: &R,
-        homspace: &FusionTreeHomSpace,
-        axis: usize,
-        dualize: bool,
-        tensor: &'static str,
-    ) -> Result<SectorLeg, OperationError> {
-        match (self.key_builder())(
-            rule,
-            MetadataRequest::OutwardLeg {
-                homspace,
-                axis,
-                dualize,
-                tensor,
-            },
-        )? {
-            MetadataOutput::Leg(leg) => Ok(leg),
-            _ => unreachable!("metadata dispatcher returned a non-leg response"),
         }
     }
 }
@@ -333,20 +279,6 @@ where
         )
         .map(MetadataOutput::Matches)
         .map_err(OperationError::from_core_preserving_context),
-        MetadataRequest::Select {
-            homspace,
-            codomain_axes,
-            domain_axes,
-        } => homspace
-            .select(rule, codomain_axes, domain_axes)
-            .map(derived)
-            .map_err(OperationError::from_core_preserving_context),
-        MetadataRequest::OutwardLeg {
-            homspace,
-            axis,
-            dualize,
-            tensor,
-        } => encoded_outward_leg(rule, homspace, axis, dualize, tensor).map(MetadataOutput::Leg),
     }
 }
 
@@ -355,8 +287,8 @@ where
 /// Why not collapse the lowered dispatcher onto the checked one directly:
 /// primer provenance differs (the sealed built-in lowered codec vs an
 /// external provider that certifies only `CheckedFusionAlgebra`) and so does
-/// its error mapping; everything else — checked permute/contract/select
-/// homspace derivation, checked outward legs — is common and lives here.
+/// its error mapping; everything else — checked permute/contract
+/// homspace derivation — is common and lives here.
 fn checked_metadata_dispatch_with_primer<R>(
     rule: &R,
     request: MetadataRequest<'_>,
@@ -419,20 +351,6 @@ where
         )
         .map(MetadataOutput::Matches)
         .map_err(checked_metadata_operation_error),
-        MetadataRequest::Select {
-            homspace,
-            codomain_axes,
-            domain_axes,
-        } => homspace
-            .try_select_checked(rule, codomain_axes, domain_axes)
-            .map_err(checked_metadata_operation_error)
-            .and_then(prepare),
-        MetadataRequest::OutwardLeg {
-            homspace,
-            axis,
-            dualize,
-            tensor,
-        } => checked_outward_leg(rule, homspace, axis, dualize, tensor).map(MetadataOutput::Leg),
     }
 }
 
@@ -460,62 +378,4 @@ where
     R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
 {
     checked_metadata_dispatch_with_primer(rule, request, checked_layout_primer)
-}
-
-fn encoded_outward_leg<R>(
-    rule: &R,
-    homspace: &FusionTreeHomSpace,
-    axis: usize,
-    dualize: bool,
-    tensor: &'static str,
-) -> Result<SectorLeg, OperationError>
-where
-    R: FusionRule,
-{
-    let mut leg = if axis < homspace.codomain().len() {
-        homspace.codomain().legs()[axis].clone()
-    } else if axis < homspace.rank() {
-        homspace.domain().legs()[axis - homspace.codomain().len()].dual(rule)
-    } else {
-        return Err(OperationError::InvalidAxisSet {
-            tensor,
-            axes: vec![axis],
-            rank: homspace.rank(),
-        });
-    };
-    if dualize {
-        leg = leg.dual(rule);
-    }
-    Ok(leg)
-}
-
-fn checked_outward_leg<R>(
-    rule: &R,
-    homspace: &FusionTreeHomSpace,
-    axis: usize,
-    dualize: bool,
-    tensor: &'static str,
-) -> Result<SectorLeg, OperationError>
-where
-    R: CheckedFusionAlgebra,
-{
-    let mut leg = if axis < homspace.codomain().len() {
-        homspace.codomain().legs()[axis].clone()
-    } else if axis < homspace.rank() {
-        homspace.domain().legs()[axis - homspace.codomain().len()]
-            .try_dual(rule)
-            .map_err(|error| OperationError::FusionAlgebra(Box::new(error)))?
-    } else {
-        return Err(OperationError::InvalidAxisSet {
-            tensor,
-            axes: vec![axis],
-            rank: homspace.rank(),
-        });
-    };
-    if dualize {
-        leg = leg
-            .try_dual(rule)
-            .map_err(|error| OperationError::FusionAlgebra(Box::new(error)))?;
-    }
-    Ok(leg)
 }

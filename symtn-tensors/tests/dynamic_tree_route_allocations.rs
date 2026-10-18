@@ -12,8 +12,7 @@ use symtn_core::{
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, HostContractMembersWorkspace,
-    OutputAxisOrder, RuleIdentity, TensorContractFusionExecutionContext, TensorContractSpec,
-    TreeTransformRuleCacheKey,
+    OutputAxisOrder, RuleIdentity, TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
 #[path = "../../tests/support/counting_alloc.rs"]
@@ -120,11 +119,6 @@ where
         OutputAxisOrder::from_axes(&case.output_axes),
     )
     .unwrap();
-    let axes = TensorContractSpec::new(
-        &case.lhs_axes,
-        &case.rhs_axes,
-        OutputAxisOrder::from_axes(&case.output_axes),
-    );
     let lhs_len = case.lhs.space().required_len().unwrap();
     let rhs_len = case.rhs.space().required_len().unwrap();
     let dst_len = dst.space().required_len().unwrap();
@@ -139,16 +133,16 @@ where
     let eager = |context: &mut Context, out: &mut [f64]| {
         counting_alloc::measure(|| {
             context
-                .tensorcontract_fusion_dyn_into(
+                .tensorcontract_planned_into(
                     &dst,
                     out,
-                    &case.lhs,
-                    &lhs[..lhs_len],
-                    &case.rhs,
-                    &rhs[..rhs_len],
-                    axes,
+                    (FusionOperand::direct(case.lhs.space()), &lhs[..lhs_len]),
+                    (FusionOperand::direct(case.rhs.space()), &rhs[..rhs_len]),
+                    &case.lhs_axes,
+                    &case.rhs_axes,
+                    &case.output_axes,
                     1.0,
-                    0.0,
+                    symtn_tensors::ContractDestinationInit::Axpby(0.0),
                 )
                 .unwrap()
         })

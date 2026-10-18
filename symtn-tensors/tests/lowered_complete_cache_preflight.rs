@@ -19,7 +19,7 @@ fn lowered_complete_cache_preflight_preserves_statistics_and_hits() {
     );
     let before = structure_cache_info(StructureCacheKind::DegeneracyStructure);
 
-    let error = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let error = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::new(U1FusionRule),
         homspace,
     )
@@ -37,7 +37,7 @@ fn lowered_complete_cache_preflight_preserves_statistics_and_hits() {
         FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]),
     );
-    let first = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let first = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         homspace.clone(),
     )
@@ -45,7 +45,7 @@ fn lowered_complete_cache_preflight_preserves_statistics_and_hits() {
     let after_first = structure_cache_info(StructureCacheKind::DegeneracyStructure);
     assert_eq!(after_first.admissions(), 1);
 
-    let second = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let second = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         provider, homspace,
     )
     .unwrap();

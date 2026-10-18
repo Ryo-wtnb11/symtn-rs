@@ -107,13 +107,7 @@ fn pinv_satisfies_the_moore_penrose_identity() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg()]),
     );
-    let key_count = hom.fusion_tree_keys(&rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        hom,
-        vec![vec![degeneracy; 3]; key_count],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let len = space.required_len().unwrap();
     let canonical = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len).map(|i| ((i * 3 + 2) % 11) as f64 - 5.0).collect(),
@@ -532,21 +526,7 @@ where
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&U1FusionRule)
-        .iter()
-        .map(|key| {
-            let coupled = key.codomain_tree().coupled();
-            let (_, rows, cols, data) = blocks
-                .iter()
-                .find(|(charge, _, _, _)| U1Irrep::new(*charge).sector_id() == coupled)
-                .unwrap();
-            assert_eq!(data.len(), rows * cols);
-            vec![*rows, *cols]
-        })
-        .collect::<Vec<_>>();
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&U1FusionRule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&U1FusionRule, homspace).unwrap();
     TestTensor::from_block_fn_with_fusion_space(space, D::zero(), |key, indices| {
         let BlockKey::FusionTree(tree) = key else {
             return D::zero();
@@ -570,8 +550,7 @@ where
         FusionProductSpace::new([leg.clone()]),
         FusionProductSpace::new([leg]),
     );
-    let shapes = vec![vec![1, 1]; homspace.fusion_tree_keys(rule).len()];
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     TestTensor::from_block_fn_with_fusion_space(space, 0.0, |key, _| {
         let BlockKey::FusionTree(tree) = key else {
             return 0.0;
@@ -737,13 +716,7 @@ fn inv_reorders_a_complete_expert_tree_grid_by_key() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let keys = homspace.fusion_tree_keys(&rule);
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        homspace,
-        vec![vec![2; 4]; keys.len()],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tree_code = |tree: &FusionTreeKey| {
         tree.uncoupled()
             .iter()
@@ -855,9 +828,7 @@ fn inv_dyn_reverses_isomorphic_spaces_with_different_tree_ranks() {
         ]),
         FusionProductSpace::new([SectorLeg::new([(charge, 6)], false)]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&U1FusionRule, homspace, [vec![2, 3, 6]])
-            .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&U1FusionRule, homspace).unwrap();
     let mut data = vec![0.0_f64; 36];
     for index in 0..6 {
         data[index + 6 * index] = index as f64 + 1.0;
@@ -1033,8 +1004,7 @@ fn inv_solves_the_rank_zero_scalar_sector() {
     let rule = Z2FusionRule;
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    let shapes = vec![Vec::new(); homspace.fusion_tree_keys(&rule).len()];
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar = TestTensor::<f64>::from_vec_with_fusion_space(vec![-4.0], space).unwrap();
     let mut dense = ScriptedExecutor::<SolveCallSpy>::default();
     let mut context = default_context();
@@ -2333,8 +2303,7 @@ fn exp_rejects_a_non_endomorphism() {
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let shapes = vec![vec![3, 2]; homspace.fusion_tree_keys(&rule).len()];
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..space.required_len().unwrap())
             .map(|index| index as f64)

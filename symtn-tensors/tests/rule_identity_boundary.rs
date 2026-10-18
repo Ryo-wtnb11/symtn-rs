@@ -5,8 +5,9 @@ use symtn_core::{
     RuleIdentity, SU2FusionRule, SectorId, SectorVec, U1FusionRule, Z2FusionRule,
 };
 use symtn_tensors::{
-    tensorcontract_fusion_block_specs, BoundDynamicFusionMapSpace,
-    TensorContractFusionExecutionContext, TensorContractSpec, TreeTransformRuleCacheKey,
+    tensorcontract_fusion_block_specs, BoundDynamicFusionMapSpace, ContractDestinationInit,
+    FusionOperand, TensorContractFusionExecutionContext, TensorContractSpec,
+    TreeTransformRuleCacheKey,
 };
 use symtn_tensors::{DynamicFusionMapSpace, OperationError};
 
@@ -94,12 +95,8 @@ fn bound_scalar_space<R>(rule: &R) -> DynamicFusionMapSpace
 where
     R: MultiplicityFreeRigidSymbols,
 {
-    DynamicFusionMapSpace::from_degeneracy_shapes(
-        rule,
-        FusionTreeHomSpace::from_sector_ids([], []),
-        [vec![]],
-    )
-    .unwrap()
+    DynamicFusionMapSpace::from_final_homspace(rule, FusionTreeHomSpace::from_sector_ids([], []))
+        .unwrap()
 }
 
 fn unbound_scalar_space<R>(rule: &R) -> DynamicFusionMapSpace
@@ -155,16 +152,16 @@ where
         Err(error) => return error,
     };
     TensorContractFusionExecutionContext::<f64, R::Key>::default()
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_planned_into(
             &dst,
             &mut [0.0],
-            &lhs,
-            &[2.0],
-            &rhs,
-            &[3.0],
-            axes,
+            (FusionOperand::direct(lhs.space()), &[2.0]),
+            (FusionOperand::direct(rhs.space()), &[3.0]),
+            axes.lhs_contracting_axes(),
+            axes.rhs_contracting_axes(),
+            &[],
             1.0,
-            0.0,
+            ContractDestinationInit::Axpby(0.0),
         )
         .unwrap_err()
 }
@@ -245,24 +242,25 @@ fn fusion_contract_rejects_same_type_rule_with_distinct_identity() {
 #[test]
 fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
     let rule = Z2FusionRule;
-    for axes in [
-        TensorContractSpec::with_default_output_order(&[], &[]),
-        TensorContractSpec::with_default_output_order_and_conjugation(&[], &[], true, false),
+    let space = || bind(&rule, &bound_scalar_space(&rule)).unwrap();
+    let (dst_space, lhs, rhs) = (space(), space(), space());
+    for lhs_operand in [
+        FusionOperand::direct(lhs.space()),
+        FusionOperand::adjoint(lhs.space()),
     ] {
-        let space = || bind(&rule, &bound_scalar_space(&rule)).unwrap();
         let mut dst = [7.0];
 
         TensorContractFusionExecutionContext::<f64, _>::default()
-            .tensorcontract_fusion_dyn_into(
-                &space(),
+            .tensorcontract_planned_into(
+                &dst_space,
                 &mut dst,
-                &space(),
-                &[2.0],
-                &space(),
-                &[5.0],
-                axes,
+                (lhs_operand, &[2.0]),
+                (FusionOperand::direct(rhs.space()), &[5.0]),
+                &[],
+                &[],
+                &[],
                 2.0,
-                3.0,
+                ContractDestinationInit::Axpby(3.0),
             )
             .unwrap();
 
@@ -274,10 +272,9 @@ fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
 fn dynamic_trace_rejects_same_type_rule_when_only_symbols_differ() {
     let first = SymbolOnlyRule::new(1.0);
     let second = SymbolOnlyRule::new(-1.0);
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = DynamicFusionMapSpace::from_final_homspace(
         &first,
         FusionTreeHomSpace::from_sector_ids([(0, 1)], []),
-        [vec![1]],
     )
     .unwrap();
 

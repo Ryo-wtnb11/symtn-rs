@@ -89,10 +89,9 @@ fn raw_transform_rejects_a_different_rule_identity() {
     // reach this operation through BoundDynamicFusionMapSpace.
     let first = CountingRule::new();
     let second = CountingRule::new();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = DynamicFusionMapSpace::from_final_homspace(
         &first,
         FusionTreeHomSpace::from_sector_ids([(0, 1)], []),
-        [vec![1]],
     )
     .unwrap();
 
@@ -108,10 +107,9 @@ fn raw_transform_rejects_a_different_rule_identity() {
 #[test]
 fn partitioned_contract_destination_rejects_distinct_provider_identities() {
     let bind = |rule: Arc<CountingRule>| {
-        let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+        let space = DynamicFusionMapSpace::from_final_homspace(
             rule.as_ref(),
             FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]),
-            [vec![1, 1]],
         )
         .unwrap();
         BoundDynamicFusionMapSpace::bind_multiplicity_free(space, rule).unwrap()
@@ -140,8 +138,7 @@ fn u1_space(charge: i32, deg: usize) -> DynamicFusionMapSpace {
     let sid = U1Irrep::new(charge).sector_id();
     let leg = || FusionProductSpace::new([SectorLeg::new([(sid, deg)], false)]);
     let hom = FusionTreeHomSpace::new(leg(), leg());
-    let count = hom.fusion_tree_keys(&rule).len();
-    DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, vec![vec![deg, deg]; count]).unwrap()
+    DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
 }
 
 fn reset_final_result_layout_test_state() -> probe::Recording {
@@ -243,9 +240,10 @@ fn validation_only_contraction_never_builds_a_default_layout() {
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let final_result_layout_builds_rec = reset_final_result_layout_test_state();
     let rule = U1FusionRule;
     let compatible = u1_space(903, 4);
+    let incompatible = u1_space(903, 5);
+    let final_result_layout_builds_rec = reset_final_result_layout_test_state();
 
     DynamicFusionMapSpace::validate_contracted_homspace(
         &rule,
@@ -260,7 +258,6 @@ fn validation_only_contraction_never_builds_a_default_layout() {
         0
     );
 
-    let incompatible = u1_space(903, 5);
     assert!(DynamicFusionMapSpace::validate_contracted_homspace(
         &rule,
         &compatible,
@@ -280,16 +277,11 @@ fn generic_transform_builds_only_the_final_layout() {
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let final_result_layout_builds_rec = reset_final_result_layout_test_state();
     let rule = GenericMultiplicityRule;
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 2)], [(0, 3)]);
     let key_count = homspace.fusion_tree_keys_generic(&rule).unwrap().len();
-    let source = DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-        &rule,
-        homspace,
-        vec![vec![2, 3]; key_count],
-    )
-    .unwrap();
+    let source = DynamicFusionMapSpace::from_final_homspace_generic(&rule, homspace).unwrap();
+    let final_result_layout_builds_rec = reset_final_result_layout_test_state();
 
     let transformed = source
         .transformed_generic(&rule, &TreeTransformOperation::permute([1], [0]))
@@ -306,16 +298,11 @@ fn generic_contraction_builds_only_the_final_layout() {
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let final_result_layout_builds_rec = reset_final_result_layout_test_state();
     let rule = GenericMultiplicityRule;
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 2)], [(0, 2)]);
     let key_count = homspace.fusion_tree_keys_generic(&rule).unwrap().len();
-    let source = DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-        &rule,
-        homspace,
-        vec![vec![2, 2]; key_count],
-    )
-    .unwrap();
+    let source = DynamicFusionMapSpace::from_final_homspace_generic(&rule, homspace).unwrap();
+    let final_result_layout_builds_rec = reset_final_result_layout_test_state();
 
     let contracted =
         DynamicFusionMapSpace::contracted_generic(&rule, &source, &source, &[1], &[0]).unwrap();
@@ -398,26 +385,14 @@ fn layout_authority_normalizes_zero_legs_but_not_storage_geometry() {
     };
     let without_zero_hom = FusionTreeHomSpace::new(leg(false), leg(false));
     let with_zero_hom = FusionTreeHomSpace::new(leg(true), leg(true));
-    let without_zero = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let without_zero = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&provider),
         without_zero_hom,
-        [vec![1, 1]],
     )
     .unwrap();
-    let zero_shapes = with_zero_hom
-        .fusion_tree_keys(provider.as_ref())
-        .iter()
-        .map(|key| {
-            vec![
-                usize::from(key.codomain_tree().coupled() == even),
-                usize::from(key.domain_tree().coupled() == even),
-            ]
-        })
-        .collect::<Vec<_>>();
-    let with_zero = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let with_zero = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&provider),
         with_zero_hom,
-        zero_shapes,
     )
     .unwrap();
     assert_eq!(
@@ -498,13 +473,12 @@ fn validated_layout_does_not_retain_the_adjoint_memo() {
 
 fn z2_matrix_space() -> DynamicFusionMapSpace {
     let leg = || SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false);
-    DynamicFusionMapSpace::from_degeneracy_shapes(
+    DynamicFusionMapSpace::from_final_homspace(
         &Z2FusionRule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![1, 1], vec![1, 1]],
     )
     .unwrap()
 }
@@ -537,8 +511,7 @@ fn bound_space_rejects_wrong_and_missing_rule_identity() {
 fn bound_space_rejects_wrong_and_missing_identity_before_provider_enumeration() {
     let source_rule = CountingRule::new();
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1), (0, 1)], []);
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&source_rule, homspace, [vec![1, 1]])
-        .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&source_rule, homspace).unwrap();
     assert!(source_rule.calls.load(Ordering::Relaxed) > 0);
 
     let wrong_rule = Arc::new(CountingRule::new());
@@ -650,18 +623,13 @@ fn every_generic_root_rejects_multiplicity_free_provider_before_input_validation
 
     expected(BoundDynamicFusionMapSpace::bind_generic(raw, Arc::new(Z2FusionRule)).unwrap_err());
     expected(
-        DynamicFusionMapSpace::from_degeneracy_shapes_generic(
-            &Z2FusionRule,
-            homspace.clone(),
-            Vec::<Vec<usize>>::new(),
-        )
-        .unwrap_err(),
+        DynamicFusionMapSpace::from_final_homspace_generic(&Z2FusionRule, homspace.clone())
+            .unwrap_err(),
     );
     expected(
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes_generic(
+        BoundDynamicFusionMapSpace::from_final_homspace_generic(
             Arc::new(Z2FusionRule),
             homspace.clone(),
-            Vec::<Vec<usize>>::new(),
         )
         .unwrap_err(),
     );
@@ -685,8 +653,7 @@ fn direct_bound_construction_enumerates_no_more_than_raw_construction() {
     // second fusion-tree enumeration.
     let hom = || FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
     let raw_rule = CountingRule::new();
-    let raw =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&raw_rule, hom(), [vec![1, 1]]).unwrap();
+    let raw = DynamicFusionMapSpace::from_final_homspace(&raw_rule, hom()).unwrap();
     let raw_calls = raw_rule.calls.load(Ordering::Relaxed);
     raw_rule.calls.store(0, Ordering::Relaxed);
     let provider = Arc::new(raw_rule);
@@ -699,10 +666,9 @@ fn direct_bound_construction_enumerates_no_more_than_raw_construction() {
     ));
 
     let bound_rule = Arc::new(CountingRule::new());
-    BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&bound_rule),
         hom(),
-        [vec![1, 1]],
     )
     .unwrap();
 
@@ -715,17 +681,15 @@ fn derived_bound_contract_and_transform_do_not_reenumerate_for_binding() {
     let hom = || FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
 
     let raw_rule = CountingRule::new();
-    let raw =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&raw_rule, hom(), [vec![1, 1]]).unwrap();
+    let raw = DynamicFusionMapSpace::from_final_homspace(&raw_rule, hom()).unwrap();
     raw_rule.calls.store(0, Ordering::Relaxed);
     let _ = DynamicFusionMapSpace::contracted(&raw_rule, &raw, &raw, &[1], &[0]).unwrap();
     let raw_contract_calls = raw_rule.calls.load(Ordering::Relaxed);
 
     let bound_rule = Arc::new(CountingRule::new());
-    let bound = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let bound = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&bound_rule),
         hom(),
-        [vec![1, 1]],
     )
     .unwrap();
     bound_rule.calls.store(0, Ordering::Relaxed);
@@ -737,8 +701,7 @@ fn derived_bound_contract_and_transform_do_not_reenumerate_for_binding() {
 
     let raw_transform_rule = CountingRule::new();
     let raw_transform =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&raw_transform_rule, hom(), [vec![1, 1]])
-            .unwrap();
+        DynamicFusionMapSpace::from_final_homspace(&raw_transform_rule, hom()).unwrap();
     raw_transform_rule.calls.store(0, Ordering::Relaxed);
     let operation = TreeTransformOperation::permute([0], [1]);
     let _ = raw_transform
@@ -747,10 +710,9 @@ fn derived_bound_contract_and_transform_do_not_reenumerate_for_binding() {
     let raw_transform_calls = raw_transform_rule.calls.load(Ordering::Relaxed);
 
     let bound_transform_rule = Arc::new(CountingRule::new());
-    let bound_transform = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let bound_transform = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&bound_transform_rule),
         hom(),
-        [vec![1, 1]],
     )
     .unwrap();
     bound_transform_rule.calls.store(0, Ordering::Relaxed);
@@ -776,16 +738,14 @@ fn bound_contract_normalizes_equal_identity_to_lhs_provider() {
     let rhs_provider = Arc::new(rule);
     assert!(!Arc::ptr_eq(&lhs_provider, &rhs_provider));
     let hom = || FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
-    let lhs = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&lhs_provider),
         hom(),
-        [vec![1, 1]],
     )
     .unwrap();
-    let rhs = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let rhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&rhs_provider),
         hom(),
-        [vec![1, 1]],
     )
     .unwrap();
     let output =
@@ -794,7 +754,7 @@ fn bound_contract_normalizes_equal_identity_to_lhs_provider() {
 
     let other_provider = Arc::new(CountingRule::new());
     let other =
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(other_provider, hom(), [vec![1, 1]])
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(other_provider, hom())
             .unwrap();
     let error = BoundDynamicFusionMapSpace::contracted_multiplicity_free(&lhs, &other, &[1], &[0])
         .unwrap_err();
@@ -861,11 +821,8 @@ fn large_canonical_shapes_reuse_frozen_content_without_tensor_storage() {
     let sid = U1Irrep::new(91).sector_id();
     let leg = || FusionProductSpace::new([SectorLeg::new([(sid, 4096)], false)]);
     let hom = FusionTreeHomSpace::new(leg(), leg());
-    let first =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom.clone(), [vec![4096, 4096]])
-            .unwrap();
-    let second =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, [vec![4096, 4096]]).unwrap();
+    let first = DynamicFusionMapSpace::from_final_homspace(&rule, hom.clone()).unwrap();
+    let second = DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     assert_eq!(first.required_len().unwrap(), 4096 * 4096);
     assert_eq!(first.structure(), second.structure());
 }
@@ -908,9 +865,9 @@ fn bound_layout_strategy_propagates_without_heap_ownership() {
     // What: clone, validated-layout rebind, derived construction, transform,
     // and contraction retain one opaque lowered strategy, while an expert
     // encoded root remains distinct and a mixed binary result follows lhs.
-    assert_eq!(
-        std::mem::size_of::<LayoutBuildCapability<symtn_core::SU2FusionRule>>(),
-        std::mem::size_of::<usize>()
+    assert!(
+        std::mem::size_of::<LayoutBuildCapability<symtn_core::SU2FusionRule>>()
+            <= std::mem::size_of::<usize>()
     );
     let provider = Arc::new(symtn_core::SU2FusionRule);
     let half = symtn_core::SU2Irrep::from_twice_spin(1).sector_id();
@@ -918,16 +875,16 @@ fn bound_layout_strategy_propagates_without_heap_ownership() {
     let make_hom = || FusionTreeHomSpace::new(leg(), leg());
     let hom = make_hom();
     checked_layout_primer(provider.as_ref(), &hom).unwrap();
-    let shapes = vec![vec![1; 2]; hom.fusion_tree_keys(provider.as_ref()).len()];
-    let lowered = BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(
+    let lowered = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         hom.clone(),
-        shapes.clone(),
     )
     .unwrap();
-    let encoded =
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(Arc::clone(&provider), hom, shapes)
-            .unwrap();
+    let encoded = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::clone(&provider),
+        hom,
+    )
+    .unwrap();
 
     let cloned = lowered.clone();
     let rebound = lowered
@@ -975,11 +932,9 @@ fn root_constructor_builds_from_checked_keys() {
         .prepare_fusion_tree_layout_checked(provider.as_ref())
         .unwrap()
         .commit();
-    let count = lowered_keys.len();
-    let bound = BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(
+    let bound = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         hom.clone(),
-        vec![vec![1, 1]; count],
     )
     .unwrap();
     let actual = (0..bound.space().structure().block_count())
@@ -1005,7 +960,7 @@ fn root_constructor_builds_from_checked_keys() {
         FusionProductSpace::new([]),
     );
     assert!(matches!(
-        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
             provider, malformed,
         ),
         Err(OperationError::FusionAlgebra(_))

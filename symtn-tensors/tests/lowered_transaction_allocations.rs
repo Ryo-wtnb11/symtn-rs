@@ -18,7 +18,7 @@ fn lowered_scratch_hit_matches_encoded_hit_allocation_and_identity() {
     let provider = Arc::new(U1FusionRule);
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    let cold = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let cold = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         homspace,
     )
@@ -26,7 +26,7 @@ fn lowered_scratch_hit_matches_encoded_hit_allocation_and_identity() {
 
     let lowered_homspace = cold.space().homspace().clone();
     counting_alloc::start();
-    let lowered = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let lowered = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         lowered_homspace,
     )

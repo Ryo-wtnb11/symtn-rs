@@ -1,4 +1,4 @@
-//! #1368: a warm contraction with a conjugated source reuses its space's
+//! #1368: a warm contraction with a lazy-adjoint source reuses its space's
 //! adjoint structure instead of rebuilding it on every call.
 
 use std::sync::Arc;
@@ -9,8 +9,8 @@ use symtn_core::{
     SectorId, SectorLeg, TensorKitProductCodec, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
-    BoundDynamicFusionMapSpace, OutputAxisOrder, TensorContractFusionExecutionContext,
-    TensorContractSpec, TreeTransformRuleCacheKey,
+    BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand, OutputAxisOrder,
+    TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
 #[path = "../../tests/support/counting_alloc.rs"]
@@ -19,8 +19,8 @@ mod counting_alloc;
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
-/// Allocation calls and bytes of one warm conjugated-source contraction
-/// `conj(A) · B` over `A, B: V ← V`, plus the retained bytes of the memoized
+/// Allocation calls and bytes of one warm lazy-adjoint-source contraction
+/// `A† · B` over `A, B: V ← V`, plus the retained bytes of the memoized
 /// adjoint structure.
 fn warm_conjugated_contract<R>(rule: R, legs: &[(SectorId, usize)]) -> (usize, usize, usize)
 where
@@ -57,22 +57,16 @@ where
     let mut context = TensorContractFusionExecutionContext::<f64, R::Key>::default();
     let mut call = || {
         context
-            .tensorcontract_fusion_dyn_into(
+            .tensorcontract_planned_into(
                 &dst,
                 &mut out,
-                &lhs,
-                &lhs_data,
-                &rhs,
-                &rhs_data,
-                TensorContractSpec::new_with_conjugation(
-                    &[0],
-                    &[0],
-                    OutputAxisOrder::identity(),
-                    true,
-                    false,
-                ),
+                (FusionOperand::adjoint(lhs.space()), &lhs_data),
+                (FusionOperand::direct(rhs.space()), &rhs_data),
+                &[1],
+                &[0],
+                &[0, 1],
                 1.0,
-                0.0,
+                ContractDestinationInit::Axpby(0.0),
             )
             .unwrap();
     };

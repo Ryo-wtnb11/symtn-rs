@@ -16,9 +16,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let blocks = hom.fusion_tree_keys(&rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, vec![vec![1; 4]; blocks])
-        .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let len = space.structure().required_len().unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len).map(|i| i as f64 + 1.0).collect(),
@@ -161,12 +159,9 @@ fn forced_orientations_match_asymmetric_u1_reduced_block_oracle() {
         2,
     )
     .unwrap();
-    let lhs_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, lhs_hom, [vec![2, 3, 4, 5]]).unwrap();
-    let rhs_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, rhs_hom, [vec![5, 4, 6, 7]]).unwrap();
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![3, 2, 7, 6]]).unwrap();
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom).unwrap();
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..lhs_space.required_len().unwrap())
             .map(|index| index as f64 * 0.125 - 2.0)
@@ -269,7 +264,7 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, [vec![1; 4]]).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], space.clone()).unwrap();
     let rhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![3.0], space.clone()).unwrap();
     let mut dst = TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0], space).unwrap();
@@ -342,8 +337,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
             [(0, dimensions[0]), (0, dimensions[1])],
             [(0, dimensions[2]), (0, dimensions[3])],
         );
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [dimensions.to_vec()])
-            .unwrap()
+        DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap()
     };
     let lhs_space = space([2, 3, 5, 7]);
     let rhs_space = space([11, 13, 3, 2]);
@@ -519,16 +513,16 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
         let dynamic_call =
             |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
              dst: &mut [f64]| {
-                context.tensorcontract_fusion_dyn_into(
+                context.tensorcontract_prelowered_into(
                     &dst_bound,
                     dst,
-                    &lhs_bound,
+                    crate::FusionOperand::direct(lhs_bound.space()),
                     lhs.data(),
-                    &rhs_bound,
+                    crate::FusionOperand::direct(rhs_bound.space()),
                     rhs.data(),
                     axes(),
                     alpha,
-                    beta,
+                    crate::ContractDestinationInit::Axpby(beta),
                 )
             };
         if typed_first {
@@ -613,7 +607,7 @@ fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, [vec![1; 4]]).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], space.clone()).unwrap();
     let rhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![3.0], space.clone()).unwrap();
     let axes = TensorContractSpec::with_default_output_order(&[3, 3], &[0, 1]);
@@ -654,9 +648,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let blocks = hom.fusion_tree_keys(&rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, vec![vec![1; 4]; blocks])
-        .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let len = space.structure().required_len().unwrap();
     let lhs = TestTensor::<Complex64>::from_vec_with_fusion_space(
         (0..len)
@@ -811,9 +803,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
             FusionProductSpace::new([leg(dimensions[0]), leg(dimensions[1])]),
             FusionProductSpace::new([leg(dimensions[2]), leg(dimensions[3])]),
         );
-        let blocks = hom.fusion_tree_keys(&rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, vec![dimensions.to_vec(); blocks])
-            .unwrap()
+        DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     };
     let lhs_space = build_space([1, 1, 2, 3]);
     let rhs_space = build_space([3, 2, 4, 5]);

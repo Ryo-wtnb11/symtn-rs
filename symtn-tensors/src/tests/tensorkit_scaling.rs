@@ -355,7 +355,8 @@ where
         let rhs_data: Vec<D> = cycle(&FINITE, rhs.space().required_len().unwrap());
         let dst_len = dst.space().required_len().unwrap();
         let initial: Vec<D> = cycle(&DESTINATION, dst_len);
-        let lhs_axes = [contracted];
+        // A set flag names `A`'s lazy adjoint, whose legs the axes index.
+        let lhs_axes = [dst_axis];
         let axes = TensorContractSpec::with_default_output_order_and_conjugation(
             &lhs_axes,
             &[0],
@@ -365,16 +366,20 @@ where
         let mut context = TensorContractFusionExecutionContext::<D, R::Key>::default();
         let mut contract = |dst_data: &mut [D], lhs_data: &[D], alpha: f64, beta: f64| {
             context
-                .tensorcontract_fusion_dyn_into(
+                .tensorcontract_prelowered_into(
                     &dst,
                     dst_data,
-                    &lhs,
+                    if conjugate {
+                        crate::FusionOperand::adjoint(lhs.space())
+                    } else {
+                        crate::FusionOperand::direct(lhs.space())
+                    },
                     lhs_data,
-                    &rhs,
+                    crate::FusionOperand::direct(rhs.space()),
                     &rhs_data,
                     axes,
                     D::from_real(alpha),
-                    D::from_real(beta),
+                    crate::ContractDestinationInit::Axpby(D::from_real(beta)),
                 )
                 .unwrap();
             assert_eq!(

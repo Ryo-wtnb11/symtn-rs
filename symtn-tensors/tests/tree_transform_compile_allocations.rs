@@ -322,13 +322,8 @@ fn rank_eight_su2_layout(half_legs: usize) -> BoundDynamicFusionMapSpace<SU2Fusi
         FusionProductSpace::new(legs.clone()),
         FusionProductSpace::new([]),
     );
-    let count = hom.fusion_tree_keys(&SU2FusionRule).len();
-    BoundDynamicFusionMapSpace::from_degeneracy_shapes(
-        Arc::new(SU2FusionRule),
-        hom,
-        (0..count).map(|_| vec![1usize; 8]),
-    )
-    .unwrap()
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(Arc::new(SU2FusionRule), hom)
+        .unwrap()
 }
 
 /// Cold allocation calls of the staging of `operation` on `source`, less
@@ -766,13 +761,8 @@ fn rank_six_u1_layout() -> BoundDynamicFusionMapSpace<U1FusionRule> {
         FusionProductSpace::new((0..3).map(|_| leg())),
         FusionProductSpace::new((0..3).map(|_| leg())),
     );
-    let count = hom.fusion_tree_keys(&U1FusionRule).len();
-    BoundDynamicFusionMapSpace::from_degeneracy_shapes(
-        Arc::new(U1FusionRule),
-        hom,
-        (0..count).map(|_| vec![1usize; 6]),
-    )
-    .unwrap()
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(Arc::new(U1FusionRule), hom)
+        .unwrap()
 }
 
 #[test]

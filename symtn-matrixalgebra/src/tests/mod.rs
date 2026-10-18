@@ -11,8 +11,9 @@ use symtn_core::{
     SU2Irrep, SectorId, SectorLeg, SectorVec, U1FusionRule, U1Irrep, Z2FusionRule,
 };
 use symtn_tensors::{
-    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, OperationError, OutputAxisOrder,
-    TensorContractFusionExecutionContext, TensorContractSpec, TreeTransformRuleCacheKey,
+    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, OperationError,
+    OutputAxisOrder, TensorContractFusionExecutionContext, TensorContractSpec,
+    TreeTransformRuleCacheKey,
 };
 
 use crate::factorize::{

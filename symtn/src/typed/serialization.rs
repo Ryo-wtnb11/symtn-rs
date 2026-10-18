@@ -702,7 +702,6 @@ where
         REPR_DIAGONAL => preflight_diagonal::<D, C, F>(&mut reader, limits)?,
         REPR_ADJOINT => match reader.u8().map_err(DecodeError::InvalidFormat)? {
             REPR_DENSE => preflight_dense::<D, C, F>(&mut reader, limits)?,
-            REPR_DIAGONAL => preflight_diagonal::<D, C, F>(&mut reader, limits)?,
             _ => {
                 return Err(DecodeError::InvalidFormat(
                     "unknown lazy-adjoint parent representation".to_string(),
@@ -757,10 +756,6 @@ enum TensorRecord<S, D> {
     AdjointDense {
         parent_space: SpaceRecord<S>,
         parent_blocks: Vec<BlockRecord<S, D>>,
-    },
-    AdjointDiagonal {
-        parent_space: SpaceRecord<S>,
-        parent_spectrum: Vec<(S, Vec<D>)>,
     },
 }
 
@@ -1391,14 +1386,6 @@ where
                     parent_blocks,
                 })
             }
-            REPR_DIAGONAL => {
-                let (parent_space, parent_spectrum) =
-                    read_diagonal(reader, limits, codec, provider)?;
-                Ok(TensorRecord::AdjointDiagonal {
-                    parent_space,
-                    parent_spectrum,
-                })
-            }
             _ => Err(DecodeError::InvalidFormat(
                 "unknown lazy-adjoint parent representation".to_string(),
             )),
@@ -1698,17 +1685,6 @@ where
         } => {
             let parent = build_dense(runtime, &provider, parent_space, parent_blocks, limits)?;
             build_adjoint(parent)
-        }
-        TensorRecord::AdjointDiagonal {
-            parent_space,
-            parent_spectrum,
-        } => {
-            // Why not `build_adjoint`: every mode takes the adjoint of a
-            // compact diagonal as an owned compact diagonal, so a v1 record
-            // written by an earlier lazy checked-Generic adjoint keeps its
-            // meaning but re-encodes as `Diagonal`.
-            let parent = build_diagonal(runtime, &provider, parent_space, parent_spectrum, limits)?;
-            parent.adjoint().map_err(DecodeError::Facade)
         }
     }
 }

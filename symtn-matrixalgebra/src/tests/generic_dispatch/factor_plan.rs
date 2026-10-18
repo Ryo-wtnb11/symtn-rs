@@ -191,9 +191,7 @@ fn typed_factor_axis_sum_overflow_is_exact_without_storage_materialization() {
         )]),
         FusionProductSpace::new([]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, Vec::<Vec<usize>>::new())
-            .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
 
     let error = TestTensor::<f64>::from_dyn(Vec::new(), space).unwrap_err();
 

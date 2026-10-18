@@ -45,9 +45,7 @@ where
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = homspace.fusion_tree_keys(rule).len();
-    let shapes = vec![vec![degeneracy; 4]; key_count];
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     let len = space.required_len().unwrap();
     let tensor = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len)
@@ -157,8 +155,7 @@ fn u1_lowest_label_matrix(rows: usize, cols: usize) -> TestTensor<f64> {
         FusionProductSpace::new([SectorLeg::new([(minimum, rows)], false)]),
         FusionProductSpace::new([SectorLeg::new([(minimum, cols)], false)]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![rows, cols]]).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     TestTensor::from_vec_with_fusion_space(
         (0..rows * cols)
             .map(|index| ((index * 7 + 3) % 17) as f64 - 5.0)
@@ -234,9 +231,7 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
             FusionProductSpace::new([SectorLeg::new([(minimum, rows)], false)]),
             FusionProductSpace::new([SectorLeg::new([(minimum, cols)], false)]),
         );
-        let space =
-            DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![rows, cols]])
-                .unwrap();
+        let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
         TestTensor::from_vec_with_fusion_space(data, space).unwrap()
     };
     let rectangular = matrix(3, 2, vec![-2.0, 5.0, 1.0, 4.0, -3.0, 2.0]);
@@ -457,8 +452,7 @@ fn full_factorizations_agree_with_compact_on_matching_square_support() {
         FusionProductSpace::new([SectorLeg::new([(neutral, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(neutral, 2)], false)]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![2, 2]]).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::from_vec_with_fusion_space(vec![-1.0, 3.0, 2.0, 4.0], space).unwrap();
     let input = bound_tensor(Arc::new(rule), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -507,9 +501,7 @@ fn full_factorizations_skip_dense_backend_for_disjoint_support() {
         FusionProductSpace::new([SectorLeg::new([(positive, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(neutral, 3)], false)]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, Vec::<Vec<usize>>::new())
-            .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::from_vec_with_fusion_space(Vec::<f64>::new(), space).unwrap();
     let input = bound_tensor(Arc::new(rule), &tensor);
 
@@ -702,7 +694,7 @@ fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<Z2
     // shape-admission bridge to symtn-tensors; the kept public installer
     // derives the identical blocks from the final homspace's leg
     // degeneracies for these dense-leg fixtures.
-    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(provider, hom)
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(provider, hom)
         .unwrap()
 }
 

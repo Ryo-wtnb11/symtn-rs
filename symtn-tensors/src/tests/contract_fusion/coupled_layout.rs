@@ -153,10 +153,8 @@ fn coupled_layout_complex_contraction_matches_packed_fallback() {
         .try_bind_rule(&rule)
         .unwrap()
     };
-    let coupled_space = |hom: FusionTreeHomSpace| {
-        let shapes = vec![vec![degeneracy; 4]; hom.fusion_tree_keys(&rule).len()];
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, hom, shapes).unwrap()
-    };
+    let coupled_space =
+        |hom: FusionTreeHomSpace| DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let lhs_packed_space = packed_space(homspace());
     assert!(lhs_packed_space
         .structure()
@@ -289,10 +287,9 @@ fn coupled_layout_complex_contraction_matches_packed_fallback() {
 #[test]
 fn coupled_layout_complex_scalar_contraction_matches_closed_form() {
     let rule = Z2FusionRule;
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([], []),
-        [Vec::<usize>::new()],
     )
     .unwrap();
     let lhs_value = Complex64::new(2.0, 1.0);
@@ -338,8 +335,6 @@ where
             FusionProductSpace::new([leg(), leg()]),
         )
     };
-    let shapes =
-        |hom: &FusionTreeHomSpace| vec![vec![degeneracy; 4]; hom.fusion_tree_keys(rule).len()];
     let packed_space = |hom: FusionTreeHomSpace| {
         let keys = hom.fusion_tree_keys(rule);
         DynamicFusionMapSpace::try_from_layout(
@@ -354,10 +349,8 @@ where
         .try_bind_rule(rule)
         .unwrap()
     };
-    let coupled_space = |hom: FusionTreeHomSpace| {
-        let shape_list = shapes(&hom);
-        DynamicFusionMapSpace::from_degeneracy_shapes(rule, hom, shape_list).unwrap()
-    };
+    let coupled_space =
+        |hom: FusionTreeHomSpace| DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap();
 
     let lhs_packed_space = packed_space(homspace());
     assert!(lhs_packed_space
@@ -550,15 +543,8 @@ fn coupled_layout_compose_uses_direct_gemm_groups() {
             FusionProductSpace::new([leg(), leg()]),
         )
     };
-    let space = |hom: FusionTreeHomSpace| {
-        let key_count = hom.fusion_tree_keys(&rule).len();
-        DynamicFusionMapSpace::from_degeneracy_shapes(
-            &rule,
-            hom,
-            vec![vec![degeneracy; 4]; key_count],
-        )
-        .unwrap()
-    };
+    let space =
+        |hom: FusionTreeHomSpace| DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap();
     let lhs_space = space(homspace());
     let lhs_len = lhs_space.required_len().unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(

@@ -667,7 +667,8 @@ fn a4_fold_round_trip_domain_rank2() {
 
 #[test]
 fn a4_bend_round_trip_domain_rank2() {
-    let rule = A4FoldRule;
+    // Through the checked entries, which also validate every pair.
+    let rule = InfallibleGeneric::new(&A4FoldRule);
     let t = SectorId::new(3);
     for cod_mu in 1..=2 {
         for dv in 1..=2 {
@@ -687,8 +688,8 @@ fn a4_bend_round_trip_domain_rank2() {
             );
             let pair = FusionTreePairKey::pair(cod, dom);
             let mut totals = std::collections::HashMap::new();
-            for (mid, c1) in generic_bendright_tree_pair(&rule, &pair).unwrap() {
-                for (out, c2) in generic_bendleft_tree_pair(&rule, &mid).unwrap() {
+            for (mid, c1) in generic_bendright_tree_pair_checked(&rule, &pair).unwrap() {
+                for (out, c2) in generic_bendleft_tree_pair_checked(&rule, &mid).unwrap() {
                     *totals.entry(out).or_insert(0.0) += c1 * c2;
                 }
             }
@@ -954,24 +955,82 @@ fn a4_pair_rank2_1(mu: usize) -> FusionTreePairKey {
     FusionTreePairKey::pair(cod, dom)
 }
 
+/// A pair, a cyclic permutation, its inverse, and a label.
+type TransposeRoundTrip = (
+    FusionTreePairKey,
+    &'static [usize],
+    &'static [usize],
+    &'static [usize],
+    &'static [usize],
+    &'static str,
+);
+
 // Gate 5: transpose (planar cyclic permutation) round-trips to the
-// identity. `generic_transpose_tree_pair` chains repartition + the fold/bend
-// A-move (`generic_cycle_*`); applying the swap [1],[0] and then its inverse
-// [1],[0] again must return the original pair with coefficient 1. Run on
+// identity. `generic_transpose_tree_pair_checked` chains repartition + the
+// fold/bend A-move (`generic_cycle_*`); a cyclic permutation followed by its
+// inverse must return the original pair with coefficient 1. Run on
 // A4FoldRule, whose A-move is a genuinely non-diagonal outer-multiplicity
 // move, so any coefficient error in the composition breaks the identity.
 #[test]
 fn generic_transpose_round_trips_to_identity() {
-    let rule = A4FoldRule;
-    let pair = a4_pair_rank1_1();
-    let forward = generic_transpose_tree_pair(&rule, &pair, &[1], &[0]).unwrap();
-    let mut totals = HashMap::new();
-    for (mid, c1) in forward {
-        for (out, c2) in generic_transpose_tree_pair(&rule, &mid, &[1], &[0]).unwrap() {
-            *totals.entry(out).or_insert(0.0) += c1 * c2;
+    // The checked entry also validates every pair. A one-step clockwise
+    // cycle is undone by the anticlockwise one; the two-step cycle with dual
+    // flags is its own inverse.
+    let rule = InfallibleGeneric::new(&A4FoldRule);
+    let t = SectorId::new(3);
+    let rank3_dom1 = |codomain: FusionTreeKey| {
+        FusionTreePairKey::pair(codomain, FusionTreeKey::new([t], t, [false], [], []))
+    };
+    let dual_pair = FusionTreePairKey::pair(
+        FusionTreeKey::new(
+            [t, t, t],
+            t,
+            [true, false, true],
+            [t],
+            [MultiplicityIndex::new(2).unwrap(), MultiplicityIndex::ONE],
+        ),
+        FusionTreeKey::new([t], t, [true], [], []),
+    );
+    let cases: [TransposeRoundTrip; 4] = [
+        (a4_pair_rank1_1(), &[1], &[0], &[1], &[0], "rank-1 swap"),
+        (
+            rank3_dom1(a4f_rank3(3, 2, 1)),
+            &[1, 2, 3],
+            &[0],
+            &[3, 0, 1],
+            &[2],
+            "clockwise",
+        ),
+        (
+            rank3_dom1(a4f_rank3(3, 1, 2)),
+            &[3, 0, 1],
+            &[2],
+            &[1, 2, 3],
+            &[0],
+            "anticlockwise",
+        ),
+        (
+            dual_pair,
+            &[2, 3, 0],
+            &[1],
+            &[2, 3, 0],
+            &[1],
+            "two-step dual flags",
+        ),
+    ];
+    for (pair, codomain, domain, inverse_codomain, inverse_domain, label) in cases {
+        let forward = generic_transpose_tree_pair_checked(&rule, &pair, codomain, domain).unwrap();
+        let mut totals = HashMap::new();
+        for (mid, c1) in forward {
+            for (out, c2) in
+                generic_transpose_tree_pair_checked(&rule, &mid, inverse_codomain, inverse_domain)
+                    .unwrap()
+            {
+                *totals.entry(out).or_insert(0.0) += c1 * c2;
+            }
         }
+        assert_identity_term_map(&totals, &pair, label);
     }
-    assert_identity_term_map(&totals, &pair, "A4 transpose round-trip");
 }
 
 // Gate 6: braid with the IDENTITY permutation is the identity map on an

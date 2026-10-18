@@ -31,40 +31,6 @@ pub(crate) use metadata::{
 pub use operand::FusionOperand;
 pub(crate) use operand::FusionOperandLayout;
 
-/// Builds scratch structures in the coupled-sector matrix layout. Scratch
-/// spaces enumerate the full tree set of their hom spaces, so the coupled
-/// grid is always complete; there is no other layout.
-// `R: FusionRule` (not mult-free): the coupled-sector matrix layout only needs
-// fusion channels/dual, so this helper serves both the mult-free and the
-// Generic-fusion space builders. Relaxing the bound leaves the mult-free
-// callers unchanged.
-fn scratch_subblock_structure<R>(
-    rule: &R,
-    nout: usize,
-    rank: usize,
-    blocks: Vec<(BlockKey, Vec<usize>)>,
-) -> Result<BlockStructure, OperationError>
-where
-    R: FusionRule,
-{
-    #[cfg(test)]
-    crate::probe::hit(crate::probe::Event::ScratchStructureBuild);
-    let mut tree_blocks = Vec::with_capacity(blocks.len());
-    for (index, (key, shape)) in blocks.iter().enumerate() {
-        match key {
-            BlockKey::FusionTree(tree) => tree_blocks.push((tree.clone(), shape.clone())),
-            _ => {
-                return Err(OperationError::ExpectedFusionTreeBlock {
-                    tensor: "scratch",
-                    index,
-                })
-            }
-        }
-    }
-    BlockStructure::coupled_sector_matrix_with_keys(rule, nout, rank, tree_blocks)
-        .map_err(OperationError::from_core_preserving_context)
-}
-
 use super::fusion::FusionContractPlan;
 use super::structure::TensorContractAxisPlan;
 
@@ -263,7 +229,10 @@ impl PreparedCheckedGenericDynamicSpace {
 }
 
 impl DynamicFusionMapSpace {
-    fn from_final_homspace<R>(
+    /// Root layout of a multiplicity-free hom space: the TensorKit coupled-sector
+    /// matrix layout derived from the hom space's stored leg degeneracies,
+    /// identical to [`FusionTreeHomSpace::coupled_subblock_structure`].
+    pub fn from_final_homspace<R>(
         rule: &R,
         homspace: FusionTreeHomSpace,
     ) -> Result<Self, OperationError>
@@ -297,7 +266,7 @@ impl DynamicFusionMapSpace {
         crate::probe::hit(crate::probe::Event::FinalResultLayoutBuild);
         let staged = match prepared {
             PreparedLayoutKeys::Checked(prepared) => Some(prepared),
-            PreparedLayoutKeys::Encoded | PreparedLayoutKeys::Staged(_) => None,
+            PreparedLayoutKeys::Encoded => None,
         };
         if let Some(prepared) = staged {
             let nout = homspace.codomain().len();
@@ -333,7 +302,9 @@ impl DynamicFusionMapSpace {
         })
     }
 
-    pub(crate) fn from_final_homspace_generic<R>(
+    /// Generic-fusion sibling of [`Self::from_final_homspace`]: the provider
+    /// must report [`FusionStyleKind::Generic`].
+    pub fn from_final_homspace_generic<R>(
         rule: &R,
         homspace: FusionTreeHomSpace,
     ) -> Result<Self, OperationError>
@@ -446,89 +417,6 @@ impl DynamicFusionMapSpace {
         Ok(self)
     }
 
-    /// Expert compatibility constructor from an untyped description: a hom
-    /// space plus one caller-supplied degeneracy shape per fusion-tree key (in
-    /// [`FusionTreeHomSpace::fusion_tree_keys`] order). The storage layout is
-    /// the TensorKit-equivalent coupled-sector matrix layout, identical to
-    /// [`FusionTreeHomSpace::coupled_subblock_structure`]. Ordinary operation
-    /// outputs derive the layout from their final hom space instead.
-    pub fn from_degeneracy_shapes<R, Shapes>(
-        rule: &R,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        Self::from_degeneracy_shapes_with_key_builder(rule, homspace, shapes, |rule, homspace| {
-            Ok(PreparedLayoutKeys::Staged(
-                homspace.prepare_fusion_tree_layout(rule),
-            ))
-        })
-    }
-
-    pub(crate) fn from_degeneracy_shapes_with_key_builder<R, Shapes, BuildKeys>(
-        rule: &R,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-        build_keys: BuildKeys,
-    ) -> Result<Self, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-        BuildKeys: FnOnce(&R, &FusionTreeHomSpace) -> Result<PreparedLayoutKeys, OperationError>,
-    {
-        let nout = homspace.codomain().len();
-        let nin = homspace.domain().len();
-        #[cfg(test)]
-        crate::probe::hit(crate::probe::Event::CallerShapePathBuild);
-        let shapes = shapes
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<Vec<usize>>>();
-        let prepared = build_keys(rule, &homspace)?;
-        let keys = prepared.keys(rule, &homspace);
-        if keys.len() != shapes.len() {
-            return Err(OperationError::from_core_preserving_context(
-                CoreError::BlockCountMismatch {
-                    expected: keys.len(),
-                    actual: shapes.len(),
-                },
-            ));
-        }
-        homspace
-            .validate_degeneracy_shapes(&keys, &shapes)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let subblock_structure = match prepared {
-            PreparedLayoutKeys::Staged(prepared) | PreparedLayoutKeys::Checked(prepared) => {
-                let structure = prepared
-                    .build_complete_from_leg_degeneracies(&homspace)
-                    .map_err(OperationError::from_core_preserving_context)?;
-                prepared.commit();
-                structure
-            }
-            PreparedLayoutKeys::Encoded => {
-                // Why not retain an explicit-shape strong cache: this path
-                // first proves every caller shape equals the HomSpace legs,
-                // so canonical layouts belong to the core owner instead.
-                homspace
-                    .coupled_subblock_structure_from_leg_degeneracies(rule)
-                    .map_err(OperationError::from_core_preserving_context)?
-            }
-        };
-        Ok(Self {
-            nout,
-            nin,
-            homspace: Arc::new(homspace),
-            subblock_structure,
-            admission: FusionSpaceAdmission::Complete(rule.rule_identity()),
-            adjoint: OnceLock::new(),
-        })
-    }
-
     /// Space of the tree-transformed (permute / braid / transpose) tensor:
     /// the hom space is permuted and the full tree set of the result is
     /// enumerated (trees the transform coefficients never reach stay as
@@ -592,60 +480,6 @@ impl DynamicFusionMapSpace {
             homspace,
             required_len,
             source_structure_matches,
-        })
-    }
-
-    /// Expert Generic-fusion sibling of [`Self::from_degeneracy_shapes`] for
-    /// caller-supplied per-tree shapes. Ordinary derived
-    /// transform/contraction results instead use the final hom space's stored
-    /// leg degeneracies directly.
-    ///
-    /// This is a Generic execution capability boundary, not an alternate
-    /// spelling for multiplicity-free construction. The provider must report
-    /// [`FusionStyleKind::Generic`].
-    pub fn from_degeneracy_shapes_generic<R, Shapes>(
-        rule: &R,
-        homspace: FusionTreeHomSpace,
-        shapes: Shapes,
-    ) -> Result<Self, OperationError>
-    where
-        R: FusionRule,
-        Shapes: IntoIterator,
-        Shapes::Item: Into<Vec<usize>>,
-    {
-        validate_generic_provider_style(rule)?;
-        let nout = homspace.codomain().len();
-        let nin = homspace.domain().len();
-        let keys = homspace
-            .fusion_tree_keys_generic(rule)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let shapes = shapes.into_iter().map(Into::into).collect::<Vec<_>>();
-        if keys.len() != shapes.len() {
-            return Err(OperationError::from_core_preserving_context(
-                CoreError::BlockCountMismatch {
-                    expected: keys.len(),
-                    actual: shapes.len(),
-                },
-            ));
-        }
-        homspace
-            .validate_degeneracy_shapes(&keys, &shapes)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let blocks = keys
-            .iter()
-            .cloned()
-            .map(BlockKey::from)
-            .zip(shapes)
-            .collect::<Vec<_>>();
-        let subblock_structure =
-            Arc::new(scratch_subblock_structure(rule, nout, nout + nin, blocks)?);
-        Ok(Self {
-            nout,
-            nin,
-            homspace: Arc::new(homspace),
-            subblock_structure,
-            admission: FusionSpaceAdmission::Complete(rule.rule_identity()),
-            adjoint: OnceLock::new(),
         })
     }
 

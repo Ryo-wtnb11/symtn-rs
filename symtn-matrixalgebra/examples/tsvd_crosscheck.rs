@@ -66,13 +66,7 @@ where
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = homspace.fusion_tree_keys(rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        rule,
-        homspace,
-        vec![vec![DEGENERACY; 4]; key_count],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     let space =
         BoundDynamicFusionMapSpace::bind_multiplicity_free(space.clone(), Arc::new(rule.clone()))
             .unwrap();

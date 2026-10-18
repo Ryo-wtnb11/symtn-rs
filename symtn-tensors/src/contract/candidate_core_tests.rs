@@ -235,8 +235,16 @@ where
                 .unwrap();
         } else {
             context
-                .tensorcontract_fusion_dyn_into(
-                    &space, &mut dst, &space, &lhs_data, &space, &rhs_data, axes, 1.0, 0.0,
+                .tensorcontract_prelowered_into(
+                    &space,
+                    &mut dst,
+                    crate::FusionOperand::direct(space.space()),
+                    &lhs_data,
+                    crate::FusionOperand::direct(space.space()),
+                    &rhs_data,
+                    axes,
+                    1.0,
+                    crate::ContractDestinationInit::Axpby(0.0),
                 )
                 .unwrap();
         }
@@ -392,16 +400,16 @@ fn a_uniform_fermionic_twist_rides_the_sorted_candidate_core_as_gemm_alpha() {
     let mut out = vec![0.0; dst.space().required_len().unwrap()];
     let mut context = Context::default();
     context
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             &dst,
             &mut out,
-            &lhs,
+            crate::FusionOperand::direct(lhs.space()),
             &data(lhs.space().required_len().unwrap(), 3),
-            &rhs,
+            crate::FusionOperand::direct(rhs.space()),
             &data(rhs.space().required_len().unwrap(), 4),
             axes,
             1.0,
-            0.0,
+            crate::ContractDestinationInit::Axpby(0.0),
         )
         .unwrap();
     assert!(context.last_resolution_is_core());

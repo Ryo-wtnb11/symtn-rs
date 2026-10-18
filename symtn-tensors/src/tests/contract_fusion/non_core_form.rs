@@ -51,18 +51,8 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         rhs_conjugate,
     );
 
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_hom.clone(),
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_hom.clone(),
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
     let lhs_adjoint_space = lhs_space
         .validate_rule(&rule)
         .and_then(|()| lhs_space.adjoint_view())
@@ -75,6 +65,14 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     let lowered_rhs_axes = maybe_adjoint_axes::<1, 3>(&source_rhs_contracting_axes, rhs_conjugate);
     let lowered_lhs_open_axes = complement_axes(4, &lowered_lhs_axes);
     let lowered_rhs_open_axes = complement_axes(4, &lowered_rhs_axes);
+    // The eager entry takes the lazy-adjoint operand form: a set flag names
+    // the operand's lazy adjoint, whose legs the axes index.
+    let lazy_axes = TensorContractSpec::with_default_output_order_and_conjugation(
+        lowered_lhs_axes.as_slice(),
+        lowered_rhs_axes.as_slice(),
+        lhs_conjugate,
+        rhs_conjugate,
+    );
     let effective_lhs_hom = if lhs_conjugate {
         lhs_adjoint_space.homspace()
     } else {
@@ -109,20 +107,9 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
             lowered_rhs_open_axes.as_slice(),
         )
         .unwrap();
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![2, 2]]).unwrap();
-    let lhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_core_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
-    let rhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_core_hom,
-        [vec![2, 2, 2, 2], vec![2, 2, 2, 2]],
-    )
-    .unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
+    let lhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_core_hom).unwrap();
+    let rhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_core_hom).unwrap();
     let lhs_data = (0..32)
         .map(|index| Complex64::new(1.0 + 0.125 * index as f64, -0.5 + 0.0625 * index as f64))
         .collect::<Vec<_>>();
@@ -259,7 +246,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &mut context_dst,
         &lhs,
         &rhs,
-        axes,
+        lazy_axes,
         alpha,
         beta,
     )
@@ -286,7 +273,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &mut context_dst,
         &lhs,
         &rhs,
-        axes,
+        lazy_axes,
         alpha,
         beta,
     )
@@ -374,12 +361,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
         .homspace()
         .permute(&rule, &[0, 1, 2], &[])
         .unwrap();
-    let lhs_core_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_core_hom,
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
+    let lhs_core_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_core_hom).unwrap();
     let core_dst_space = lhs_core_space.clone();
     let rhs_core_space = rhs_space.clone();
     let lhs_data = vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, -1.0)];
@@ -568,24 +550,9 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
         ]),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        lhs_hom.clone(),
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
-    let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        rhs_hom.clone(),
-        [vec![1, 1, 1], vec![1, 1, 1]],
-    )
-    .unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom.clone(),
-        [vec![1, 1, 1, 1], vec![1, 1, 1, 1]],
-    )
-    .unwrap();
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom.clone()).unwrap();
     let lhs_data = vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, -1.0)];
     let rhs_data = vec![Complex64::new(-2.0, 0.5), Complex64::new(4.0, 3.0)];
     let initial_dst = vec![Complex64::new(5.0, 1.0), Complex64::new(-2.0, 4.0)];
@@ -615,24 +582,9 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
 
     let expected_structure = std::sync::Arc::clone(dst.structure());
     let rebuild_and_contract = || {
-        let lhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-            &rule,
-            lhs_hom.clone(),
-            [vec![1, 1, 1], vec![1, 1, 1]],
-        )
-        .unwrap();
-        let rhs_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-            &rule,
-            rhs_hom.clone(),
-            [vec![1, 1, 1], vec![1, 1, 1]],
-        )
-        .unwrap();
-        let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-            &rule,
-            dst_hom.clone(),
-            [vec![1, 1, 1, 1], vec![1, 1, 1, 1]],
-        )
-        .unwrap();
+        let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
+        let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
+        let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom.clone()).unwrap();
         let rebuilt_lhs =
             TestTensor::<Complex64>::from_vec_with_fusion_space(lhs_data.clone(), lhs_space)
                 .unwrap();
@@ -681,11 +633,9 @@ fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
             FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]),
         )
     };
-    let lhs_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, matrix_hom(), [vec![1, 1]]).unwrap();
-    let rhs_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, matrix_hom(), [vec![1, 1]]).unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, matrix_hom()).unwrap();
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, matrix_hom()).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([
@@ -694,7 +644,6 @@ fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
             ]),
             FusionProductSpace::new([]),
         ),
-        [vec![1, 1]],
     )
     .unwrap();
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], lhs_space).unwrap();

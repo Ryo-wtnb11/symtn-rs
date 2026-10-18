@@ -408,7 +408,8 @@ fn axioms_fz2_u1_su2() {
     check_all("fZ2xU1xSU2", &triple_rule(), &triple_sectors(1, 1));
 }
 
-/// The Cantor product codecs are a coherent expert option.
+/// Product rules with the default `TensorKitProductCodec` (Cantor pairing)
+/// satisfy the axioms.
 #[test]
 fn axioms_cantor_product_codec() {
     let pair = CantorU1Fz2Rule::new(U1FusionRule, FermionParityFusionRule);

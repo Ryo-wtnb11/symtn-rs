@@ -854,54 +854,12 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         }));
 }
 
-/// A v1 lazy-adjoint-of-diagonal record decodes to the adjoint it denotes:
-/// the owned conjugated diagonal, which re-encodes as a plain diagonal record.
+/// A lazy-adjoint record names only a dense parent: the encoder never writes a
+/// diagonal parent, because the adjoint of a compact diagonal is itself an
+/// owned compact diagonal.
 #[test]
-fn lazy_adjoint_diagonal_records_decode_to_the_owned_conjugated_diagonal() {
-    fn lazy_adjoint_diagonal_record(diagonal_bytes: &[u8]) -> Vec<u8> {
-        let mut bytes = diagonal_bytes.to_vec();
-        let repr = header_end(&bytes);
-        assert_eq!(bytes[repr], 2, "diagonal record tag");
-        bytes.insert(repr, 3);
-        bytes
-    }
+fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
     let runtime = host_runtime();
-    let values = vec![Complex64::new(2.0, 1.5), Complex64::new(-3.0, -0.5)];
-
-    let provider = Arc::new(GenericToy);
-    let codec = GenericCodec {
-        provider: Arc::clone(&provider),
-    };
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(GenericLabel::X, 2)]).unwrap();
-    let diagonal = TensorMap::<_, Complex64>::diagonal(
-        &runtime,
-        &leg,
-        [SectorSpectrum {
-            sector: GenericLabel::X,
-            values: values.clone(),
-        }],
-    )
-    .unwrap();
-    let decoded = TensorMap::<GenericToy, Complex64>::from_bytes_with(
-        &runtime,
-        &lazy_adjoint_diagonal_record(&diagonal.to_bytes_with(&codec).unwrap()),
-        DecodeLimits::default(),
-        &codec,
-    )
-    .unwrap();
-    let adjoint = diagonal.adjoint().unwrap();
-    assert!(
-        symtn::typed::__network::network_reuse_class(&decoded, false) == NetworkReuseClass::Compact
-    );
-    assert_eq!(
-        decoded.materialize().unwrap().dense_data().unwrap().bits(),
-        adjoint.materialize().unwrap().dense_data().unwrap().bits()
-    );
-    assert_eq!(
-        decoded.to_bytes_with(&codec).unwrap(),
-        adjoint.to_bytes_with(&codec).unwrap()
-    );
-
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
     let diagonal = TensorMap::<_, Complex64>::diagonal(
@@ -910,30 +868,28 @@ fn lazy_adjoint_diagonal_records_decode_to_the_owned_conjugated_diagonal() {
         [
             SectorSpectrum {
                 sector: SU2Irrep::from_twice_spin(0),
-                values: vec![values[0]],
+                values: vec![Complex64::new(2.0, 1.5)],
             },
             SectorSpectrum {
                 sector: SU2Irrep::from_twice_spin(1),
-                values: values.clone(),
+                values: vec![Complex64::new(2.0, 1.5), Complex64::new(-3.0, -0.5)],
             },
         ],
     )
     .unwrap();
-    let decoded = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
-        &runtime,
-        &lazy_adjoint_diagonal_record(&diagonal.to_bytes_with(&codec).unwrap()),
-        DecodeLimits::default(),
-        &codec,
-    )
-    .unwrap();
-    let adjoint = diagonal.adjoint().unwrap();
-    assert!(
-        symtn::typed::__network::network_reuse_class(&decoded, false) == NetworkReuseClass::Compact
-    );
-    assert_eq!(
-        decoded.materialize().unwrap().dense_data().unwrap().bits(),
-        adjoint.materialize().unwrap().dense_data().unwrap().bits()
-    );
+    let mut bytes = diagonal.to_bytes_with(&codec).unwrap();
+    let repr = header_end(&bytes);
+    assert_eq!(bytes[repr], 2, "diagonal record tag");
+    bytes.insert(repr, 3);
+    assert!(matches!(
+        TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+            &runtime,
+            &bytes,
+            DecodeLimits::default(),
+            &codec,
+        ),
+        Err(DecodeError::InvalidFormat(_))
+    ));
 }
 
 #[test]

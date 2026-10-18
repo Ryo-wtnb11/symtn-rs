@@ -830,16 +830,7 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
         FusionProductSpace::new([SectorLeg::new([(even, 5), (odd, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 3), (odd, 4)], false)]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|key| match key.codomain_tree().coupled() {
-            sector if sector == even => vec![5, 3],
-            sector if sector == odd => vec![2, 4],
-            sector => panic!("unexpected Z2 sector {sector:?}"),
-        })
-        .collect::<Vec<_>>();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
         (0..space.required_len().unwrap())
             .map(|index| {
@@ -1107,8 +1098,7 @@ fn svd_compact_factor_dims_include_sectors_without_populated_trees() {
         FusionProductSpace::new([SectorLeg::new([(neutral, 2), (positive, 3)], false)]),
         FusionProductSpace::new([SectorLeg::new([(neutral, 2)], false)]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![2, 2]]).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::from_vec_with_fusion_space(vec![1.0, 2.0, 3.0, 4.0], space).unwrap();
     let original_homspace = tensor.fusion_space().homspace().clone();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -1144,16 +1134,7 @@ fn svd_compact_preserves_asymmetric_non_self_dual_u1_factor_layouts() {
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let shapes = homspace
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|key| match key.codomain_tree().coupled() {
-            sector if sector == neutral => vec![3, 1],
-            sector if sector == positive => vec![2, 4],
-            sector => panic!("unexpected U(1) sector {sector:?}"),
-        })
-        .collect::<Vec<_>>();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, shapes).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..space.required_len().unwrap())
             .map(|index| ((index * 7 + 3) % 17) as f64 - 6.0)

@@ -188,13 +188,7 @@ fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg()]),
     );
-    let key_count = tall_hom.fusion_tree_keys(&rule).len();
-    let tall_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        tall_hom,
-        vec![vec![degeneracy; 3]; key_count],
-    )
-    .unwrap();
+    let tall_space = DynamicFusionMapSpace::from_final_homspace(&rule, tall_hom).unwrap();
     let len = tall_space.required_len().unwrap();
     let tall = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len).map(|i| ((i * 3 + 1) % 13) as f64 - 6.0).collect(),
@@ -236,13 +230,7 @@ fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
         FusionProductSpace::new([leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = wide_hom.fusion_tree_keys(&rule).len();
-    let wide_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        wide_hom,
-        vec![vec![degeneracy; 3]; key_count],
-    )
-    .unwrap();
+    let wide_space = DynamicFusionMapSpace::from_final_homspace(&rule, wide_hom).unwrap();
     let len = wide_space.required_len().unwrap();
     let wide = TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len).map(|i| ((i * 5 + 2) % 11) as f64 - 5.0).collect(),
@@ -630,13 +618,7 @@ where
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg()]),
     );
-    let key_count = homspace.fusion_tree_keys(rule).len();
-    let space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        rule,
-        homspace,
-        vec![vec![degeneracy; 3]; key_count],
-    )
-    .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap();
     let len = space.required_len().unwrap();
     TestTensor::<f64>::from_vec_with_fusion_space(
         (0..len)

@@ -5,13 +5,12 @@ fn prepared_tensorcontract_fusion_route_replays_like_the_eager_entry() {
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let fusion_space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(
+        DynamicFusionMapSpace::from_final_homspace(
             &rule,
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg()]),
                 FusionProductSpace::new([leg()]),
             ),
-            [vec![1, 1], vec![1, 1]],
         )
         .unwrap()
     };

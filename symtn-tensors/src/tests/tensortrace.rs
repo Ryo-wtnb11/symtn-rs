@@ -245,17 +245,14 @@ fn public_dynamic_fz2_trace_validates_exact_extents_before_mutation() {
         FusionProductSpace::new([traced_leg()]),
         FusionProductSpace::new([traced_leg()]),
     );
-    let src_shapes = vec![vec![1, 1]; src_homspace.fusion_tree_keys(provider.as_ref()).len()];
-    let src_space = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let src_space = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         src_homspace,
-        src_shapes,
     )
     .unwrap();
-    let dst_space = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst_space = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         provider,
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([])),
-        [Vec::<usize>::new()],
     )
     .unwrap();
     let cases = [
@@ -333,23 +330,21 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
     where
         R: MultiplicityFreeRigidSymbols<Scalar = f64>,
     {
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             provider,
             FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([])),
-            [Vec::<usize>::new()],
         )
         .unwrap()
     }
 
     let u1_provider = std::sync::Arc::new(U1FusionRule);
     let u1_leg = || SectorLeg::new([(U1Irrep::new(1).sector_id(), 2)], false);
-    let u1_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let u1_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&u1_provider),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([u1_leg()]),
             FusionProductSpace::new([u1_leg()]),
         ),
-        [vec![2, 2]],
     )
     .unwrap();
     let u1_dst = scalar_destination(u1_provider);
@@ -361,13 +356,12 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
 
     let su2_provider = std::sync::Arc::new(SU2FusionRule);
     let su2_leg = || SectorLeg::new([(SU2Irrep::from_twice_spin(1).sector_id(), 2)], false);
-    let su2_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let su2_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&su2_provider),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([su2_leg()]),
             FusionProductSpace::new([su2_leg()]),
         ),
-        [vec![2, 2]],
     )
     .unwrap();
     let su2_dst = scalar_destination(su2_provider);
@@ -383,10 +377,9 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         FusionProductSpace::new([fz2_leg()]),
         FusionProductSpace::new([fz2_leg()]),
     );
-    let fz2_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let fz2_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&fz2_provider),
         fz2_hom.clone(),
-        vec![vec![2, 2]; fz2_hom.fusion_tree_keys(fz2_provider.as_ref()).len()],
     )
     .unwrap();
     let fz2_dst = scalar_destination(fz2_provider);
@@ -403,13 +396,12 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         SU2Irrep::from_twice_spin(1).sector_id(),
     );
     let product_leg = || SectorLeg::new([(product_sector, 2)], false);
-    let product_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let product_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&product_provider),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([product_leg()]),
             FusionProductSpace::new([product_leg()]),
         ),
-        [vec![2, 2]],
     )
     .unwrap();
     let product_dst = scalar_destination(product_provider);
@@ -428,12 +420,7 @@ fn strided_fz2_identity_trace_spaces() -> (DynamicFusionMapSpace, DynamicFusionM
         FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
     );
-    let canonical = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        homspace.clone(),
-        [vec![2, 1], vec![2, 1]],
-    )
-    .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
     assert_eq!(canonical.structure().block_count(), 2);
 
     let destination = BlockStructure::from_blocks_with_rank(
@@ -611,21 +598,11 @@ fn typed_fz2_multiple_trace_terms_and_inactive_block_scale_beta_once() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let src_key_count = src_homspace.fusion_tree_keys(&rule).len();
-    let canonical_src = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_homspace.clone(),
-        vec![vec![1, 1, 1, 1]; src_key_count],
-    )
-    .unwrap();
+    let canonical_src =
+        DynamicFusionMapSpace::from_final_homspace(&rule, src_homspace.clone()).unwrap();
     let dst_homspace = src_homspace.select(&rule, &[0], &[2]).unwrap();
-    let dst_key_count = dst_homspace.fusion_tree_keys(&rule).len();
-    let canonical_dst = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_homspace.clone(),
-        vec![vec![1, 1]; dst_key_count],
-    )
-    .unwrap();
+    let canonical_dst =
+        DynamicFusionMapSpace::from_final_homspace(&rule, dst_homspace.clone()).unwrap();
     let full_structure = TensorTraceFusionStructure::<f64>::compile_fusion_dyn_raw(
         &rule,
         &canonical_dst.clone(),
@@ -754,12 +731,9 @@ fn typed_fz2_trace_admits_only_injective_destination_spaces() {
     let self_overlapping_dst = relayout_fz2_destination(&canonical_dst, [[0, 4], [2, 4]], [0, 4]);
     let interleaved_dst =
         relayout_fz2_destination(&canonical_dst, [[2, 4], [2, 4]], [0, 1]).unwrap();
-    let full_src = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        canonical_dst.homspace().clone(),
-        [vec![2, 1], vec![2, 1]],
-    )
-    .unwrap();
+    let full_src =
+        DynamicFusionMapSpace::from_final_homspace(&rule, canonical_dst.homspace().clone())
+            .unwrap();
 
     // What: owning symmetric spaces reject both cross-block and self aliases
     // before an operation can observe them.
@@ -872,33 +846,25 @@ fn fz2_lowered_dynamic_trace_matches_encoded_data_oracle() {
     let odd = symtn_core::Z2Irrep::ODD.sector_id();
     let leg = || FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]);
     let src_homspace = FusionTreeHomSpace::new(leg(), leg());
-    let src_count = src_homspace.fusion_tree_keys(provider.as_ref()).len();
-    let src_shapes = vec![vec![1, 1]; src_count];
-    let encoded_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let encoded_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         src_homspace.clone(),
-        src_shapes.clone(),
     )
     .unwrap();
-    let lowered_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(
+    let lowered_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         std::sync::Arc::clone(&provider),
         src_homspace,
-        src_shapes,
     )
     .unwrap();
     let scalar = FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    let encoded_dst = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let encoded_dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         scalar.clone(),
-        [Vec::<usize>::new()],
     )
     .unwrap();
-    let lowered_dst = BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(
-        provider,
-        scalar,
-        [Vec::<usize>::new()],
-    )
-    .unwrap();
+    let lowered_dst =
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(provider, scalar)
+            .unwrap();
     let axes = TensorTraceAxisSpec::new(&[], &[0], &[1]);
     let mut encoded_data = vec![7.0_f64];
     let mut lowered_data = encoded_data.clone();
@@ -930,24 +896,22 @@ fn fz2_lowered_dynamic_trace_matches_encoded_data_oracle() {
 fn tensortrace_fusion_rejects_invalid_axis_sets_at_compile_time() {
     let rule = FermionParityFusionRule;
     let parity = [(SectorId::new(0), 1), (SectorId::new(1), 1)];
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let src_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new(parity, false)]),
             FusionProductSpace::new([SectorLeg::new(parity, false)]),
         ),
-        [vec![1, 1], vec![1, 1]],
     )
     .unwrap();
     let src: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![2.0, 3.0], src_space).unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new(Vec::<SectorLeg>::new()),
             FusionProductSpace::new(Vec::<SectorLeg>::new()),
         ),
-        [vec![]],
     )
     .unwrap();
     let dst: TestTensor<f64> =
@@ -1118,9 +1082,7 @@ fn tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace() {
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
     );
-    let src_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom, [vec![1, 1], vec![1, 1]])
-            .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![2.0, 3.0], src_space).unwrap();
 
@@ -1128,8 +1090,7 @@ fn tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![0.0], dst_space).unwrap();
 
@@ -1163,16 +1124,13 @@ fn tensortrace_fusion_default_host_api_accepts_custom_host_storage() {
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
     );
-    let src_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom, [vec![1, 1], vec![1, 1]])
-            .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src = TestTensor::from_vec_with_fusion_space(vec![2.0_f64, 3.0], src_space).unwrap();
     let dst_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst = TestTensor::from_vec_with_fusion_space(vec![0.0_f64], dst_space).unwrap();
 
     dynamic_tensortrace_fusion_into(
@@ -1197,9 +1155,7 @@ fn tensortrace_fusion_fermion_supertrace_uses_degeneracy_diagonals() {
         FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 2)], false)]),
     );
-    let src_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom, [vec![2, 2], vec![2, 2]])
-            .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![
             1.0, 2.0, 3.0, 4.0, // even block, column-major diagonal 1 + 4
@@ -1213,8 +1169,7 @@ fn tensortrace_fusion_fermion_supertrace_uses_degeneracy_diagonals() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![10.0], dst_space).unwrap();
 
@@ -1240,9 +1195,7 @@ fn tensortrace_fusion_with_conjugation_lowers_lazy_adjoint_supertrace() {
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
     );
-    let src_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom, [vec![1, 1], vec![1, 1]])
-            .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<Complex64> = TestTensor::from_vec_with_fusion_space(
         vec![Complex64::new(2.0, 1.0), Complex64::new(3.0, 4.0)],
         src_space,
@@ -1252,8 +1205,7 @@ fn tensortrace_fusion_with_conjugation_lowers_lazy_adjoint_supertrace() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<Complex64> =
         TestTensor::from_vec_with_fusion_space(vec![Complex64::new(10.0, 20.0)], dst_space)
             .unwrap();
@@ -1282,9 +1234,7 @@ fn tensortrace_fusion_rank_zero_adjoint_keeps_parent_structure() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let space = || {
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace.clone(), [vec![]]).unwrap()
-    };
+    let space = || DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
     let src: TestTensor<Complex64> =
         TestTensor::from_vec_with_fusion_space(vec![Complex64::new(2.0, 3.0)], space()).unwrap();
     let mut dst: TestTensor<Complex64> =
@@ -1318,9 +1268,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
         FusionProductSpace::new([charged_leg(), neutral_leg()]),
         FusionProductSpace::new([charged_leg()]),
     );
-    let src_fusion =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom.clone(), [vec![2, 3, 2]])
-            .unwrap();
+    let src_fusion = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom.clone()).unwrap();
     let src_data = (1..=12)
         .map(|value| Complex64::new(value as f64, value as f64 + 0.25))
         .collect::<Vec<_>>();
@@ -1331,8 +1279,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
         FusionProductSpace::new([]),
         FusionProductSpace::new([neutral_leg()]),
     );
-    let dst_fusion =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom.clone(), [vec![3]]).unwrap();
+    let dst_fusion = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom.clone()).unwrap();
     let initial = vec![
         Complex64::new(1.0, 2.0),
         Complex64::new(3.0, 4.0),
@@ -1363,14 +1310,14 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
     assert_eq!(typed.data(), expected);
 
     let provider = std::sync::Arc::new(rule);
-    let dynamic_src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let dynamic_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         src_hom,
-        [vec![2, 3, 2]],
     )
     .unwrap();
     let dynamic_dst =
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(provider, dst_hom, [vec![3]]).unwrap();
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(provider, dst_hom)
+            .unwrap();
     let mut unchecked = initial.clone();
     tensortrace_fusion_dyn_into(
         &dynamic_dst,
@@ -1510,22 +1457,20 @@ fn dynamic_u1_nonconjugating_trace_keeps_parent_axis_geometry() {
     let charged_leg = || SectorLeg::new([(charge, 2)], false);
     let neutral_leg = || SectorLeg::new([(neutral, 3)], false);
     let provider = std::sync::Arc::new(U1FusionRule);
-    let src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([charged_leg(), neutral_leg()]),
             FusionProductSpace::new([charged_leg()]),
         ),
-        [vec![2, 3, 2]],
     )
     .unwrap();
-    let dst = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         provider,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([neutral_leg()]),
             FusionProductSpace::new([]),
         ),
-        [vec![3]],
     )
     .unwrap();
     let src_data = (1..=12)
@@ -1577,12 +1522,7 @@ fn dynamic_u1_adjoint_trace_replays_two_pairs_from_padded_storage() {
         FusionProductSpace::new([leg(1, 2), leg(-1, 2), leg(2, 2), leg(-2, 3)]),
         FusionProductSpace::new([leg(1, 2), leg(-1, 2)]),
     );
-    let canonical = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom.clone(),
-        [vec![2, 2, 2, 3, 2, 2]],
-    )
-    .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom.clone()).unwrap();
     let key = canonical.structure().block(0).unwrap().key().clone();
     let padded = DynamicFusionMapSpace::try_from_layout(
         src_hom,
@@ -1603,13 +1543,12 @@ fn dynamic_u1_adjoint_trace_replays_two_pairs_from_padded_storage() {
         std::sync::Arc::clone(&provider),
     )
     .unwrap();
-    let dst = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         provider,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([]),
             FusionProductSpace::new([leg(-2, 3), leg(2, 2)]),
         ),
-        [vec![3, 2]],
     )
     .unwrap();
     let src_data = (0..144)
@@ -1662,23 +1601,17 @@ fn owned_trace_reuses_initialized_fallback_for_padded_destination() {
     let rule = U1FusionRule;
     let provider = std::sync::Arc::new(rule);
     let leg = || SectorLeg::new([(U1Irrep::new(1).sector_id(), 2)], false);
-    let src = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
         ),
-        [vec![2, 2]],
     )
     .unwrap();
 
     let dst_hom = FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    let canonical = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom.clone(),
-        [Vec::<usize>::new()],
-    )
-    .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom.clone()).unwrap();
     let key = canonical.structure().block(0).unwrap().key().clone();
     let padded = DynamicFusionMapSpace::try_from_layout(
         dst_hom,
@@ -1711,9 +1644,7 @@ fn tensortrace_fusion_scales_destination_once_for_multiple_source_terms() {
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
     );
-    let src_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom, [vec![1, 1], vec![1, 1]])
-            .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![2.0, 3.0], src_space).unwrap();
 
@@ -1721,8 +1652,7 @@ fn tensortrace_fusion_scales_destination_once_for_multiple_source_terms() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![10.0], dst_space).unwrap();
 
@@ -1749,12 +1679,7 @@ fn tensortrace_fusion_fermion_open_output_matches_tensorkit_oracle() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom,
-        (0..8).map(|_| vec![1, 1, 1, 1]),
-    )
-    .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         (1..=8).map(|value| value as f64).collect(),
         src_space,
@@ -1765,9 +1690,7 @@ fn tensortrace_fusion_fermion_open_output_matches_tensorkit_oracle() {
         FusionProductSpace::new([leg()]),
         FusionProductSpace::new([leg()]),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![1, 1], vec![1, 1]])
-            .unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![10.0, 20.0], dst_space).unwrap();
 
@@ -1795,12 +1718,7 @@ fn tensortrace_fusion_fermion_two_trace_pairs_match_tensorkit_oracle() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom,
-        (0..8).map(|_| vec![1, 1, 1, 1]),
-    )
-    .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         (1..=8).map(|value| value as f64).collect(),
         src_space,
@@ -1811,8 +1729,7 @@ fn tensortrace_fusion_fermion_two_trace_pairs_match_tensorkit_oracle() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![5.0], dst_space).unwrap();
 
@@ -1833,18 +1750,16 @@ fn tensortrace_fusion_fermion_two_trace_pairs_match_tensorkit_oracle() {
 #[test]
 fn tensortrace_fusion_rejects_nonsymmetric_braiding_like_tensorkit_tensortrace() {
     let rule = UniqueAnyonicRule;
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let src_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([(1, 1)], [(1, 1)]),
-        [vec![1, 1]],
     )
     .unwrap();
     let src: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![2.0], src_space).unwrap();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([], []),
-        [vec![]],
     )
     .unwrap();
     let dst: TestTensor<f64> =
@@ -1874,8 +1789,7 @@ fn tensortrace_fusion_su2_includes_quantum_dimension_factor() {
         FusionProductSpace::new([SectorLeg::new([(half, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(half, 1)], false)]),
     );
-    let src_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, src_hom, [vec![1, 1]]).unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
     let src: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![7.0], src_space).unwrap();
 
@@ -1883,8 +1797,7 @@ fn tensortrace_fusion_su2_includes_quantum_dimension_factor() {
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let dst_space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, dst_hom, [vec![]]).unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let mut dst: TestTensor<f64> =
         TestTensor::from_vec_with_fusion_space(vec![0.0], dst_space).unwrap();
 
@@ -2024,13 +1937,7 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let src_key_count = src_hom.fusion_tree_keys(&rule).len();
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom.clone(),
-        (0..src_key_count).map(|_| vec![1, 1, 1, 1]),
-    )
-    .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom.clone()).unwrap();
     let src: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; src_space.required_len().unwrap()],
         src_space,
@@ -2038,13 +1945,7 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
     .unwrap();
 
     let dst_hom = src_hom.select(&rule, &[1], &[3]).unwrap();
-    let dst_key_count = dst_hom.fusion_tree_keys(&rule).len();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom,
-        (0..dst_key_count).map(|_| vec![1, 1]),
-    )
-    .unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let dst: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; dst_space.required_len().unwrap()],
         dst_space,
@@ -2111,13 +2012,8 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
             &lowered_axes.output_axes()[1..],
         )
         .unwrap();
-    let conjugate_dst_key_count = conjugate_dst_hom.fusion_tree_keys(&rule).len();
-    let conjugate_dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        conjugate_dst_hom,
-        (0..conjugate_dst_key_count).map(|_| vec![1, 1]),
-    )
-    .unwrap();
+    let conjugate_dst_space =
+        DynamicFusionMapSpace::from_final_homspace(&rule, conjugate_dst_hom).unwrap();
     let conjugate_dst: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; conjugate_dst_space.required_len().unwrap()],
         conjugate_dst_space,
@@ -2163,26 +2059,14 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
             SectorLeg::new([(a, 1)], false),
         ]),
     );
-    let src_key_count = src_hom.fusion_tree_keys(&rule).len();
-    let src_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom.clone(),
-        (0..src_key_count).map(|_| vec![1, 1, 1, 1]),
-    )
-    .unwrap();
+    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom.clone()).unwrap();
     let src: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; src_space.required_len().unwrap()],
         src_space,
     )
     .unwrap();
     let dst_hom = src_hom.select(&rule, &[1], &[2]).unwrap();
-    let dst_key_count = dst_hom.fusion_tree_keys(&rule).len();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom,
-        (0..dst_key_count).map(|_| vec![1, 1]),
-    )
-    .unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let dst: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; dst_space.required_len().unwrap()],
         dst_space,
@@ -2220,13 +2104,8 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
             &lowered_axes.output_axes()[1..],
         )
         .unwrap();
-    let conjugate_dst_key_count = conjugate_dst_hom.fusion_tree_keys(&rule).len();
-    let conjugate_dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        conjugate_dst_hom,
-        (0..conjugate_dst_key_count).map(|_| vec![1, 1]),
-    )
-    .unwrap();
+    let conjugate_dst_space =
+        DynamicFusionMapSpace::from_final_homspace(&rule, conjugate_dst_hom).unwrap();
     let conjugate_dst: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; conjugate_dst_space.required_len().unwrap()],
         conjugate_dst_space,
@@ -2283,13 +2162,7 @@ fn tensortrace_fusion_interleaved_groups_lower_in_global_source_order() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = src_hom.fusion_tree_keys(&rule).len();
-    let canonical = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        src_hom.clone(),
-        (0..key_count).map(|_| vec![1, 1, 1, 1]),
-    )
-    .unwrap();
+    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom.clone()).unwrap();
     let groups = canonical.structure().fusion_tree_groups();
     let first = groups
         .iter()
@@ -2337,13 +2210,7 @@ fn tensortrace_fusion_interleaved_groups_lower_in_global_source_order() {
     .unwrap();
 
     let dst_hom = src_hom.select(&rule, &[0], &[3]).unwrap();
-    let dst_key_count = dst_hom.fusion_tree_keys(&rule).len();
-    let dst_space = DynamicFusionMapSpace::from_degeneracy_shapes(
-        &rule,
-        dst_hom,
-        (0..dst_key_count).map(|_| vec![1, 1]),
-    )
-    .unwrap();
+    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
     let dst: TestTensor<f64> = TestTensor::from_vec_with_fusion_space(
         vec![0.0; dst_space.required_len().unwrap()],
         dst_space,
@@ -2407,7 +2274,7 @@ fn tensortrace_fusion_interleaved_groups_lower_in_global_source_order() {
     .try_bind_rule(&rule)
     .unwrap();
     // What: the expert explicit-structure constructor permits incomplete
-    // layouts; ordinary from_degeneracy_shapes construction remains complete.
+    // layouts; ordinary final-HomSpace construction remains complete.
     assert_eq!(
         incomplete_space.structure().block_count() + 1,
         dst.structure().block_count()
@@ -2493,13 +2360,12 @@ fn excluded_u1_sector_id_is_rejected_at_admission() {
     // What: the raw zigzag ID excluded by the label constructor never becomes
     // a space, so no trace can observe it.
     let min = SectorId::new(u32::MAX as usize);
-    let error = BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(
+    let error = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         std::sync::Arc::new(U1FusionRule),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(min, 1)], false)]),
             FusionProductSpace::new([]),
         ),
-        Vec::<Vec<usize>>::new(),
     )
     .unwrap_err();
     assert_eq!(
@@ -2517,20 +2383,18 @@ fn structure_executors_reject_terms_compiled_for_other_spaces() {
     let provider = std::sync::Arc::new(U1FusionRule);
     let source = |degeneracy| {
         let leg = || SectorLeg::new([(U1Irrep::new(1).sector_id(), degeneracy)], false);
-        BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             std::sync::Arc::clone(&provider),
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg()]),
                 FusionProductSpace::new([leg()]),
             ),
-            [vec![degeneracy, degeneracy]],
         )
         .unwrap()
     };
-    let dst = BoundDynamicFusionMapSpace::from_degeneracy_shapes(
+    let dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&provider),
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([])),
-        [Vec::<usize>::new()],
     )
     .unwrap();
     let (compiled_for, other) = (source(2), source(3));

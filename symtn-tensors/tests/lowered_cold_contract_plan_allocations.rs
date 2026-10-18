@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
 use symtn_tensors::{
-    BoundDynamicFusionMapSpace, OutputAxisOrder, RuleIdentity,
-    TensorContractFusionExecutionContext, TensorContractSpec,
+    BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand, OutputAxisOrder,
+    RuleIdentity, TensorContractFusionExecutionContext, TensorContractSpec,
 };
 
 #[path = "../../tests/support/counting_alloc.rs"]
@@ -129,12 +129,12 @@ fn contract_fixture() -> ContractFixture {
         FusionProductSpace::new([leg(true)]),
         FusionProductSpace::new([leg(true), leg(false)]),
     );
-    let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         lhs_hom,
     )
     .unwrap();
-    let rhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let rhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         rhs_hom,
     )
@@ -183,16 +183,22 @@ fn run_route() -> RouteRun {
         |output: &mut [f64],
          context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>| {
             context
-                .tensorcontract_fusion_dyn_into(
+                .tensorcontract_planned_into(
                     &fixture.dst,
                     output,
-                    &fixture.lhs,
-                    &fixture.lhs_data,
-                    &fixture.rhs,
-                    &fixture.rhs_data,
-                    axes(),
+                    (
+                        FusionOperand::direct(fixture.lhs.space()),
+                        &fixture.lhs_data,
+                    ),
+                    (
+                        FusionOperand::direct(fixture.rhs.space()),
+                        &fixture.rhs_data,
+                    ),
+                    axes().lhs_contracting_axes(),
+                    axes().rhs_contracting_axes(),
+                    &[2, 0, 3, 1],
                     1.0,
-                    0.0,
+                    ContractDestinationInit::Axpby(0.0),
                 )
                 .unwrap();
         };

@@ -1258,8 +1258,7 @@ fn eigh_full_does_not_relabel_the_lowest_u1_sector() {
         FusionProductSpace::new([SectorLeg::new([(minimum, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(minimum, 2)], false)]),
     );
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, [vec![2, 2]]).unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let tensor = TestTensor::from_vec_with_fusion_space(vec![4.0, 1.0, 1.0, 3.0], space).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
@@ -1655,10 +1654,7 @@ fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
     );
-    let key_count = homspace.fusion_tree_keys(&rule).len();
-    let space =
-        DynamicFusionMapSpace::from_degeneracy_shapes(&rule, homspace, vec![vec![1; 4]; key_count])
-            .unwrap();
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let canonical = TestTensor::<f64>::from_block_fn_with_fusion_space(space, 0.0, |key, _| {
         let BlockKey::FusionTree(tree) = key else {
             unreachable!("fusion-tree blocks")
