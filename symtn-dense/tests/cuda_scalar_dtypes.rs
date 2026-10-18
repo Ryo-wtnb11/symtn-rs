@@ -230,18 +230,27 @@ fn gemm_case<D: ProbeScalar>(
     let (rhs_payload, rhs_wide) = fixture::<D>(k, n, 1.25);
     let (dst_payload, dst_wide) = fixture::<D>(m, n, -2.0);
 
-    let lhs = upload::<D>(ctx, &lhs_payload);
-    let rhs = upload::<D>(ctx, &rhs_payload);
-    let mut dst = upload::<D>(ctx, &dst_payload);
+    // Each operand sits behind a leading pad, so the regions are sub-regions
+    // of longer buffers rather than whole allocations.
+    let (lhs_offset, rhs_offset, dst_offset) = (5usize, 7usize, 3usize);
+    let padded = |offset: usize, payload: &[D]| -> Vec<D> {
+        let mut buffer = vec![D::narrow(Complex64::new(7.0, -3.0)); offset];
+        buffer.extend_from_slice(payload);
+        buffer.extend(std::iter::repeat_n(D::narrow(Complex64::new(7.0, -3.0)), 8));
+        buffer
+    };
+    let lhs = upload::<D>(ctx, &padded(lhs_offset, &lhs_payload));
+    let rhs = upload::<D>(ctx, &padded(rhs_offset, &rhs_payload));
+    let mut dst = upload::<D>(ctx, &padded(dst_offset, &dst_payload));
 
     cuda_gemm_region_with_ops_into::<D>(
         ctx,
         &mut dst,
-        0,
+        dst_offset,
         &lhs,
-        0,
+        lhs_offset,
         &rhs,
-        0,
+        rhs_offset,
         m,
         k,
         n,
@@ -274,8 +283,16 @@ fn gemm_case<D: ProbeScalar>(
         })
         .collect();
 
+    // The pad around the destination region must be untouched.
+    let downloaded = download::<D>(ctx, &dst);
+    let pad = D::narrow(Complex64::new(7.0, -3.0));
+    assert!(
+        downloaded[..dst_offset].iter().all(|v| *v == pad)
+            && downloaded[dst_offset + m * n..].iter().all(|v| *v == pad),
+        "GEMM {lhs_op:?}/{rhs_op:?} {m}x{k}x{n}: wrote outside its region"
+    );
     assert_close::<D>(
-        &download::<D>(ctx, &dst),
+        &downloaded[dst_offset..dst_offset + m * n],
         &expected,
         &magnitudes,
         k + 1,
@@ -287,7 +304,7 @@ fn gemm_sweep<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
     let ops = [MatrixOp::Identity, MatrixOp::Transpose, MatrixOp::Adjoint];
     for lhs_op in ops {
         for rhs_op in ops {
-            for &(m, k, n) in &[(3usize, 4usize, 2usize), (1, 6, 1), (4, 4, 4)] {
+            for &(m, k, n) in &[(3usize, 4usize, 2usize), (1, 6, 1), (5, 1, 4), (4, 4, 4)] {
                 gemm_case::<D>(
                     ctx,
                     lhs_op,
