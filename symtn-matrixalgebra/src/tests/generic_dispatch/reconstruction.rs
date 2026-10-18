@@ -702,7 +702,7 @@ fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<Z2
     // shape-admission bridge to symtn-tensors; the kept public installer
     // derives the identical blocks from the final homspace's leg
     // degeneracies for these dense-leg fixtures.
-    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(provider, hom)
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(provider, hom)
         .unwrap()
 }
 

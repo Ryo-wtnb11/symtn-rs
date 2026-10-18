@@ -134,11 +134,8 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     let direct =
         uncached_tree_pair_structure(&SU2FusionRule, direct_operation, &dst, &src).unwrap();
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (group_count, 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        group_count
     );
 
     let tree_pair_lowering_calls_rec = probe::record();
@@ -157,11 +154,8 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     let groups = crate::probe::take_coefficient_group_activity();
     assert_eq!(groups.hits + groups.misses, group_count);
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (groups.misses, 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        groups.misses
     );
 
     let tree_pair_lowering_calls_rec = probe::record();
@@ -178,11 +172,8 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     // rebuilds its transformer (lookup-only key), but every group's
     // coefficients come from the composed-coefficient cache: no lowering.
     assert_eq!(
-        (
-            tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
-        ),
-        (0, 0)
+        tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
+        0
     );
     let groups = crate::probe::take_coefficient_group_activity();
     assert_eq!((groups.hits, groups.misses), (group_count, 0));

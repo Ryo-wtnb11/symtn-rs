@@ -129,12 +129,12 @@ fn contract_fixture() -> ContractFixture {
         FusionProductSpace::new([leg(true)]),
         FusionProductSpace::new([leg(true), leg(false)]),
     );
-    let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         lhs_hom,
     )
     .unwrap();
-    let rhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let rhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         rhs_hom,
     )

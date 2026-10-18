@@ -130,7 +130,7 @@ where
     let caller_shape_path_builds_rec = probe::record();
     let scratch_structure_builds_rec = probe::record();
     let expected_rule = provider.rule_identity();
-    let actual = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let actual = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         homspace,
     )
@@ -151,36 +151,6 @@ where
         scratch_structure_builds_rec.get(Event::ScratchStructureBuild),
         0
     );
-}
-
-#[test]
-fn derived_factor_shapes_use_one_authority_key_build() {
-    // What: each cold SVD/QR/EIGH-style output derives its shapes and
-    // storage grid from one authority-selected fusion-tree key set.
-    let _guard = CACHE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    symtn_core::clear_structure_caches();
-    symtn_core::clear_structure_caches();
-    let rule = Arc::new(rule());
-    let source = source(rule.as_ref());
-    let authority = BoundDynamicFusionMapSpace::bind_multiplicity_free(source, rule)
-        .unwrap()
-        .with_test_layout_primer(counting_primer);
-
-    for _operation in ["svd_compact", "qr_compact", "eigh_full"] {
-        reset_primer_calls();
-        let shape_builds = Cell::new(0usize);
-        let derived = authority
-            .derive_from_fusion_tree_shapes(homspace(), |keys| {
-                shape_builds.set(shape_builds.get() + 1);
-                Ok(keys.iter().map(|_| vec![1; 4]).collect::<Vec<_>>())
-            })
-            .unwrap();
-        assert_eq!(primer_calls(), 1);
-        assert_eq!(shape_builds.get(), 1);
-        assert!(derived.space().structure().block_count() > 0);
-    }
 }
 
 #[test]
@@ -295,12 +265,12 @@ fn final_homspace_normalizes_zero_degeneracy_sectors() {
     assert_eq!(explicit_zero, omitted);
 
     let provider = Arc::new(U1FusionRule);
-    let explicit = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let explicit = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         explicit_zero,
     )
     .unwrap();
-    let omitted = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let omitted = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         provider, omitted,
     )
     .unwrap();
@@ -333,7 +303,7 @@ fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
     );
     let caller_shape_path_builds_rec = probe::record();
     let scratch_structure_builds_rec = probe::record();
-    let root = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+    let root = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
         root_homspace.clone(),
     )

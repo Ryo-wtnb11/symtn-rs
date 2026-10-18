@@ -1005,7 +1005,7 @@ fn root_constructor_builds_from_checked_keys() {
         FusionProductSpace::new([]),
     );
     assert!(matches!(
-        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
+        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
             provider, malformed,
         ),
         Err(OperationError::FusionAlgebra(_))
