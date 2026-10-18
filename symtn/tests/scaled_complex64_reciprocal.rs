@@ -141,9 +141,9 @@ fn compact_reciprocal_at_branch_boundaries() {
         ("inf", c(inf, 0.0), c(0.0, -0.0)),
         ("-inf - 3i", c(-inf, -3.0), c(-0.0, 0.0)),
         ("-inf i", c(0.0, -inf), c(0.0, 0.0)),
-        // Generic mantissas, where the last bit depends on the port's exact
-        // operation order (`mul_add`, robust_cinv's swapped branch). Bits
-        // checked against Julia 1.11.6 `inv(::ComplexF64)` on aarch64.
+        // Generic mantissas, bits checked against Julia 1.11.6
+        // `inv(::ComplexF64)` on aarch64 (where `muladd` fuses). The
+        // `mul_add`-sensitive rows change if that fused step is unfused.
         (
             "fast path, |im| > |re|",
             c(
@@ -156,7 +156,18 @@ fn compact_reciprocal_at_branch_boundaries() {
             ),
         ),
         (
-            "robust_cinv near 2^511, |im| > |re|",
+            "fast path; pins the denominator `cd.mul_add(cd, dc * dc)`",
+            c(
+                f64::from_bits(0x3fc2bf85a17ded20),
+                f64::from_bits(0xbfe06c0e79448bf4),
+            ),
+            c(
+                f64::from_bits(0x3fe074cc8c88b823),
+                f64::from_bits(0x3ffcd440fa11eccc),
+            ),
+        ),
+        (
+            "unscaled robust_cinv near 2^511, swapped (|im| > |re|)",
             c(
                 f64::from_bits(0xdfc981ba11426db0),
                 f64::from_bits(0x5feef280c2a756ca),
@@ -167,14 +178,15 @@ fn compact_reciprocal_at_branch_boundaries() {
             ),
         ),
         (
-            "robust_cinv near 2^-511, |im| > |re|",
+            "unscaled robust_cinv near 2^-512, swapped (|im| > |re|); \
+             pins robust_cinv's `d.mul_add(r, c)`",
             c(
-                f64::from_bits(0xa000d7621b35fa04),
-                f64::from_bits(0xa00d0f8786814440),
+                f64::from_bits(0x1fed0f254120eaf0),
+                f64::from_bits(0x1ff0c4746b0cbf5c),
             ),
             c(
-                f64::from_bits(0xdfbe92b304e16382),
-                f64::from_bits(0x5fca60b354d147d1),
+                f64::from_bits(0x5fde398c37f9ffa7),
+                f64::from_bits(0xdfe170a2b35e8b5a),
             ),
         ),
     ];
