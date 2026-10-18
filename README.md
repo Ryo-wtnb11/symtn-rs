@@ -99,5 +99,5 @@ symtn builds; it does not add a condition to the software license.
 
 ## License
 
-symtn is licensed under either of MIT or Apache-2.0, at your option, as
-declared in the workspace [`Cargo.toml`](Cargo.toml).
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option.
