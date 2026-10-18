@@ -365,6 +365,25 @@ fn decompositions_reconstruct(case: &Case) {
     assert_tensorkit_dims("right null", category, "right_null", &n.codomain()[0]);
 }
 
+/// Moore–Penrose: `t · pinv(t) · t = t`, for a wide map whose `pinv` is
+/// not an inverse.
+fn pseudo_inverse_reproduces_the_input(case: &Case) {
+    let wide = case.filled("y", 1, 2);
+    let pinv = wide.pinv(&[0], &[1, 2], 1.0e-12).unwrap();
+    let roundtrip = wide.compose(&pinv).unwrap().compose(&wide).unwrap();
+    assert_near("t pinv(t) t", &roundtrip, &wide);
+}
+
+#[test]
+fn fibonacci_pseudo_inverse_reproduces_the_input() {
+    pseudo_inverse_reproduces_the_input(&Case::fibonacci());
+}
+
+#[test]
+fn ising_pseudo_inverse_reproduces_the_input() {
+    pseudo_inverse_reproduces_the_input(&Case::ising());
+}
+
 #[test]
 fn fibonacci_decompositions_reconstruct() {
     decompositions_reconstruct(&Case::fibonacci());

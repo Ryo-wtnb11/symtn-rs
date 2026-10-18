@@ -33,6 +33,23 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     ///     let _ = tensor.to_cuda();
     /// }
     /// ```
+    ///
+    /// A rule with complex categorical coefficients has no device path. The
+    /// payload itself uploads (storage only), but every device operation
+    /// needs `Scalar = f64` symbols, so using it is a compile-time boundary
+    /// rather than a runtime error:
+    ///
+    /// ```compile_fail
+    /// use num_complex::Complex64;
+    /// use symtn::sector::TableRule;
+    /// use symtn::typed::{Error, TensorMap};
+    ///
+    /// fn no_table_device_svd(tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
+    ///     let device = tensor.to_cuda()?;
+    ///     let _ = device.svd_compact(&[0], &[1]);
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn to_cuda(&self) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
         let mut lease = self.runtime.lease_cuda()?;
         let cuda = &mut *lease;
