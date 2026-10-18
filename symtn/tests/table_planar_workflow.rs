@@ -251,8 +251,9 @@ fn fibonacci_public_planar_workflow_matches_tensorkit() {
     // TensorKit 0.17 at cfaa073e4d1e3eb2167edcbdc3be9872f41e7d91 with
     // TensorKitSectors + CategoryData, pinned in the
     // vacuum-first left-associated basis [(tau tau)->1, (tau tau)->tau],
-    // source order [tau_1,tau_2,tau_3 | total tau], and the gauge recorded in
-    // `fixtures/fib-categorydata-v0.1.3.txt`. The braid oracle uses the
+    // source order [tau_1,tau_2,tau_3 | total tau], and the TensorKitSectors
+    // `FibonacciAnyon` gauge written out in
+    // `symtn-sectors/tests/fibonacci_providers.rs`. The braid oracle uses the
     // positive words sigma_1 sigma_2 sigma_1 and sigma_2 sigma_1 sigma_2 with
     // increasing source levels [0,1,2,3] (reversed for the inverse). This is
     // H = -(P_12 + F P_12 F^dagger), not a non-planar ordinary contraction.

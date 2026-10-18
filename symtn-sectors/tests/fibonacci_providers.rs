@@ -1,6 +1,6 @@
 //! Fibonacci is `TableRule::fibonacci()`, symtn's one Fibonacci provider.
 //! These tests hold its values through symtn's traits against
-//! CategoryData.jl / TensorKitSectors and hand relations, the trait-default
+//! TensorKitSectors' closed forms and hand relations, the trait-default
 //! A/B symbols, the codec and the domain checks. The tables' own coherence
 //! tests (pentagon, hexagon, unitarity, ribbon) live in `fusion-symbols`.
 
@@ -17,10 +17,6 @@ mod numerics;
 
 const SECTORS: [SectorId; 2] = [SectorId::new(0), SectorId::new(1)];
 
-/// CategoryData.jl 0.3.6 / TensorKitSectors 0.3.9 values for the table
-/// (`fixtures/generate_fib_categorydata_fixture.jl`).
-const CATEGORYDATA: &str = include_str!("fixtures/fib-categorydata-v0.1.3.txt");
-
 fn table() -> TableRule {
     TableRule::fibonacci()
 }
@@ -29,99 +25,143 @@ fn bits(z: Complex64) -> String {
     format!("{:016x} {:016x}", z.re.to_bits(), z.im.to_bits())
 }
 
-/// `tag` and one-based labels -> value, as emitted by the Julia generator.
-fn categorydata_value(tag: &str, labels: &[usize]) -> Complex64 {
-    let wanted: Vec<String> = labels.iter().map(|id| (id + 1).to_string()).collect();
-    CATEGORYDATA
-        .lines()
-        .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| fields[0] == tag && fields[1..=labels.len()] == wanted[..])
-        .map(|fields| {
-            let value = &fields[labels.len() + 1..];
-            Complex64::new(
-                value[0].parse().unwrap(),
-                value.get(1).map_or(0.0, |im| im.parse().unwrap()),
-            )
-        })
-        .unwrap_or_else(|| panic!("fixture is missing {tag}{labels:?}"))
+const PHI: f64 = std::f64::consts::GOLDEN_RATIO;
+
+/// TensorKitSectors 0.3.9 `FibonacciAnyon` (`src/anyons.jl`: `Nsymbol`,
+/// `Fsymbol`, `Rsymbol`, `dim`) on ids `(1, τ) = (0, 1)`, the same closed
+/// forms fusion-symbols' `tests/tables_reference.rs` holds its table to.
+/// `N^{ab}_c = 0` exactly when one of `a, b, c` is `τ`.
+fn n(a: usize, b: usize, c: usize) -> bool {
+    a + b + c != 1
+}
+
+fn dim(a: usize) -> f64 {
+    if a == 0 {
+        1.0
+    } else {
+        PHI
+    }
+}
+
+/// `F^{τττ}_τ = [[1/φ, 1/√φ], [1/√φ, -1/φ]]` in the basis `(1, τ)`; every
+/// other admissible F is `1`, an inadmissible one `0`.
+fn f(a: usize, b: usize, c: usize, d: usize, e: usize, x: usize) -> f64 {
+    if !(n(a, b, e) && n(e, c, d) && n(b, c, x) && n(a, x, d)) {
+        return 0.0;
+    }
+    match ([a, b, c, d] == [1; 4], e, x) {
+        (true, 0, 0) => 1.0 / PHI,
+        (true, 1, 1) => -1.0 / PHI,
+        (true, _, _) => 1.0 / PHI.sqrt(),
+        _ => 1.0,
+    }
+}
+
+/// `R^{ττ}_1 = e^{4πi/5}`, `R^{ττ}_τ = e^{-3πi/5}`, `1` with a unit leg.
+fn r(a: usize, b: usize, c: usize) -> Complex64 {
+    let pi = std::f64::consts::PI;
+    match (n(a, b, c), a * b, c) {
+        (false, _, _) => Complex64::new(0.0, 0.0),
+        (true, 0, _) => Complex64::new(1.0, 0.0),
+        (true, _, 0) => Complex64::cis(0.8 * pi),
+        (true, _, _) => Complex64::cis(-0.6 * pi),
+    }
 }
 
 /// The table's symbols, derived values and symtn's trait-default A/B symbols
-/// against CategoryData.jl / TensorKitSectors, under the workspace tolerance
-/// rule; duals, N and fusion channels exactly.
+/// against the TensorKitSectors closed forms above, under the workspace
+/// tolerance rule; duals, N and fusion channels exactly. Derived values use
+/// TensorKitSectors' generic definitions (every label is self-dual):
+/// `frobenius_schur_phase(a) = sign(F^{aaa}_a[1, 1])`,
+/// `twist(a) = Σ_b d_b / d_a R^{aa}_b`,
+/// `A^{ab}_c = √(d_a d_b / d_c) conj(κ_a F^{a a b}_b[1, c])` and
+/// `B^{ab}_c = √(d_a d_b / d_c) F^{a b b}_a[c, 1]`.
 #[test]
-fn symbols_derived_and_ab_values_match_categorydata_and_tensorkitsectors() {
+fn symbols_derived_and_ab_values_match_tensorkitsectors_closed_forms() {
     let fib = table();
-    for a in SECTORS {
-        let id = [a.id()];
-        let close = |what, actual, tag| {
-            numerics::assert_close(what, actual, categorydata_value(tag, &id), 4)
-        };
-        assert_eq!(
-            fib.dual(a).id() as f64 + 1.0,
-            categorydata_value("dual", &id).re,
-            "dual {a:?}"
-        );
-        close("dim", fib.dim_scalar(a), "dim");
+    let ids = [0, 1];
+    for a in ids {
+        let s = SECTORS[a];
+        let real = |x: f64| Complex64::new(x, 0.0);
+        assert_eq!(fib.dual(s), s, "dual {s:?}");
+        numerics::assert_close("dim", fib.dim_scalar(s), real(dim(a)), 4);
         // Hand relations tie the derived dimensions to `dim`.
-        let one = Complex64::new(1.0, 0.0);
-        let sqrt = fib.sqrt_dim_scalar(a);
-        numerics::assert_close("sqrt_dim^2", sqrt * sqrt, fib.dim_scalar(a), 4);
+        let one = real(1.0);
+        let sqrt = fib.sqrt_dim_scalar(s);
+        numerics::assert_close("sqrt_dim^2", sqrt * sqrt, fib.dim_scalar(s), 4);
         numerics::assert_close(
             "dim * inv_dim",
-            fib.dim_scalar(a) * fib.inv_dim_scalar(a),
+            fib.dim_scalar(s) * fib.inv_dim_scalar(s),
             one,
             4,
         );
         numerics::assert_close(
             "sqrt_dim * inv_sqrt_dim",
-            sqrt * fib.inv_sqrt_dim_scalar(a),
+            sqrt * fib.inv_sqrt_dim_scalar(s),
             one,
             4,
         );
-        close(
+        let fs = f(a, a, a, a, 0, 0).signum();
+        numerics::assert_close(
             "frobenius-schur",
-            fib.frobenius_schur_phase_scalar(a),
-            "frobeniusschur",
+            fib.frobenius_schur_phase_scalar(s),
+            real(fs),
+            4,
         );
-        close("twist", fib.twist_scalar(a), "twist");
+        let twist: Complex64 = ids.iter().map(|&b| r(a, a, b) * (dim(b) / dim(a))).sum();
+        numerics::assert_close("twist", fib.twist_scalar(s), twist, 4);
     }
-    for a in SECTORS {
-        for b in SECTORS {
-            let channels: Vec<SectorId> = fib.fusion_channels(a, b).iter().copied().collect();
-            for c in SECTORS {
-                let labels = [a.id(), b.id(), c.id()];
-                let n = categorydata_value("N", &labels).re as usize;
-                assert_eq!(fib.nsymbol(a, b, c), n, "N{labels:?}");
-                assert_eq!(channels.contains(&c), n > 0, "channels{labels:?}");
-                numerics::assert_close(
-                    "R",
-                    fib.r_symbol_scalar(a, b, c),
-                    categorydata_value("R", &labels),
-                    4,
+    // The twist formula evaluated by hand: `θ_τ = e^{4πi/5}/φ + e^{-3πi/5}
+    // = e^{-4πi/5}` (checked against TensorKitSectors 0.3.9 `twist`).
+    numerics::assert_close(
+        "twist(τ)",
+        fib.twist_scalar(SECTORS[1]),
+        Complex64::cis(-0.8 * std::f64::consts::PI),
+        4,
+    );
+    for a in ids {
+        for b in ids {
+            let channels: Vec<SectorId> = fib
+                .fusion_channels(SECTORS[a], SECTORS[b])
+                .iter()
+                .copied()
+                .collect();
+            for c in ids {
+                let [sa, sb, sc] = [a, b, c].map(|id| SECTORS[id]);
+                let labels = [a, b, c];
+                assert_eq!(
+                    fib.nsymbol(sa, sb, sc),
+                    usize::from(n(a, b, c)),
+                    "N{labels:?}"
                 );
+                assert_eq!(channels.contains(&sc), n(a, b, c), "channels{labels:?}");
+                numerics::assert_close("R", fib.r_symbol_scalar(sa, sb, sc), r(a, b, c), 4);
+                let scale = (dim(a) * dim(b) / dim(c)).sqrt();
+                let fs = f(a, a, a, a, 0, 0).signum();
+                let want_a = scale * fs * f(a, a, b, b, 0, c);
+                let want_b = scale * f(a, b, b, a, c, 0);
                 numerics::assert_close(
                     "A",
-                    fib.a_symbol_scalar(a, b, c),
-                    categorydata_value("A", &labels),
+                    fib.a_symbol_scalar(sa, sb, sc),
+                    Complex64::new(want_a, 0.0),
                     4,
                 );
                 numerics::assert_close(
                     "B",
-                    fib.b_symbol_scalar(a, b, c),
-                    categorydata_value("B", &labels),
+                    fib.b_symbol_scalar(sa, sb, sc),
+                    Complex64::new(want_b, 0.0),
                     4,
                 );
             }
         }
     }
     for labels in (0..64usize).map(|index| [5, 4, 3, 2, 1, 0].map(|axis| (index >> axis) & 1)) {
-        let [a, b, c, d, e, f] = labels.map(SectorId::new);
+        let [a, b, c, d, e, x] = labels;
+        let [sa, sb, sc, sd, se, sx] = labels.map(SectorId::new);
         numerics::assert_close(
             "F",
-            fib.f_symbol_scalar(a, b, c, d, e, f),
-            categorydata_value("F", &labels),
+            fib.f_symbol_scalar(sa, sb, sc, sd, se, sx),
+            Complex64::new(f(a, b, c, d, e, x), 0.0),
             4,
         );
     }
