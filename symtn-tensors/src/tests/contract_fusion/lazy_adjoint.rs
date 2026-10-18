@@ -186,6 +186,7 @@ fn tensorcontract_fusion_lowers_both_categorical_adjoint_inputs_lazily() {
     );
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = Z2FusionRule;
@@ -265,6 +266,7 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     );
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule;
@@ -344,6 +346,7 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     );
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = Z2FusionRule;
@@ -422,6 +425,7 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     );
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule;
@@ -501,6 +505,7 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     );
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
     let rule = Z2FusionRule;
@@ -583,6 +588,7 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
     );
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule;

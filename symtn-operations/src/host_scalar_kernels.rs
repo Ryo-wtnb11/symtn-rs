@@ -1852,9 +1852,9 @@ mod tests {
     }
 
     // TensorKit scaling parity for non-finite data (#1438). Every expected
-    // value below is an output observed in Julia 1.11 with TensorOperations
-    // 5.6.2 and VectorInterface 0.6.0 (the TensorKit f87ca7fe oracle
-    // environment in `benchmarks/tensorkit_oracle`), quoted beside it.
+    // value below is an output observed in Julia 1.11 with TensorKit main
+    // f87ca7fe (version 0.17.1), TensorOperations 5.6.2 and VectorInterface
+    // 0.6.0, quoted beside it.
 
     fn bit_pairs(values: &[Complex64]) -> Vec<(u64, u64)> {
         values

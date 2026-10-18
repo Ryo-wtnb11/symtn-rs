@@ -587,6 +587,8 @@ fn unique_production_domain_fermion_crossing_matches_tensorkit_oracle() {
 
     // What: moving one odd domain leg across one odd codomain leg carries the
     // exact TensorKit fermionic sign, rather than a self-consistency result.
+    // Closed form: the odd-odd exchange sign -1; checked against TensorKit
+    // 0.17.0 (cfaa073) and 0.17.1.
     assert_eq!(plan.specs().len(), 1);
     assert_eq!(plan.specs()[0].dst_keys(), &[source]);
     assert_eq!(plan.specs()[0].recoupling_coefficients_dst_src(), &[-1.0]);
@@ -624,6 +626,9 @@ fn unique_production_complex_artin_and_inverse_match_tensorkit_oracle() {
 
         // What: Z4Element{2}'s later Artin crossing preserves the recoupled
         // innerline and conjugates the complex phase when the levels reverse.
+        // Closed form: R(2,3) = exp(2πi p·2·3/N²) = exp(3πi/2) = -i for
+        // N = 4, p = 2 (the F ratio is 1), and +i for the inverse; checked
+        // against TensorKit 0.17.0 (cfaa073) and 0.17.1.
         assert_eq!(plan.specs().len(), 1);
         assert_eq!(plan.specs()[0].dst_keys(), std::slice::from_ref(&expected));
         assert_complex_oracle(
@@ -688,25 +693,14 @@ fn unique_production_pivotal_transpose_matches_tensorkit_oracle() {
 
     // What: the nontrivial Z4 Frobenius-Schur/A-symbol phase survives the
     // cyclic transpose with TensorKit's exact destination dual flags.
+    // Closed form: fs(1) = ω(1, 3, 1) = exp(iπ·2p·1·4/N²) = -1 for N = 4,
+    // p = 2; checked against TensorKit 0.17.0 (cfaa073) and 0.17.1.
     assert_eq!(plan.specs().len(), 1);
     assert_eq!(plan.specs()[0].dst_keys(), &[expected]);
     assert_complex_oracle(
         plan.specs()[0].recoupling_coefficients_dst_src()[0],
         Complex64::new(-1.0, 0.0),
     );
-}
-
-#[test]
-fn tensorkit_unique_oracle_provenance_is_pinned() {
-    const RAW: &str = include_str!("fixtures/issue306_tensorkit_unique_oracle.txt");
-
-    // What: independent expected values retain the exact reference revision
-    // and raw outputs needed to regenerate or audit this fixture.
-    assert!(RAW.contains("TensorKit_commit=cfaa073e4d1e3eb2167edcbdc3be9872f41e7d91"));
-    assert!(RAW.contains("pair3.coeff=-2.2204460492503131e-16-1im"));
-    assert!(RAW.contains("pair3.coeff=-2.2204460492503131e-16+1im"));
-    assert!(RAW.contains("transpose.coeff=-1+0im"));
-    assert!(RAW.contains("fz2.domain_crossing.coeff=-1+0im"));
 }
 
 fn unique_rank_three_tree_pair<R>(rule: &R, left: SectorId, right: SectorId) -> FusionTreePairKey

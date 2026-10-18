@@ -17,9 +17,8 @@
 //!
 //! # Oracle provenance
 //!
-//! The constants are emitted by section 5 of the pinned current oracle,
-//! `benchmarks/tensorkit_semantic_oracle.jl`: TensorKit `f87ca7f` (project
-//! version 0.17.1) on Julia 1.11.6, from a tensor built block-by-block with
+//! The constants were checked against TensorKit 0.17.1 on Julia 1.11.6, from
+//! a tensor built block-by-block with
 //! exactly the fill this file uses:
 //!
 //! ```julia

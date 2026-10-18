@@ -1,7 +1,7 @@
 //! TensorKit's zero-scale rule on the typed `add`/`scale` family (#1442).
 //!
-//! Oracle: Julia 1.11, TensorKit 0.17.1 (f87ca7fe), VectorInterface 0.6.0
-//! (the `benchmarks/tensorkit_oracle` environment). For `x, y ∈ V ⊗ V ← V`
+//! Oracle: Julia 1.11, TensorKit main f87ca7fe (version 0.17.1),
+//! VectorInterface 0.6.0. For `x, y ∈ V ⊗ V ← V`
 //! over U(1), SU(2) and fZ₂ legs, `Float64` and `ComplexF64`, with `Inf`,
 //! NaN and finite entries, `add(y, x, α, β)`, `add!(y, x, α, β)`,
 //! `scale(x, α)`, `scale!(x, α)` and `scale!(y, x, α)` equal, elementwise,

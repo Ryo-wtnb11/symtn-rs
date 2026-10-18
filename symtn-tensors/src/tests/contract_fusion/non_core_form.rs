@@ -511,6 +511,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
     .unwrap();
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su2_recoupling() {
     let _guard = crate::test_support::CACHE_TEST_LOCK

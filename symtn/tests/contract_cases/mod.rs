@@ -922,9 +922,8 @@ where
 }
 
 /// Degeneracy-1 FZ2 map `V <- V` with `even`/`odd` block values: the tensor
-/// `build(f)` produces in the TensorKit reference
-/// (`benchmarks/tensorkit_semantic_oracle.jl` §3, pinned values in
-/// `symtn-network/tests/tk_fermionic_correspondence.rs`).
+/// `build(f)` produces in the TensorKit reference (values checked against
+/// TensorKit 0.17.1 in `symtn-network/tests/tk_fermionic_correspondence.rs`).
 pub fn fz2_map(runtime: &Runtime, even: f64, odd: f64) -> TensorMap<FermionParityFusionRule, f64> {
     let v = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule),

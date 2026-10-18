@@ -1,7 +1,0 @@
-== QSpace SU2 spin-half oracle ==
-labels = [1, 1, 2]
-itags = ["", "*", "*"]
-reduced = -8.660254037844387e-01
-casimir = 7.500000000000002e-01
-identity = 1.000000000000000e+00
-closed_norm2 = 1.500000000000000e+00
