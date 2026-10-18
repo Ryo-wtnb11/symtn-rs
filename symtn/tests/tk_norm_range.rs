@@ -25,8 +25,8 @@
 //!
 //! # Oracle provenance
 //!
-//! Constants were printed by TensorKit `f87ca7f` on Julia 1.11.6
-//! (`julia --project=benchmarks/tensorkit_oracle`) from tensors filled block by
+//! Constants were printed by TensorKit main `f87ca7f` (version 0.17.1) on
+//! Julia 1.11.6 from tensors filled block by
 //! block with the fills of `tk_norm_p.rs`, multiplied by the named scale:
 //!
 //! ```julia

@@ -20,9 +20,8 @@
 //!
 //! # Oracle provenance
 //!
-//! The constants below are emitted by section 5 of the pinned current oracle,
-//! `benchmarks/tensorkit_semantic_oracle.jl`: TensorKit `f87ca7f` (project
-//! version 0.17.1) on Julia 1.11.6, using the same fill as this file:
+//! The constants below were checked against TensorKit 0.17.1 on Julia 1.11.6,
+//! using the same fill as this file:
 //!
 //! ```julia
 //! V = U1Space(0 => 3, 1 => 2)

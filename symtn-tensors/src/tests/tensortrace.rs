@@ -1669,6 +1669,7 @@ fn tensortrace_fusion_scales_destination_once_for_multiple_source_terms() {
     assert_eq!(dst.data(), &[49.0]);
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensortrace!`.
 #[test]
 fn tensortrace_fusion_fermion_open_output_matches_tensorkit_oracle() {
     let rule = FermionParityFusionRule;
@@ -1708,6 +1709,7 @@ fn tensortrace_fusion_fermion_open_output_matches_tensorkit_oracle() {
     assert_eq!(dst.data(), &[16.0, 62.0]);
 }
 
+// Expected data checked against TensorKit 0.17.1 `TO.tensortrace!`.
 #[test]
 fn tensortrace_fusion_fermion_two_trace_pairs_match_tensorkit_oracle() {
     let rule = FermionParityFusionRule;

@@ -908,11 +908,9 @@ fn svd_qr_reconstruction_random_spaces() {
 // Part 3: cross-library invariant stream vs TensorKit
 // ---------------------------------------------------------------------------
 
-/// The shared deterministic per-block fill, identical to `fill_value` in
-/// `benchmarks/tensorkit_semantic_oracle.jl` (section 3), which follows the
-/// block/tree alignment already validated by
-/// `benchmarks/tensorkit_tsvd_crosscheck.jl`. Labels: U1 charge or SU2
-/// twice-spin; indices are one-based degeneracy coordinates, codomain
+/// The shared deterministic per-block fill, the same function the TensorKit
+/// 0.17.1 run used to produce the expected streams below. Labels: U1 charge
+/// or SU2 twice-spin; indices are one-based degeneracy coordinates, codomain
 /// axes first.
 fn oracle_fill(c0: i64, labels: [i64; 5], idx: &[usize]) -> f64 {
     let [l1, l2, m1, m2, lc] = labels;
@@ -1094,9 +1092,8 @@ macro_rules! invariant_stream_case {
     }};
 }
 
-/// Cross-library invariant stream, U(1). Oracle:
-/// `julia benchmarks/tensorkit_semantic_oracle.jl` (section 3, `-- U1 --`
-/// of `benchmarks/tensorkit_semantic_oracle.out`).
+/// Cross-library invariant stream, U(1). Expected norms, traces and singular
+/// values checked against TensorKit 0.17.1 (Julia 1.11.6).
 /// Run with: `cargo test -p symtn --release --test semantic_suite -- --ignored u1_vs`
 #[test]
 #[ignore = "cross-library stream, run explicitly (release recommended)"]
@@ -1158,9 +1155,8 @@ fn cross_library_invariant_stream_u1_vs_tensorkit() {
     );
 }
 
-/// Cross-library invariant stream, SU(2). Oracle:
-/// `julia benchmarks/tensorkit_semantic_oracle.jl` (section 3, `-- SU2 --`
-/// of `benchmarks/tensorkit_semantic_oracle.out`).
+/// Cross-library invariant stream, SU(2). Expected norms, traces and singular
+/// values checked against TensorKit 0.17.1 (Julia 1.11.6).
 /// Run with: `cargo test -p symtn --release --test semantic_suite -- --ignored su2_vs`
 #[test]
 #[ignore = "cross-library stream, run explicitly (release recommended)"]
@@ -1213,8 +1209,8 @@ fn cross_library_invariant_stream_su2_vs_tensorkit() {
     );
 }
 
-/// Cross-library invariant stream for fZ2 x U(1) x SU(2). Oracle:
-/// `julia benchmarks/tensorkit_semantic_oracle.jl` (section 3).
+/// Cross-library invariant stream for fZ2 x U(1) x SU(2). Expected values
+/// checked against TensorKit 0.17.1 (Julia 1.11.6).
 /// Run with: `cargo test -p symtn --release --test semantic_suite -- --ignored product_vs`
 #[test]
 #[ignore = "cross-library stream, run explicitly (release recommended)"]

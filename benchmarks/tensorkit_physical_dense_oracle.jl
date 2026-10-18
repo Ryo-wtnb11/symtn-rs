@@ -7,7 +7,7 @@
 # `# name shape...` header.
 #
 # Run (Julia 1.11.6, pinned TensorKit main `f87ca7f` = 0.17.1):
-#   julia --project=benchmarks/tensorkit_oracle \
+#   julia --project=<environment with TensorKit 0.17.1> \
 #     benchmarks/tensorkit_physical_dense_oracle.jl \
 #     > symtn/tests/fixtures/physical_dense/tensorkit_dense.txt
 

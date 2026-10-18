@@ -1,5 +1,5 @@
 //! Complex SU(2) structural-operation correspondence with TensorKit
-//! `f87ca7f` (Project 0.17.1, Julia 1.11.6), oracle section 7.
+//! 0.17.1 (Julia 1.11.6).
 
 use std::sync::Arc;
 

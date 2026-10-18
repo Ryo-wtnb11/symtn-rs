@@ -1,8 +1,8 @@
 //! TensorKit scaling parity for non-finite data (#1438).
 //!
-//! Oracle: outputs observed in Julia 1.11 with TensorKit 0.17.1 (f87ca7fe),
-//! TensorOperations 5.6.2 and VectorInterface 0.6.0 (the
-//! `benchmarks/tensorkit_oracle` environment), on `V ⊗ V ← V` tensors whose
+//! Oracle: outputs observed in Julia 1.11 with TensorKit main f87ca7fe
+//! (version 0.17.1), TensorOperations 5.6.2 and VectorInterface 0.6.0, on
+//! `V ⊗ V ← V` tensors whose
 //! data cycles through `±Inf`, NaN, `-0.0` and finite values:
 //!
 //! - `permute!(tdst, tsrc, ((1, 3), (2,)), zero(T), T(β))` equals

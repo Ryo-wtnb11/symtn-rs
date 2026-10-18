@@ -1,5 +1,5 @@
-//! Disjoint U(1) zero-map null-space completion against TensorKit `f87ca7f`
-//! (Project 0.17.1, Julia 1.11.6), oracle section 6.
+//! Disjoint U(1) zero-map null-space completion against TensorKit 0.17.1
+//! (Julia 1.11.6).
 
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
