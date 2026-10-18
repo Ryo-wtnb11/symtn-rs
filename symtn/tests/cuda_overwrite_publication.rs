@@ -158,7 +158,10 @@ fn overwrite_destination(forced: bool) -> usize {
 fn overwrite_destination_read_by_another_thread_is_complete() {
     let stale = overwrite_destination(true);
     println!("F1 forced: {stale}/{ITERS} iterations read a stale destination");
-    assert_eq!(stale, 0, "#1391 F1 reproduced: {stale}/{ITERS}");
+    assert_eq!(
+        stale, 0,
+        "stale overwrite destination (F1): {stale}/{ITERS}"
+    );
 }
 
 #[test]
@@ -281,7 +284,7 @@ fn reused_scratch(threaded: bool) -> usize {
 fn reused_scratch_is_not_overwritten_while_another_thread_reads_it() {
     let stale = reused_scratch(true);
     println!("F2 two threads: {stale}/{ITERS} iterations read a wrong output");
-    assert_eq!(stale, 0, "#1391 F2 reproduced: {stale}/{ITERS}");
+    assert_eq!(stale, 0, "stale reused scratch (F2): {stale}/{ITERS}");
 }
 
 #[test]

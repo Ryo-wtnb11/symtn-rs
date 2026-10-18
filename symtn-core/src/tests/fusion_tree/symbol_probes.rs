@@ -83,7 +83,7 @@ impl MultiplicityFreeFusionSymbols for ComplexScalarProbeRule {
 }
 
 #[test]
-fn complex_scalar_r_symbol_and_conjugate_inverse_braid_stage0_spike() {
+fn complex_scalar_r_symbol_and_conjugate_inverse_braid() {
     let rule = ComplexScalarProbeRule;
     for coupled in [0usize, 1usize] {
         let tree =
@@ -112,7 +112,7 @@ fn complex_scalar_r_symbol_and_conjugate_inverse_braid_stage0_spike() {
 }
 
 #[test]
-fn complex_scalar_braid_tree_expands_multichannel_loop_stage0_spike() {
+fn complex_scalar_braid_tree_expands_multichannel_loop() {
     // Rank-3 tree with an index>0 swap: exercises the `fusion_channels(a,
     // d)` loop branch of `multiplicity_free_artin_braid_at_with_inverse`
     // (f_symbol_scalar * r_symbol_scalar * conj composition) —

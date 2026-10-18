@@ -195,7 +195,7 @@ fn svd_full_gives_square_unitaries_and_reconstructs() {
 }
 
 #[test]
-fn svd_full_uses_native_owned_full_svd_without_legacy_completion() {
+fn svd_full_uses_native_owned_full_svd_without_orthonormal_completion() {
     let tensor = rectangular_svd_tensor(2, 3);
     let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let Some(mut dense) = NativeFullSvdSpy::new() else {
@@ -614,9 +614,9 @@ fn rectangular_full_svd_has_square_outer_factors_and_reconstructs() {
         );
         let input = bound_tensor(Arc::new(rule), &matrix);
         let full = svd_full(&mut dense, &input.as_ref()).unwrap();
-        assert_factor_layout_matches_legacy_shapes(full.u.space());
-        assert_factor_layout_matches_legacy_shapes(full.s.space());
-        assert_factor_layout_matches_legacy_shapes(full.vh.space());
+        assert_factor_layout_matches_per_tree_shapes(full.u.space());
+        assert_factor_layout_matches_per_tree_shapes(full.s.space());
+        assert_factor_layout_matches_per_tree_shapes(full.vh.space());
         assert_eq!(full.u.structure().block(0).unwrap().shape(), &[rows, rows]);
         assert_eq!(full.s.structure().block(0).unwrap().shape(), &[rows, cols]);
         assert_eq!(full.vh.structure().block(0).unwrap().shape(), &[cols, cols]);

@@ -2073,9 +2073,9 @@ mod tests {
             .collect()
     }
 
-    /// Test-only oracle: the column-major symtn loop the Strided route replaced.
+    /// Test-only oracle: an independent column-major scalar loop.
     #[allow(clippy::too_many_arguments)]
-    fn previous_kernel<T>(
+    fn column_major_loop_reference<T>(
         dst: &mut [T],
         src: &[T],
         shape: &[usize],
@@ -2198,7 +2198,7 @@ mod tests {
         ]
     }
 
-    fn assert_strided_matches_previous<T>(make: impl Fn(f64, f64) -> T, scales: &[T])
+    fn assert_strided_matches_column_major_loop<T>(make: impl Fn(f64, f64) -> T, scales: &[T])
     where
         T: BitPattern
             + Add<T, Output = T>
@@ -2230,7 +2230,7 @@ mod tests {
                         let src = special_values(len, 1, &make);
                         let initial = special_values(len, 4, &make);
                         let mut expected = initial.clone();
-                        previous_kernel(
+                        column_major_loop_reference(
                             &mut expected,
                             &src,
                             shape,
@@ -2273,15 +2273,15 @@ mod tests {
     }
 
     /// What: `Copy`, nonzero `CopyScale` and nonzero `Axpy` through Strided
-    /// are bit-identical to symtn's previous loop at ranks 0 through 8 over
+    /// are bit-identical to an independent column-major scalar loop at ranks 0 through 8 over
     /// permuted, negative, broadcast and zero-extent layouts, with and
     /// without conjugation, for signed zeros, NaN payloads, infinities and
     /// subnormals (NaN payloads compared exactly for copies, as NaN-ness for
     /// arithmetic). `Copy` of `inf + 0i` stays `inf + 0i` (no multiply).
     #[test]
-    fn strided_raw_actions_match_previous_kernel_bitwise() {
-        assert_strided_matches_previous(|re, _| re, &[-0.5, 3.0, f64::from_bits(1)]);
-        assert_strided_matches_previous(
+    fn strided_raw_actions_match_column_major_loop_bitwise() {
+        assert_strided_matches_column_major_loop(|re, _| re, &[-0.5, 3.0, f64::from_bits(1)]);
+        assert_strided_matches_column_major_loop(
             Complex64::new,
             &[
                 Complex64::new(-0.5, 0.25),
@@ -2405,7 +2405,7 @@ mod tests {
         assert!(!destination_axes_separated(&shape, &dst_strides));
 
         let mut expected = initial;
-        previous_kernel(
+        column_major_loop_reference(
             &mut expected,
             &src,
             &shape,
@@ -2419,7 +2419,7 @@ mod tests {
         assert_eq!(expected[2], 0.0);
         for (alpha, beta) in [(1.0, 1.0), (1.0, 0.0), (2.0, 0.0)] {
             let mut want = initial;
-            previous_kernel(
+            column_major_loop_reference(
                 &mut want,
                 &src,
                 &shape,
@@ -2510,7 +2510,7 @@ mod tests {
         )
         .unwrap();
         let mut want = vec![0.0; 512];
-        previous_kernel(
+        column_major_loop_reference(
             &mut want,
             &src,
             &shape,

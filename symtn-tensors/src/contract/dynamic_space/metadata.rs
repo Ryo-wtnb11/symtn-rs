@@ -97,7 +97,7 @@ pub(crate) type LayoutKeyBuilder<R> =
     for<'a> fn(&R, MetadataRequest<'a>) -> Result<MetadataOutput, OperationError>;
 
 pub(super) enum LayoutBuildCapability<R> {
-    Legacy(LayoutKeyBuilder<R>),
+    KeyBuilder(LayoutKeyBuilder<R>),
     CheckedGeneric,
 }
 
@@ -115,14 +115,14 @@ where
     R: FusionRule,
 {
     pub(super) const fn encoded() -> Self {
-        Self::Legacy(encoded_layout_primer::<R>)
+        Self::KeyBuilder(encoded_layout_primer::<R>)
     }
 
-    pub(super) fn legacy_dispatch(self) -> LayoutKeyBuilder<R> {
+    pub(super) fn key_builder(self) -> LayoutKeyBuilder<R> {
         match self {
-            Self::Legacy(dispatch) => dispatch,
+            Self::KeyBuilder(dispatch) => dispatch,
             Self::CheckedGeneric => {
-                unreachable!("checked Generic bindings do not use legacy metadata dispatch")
+                unreachable!("checked Generic bindings do not use a layout key builder")
             }
         }
     }
@@ -142,7 +142,7 @@ where
         rule: &R,
         homspace: &FusionTreeHomSpace,
     ) -> Result<PreparedLayoutKeys, OperationError> {
-        match (self.legacy_dispatch())(rule, MetadataRequest::Prepare { homspace })? {
+        match (self.key_builder())(rule, MetadataRequest::Prepare { homspace })? {
             MetadataOutput::Prepared(prepared) => Ok(prepared),
             _ => unreachable!("metadata dispatcher returned a non-prepare response"),
         }
@@ -157,7 +157,7 @@ where
     ) -> Result<(FusionTreeHomSpace, PreparedLayoutKeys), OperationError> {
         #[cfg(test)]
         crate::probe::hit(crate::probe::Event::DerivedHomspaceBuild);
-        match (self.legacy_dispatch())(
+        match (self.key_builder())(
             rule,
             MetadataRequest::Permute {
                 homspace,
@@ -181,7 +181,7 @@ where
     ) -> Result<(FusionTreeHomSpace, PreparedLayoutKeys), OperationError> {
         #[cfg(test)]
         crate::probe::hit(crate::probe::Event::DerivedHomspaceBuild);
-        match (self.legacy_dispatch())(
+        match (self.key_builder())(
             rule,
             MetadataRequest::Contract {
                 lhs,
@@ -204,7 +204,7 @@ where
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<(FusionTreeHomSpace, PreparedLayoutKeys), OperationError> {
-        match (self.legacy_dispatch())(
+        match (self.key_builder())(
             rule,
             MetadataRequest::Select {
                 homspace,
@@ -225,7 +225,7 @@ where
         dualize: bool,
         tensor: &'static str,
     ) -> Result<SectorLeg, OperationError> {
-        match (self.legacy_dispatch())(
+        match (self.key_builder())(
             rule,
             MetadataRequest::OutwardLeg {
                 homspace,
@@ -245,7 +245,7 @@ where
     R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
 {
     pub(super) const fn checked() -> Self {
-        Self::Legacy(checked_metadata_dispatcher::<R>)
+        Self::KeyBuilder(checked_metadata_dispatcher::<R>)
     }
 }
 

@@ -127,7 +127,7 @@ where
 
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let legacy_shape_path_builds_rec = probe::record();
+    let caller_shape_path_builds_rec = probe::record();
     let scratch_structure_builds_rec = probe::record();
     let expected_rule = provider.rule_identity();
     let actual = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
@@ -144,7 +144,7 @@ where
     assert_eq!(layout_snapshot(actual.space()), expected_layout);
     assert_eq!(actual.space().required_len().unwrap(), expected_len);
     assert_eq!(
-        legacy_shape_path_builds_rec.get(Event::LegacyShapePathBuild),
+        caller_shape_path_builds_rec.get(Event::CallerShapePathBuild),
         0
     );
     assert_eq!(
@@ -331,7 +331,7 @@ fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 3)], true)]),
     );
-    let legacy_shape_path_builds_rec = probe::record();
+    let caller_shape_path_builds_rec = probe::record();
     let scratch_structure_builds_rec = probe::record();
     let root = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_lowered(
         Arc::clone(&provider),
@@ -340,7 +340,7 @@ fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
     .unwrap();
     assert!(Arc::ptr_eq(root.provider_arc(), &provider));
     assert_eq!(
-        legacy_shape_path_builds_rec.get(Event::LegacyShapePathBuild),
+        caller_shape_path_builds_rec.get(Event::CallerShapePathBuild),
         0
     );
     assert_eq!(
@@ -352,14 +352,14 @@ fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
         FusionProductSpace::new([SectorLeg::new([(vacuum, 5)], false)]),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let legacy_shape_path_builds_rec = probe::record();
+    let caller_shape_path_builds_rec = probe::record();
     let scratch_structure_builds_rec = probe::record();
     let derived = root
         .derive_from_final_homspace(derived_homspace.clone())
         .unwrap();
     assert!(Arc::ptr_eq(derived.provider_arc(), &provider));
     assert_eq!(
-        legacy_shape_path_builds_rec.get(Event::LegacyShapePathBuild),
+        caller_shape_path_builds_rec.get(Event::CallerShapePathBuild),
         0
     );
     assert_eq!(
@@ -379,14 +379,14 @@ fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
 
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let legacy_shape_path_builds_rec = probe::record();
+    let caller_shape_path_builds_rec = probe::record();
     let scratch_structure_builds_rec = probe::record();
     let shapes = shapes_from_tree_keys(provider.as_ref(), &root_homspace);
     let _expert =
         BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(provider, root_homspace, shapes)
             .unwrap();
     assert_eq!(
-        legacy_shape_path_builds_rec.get(Event::LegacyShapePathBuild),
+        caller_shape_path_builds_rec.get(Event::CallerShapePathBuild),
         1
     );
     assert_eq!(
@@ -407,14 +407,14 @@ fn lowered_final_homspace_keeps_single_pass_and_publishes_only_success() {
     symtn_core::clear_structure_caches();
     let rule = rule();
     reset_primer_calls();
-    let legacy_shape_path_builds_rec = probe::record();
+    let caller_shape_path_builds_rec = probe::record();
 
     let lowered =
         DynamicFusionMapSpace::from_final_homspace_with_primer(&rule, homspace(), counting_primer)
             .unwrap();
     assert_eq!(primer_calls(), 1);
     assert_eq!(
-        legacy_shape_path_builds_rec.get(Event::LegacyShapePathBuild),
+        caller_shape_path_builds_rec.get(Event::CallerShapePathBuild),
         0
     );
 

@@ -481,7 +481,7 @@ impl<R: MultiplicityFreeRigidSymbols> KeyedMultiFKernel for SimpleK<'_, R> {
 }
 
 #[cfg(test)]
-fn fusion_tree_vertex_neighbors_legacy_oracle(
+fn fusion_tree_vertex_neighbors_stepwise_oracle(
     tree: &FusionTreeKey,
     leg_index: usize,
 ) -> Result<(SectorId, SectorId), CoreError> {
@@ -514,7 +514,7 @@ fn fusion_tree_vertex_neighbors_legacy_oracle(
 }
 
 #[cfg(test)]
-fn multiplicity_free_multi_associator_scalar_legacy_oracle<R>(
+fn multiplicity_free_multi_associator_scalar_stepwise_oracle<R>(
     rule: &R,
     long: &FusionTreeKey,
     short: &FusionTreeKey,
@@ -536,9 +536,9 @@ where
     for tensor_kit_k in 2..rank {
         let right = long.uncoupled()[tensor_kit_k];
         let (left_coupled, coupled) =
-            fusion_tree_vertex_neighbors_legacy_oracle(long, tensor_kit_k)?;
+            fusion_tree_vertex_neighbors_stepwise_oracle(long, tensor_kit_k)?;
         let (middle, right_coupled) =
-            fusion_tree_vertex_neighbors_legacy_oracle(short, tensor_kit_k - 1)?;
+            fusion_tree_vertex_neighbors_stepwise_oracle(short, tensor_kit_k - 1)?;
         // Why not reuse the production admissibility helper: this oracle must
         // retain the pre-grouping decision path to expose a shared-helper bug.
         if rule.nsymbol(first, right_coupled, coupled) == 0 {
@@ -551,7 +551,7 @@ where
 }
 
 #[cfg(test)]
-pub(crate) fn multiplicity_free_multi_fmove_tree_legacy_oracle<R>(
+pub(crate) fn multiplicity_free_multi_fmove_tree_stepwise_oracle<R>(
     rule: &R,
     tree: &FusionTreeKey,
 ) -> Result<Vec<(FusionTreeKey, R::Scalar)>, CoreError>
@@ -605,7 +605,7 @@ where
             tail_coupled,
         ) {
             if let Some(coefficient) =
-                multiplicity_free_multi_associator_scalar_legacy_oracle(rule, tree, &tail_tree)?
+                multiplicity_free_multi_associator_scalar_stepwise_oracle(rule, tree, &tail_tree)?
             {
                 terms.push((tail_tree, coefficient));
             }
@@ -615,7 +615,7 @@ where
 }
 
 #[cfg(test)]
-pub(crate) fn multiplicity_free_multi_fmove_inv_tree_legacy_oracle<R>(
+pub(crate) fn multiplicity_free_multi_fmove_inv_tree_stepwise_oracle<R>(
     rule: &R,
     leading_sector: SectorId,
     coupled: SectorId,
@@ -647,7 +647,7 @@ where
     let mut terms = Vec::with_capacity(candidates.len());
     for candidate in candidates {
         if let Some(coefficient) =
-            multiplicity_free_multi_associator_scalar_legacy_oracle(rule, &candidate, tree)?
+            multiplicity_free_multi_associator_scalar_stepwise_oracle(rule, &candidate, tree)?
         {
             terms.push((candidate, (coefficient).conj()));
         }

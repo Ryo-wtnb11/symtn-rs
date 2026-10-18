@@ -1316,8 +1316,8 @@ where
         &bound_tensor_ref!(Arc::new((*rule).clone()), &tensor),
     )
     .unwrap();
-    assert_factor_layout_matches_legacy_shapes(eigh.v.space());
-    assert_factor_layout_matches_legacy_shapes(eigh.d.space());
+    assert_factor_layout_matches_per_tree_shapes(eigh.v.space());
+    assert_factor_layout_matches_per_tree_shapes(eigh.d.space());
     for entry in &eigh.eigenvalues {
         for pair in entry.values.windows(2) {
             assert!(pair[0] <= pair[1]);

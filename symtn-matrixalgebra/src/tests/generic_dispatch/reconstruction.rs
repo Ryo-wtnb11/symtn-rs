@@ -63,9 +63,9 @@ where
         &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
-    assert_factor_layout_matches_legacy_shapes(svd.u.space());
-    assert_factor_layout_matches_legacy_shapes(svd.s.space());
-    assert_factor_layout_matches_legacy_shapes(svd.vh.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.u.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.s.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.vh.space());
 
     for entry in &svd.singular_values {
         for pair in entry.values.windows(2) {

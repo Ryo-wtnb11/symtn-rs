@@ -134,13 +134,13 @@ fn checked_generic_tree_split_is_structural_and_provider_typed() {
 }
 
 #[test]
-fn checked_generic_artin_matches_legacy_outer_and_inner_rows() {
+fn checked_generic_artin_matches_unchecked_outer_and_inner_rows() {
     let rule = UnitaryToyOmRule;
     for (tree, index) in [(unitary_rank2_tree(1), 0), (unitary_rank3_tree(1), 1)] {
-        let legacy = generic_artin_braid_at_with_inverse(&rule, &tree, index, false).unwrap();
+        let unchecked = generic_artin_braid_at_with_inverse(&rule, &tree, index, false).unwrap();
         let checked =
             generic_artin_braid_at_with_inverse_checked(&rule, &tree, index, false).unwrap();
-        assert_eq!(checked, legacy);
+        assert_eq!(checked, unchecked);
     }
 }
 

@@ -76,11 +76,11 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
 
     let fallback_space = bound.space().adjoint_view().unwrap();
     let fallback = BoundDynamicTensorRef::try_new(&fallback_space, bound.data()).unwrap();
-    let mut legacy = ScriptedExecutor::<RejectSvdInto>::default();
+    let mut adjoint_executor = ScriptedExecutor::<RejectSvdInto>::default();
     let compact_svd_copy_rec = crate::probe::record();
-    svd_compact_dyn(&mut legacy, &fallback).unwrap();
-    assert!(legacy.counts().svd > 0);
-    assert_eq!(legacy.counts().svd_into, 0);
+    svd_compact_dyn(&mut adjoint_executor, &fallback).unwrap();
+    assert!(adjoint_executor.counts().svd > 0);
+    assert_eq!(adjoint_executor.counts().svd_into, 0);
     let probe = compact_svd_copy_rec.compact_svd_copy();
     assert!(probe.input_pack_calls > 0);
     assert!(probe.output_scatter_calls > 0);
@@ -570,9 +570,9 @@ fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let compact_svd_copy_rec = crate::probe::record();
     let svd = svd_compact(&mut dense, &bound.as_ref()).unwrap();
-    assert_factor_layout_matches_legacy_shapes(svd.u.space());
-    assert_factor_layout_matches_legacy_shapes(svd.s.space());
-    assert_factor_layout_matches_legacy_shapes(svd.vh.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.u.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.s.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.vh.space());
     assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let rank = rows.min(cols);
     if rank == 0 {
@@ -1115,9 +1115,9 @@ fn svd_compact_factor_dims_include_sectors_without_populated_trees() {
 
     let result = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
 
-    assert_factor_layout_matches_legacy_shapes(result.u.space());
-    assert_factor_layout_matches_legacy_shapes(result.s.space());
-    assert_factor_layout_matches_legacy_shapes(result.vh.space());
+    assert_factor_layout_matches_per_tree_shapes(result.u.space());
+    assert_factor_layout_matches_per_tree_shapes(result.s.space());
+    assert_factor_layout_matches_per_tree_shapes(result.vh.space());
     assert_eq!(result.u.tensor().dims(), &[5, 2]);
     assert_eq!(result.vh.tensor().dims(), &[2, 2]);
     assert_eq!(
@@ -1165,9 +1165,9 @@ fn svd_compact_preserves_asymmetric_non_self_dual_u1_factor_layouts() {
 
     let svd = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
 
-    assert_factor_layout_matches_legacy_shapes(svd.u.space());
-    assert_factor_layout_matches_legacy_shapes(svd.s.space());
-    assert_factor_layout_matches_legacy_shapes(svd.vh.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.u.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.s.space());
+    assert_factor_layout_matches_per_tree_shapes(svd.vh.space());
     let input_regions = tensor
         .structure()
         .coupled_sector_regions(1)
@@ -1337,7 +1337,7 @@ fn assert_zero_axis_svd_compact(rows: usize, cols: usize) {
         assert!(result.vh().data().is_empty());
         for factor in [result.u(), result.s(), result.vh()] {
             assert_eq!(factor.space().space().structure().block_count(), 0);
-            assert_factor_layout_matches_legacy_shapes(factor.space());
+            assert_factor_layout_matches_per_tree_shapes(factor.space());
         }
         assert_eq!(
             diagonal_bond_build_rec.diagonal_bond_build(),

@@ -42,7 +42,7 @@ pub(crate) enum Event {
     /// A final result layout was built.
     FinalResultLayoutBuild,
     /// A layout was built on the caller-supplied shapes path.
-    LegacyShapePathBuild,
+    CallerShapePathBuild,
     /// A scratch structure was built.
     ScratchStructureBuild,
     /// A permuted or contracted HomSpace was built by a layout capability.
@@ -56,7 +56,7 @@ pub(crate) enum Event {
     /// An ordered tree-pair group was lowered to specs.
     OrderedTreePairLowering,
     /// A tree-pair group was assembled by the per-row callback assembler.
-    LegacyTreePairAssembly,
+    RowCallbackTreePairAssembly,
     /// A tree-pair operation was prepared.
     TreePairOperationPreparation,
     /// An oriented tree-pair plan was compiled.

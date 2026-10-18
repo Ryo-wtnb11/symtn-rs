@@ -316,7 +316,7 @@ fn fusion_tree_homspace_tensorcontract_accepts_output_permutation_structurally()
 }
 
 #[test]
-fn direct_homspace_derivation_matches_old_sequence_for_supported_rules() {
+fn direct_homspace_derivation_matches_reference_for_supported_rules() {
     let mixed_leg =
         |sectors: &[(SectorId, usize)], dual| SectorLeg::new(sectors.iter().copied(), dual);
 
@@ -325,7 +325,7 @@ fn direct_homspace_derivation_matches_old_sequence_for_supported_rules() {
         FusionProductSpace::new([mixed_leg(&u1_sectors, false), mixed_leg(&u1_sectors, true)]),
         FusionProductSpace::new([mixed_leg(&u1_sectors, true), mixed_leg(&u1_sectors, false)]),
     );
-    assert_direct_contract_matches_legacy(
+    assert_direct_contract_matches_reference(
         &U1FusionRule,
         &u1_hom,
         &u1_hom,
@@ -340,7 +340,7 @@ fn direct_homspace_derivation_matches_old_sequence_for_supported_rules() {
         FusionProductSpace::new([mixed_leg(&parity, false), mixed_leg(&parity, true)]),
         FusionProductSpace::new([mixed_leg(&parity, true), mixed_leg(&parity, false)]),
     );
-    assert_direct_contract_matches_legacy(
+    assert_direct_contract_matches_reference(
         &FermionParityFusionRule,
         &fz2_hom,
         &fz2_hom,
@@ -358,7 +358,7 @@ fn direct_homspace_derivation_matches_old_sequence_for_supported_rules() {
         FusionProductSpace::new([mixed_leg(&su2, false), mixed_leg(&su2, true)]),
         FusionProductSpace::new([mixed_leg(&su2, true), mixed_leg(&su2, false)]),
     );
-    assert_direct_contract_matches_legacy(
+    assert_direct_contract_matches_reference(
         &SU2FusionRule,
         &su2_hom,
         &su2_hom,
@@ -384,7 +384,7 @@ fn direct_homspace_derivation_matches_old_sequence_for_supported_rules() {
         FusionProductSpace::new([mixed_leg(&product, false), mixed_leg(&product, true)]),
         FusionProductSpace::new([mixed_leg(&product, true), mixed_leg(&product, false)]),
     );
-    assert_direct_contract_matches_legacy(
+    assert_direct_contract_matches_reference(
         &product_rule,
         &product_hom,
         &product_hom,
@@ -761,7 +761,7 @@ fn oriented_composed_leg_membership_is_linear_in_dual_operations() {
 }
 
 #[test]
-fn oriented_composed_leg_invalid_path_preserves_legacy_error_order() {
+fn oriented_composed_leg_invalid_path_matches_materialized_error_order() {
     let rule = U1FusionRule;
     let lhs = SectorLeg::new([(u1(-3), 1), (u1(2), 2)], false);
     let rhs = SectorLeg::new([(u1(-3), 4), (u1(2), 2)], false);
@@ -779,7 +779,7 @@ fn oriented_composed_leg_invalid_path_preserves_legacy_error_order() {
 }
 
 #[test]
-fn generic_select_matches_old_sequence() {
+fn generic_select_matches_reference() {
     let rule = UnitaryToyOmRule;
     let leg = SectorLeg::new(
         [
@@ -792,7 +792,7 @@ fn generic_select_matches_old_sequence() {
         FusionProductSpace::new([leg.clone(), leg.clone()]),
         FusionProductSpace::new([leg.clone(), leg]),
     );
-    let expected = legacy_select(&rule, &hom, &[3, 0], &[2, 1]);
+    let expected = reference_select(&rule, &hom, &[3, 0], &[2, 1]);
     let actual = hom.select(&rule, &[3, 0], &[2, 1]).unwrap();
     assert_eq!(actual, expected);
 }

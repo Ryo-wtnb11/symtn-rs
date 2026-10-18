@@ -16,7 +16,7 @@ fn explicit_shape_coupled_grid_reports_extent_overflow() {
     assert_eq!(error, CoreError::ElementCountOverflow);
 }
 
-fn assert_direct_generic_leg_degeneracy_structure_matches_legacy<R>(
+fn assert_direct_generic_leg_degeneracy_structure_matches_reference<R>(
     rule: &R,
     homspace: &FusionTreeHomSpace,
 ) where
@@ -48,7 +48,7 @@ fn assert_direct_generic_leg_degeneracy_structure_matches_legacy<R>(
 }
 
 #[test]
-fn direct_generic_leg_degeneracy_layout_matches_legacy() {
+fn direct_generic_leg_degeneracy_layout_matches_reference() {
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -62,7 +62,7 @@ fn direct_generic_leg_degeneracy_layout_matches_legacy() {
         ]),
         FusionProductSpace::new([SectorLeg::new([(c, 3)], false)]),
     );
-    assert_direct_generic_leg_degeneracy_structure_matches_legacy(&rule, &homspace);
+    assert_direct_generic_leg_degeneracy_structure_matches_reference(&rule, &homspace);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn canonical_coupled_grid_derives_each_row_and_column_once() {
         .map(|sector| sector.row_count + sector.col_count)
         .sum::<usize>();
     let actual = coupled_subblock_parts_from_leg_degeneracies(&homspace, &layout).unwrap();
-    let expected = legacy_leg_degeneracy_structure(&rule, &homspace);
+    let expected = reference_leg_degeneracy_structure(&rule, &homspace);
     assert_eq!(*actual.0, *expected.sector_structure());
     assert_eq!(actual.1, *expected.degeneracy_structure());
     assert_eq!(

@@ -854,12 +854,11 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         }));
 }
 
-/// A v1 lazy-adjoint-of-diagonal record, which checked-Generic wrote before
-/// #1449, still decodes to the adjoint it denotes: the owned conjugated
-/// diagonal, which re-encodes as a plain diagonal record.
+/// A v1 lazy-adjoint-of-diagonal record decodes to the adjoint it denotes:
+/// the owned conjugated diagonal, which re-encodes as a plain diagonal record.
 #[test]
-fn legacy_adjoint_diagonal_records_decode_to_the_owned_conjugated_diagonal() {
-    fn legacy_adjoint_record(diagonal_bytes: &[u8]) -> Vec<u8> {
+fn lazy_adjoint_diagonal_records_decode_to_the_owned_conjugated_diagonal() {
+    fn lazy_adjoint_diagonal_record(diagonal_bytes: &[u8]) -> Vec<u8> {
         let mut bytes = diagonal_bytes.to_vec();
         let repr = header_end(&bytes);
         assert_eq!(bytes[repr], 2, "diagonal record tag");
@@ -885,7 +884,7 @@ fn legacy_adjoint_diagonal_records_decode_to_the_owned_conjugated_diagonal() {
     .unwrap();
     let decoded = TensorMap::<GenericToy, Complex64>::from_bytes_with(
         &runtime,
-        &legacy_adjoint_record(&diagonal.to_bytes_with(&codec).unwrap()),
+        &lazy_adjoint_diagonal_record(&diagonal.to_bytes_with(&codec).unwrap()),
         DecodeLimits::default(),
         &codec,
     )
@@ -922,7 +921,7 @@ fn legacy_adjoint_diagonal_records_decode_to_the_owned_conjugated_diagonal() {
     .unwrap();
     let decoded = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
         &runtime,
-        &legacy_adjoint_record(&diagonal.to_bytes_with(&codec).unwrap()),
+        &lazy_adjoint_diagonal_record(&diagonal.to_bytes_with(&codec).unwrap()),
         DecodeLimits::default(),
         &codec,
     )

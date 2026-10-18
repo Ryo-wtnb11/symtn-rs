@@ -117,7 +117,7 @@ where
 }
 
 #[cfg(test)]
-fn build_adjoint_space_dyn_legacy_oracle<R>(
+fn build_adjoint_space_dyn_stepwise_oracle<R>(
     rule: &R,
     space: &DynamicFusionMapSpace,
     primer: LayoutKeyBuilder<R>,
@@ -898,16 +898,16 @@ mod cache_tests {
         let data = (0..source.required_len().unwrap())
             .map(|index| Complex64::new(index as f64 + 1.0, index as f64 + 0.25))
             .collect::<Vec<_>>();
-        let legacy =
-            build_adjoint_space_dyn_legacy_oracle(rule, &source, encoded_layout_primer::<R>)
+        let stepwise =
+            build_adjoint_space_dyn_stepwise_oracle(rule, &source, encoded_layout_primer::<R>)
                 .unwrap();
-        let expected_data = adjoint_data_oracle(&source, &legacy, &data);
+        let expected_data = adjoint_data_oracle(&source, &stepwise, &data);
 
         let (dynamic, dynamic_data) = adjoint_dyn(rule, &source, &data).unwrap();
-        assert_complete_structure_eq(dynamic.structure(), legacy.structure());
+        assert_complete_structure_eq(dynamic.structure(), stepwise.structure());
         assert_eq!(dynamic.nout(), 1);
         assert_eq!(dynamic.nin(), 1);
-        assert_eq!(dynamic.homspace(), legacy.homspace());
+        assert_eq!(dynamic.homspace(), stepwise.homspace());
         assert_eq!(dynamic_data, expected_data);
     }
 
@@ -965,19 +965,19 @@ mod cache_tests {
         let data = (0..source.required_len().unwrap())
             .map(|index| Complex64::new(index as f64 + 0.5, index as f64 + 0.125))
             .collect::<Vec<_>>();
-        let legacy = build_adjoint_space_dyn_legacy_oracle(
+        let stepwise = build_adjoint_space_dyn_stepwise_oracle(
             &rule,
             &source,
             encoded_layout_primer::<TripleRule>,
         )
         .unwrap();
-        let expected_data = adjoint_data_oracle(&source, &legacy, &data);
+        let expected_data = adjoint_data_oracle(&source, &stepwise, &data);
 
         let (dynamic, dynamic_data) = adjoint_dyn(&rule, &source, &data).unwrap();
-        assert_complete_structure_eq(dynamic.structure(), legacy.structure());
+        assert_complete_structure_eq(dynamic.structure(), stepwise.structure());
         assert_eq!(dynamic.nout(), 2);
         assert_eq!(dynamic.nin(), 2);
-        assert_eq!(dynamic.homspace(), legacy.homspace());
+        assert_eq!(dynamic.homspace(), stepwise.homspace());
         assert_eq!(dynamic_data, expected_data);
     }
 

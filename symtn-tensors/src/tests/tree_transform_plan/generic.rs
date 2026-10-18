@@ -747,7 +747,7 @@ impl GenericRigidSymbols for AnyonicGenericRule {
     }
 }
 
-pub(super) fn b2c_src_pair_for_rule<R: FusionRule>(rule: &R) -> FusionTreePairKey {
+pub(super) fn vacuum_rank2_src_pair_for_rule<R: FusionRule>(rule: &R) -> FusionTreePairKey {
     let cod = FusionTreeKey::try_new_for_rule(
         rule,
         [SectorId::new(1), SectorId::new(1)],
@@ -761,9 +761,9 @@ pub(super) fn b2c_src_pair_for_rule<R: FusionRule>(rule: &R) -> FusionTreePairKe
     FusionTreePairKey::pair(cod, dom)
 }
 
-pub(super) fn b2c_toy_src_pair() -> FusionTreePairKey {
+pub(super) fn vacuum_rank2_toy_src_pair() -> FusionTreePairKey {
     // cod [1,1]->0 (vacuum-coupled, N(1,1,0)=1, single vertex label 1), dom []->0.
-    b2c_src_pair_for_rule(&ToyGenericRule {
+    vacuum_rank2_src_pair_for_rule(&ToyGenericRule {
         style: FusionStyleKind::Generic,
     })
 }
@@ -888,7 +888,7 @@ fn build_generic_tree_pair_plan_matches_core_rows_and_guards_style() {
     let rule = ToyGenericRule {
         style: FusionStyleKind::Generic,
     };
-    let src_pair = b2c_toy_src_pair();
+    let src_pair = vacuum_rank2_toy_src_pair();
     let src_key = BlockKey::from(src_pair.clone());
     let src_structure = packed_fixture_structure(2, [(src_key.clone(), vec![1, 1])]).unwrap();
 
@@ -987,7 +987,7 @@ fn generic_multiplicity_monomial_rows_compile_and_execute_as_direct_singles() {
     assert_eq!(
         (
             tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
-            tree_pair_lowering_calls_rec.get(Event::LegacyTreePairAssembly)
+            tree_pair_lowering_calls_rec.get(Event::RowCallbackTreePairAssembly)
         ),
         (structure.fusion_tree_groups().len(), 0)
     );
@@ -1585,8 +1585,11 @@ fn generic_builder_rejects_multiplicity_free_style() {
     let mf = ToyGenericRule {
         style: FusionStyleKind::Simple,
     };
-    let structure =
-        packed_fixture_structure(2, [(BlockKey::from(b2c_toy_src_pair()), vec![1, 1])]).unwrap();
+    let structure = packed_fixture_structure(
+        2,
+        [(BlockKey::from(vacuum_rank2_toy_src_pair()), vec![1, 1])],
+    )
+    .unwrap();
     let err = build_generic_tree_pair_transform_group_plan(
         &mf,
         TreeTransformOperation::permute([1, 0], []),

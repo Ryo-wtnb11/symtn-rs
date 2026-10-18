@@ -63,7 +63,7 @@ where
         Ok(trees) => trees,
         Err(CheckedGenericStructureError::Provider(never)) => match never {},
         Err(CheckedGenericStructureError::Core(error)) => {
-            panic!("legacy Generic tree enumeration failed unexpectedly: {error}")
+            panic!("infallible Generic tree enumeration failed unexpectedly: {error}")
         }
     }
 }
@@ -86,7 +86,7 @@ where
         Ok(trees) => trees,
         Err(CheckedGenericStructureError::Provider(never)) => match never {},
         Err(CheckedGenericStructureError::Core(error)) => {
-            panic!("legacy Generic tree enumeration failed unexpectedly: {error}")
+            panic!("infallible Generic tree enumeration failed unexpectedly: {error}")
         }
     }
 }

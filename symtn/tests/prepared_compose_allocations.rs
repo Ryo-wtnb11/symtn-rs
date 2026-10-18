@@ -113,6 +113,6 @@ fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
     });
     assert_eq!((plan_warm.0, plan_warm.1), (warm.0, warm.1));
     eprintln!(
-        "B={count} legacy cold={cold:?} warm={warm:?}; plan/workspace cold={plan_cold:?} warm={plan_warm:?}"
+        "B={count} first runtime cold={cold:?} warm={warm:?}; fresh runtime cold={plan_cold:?} warm={plan_warm:?}"
     );
 }

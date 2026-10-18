@@ -682,7 +682,7 @@ fn assert_identity_map(
 // Gate 1: bendright∘bendleft == identity (the B-matrix is a Hom-space
 // isomorphism), enumerated over all vertex assignments, rank 2 and 3.
 #[test]
-fn b2a_generic_bend_round_trip_identity() {
+fn generic_bend_round_trip_identity() {
     let rule = A4BendRule;
     let t = a4_three();
     // Premise the round-trip depends on: N(a,b,c)==N(c,dual(b),a) so the
@@ -724,7 +724,7 @@ fn b2a_generic_bend_round_trip_identity() {
 // via_n=1 exercises one bend each way; via_n=0 exercises two bends each way,
 // covering the rank-1-codomain (left_coupled=vacuum) branch of bendright.
 #[test]
-fn b2a_generic_repartition_round_trip_identity() {
+fn generic_repartition_round_trip_identity() {
     let rule = A4BendRule;
     for via_n in [1usize, 0usize] {
         for mu in 1..=2 {
@@ -742,7 +742,7 @@ fn b2a_generic_repartition_round_trip_identity() {
 
 // Oracle: the core A/B derivation matches TK's Bsymbol / Asymbol.
 #[test]
-fn b2a_a4_b_and_a_symbol_match_tensorkit() {
+fn a4_b_and_a_symbol_match_tensorkit() {
     let rule = A4BendRule;
     let t = a4_three();
     // TK: Bsymbol(3,3,3) == I₂, Asymbol(3,3,3) == I₂ (TKS v0.3.6).
@@ -848,7 +848,7 @@ impl GenericRigidSymbols for OverwriteProbeRule {
 }
 
 #[test]
-fn b2a_generic_bendright_domain_empty_keeps_last_nu() {
+fn generic_bendright_domain_empty_keeps_last_nu() {
     let rule = OverwriteProbeRule;
     let a = SectorId::new(1);
     let c = rule.vacuum();
@@ -869,7 +869,7 @@ fn b2a_generic_bendright_domain_empty_keeps_last_nu() {
 
 // Oracle: tree-level bendright tables vs TensorKit's own bendright.
 #[test]
-fn b2a_a4_bendright_tree_table_matches_tensorkit() {
+fn a4_bendright_tree_table_matches_tensorkit() {
     let rule = A4BendRule;
     let sq3 = 3.0_f64.sqrt();
 
@@ -944,7 +944,7 @@ fn tp_expected_a() -> [[f64; 2]; 2] {
 }
 
 #[test]
-fn refute_b2a_b_symbol_is_not_transposed() {
+fn refute_b_symbol_is_not_transposed() {
     let rule = TransposeProbeRule;
     let s = SectorId::new(1);
     let b = b_symbol(&rule, s, s, s);
@@ -968,7 +968,7 @@ fn refute_b2a_b_symbol_is_not_transposed() {
 }
 
 #[test]
-fn refute_b2a_a_symbol_is_not_transposed() {
+fn refute_a_symbol_is_not_transposed() {
     // No other bend test uses the A derivation (fold tests do, through the
     // A4 oracle whose A is I₂), so this is the only check of its κ↔λ index
     // order.

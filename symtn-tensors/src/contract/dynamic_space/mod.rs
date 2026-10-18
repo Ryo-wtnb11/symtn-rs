@@ -484,7 +484,7 @@ impl DynamicFusionMapSpace {
         let nout = homspace.codomain().len();
         let nin = homspace.domain().len();
         #[cfg(test)]
-        crate::probe::hit(crate::probe::Event::LegacyShapePathBuild);
+        crate::probe::hit(crate::probe::Event::CallerShapePathBuild);
         let shapes = shapes
             .into_iter()
             .map(Into::into)
@@ -559,7 +559,7 @@ impl DynamicFusionMapSpace {
         let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
         let nout = codomain_axes.len();
         let nin = domain_axes.len();
-        let capability = LayoutBuildCapability::Legacy(primer);
+        let capability = LayoutBuildCapability::KeyBuilder(primer);
         let (homspace, prepared) =
             capability.permute(rule, source.homspace(), codomain_axes, domain_axes)?;
         debug_assert_eq!(nout, homspace.codomain().len());
@@ -974,7 +974,7 @@ impl DynamicFusionMapSpace {
     where
         R: MultiplicityFreeRigidSymbols,
     {
-        LayoutBuildCapability::Legacy(primer).contract(
+        LayoutBuildCapability::KeyBuilder(primer).contract(
             rule,
             lhs.homspace(),
             rhs.homspace(),

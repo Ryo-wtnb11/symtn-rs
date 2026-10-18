@@ -245,7 +245,7 @@ fn assert_checked_contract_all_orientations<R>(
                     FusionProductSpace::new([rhs_stored]),
                 )
             };
-            assert_direct_contract_matches_legacy(
+            assert_direct_contract_matches_reference(
                 rule,
                 &lhs,
                 &rhs,
@@ -391,11 +391,13 @@ fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
     }
 }
 
-fn assert_direct_leg_degeneracy_structure_matches_legacy<R>(rule: &R, homspace: &FusionTreeHomSpace)
-where
+fn assert_direct_leg_degeneracy_structure_matches_reference<R>(
+    rule: &R,
+    homspace: &FusionTreeHomSpace,
+) where
     R: MultiplicityFreeFusionRule,
 {
-    let expected = legacy_leg_degeneracy_structure(rule, homspace);
+    let expected = reference_leg_degeneracy_structure(rule, homspace);
     let actual = homspace
         .coupled_subblock_structure_from_leg_degeneracies(rule)
         .unwrap();
@@ -442,7 +444,7 @@ where
     }
 
     let direct_parts = coupled_subblock_parts_from_leg_degeneracies(homspace, &direct).unwrap();
-    let reconstructed_parts = legacy_leg_degeneracy_structure(rule, homspace);
+    let reconstructed_parts = reference_leg_degeneracy_structure(rule, homspace);
     assert_eq!(*direct_parts.0, *reconstructed_parts.sector_structure());
     assert_eq!(direct_parts.1, *reconstructed_parts.degeneracy_structure());
     assert_eq!(
@@ -452,7 +454,7 @@ where
 }
 
 #[test]
-fn direct_leg_degeneracy_layout_matches_legacy_for_supported_rules() {
+fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -466,18 +468,18 @@ fn direct_leg_degeneracy_layout_matches_legacy_for_supported_rules() {
     };
 
     let u1_hom = build(&[(u1(-2), 2), (u1(1), 1)]);
-    assert_direct_leg_degeneracy_structure_matches_legacy(&U1FusionRule, &u1_hom);
+    assert_direct_leg_degeneracy_structure_matches_reference(&U1FusionRule, &u1_hom);
     assert_coupled_grid_layout_matches_key_reconstruction(&U1FusionRule, &u1_hom);
 
     let parity_hom = build(&[(SectorId::new(0), 3), (SectorId::new(1), 2)]);
-    assert_direct_leg_degeneracy_structure_matches_legacy(&FermionParityFusionRule, &parity_hom);
+    assert_direct_leg_degeneracy_structure_matches_reference(&FermionParityFusionRule, &parity_hom);
     assert_coupled_grid_layout_matches_key_reconstruction(&FermionParityFusionRule, &parity_hom);
 
     let su2_hom = build(&[
         (SU2Irrep::from_twice_spin(0).sector_id(), 2),
         (SU2Irrep::from_twice_spin(1).sector_id(), 1),
     ]);
-    assert_direct_leg_degeneracy_structure_matches_legacy(&SU2FusionRule, &su2_hom);
+    assert_direct_leg_degeneracy_structure_matches_reference(&SU2FusionRule, &su2_hom);
     assert_coupled_grid_layout_matches_key_reconstruction(&SU2FusionRule, &su2_hom);
 
     let product_rule = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
@@ -491,18 +493,18 @@ fn direct_leg_degeneracy_layout_matches_legacy_for_supported_rules() {
             1,
         ),
     ]);
-    assert_direct_leg_degeneracy_structure_matches_legacy(&product_rule, &product_hom);
+    assert_direct_leg_degeneracy_structure_matches_reference(&product_rule, &product_hom);
     assert_coupled_grid_layout_matches_key_reconstruction(&product_rule, &product_hom);
 
     let scalar = FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
-    assert_direct_leg_degeneracy_structure_matches_legacy(&U1FusionRule, &scalar);
+    assert_direct_leg_degeneracy_structure_matches_reference(&U1FusionRule, &scalar);
     assert_coupled_grid_layout_matches_key_reconstruction(&U1FusionRule, &scalar);
 
     let rank_one = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(u1(0), 5)], true)]),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    assert_direct_leg_degeneracy_structure_matches_legacy(&U1FusionRule, &rank_one);
+    assert_direct_leg_degeneracy_structure_matches_reference(&U1FusionRule, &rank_one);
     assert_coupled_grid_layout_matches_key_reconstruction(&U1FusionRule, &rank_one);
     let rank_one_block = rank_one
         .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
@@ -531,7 +533,7 @@ fn direct_leg_degeneracy_layout_matches_legacy_for_supported_rules() {
         ]),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    assert_direct_leg_degeneracy_structure_matches_legacy(&U1FusionRule, &empty_domain);
+    assert_direct_leg_degeneracy_structure_matches_reference(&U1FusionRule, &empty_domain);
     assert_coupled_grid_layout_matches_key_reconstruction(&U1FusionRule, &empty_domain);
 }
 

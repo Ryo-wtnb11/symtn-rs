@@ -1090,7 +1090,7 @@ fn checked_generic_plan_repartition_queries_checked_rigid_primitives() {
 #[test]
 fn generic_transpose_accepts_nonsymmetric_braiding_but_permute_rejects_it() {
     let rule = AnyonicGenericRule;
-    let src_pair = b2c_src_pair_for_rule(&rule);
+    let src_pair = vacuum_rank2_src_pair_for_rule(&rule);
     let structure =
         packed_fixture_structure(2, [(BlockKey::from(src_pair.clone()), vec![1, 1])]).unwrap();
 

@@ -402,7 +402,7 @@ where
             // The infallible API only reports the bounded-table failure after the
             // aggregate is built. All other core failures are impossible for
             // a structurally valid infallible FusionRule walk.
-            panic!("legacy Generic structural walk failed unexpectedly: {error}")
+            panic!("infallible Generic structural walk failed unexpectedly: {error}")
         }
     }
 }

@@ -369,7 +369,7 @@ fn checked_tree_pair_preserves_validation_precedence() {
 }
 
 #[test]
-fn fusion_subset_structural_proof_precedes_algebra_and_preserves_legacy_work() {
+fn fusion_subset_structural_proof_precedes_algebra_and_preserves_unchecked_work() {
     // What: HomSpace metadata is proved without provider calls, while the
     // categorical phase makes exactly the local validator's provider calls.
     let scalar = FusionTreeKey::new([], SectorId::new(0), [], [], []);
@@ -435,14 +435,14 @@ fn fusion_subset_structural_proof_precedes_algebra_and_preserves_legacy_work() {
             .unwrap();
     let direct = CheckedTreeProbe::default();
     LocallyValidatedFusionTreeBlockStructure::try_new(&direct, &structure).unwrap();
-    let expected_calls = direct.legacy_nsymbol_calls.load(Ordering::Relaxed);
+    let expected_calls = direct.unchecked_nsymbol_calls.load(Ordering::Relaxed);
     let admitted = CheckedTreeProbe::default();
     homspace
         .validate_subblock_structure_subset(&admitted, &structure)
         .unwrap();
     assert!(expected_calls > 0);
     assert_eq!(
-        admitted.legacy_nsymbol_calls.load(Ordering::Relaxed),
+        admitted.unchecked_nsymbol_calls.load(Ordering::Relaxed),
         expected_calls
     );
 }
@@ -563,12 +563,12 @@ fn checked_layout_and_space_admission_reject_finite_nonclosure_transactionally()
         ]),
         FusionProductSpace::new([]),
     );
-    let legacy = packed_fixture_structure(2, [(failing_pair, vec![1, 1])]).unwrap();
+    let structure = packed_fixture_structure(2, [(failing_pair, vec![1, 1])]).unwrap();
     homspace
-        .validate_subblock_structure_subset(&probe, &legacy)
+        .validate_subblock_structure_subset(&probe, &structure)
         .unwrap();
     assert_eq!(
-        homspace.validate_subblock_structure_subset_checked(&probe, &legacy),
+        homspace.validate_subblock_structure_subset_checked(&probe, &structure),
         Err(CheckedFusionSpaceError::FusionAlgebra(Box::new(
             FusionAlgebraError::FusionNotRepresentable {
                 left: SectorId::new(9),
