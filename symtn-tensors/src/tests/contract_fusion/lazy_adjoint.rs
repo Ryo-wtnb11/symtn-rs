@@ -893,14 +893,16 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
         TestTensor::<Complex64>::from_vec_with_fusion_space(lhs_data.clone(), lhs_fusion).unwrap();
     let rhs_typed =
         TestTensor::<Complex64>::from_vec_with_fusion_space(rhs_data.clone(), rhs_fusion).unwrap();
-    let candidate = crate::contract::contracted_axis_order_candidates(&[0], &[0]).remove(0);
+    // The reverse plan takes the same lazy-adjoint form as the eager calls
+    // above: the contracted leg is the domain leg 1 of `a'`.
+    let candidate = crate::contract::contracted_axis_order_candidates(&[1], &[0]).remove(0);
     let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
         provider.as_ref(),
         &dst_space,
         &lhs_typed.fusion_space().unwrap().as_ref().clone(),
         &rhs_typed.fusion_space().unwrap().as_ref().clone(),
         TensorContractSpec::new_with_conjugation(
-            &[0],
+            &[1],
             &[0],
             OutputAxisOrder::identity(),
             true,

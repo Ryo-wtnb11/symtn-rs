@@ -247,8 +247,8 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
         } else {
             &rhs_hom
         };
-        let lowered_lhs_axes = maybe_adjoint_axes::<3, 1>(&[0, 1, 2], lhs_conjugate);
-        let lowered_rhs_axes = maybe_adjoint_axes::<1, 3>(&[1, 2, 3], rhs_conjugate);
+        let (lowered_lhs_axes, lowered_rhs_axes) =
+            su2_contracted_logical_axes(lhs_conjugate, rhs_conjugate);
         // A set flag names the lazy-adjoint operand, whose legs the axes index.
         let axes = TensorContractSpec::with_default_output_order_and_conjugation(
             lowered_lhs_axes.as_slice(),

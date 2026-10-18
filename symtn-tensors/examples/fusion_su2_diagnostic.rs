@@ -75,8 +75,15 @@ fn main() {
     let lhs_bound = bind(lhs_space.clone());
     let rhs_bound = bind(rhs_space.clone());
     let dst_bound = bind(dst_space);
-    let plan =
-        prepare_tensorcontract_fusion_plan_dyn(&dst_bound, &lhs_bound, &rhs_bound, axes).unwrap();
+    let plan = prepare_tensorcontract_fusion_plan_dyn(
+        &dst_bound,
+        FusionOperand::direct(lhs_bound.space()),
+        FusionOperand::direct(rhs_bound.space()),
+        axes.lhs_contracting_axes(),
+        axes.rhs_contracting_axes(),
+        &[0, 1],
+    )
+    .unwrap();
     let mut tree_context = TreeTransformExecutionContext::<f64, RuleIdentity>::default();
     tree_context
         .tree_transform_dyn_into(

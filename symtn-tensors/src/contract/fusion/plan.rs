@@ -1,8 +1,9 @@
+use std::borrow::Cow;
+
 use symtn_core::{FusionSpaceAdmission, FusionTreeHomSpace, MultiplicityFreeRigidSymbols};
 
 use smallvec::SmallVec;
 
-use crate::lowering::lower_tensorcontract_adjoint_axes;
 use crate::{DenseBlockScalar, OperationError, TreeTransformOperation, TreeTransformOperationKind};
 use symtn_operations::{AxisVec, OutputAxisOrder, TensorContractSpec, TensorContractSpecOwned};
 
@@ -548,28 +549,56 @@ impl FusionContractPlan {
     }
 }
 
-/// The fusion contraction plan over bound dynamic spaces, retaining the
-/// checked provider authority carried by the input spaces.
+/// The fusion contraction plan of `dst = contract(lhs, rhs)`, the planning
+/// step of [`TensorContractFusionExecutionContext::tensorcontract_planned_into`]
+/// with the same operand convention: a [`FusionOperand::adjoint`] operand is
+/// the lazy adjoint of its storage space, and its axes index the adjoint's
+/// legs, as in TensorKit's planned `contract!`, which receives `A'` after
+/// `tensorcontract!` has lowered `conjA`.
+///
+/// [`TensorContractFusionExecutionContext::tensorcontract_planned_into`]:
+///     crate::TensorContractFusionExecutionContext::tensorcontract_planned_into
 pub fn prepare_tensorcontract_fusion_plan_dyn<R>(
     dst: &BoundDynamicFusionMapSpace<R>,
-    lhs: &BoundDynamicFusionMapSpace<R>,
-    rhs: &BoundDynamicFusionMapSpace<R>,
-    axes: TensorContractSpec<'_>,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
+    lhs_axes: &[usize],
+    rhs_axes: &[usize],
+    output_axes: &[usize],
 ) -> Result<FusionContractPlan, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    // Why not accept a separate rule: the bound spaces are the semantic
-    // authority. The raw core still performs cheap identity checks without
-    // re-enumerating any fusion-tree grid.
+    // Why not accept a separate rule: the bound destination is the semantic
+    // authority, as in the eager entry. The raw core still checks every
+    // operand space against it without re-enumerating any fusion-tree grid.
     prepare_tensorcontract_fusion_plan_dyn_raw(
-        lhs.provider(),
+        dst.provider(),
         dst.space(),
-        lhs.space(),
-        rhs.space(),
-        axes,
+        lhs.storage_space(),
+        rhs.storage_space(),
+        TensorContractSpec::new_with_conjugation(
+            lhs_axes,
+            rhs_axes,
+            OutputAxisOrder::from_axes(output_axes),
+            lhs.storage_conjugate(),
+            rhs.storage_conjugate(),
+        ),
     )
+}
+
+/// `space`, or its lazy adjoint view when `adjoint` is set: the logical
+/// space whose legs a conjugated operand's axes index.
+fn logical_space(
+    space: &DynamicFusionMapSpace,
+    adjoint: bool,
+) -> Result<Cow<'_, DynamicFusionMapSpace>, OperationError> {
+    if adjoint {
+        space.adjoint_view().map(Cow::Owned)
+    } else {
+        Ok(Cow::Borrowed(space))
+    }
 }
 
 pub(crate) fn prepare_tensorcontract_fusion_plan_dyn_raw<R>(
@@ -629,30 +658,18 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    let lowered_axes =
-        lower_tensorcontract_adjoint_axes(lhs.nout(), lhs.nin(), rhs.nout(), rhs.nin(), axes)?;
-    let lhs_adjoint;
-    let lhs = if axes.lhs_conjugate() {
-        lhs_adjoint = lhs.adjoint_view()?;
-        &lhs_adjoint
-    } else {
-        lhs
-    };
-    let rhs_adjoint;
-    let rhs = if axes.rhs_conjugate() {
-        rhs_adjoint = rhs.adjoint_view()?;
-        &rhs_adjoint
-    } else {
-        rhs
-    };
+    let lhs = logical_space(lhs, axes.lhs_conjugate())?;
+    let lhs = &*lhs;
+    let rhs = logical_space(rhs, axes.rhs_conjugate())?;
+    let rhs = &*rhs;
     select_tensorcontract_fusion_plan_from_spaces_with_orientations(
         rule,
         dst,
         lhs,
         rhs,
-        lowered_axes.as_spec(),
-        lowered_axes.lhs_storage_conjugate(),
-        lowered_axes.rhs_storage_conjugate(),
+        axes,
+        axes.lhs_conjugate(),
+        axes.rhs_conjugate(),
         orientations,
     )
 }
@@ -778,30 +795,18 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    let lowered_axes =
-        lower_tensorcontract_adjoint_axes(lhs.nout(), lhs.nin(), rhs.nout(), rhs.nin(), axes)?;
-    let lhs_adjoint;
-    let lhs = if axes.lhs_conjugate() {
-        lhs_adjoint = lhs.adjoint_view()?;
-        &lhs_adjoint
-    } else {
-        lhs
-    };
-    let rhs_adjoint;
-    let rhs = if axes.rhs_conjugate() {
-        rhs_adjoint = rhs.adjoint_view()?;
-        &rhs_adjoint
-    } else {
-        rhs
-    };
-    validate_tensorcontract_fusion_plan_inputs(rule, dst, lhs, rhs, lowered_axes.as_spec(), None)?;
+    let lhs = logical_space(lhs, axes.lhs_conjugate())?;
+    let lhs = &*lhs;
+    let rhs = logical_space(rhs, axes.rhs_conjugate())?;
+    let rhs = &*rhs;
+    validate_tensorcontract_fusion_plan_inputs(rule, dst, lhs, rhs, axes, None)?;
     compile_tensorcontract_fusion_plan_from_spaces(
         dst,
         lhs,
         rhs,
-        lowered_axes.as_spec(),
-        lowered_axes.lhs_storage_conjugate(),
-        lowered_axes.rhs_storage_conjugate(),
+        axes,
+        axes.lhs_conjugate(),
+        axes.rhs_conjugate(),
     )
 }
 
@@ -820,30 +825,18 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    let lowered_axes =
-        lower_tensorcontract_adjoint_axes(lhs.nout(), lhs.nin(), rhs.nout(), rhs.nin(), axes)?;
-    let lhs_adjoint;
-    let lhs = if axes.lhs_conjugate() {
-        lhs_adjoint = lhs.adjoint_view()?;
-        &lhs_adjoint
-    } else {
-        lhs
-    };
-    let rhs_adjoint;
-    let rhs = if axes.rhs_conjugate() {
-        rhs_adjoint = rhs.adjoint_view()?;
-        &rhs_adjoint
-    } else {
-        rhs
-    };
+    let lhs = logical_space(lhs, axes.lhs_conjugate())?;
+    let lhs = &*lhs;
+    let rhs = logical_space(rhs, axes.rhs_conjugate())?;
+    let rhs = &*rhs;
     fusion_contract_candidate_facts_from_spaces_with_probe(
         rule,
         dst,
         lhs,
         rhs,
-        lowered_axes.as_spec(),
-        lowered_axes.lhs_storage_conjugate(),
-        lowered_axes.rhs_storage_conjugate(),
+        axes,
+        axes.lhs_conjugate(),
+        axes.rhs_conjugate(),
         encoded_layout_probe::<R>,
         None,
         &CACHED_ORIENTATIONS,

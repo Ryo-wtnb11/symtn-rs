@@ -166,7 +166,15 @@ fn warm_compile_allocations(codomain: usize, domain: usize) -> [usize; 3] {
         resolution
     });
     let plan = warm_allocations(|| {
-        prepare_tensorcontract_fusion_plan_dyn(&dst, &lhs, &square, axes()).unwrap()
+        prepare_tensorcontract_fusion_plan_dyn(
+            &dst,
+            FusionOperand::direct(lhs.space()),
+            FusionOperand::direct(square.space()),
+            &lhs_domain,
+            &square_codomain,
+            &swapped,
+        )
+        .unwrap()
     });
     [core, dynamic_tree, plan]
 }
