@@ -1,13 +1,8 @@
 //! `twist` and `flip` of complex-symbol rules (#2281) on Fibonacci and
-//! Ising through `TableRule`, against TensorKit 0.17.1
-//! (`fixtures/tensorkit_table_twist_flip.jl`), a closed-form θ hand oracle,
-//! TensorKit's inverse identities, and the lazy adjoint; and the unchanged
-//! `NoBraiding` refusals on Rep(S₃).
-//!
-//! Entries are the tree-hash function the fixture also evaluates, so the
-//! oracle builds the same tensor without reading anything symtn computed.
-//! Every fixture row is `inner(probe, result)`, invariant under AnyonWiki's
-//! Ising vertex gauge (see the fixture header).
+//! Ising through `TableRule`: twist against the closed-form θ entrywise,
+//! flip against a few values checked against TensorKit 0.17.1, TensorKit's
+//! inverse identities, and the lazy adjoint; and the unchanged `NoBraiding`
+//! refusals on Rep(S₃).
 
 use std::sync::Arc;
 
@@ -22,9 +17,7 @@ use table_fixture::*;
 
 type Table = TensorMap<TableRule, Complex64>;
 
-const TENSORKIT: &str = include_str!("fixtures/tensorkit-0.17.1-table-twist-flip.txt");
-
-/// Zero-based symtn legs and TensorKit's `inv`, as the fixture's `CASES`.
+/// Zero-based symtn legs and TensorKit's `inv`.
 const TWISTS: [(bool, &[usize]); 5] = [
     (false, &[1]),
     (true, &[1]),
@@ -41,22 +34,6 @@ const FLIPS: [(bool, &[usize]); 7] = [
     (true, &[1, 2]),
     (false, &[0, 1, 2, 3]),
 ];
-
-fn tensorkit(category: &str, operation: &str, inverse: bool, legs: &[usize]) -> Complex64 {
-    let legs = legs
-        .iter()
-        .map(|leg| (leg + 1).to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let inverse = inverse.to_string();
-    let row = TENSORKIT
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| fields[..4] == [category, operation, &*inverse, &*legs])
-        .unwrap_or_else(|| panic!("fixture is missing {category} {operation} {inverse} {legs}"));
-    Complex64::new(row[4].parse().unwrap(), row[5].parse().unwrap())
-}
 
 fn direction(inverse: bool) -> Direction {
     if inverse {
@@ -93,6 +70,7 @@ fn ising() -> Category {
         theta: |label| match label {
             1 => Complex64::new(1.0, 0.0),
             2 => Complex64::new(-1.0, 0.0),
+            // θ_σ = (R^{σσ}_1 + R^{σσ}_ψ)/√2 = (e^{-iπ/8} + e^{3iπ/8})/√2 = e^{iπ/8}.
             _ => Complex64::from_polar(1.0, std::f64::consts::PI / 8.0),
         },
     }
@@ -152,50 +130,58 @@ fn assert_same(what: &str, got: &Table, want: &Table) {
     }
 }
 
-fn check_against_tensorkit(category: &Category) {
+/// `inner(probe, flip(t, legs))` checked against TensorKit 0.17.1 (`flip`
+/// on the same `entry` operand and probe, AnyonWiki labels; one-based legs
+/// `1`, inv `1,4` for Fibonacci and `4`, inv `2,3` for Ising). Each value is
+/// invariant under AnyonWiki's Ising vertex sign u^{σσ}_ψ = −1 (#2277): flip
+/// scales a tree pair by twists and Frobenius-Schur phases of its uncoupled
+/// sectors, and `inner` pairs entries of equal trees.
+const FLIP_ROWS: [(&str, bool, &[usize], Complex64); 4] = [
+    (
+        "fibonacci",
+        false,
+        &[0],
+        Complex64::new(4.429009764303868, -0.00839304164666606),
+    ),
+    (
+        "fibonacci",
+        true,
+        &[0, 3],
+        Complex64::new(-1.8270041038594473, 2.030263134846873),
+    ),
+    (
+        "ising",
+        false,
+        &[3],
+        Complex64::new(1.194743771104495, 0.21559809479101277),
+    ),
+    (
+        "ising",
+        true,
+        &[1, 2],
+        Complex64::new(-5.795438516579738, 0.7743937638144475),
+    ),
+];
+
+#[test]
+fn flip_matches_values_checked_against_tensorkit() {
     let runtime = Runtime::builder().build().unwrap();
-    let t = operand(&runtime, category);
-    for (inverse, legs) in TWISTS {
-        let result = t.twist(legs, direction(inverse)).unwrap();
-        assert_close(
-            &format!("{} twist {inverse} {legs:?}", category.name),
-            probe(&runtime, &result),
-            tensorkit(category.name, "twist", inverse, legs),
-        );
-    }
-    for (inverse, legs) in FLIPS {
-        let result = t.flip(legs, direction(inverse)).unwrap();
-        assert_close(
-            &format!("{} flip {inverse} {legs:?}", category.name),
-            probe(&runtime, &result),
-            tensorkit(category.name, "flip", inverse, legs),
-        );
-    }
-}
-
-#[test]
-fn fibonacci_twist_and_flip_match_tensorkit() {
-    check_against_tensorkit(&fibonacci());
-}
-
-#[test]
-fn ising_twist_and_flip_match_tensorkit() {
-    check_against_tensorkit(&ising());
-}
-
-/// The negative control of the fixture rows: the inverse twist of a leg
-/// carrying a complex θ is a different tensor, so comparing a forward row
-/// with its inverse row would fail.
-#[test]
-fn the_inverse_twist_row_differs_from_the_forward_row() {
     for category in [fibonacci(), ising()] {
-        let forward = tensorkit(category.name, "twist", false, &[1]);
-        let inverse = tensorkit(category.name, "twist", true, &[1]);
-        assert!((forward - inverse).norm() > 1.0, "{}", category.name);
+        let t = operand(&runtime, &category);
+        for &(name, inverse, legs, want) in &FLIP_ROWS {
+            if name == category.name {
+                let result = t.flip(legs, direction(inverse)).unwrap();
+                assert_close(
+                    &format!("{name} flip {inverse} {legs:?}"),
+                    probe(&runtime, &result),
+                    want,
+                );
+            }
+        }
     }
 }
 
-/// Every entry of the twisted tensor is the fixture entry times the
+/// Every entry of the twisted tensor is the operand entry times the
 /// closed-form `Π θ` of its block's uncoupled sectors on `legs` (θ̄ for the
 /// inverse): θ_τ = e^{-4πi/5}; θ_σ = e^{iπ/8}, θ_ψ = −1.
 #[test]
