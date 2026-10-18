@@ -9,6 +9,7 @@ operation examples and function-level contracts.
 | Layer ownership (symbols, tensors, dense backend) | [Layering and ownership](layering.md) |
 | Architecture and ownership | [symtn design](design.md) |
 | Mathematical conventions | [Tensor-map mathematics](../symtn/src/mathematics.md) |
+| Intentional differences from TensorKit | [Differences from TensorKit](tensorkit-differences.md) |
 | Implementing a symmetry provider | [Provider interface](provider_interface.md) |
 | Selecting dense and device backends | [Backend policy](backend_policy.md) |
 | Structural complexity obligations | [Complexity policy](complexity_parity_policy.md) |
