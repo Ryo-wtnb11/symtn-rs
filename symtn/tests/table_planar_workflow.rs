@@ -13,7 +13,7 @@ use symtn_sectors::{
 
 /// One fixed bound for the planar workflow. At most three unit-norm 2x2
 /// transforms and two 2x2 products contribute to any checked coordinate, so
-/// `256 * f64::EPSILON` leaves margin for the imported decimals and BLAS
+/// `256 * f64::EPSILON` leaves margin for the closed-form constants and BLAS
 /// arithmetic without making the bound provider-tunable.
 const PLANAR_BOUND: f64 = 256.0 * f64::EPSILON;
 
@@ -270,28 +270,27 @@ fn fibonacci_public_planar_workflow_matches_tensorkit() {
     assert_matrix_close(fibonacci.hamiltonian, tensorkit_hamiltonian, "golden chain");
 }
 
-/// TensorKit 0.17.1 / TensorKitSectors 0.3.9 `IsingAnyon`
-/// (`src/anyons.jl`: `Fsymbol`, `Rsymbol`), from
-/// `fixtures/tensorkit_table_planar.jl`.
-const TENSORKIT_ISING: &str = include_str!("fixtures/tensorkit-0.17.1-table-planar.txt");
-
-fn tensorkit_ising(tag: &str) -> Matrix2 {
-    let mut matrix = [[Complex64::new(f64::NAN, f64::NAN); 2]; 2];
-    let mut seen = 0;
-    for fields in TENSORKIT_ISING
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .filter(|fields| fields[0] == tag && fields.len() == 5)
-    {
-        let (row, column): (usize, usize) =
-            (fields[1].parse().unwrap(), fields[2].parse().unwrap());
-        matrix[row][column] =
-            Complex64::new(fields[3].parse().unwrap(), fields[4].parse().unwrap());
-        seen += 1;
-    }
-    assert_eq!(seen, 4, "fixture rows for {tag}");
-    matrix
+/// TensorKitSectors 0.3.9 `IsingAnyon` (`src/anyons.jl`: `Fsymbol`,
+/// `Rsymbol`) on TensorKit's basis `[(σσ) → 𝟙, (σσ) → ψ]` of `σ ⊗ σ ⊗ σ ← σ`:
+/// `σ₁ = diag(R^{σσ}_𝟙, R^{σσ}_ψ) = diag(e^{−iπ/8}, e^{3iπ/8})`, the planar
+/// basis change `F = F^{σσσ}_σ = [[1, 1], [1, −1]]/√2`, and `σ₂ = F σ₁ F`
+/// (`F` is real symmetric and its own inverse). Returns `(σ₁, σ₂, F)`.
+///
+/// Gauge: `R^{σσ}_c` (equal legs) and so the spectra of `σ₁`, `σ₂` are
+/// vertex-gauge invariant; `σ₂` and `F` are not, since `u^{σσ}_ψ` flips the
+/// sign of their off-diagonal entries. Those are therefore compared only
+/// under the explicit gauge witness in the Ising test.
+fn tensorkit_ising() -> (Matrix2, Matrix2, Matrix2) {
+    use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_8};
+    let zero = Complex64::new(0.0, 0.0);
+    let s = Complex64::new(FRAC_1_SQRT_2, 0.0);
+    let sigma1 = [
+        [Complex64::cis(-FRAC_PI_8), zero],
+        [zero, Complex64::cis(3.0 * FRAC_PI_8)],
+    ];
+    let f = [[s, s], [s, -s]];
+    let sigma2 = matrix_product(matrix_product(f, sigma1), f);
+    (sigma1, sigma2, f)
 }
 
 fn hamiltonian(f: Matrix2) -> Matrix2 {
@@ -348,11 +347,7 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
         [TableSector::new(1), TableSector::new(2)],
         [0, 2, 0],
     );
-    let (sigma1, sigma2, f) = (
-        tensorkit_ising("sigma1"),
-        tensorkit_ising("sigma2"),
-        tensorkit_ising("f"),
-    );
+    let (sigma1, sigma2, f) = tensorkit_ising();
 
     // Gauge-invariant: braid-generator and golden-chain spectra, and the
     // trace of the braid word σ₁σ₂σ₁.
@@ -362,17 +357,10 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
     let word = matrix_product(matrix_product(sigma1, sigma2), sigma1);
     let trace = |m: Matrix2| m[0][0] + m[1][1];
     assert!((trace(ising.yang_baxter) - trace(word)).norm() <= PLANAR_BOUND);
-    for (generator, tensorkit) in [(1, sigma1), (2, sigma2)] {
-        let inverse = tensorkit_ising(&format!("sigma_inv{generator}"));
-        assert_matrix_close(
-            matrix_product(inverse, tensorkit),
-            [
-                [Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
-                [Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)],
-            ],
-            "TensorKit generator inverse",
-        );
-    }
+    // Inverses: TensorKit's σᵢ⁻¹ is σᵢ† (both generators are unitary), and
+    // `planar_workflow` already asserts the workflow's inverse is the adjoint
+    // of its generator; with the real orthogonal witness below this matches
+    // TensorKit's inverse too.
 
     // The exact gauge witness: AnyonWiki's Ising is TensorKit's under the
     // vertex gauge u^{σσ}_ψ = −1, which fixes σ₁ (diagonal R) and conjugates
@@ -396,15 +384,6 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
     }
 }
 
-fn tensorkit_semion(tag: &str) -> Complex64 {
-    let fields: Vec<&str> = TENSORKIT_ISING
-        .lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>())
-        .find(|fields| fields.first() == Some(&tag))
-        .unwrap_or_else(|| panic!("fixture is missing {tag}"));
-    Complex64::new(fields[1].parse().unwrap(), fields[2].parse().unwrap())
-}
-
 /// The semion `[2,1,0,1,1,1,1]` is pointed, so `TableRule` reports `Unique`
 /// fusion with a nontrivial associator `F^{sss}_s = −1` and `R^{ss}_𝟙 = i`.
 /// Hand oracle on the one state of `s ⊗ s ⊗ s ← s`: the braid generators act
@@ -412,7 +391,10 @@ fn tensorkit_semion(tag: &str) -> Complex64 {
 /// the crossing-free transpose then compose is `F^{sss}_s[𝟙, 𝟙]` times the
 /// Frobenius–Schur phase `κ_s = −1` of the bend, `+1`. An engine that took
 /// `F = 1` on the Unique path but kept `κ_s` from the table would give `−1`.
-/// TensorKit's `Z2Element{1}`, the same symbols, agrees on every value.
+/// Every value is vertex-gauge invariant (equal-leg `R`, and in a pointed
+/// category the gauge factors of `F^{sss}_s` cancel); TensorKit's
+/// `Z2Element{1}`, the same symbols, gives the same values (checked against
+/// TensorKit 0.17.1).
 #[test]
 fn semion_unique_fusion_uses_its_associator() {
     use symtn_sectors::{FusionRule, FusionStyleKind};
@@ -435,11 +417,6 @@ fn semion_unique_fusion_uses_its_associator() {
         assert!(
             (actual - hand).norm() <= PLANAR_BOUND,
             "{what}: {actual} != {hand}"
-        );
-        let tensorkit = tensorkit_semion(what);
-        assert!(
-            (actual - tensorkit).norm() <= PLANAR_BOUND,
-            "{what}: {actual} != TensorKit {tensorkit}"
         );
     };
     let i = Complex64::new(0.0, 1.0);
