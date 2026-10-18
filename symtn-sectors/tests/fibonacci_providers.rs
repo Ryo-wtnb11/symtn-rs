@@ -25,7 +25,7 @@ fn bits(z: Complex64) -> String {
     format!("{:016x} {:016x}", z.re.to_bits(), z.im.to_bits())
 }
 
-const PHI: f64 = 1.618_033_988_749_895;
+const PHI: f64 = std::f64::consts::GOLDEN_RATIO;
 
 /// TensorKitSectors 0.3.9 `FibonacciAnyon` (`src/anyons.jl`: `Nsymbol`,
 /// `Fsymbol`, `Rsymbol`, `dim`) on ids `(1, τ) = (0, 1)`, the same closed
