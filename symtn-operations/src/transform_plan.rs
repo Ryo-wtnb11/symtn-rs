@@ -608,7 +608,7 @@ impl<T> TreeTransformGroupBlockSpec<T> {
 
     /// Replace every key in place, destinations first, then sources, each in
     /// order; a cache re-homes a freshly built spec's keys into the entry's
-    /// own arena this way (Rule O, #2192). A shared key slice is copied once.
+    /// own arena this way (single-arena ownership, #2192). A shared key slice is copied once.
     #[doc(hidden)]
     pub fn rehome_keys(&mut self, mut rehome: impl FnMut(&FusionTreePairKey) -> FusionTreePairKey) {
         fn in_place(

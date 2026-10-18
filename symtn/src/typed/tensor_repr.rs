@@ -915,8 +915,8 @@ where
     ///
     /// # Errors
     ///
-    /// Never returns an error; the `Result` keeps the method shape for
-    /// fallible dimension providers.
+    /// Returns an error when a sector's quantum dimension is not real (its
+    /// dimension scalar's `real_dimension()` is `None`).
     pub fn leg_dims(&self) -> Result<Vec<usize>, Error> {
         let hom = self.logical_space().space().homspace();
         let provider = self.logical_space().provider();

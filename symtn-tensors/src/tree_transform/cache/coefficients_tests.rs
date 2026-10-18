@@ -451,7 +451,7 @@ fn a_staged_entry_owns_one_arena_for_its_key_and_value() {
 
     // What: the key's group and source pairs and the value's destination and
     // source pairs all point into one arena (charged once), never into the
-    // source structure's, and are equal by content (Rule O, #2192).
+    // source structure's, and are equal by content (single-arena ownership, #2192).
     let arena = key.group_key.codomain_tree();
     assert!(arena.shares_arena(key.group_key.domain_tree()));
     let spec = &entry.specs()[0];
@@ -496,8 +496,8 @@ fn a_staged_trace_entry_owns_one_arena_for_its_key_and_destinations() {
     let (key, _, _) = &pending.groups[0];
 
     // What: the key and every destination of a trace entry point into one
-    // arena (charged once), never into the source structure's (Rule O,
-    // #2192), and keep their content.
+    // arena (charged once), never into the source structure's (single-arena
+    // ownership, #2192), and keep their content.
     let arena = key.group_key.codomain_tree();
     assert!(arena.shares_arena(key.group_key.domain_tree()));
     for pair in key.src_keys.iter().chain(entry.destinations()) {

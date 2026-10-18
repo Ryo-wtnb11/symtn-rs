@@ -77,7 +77,7 @@ case/workspace pair (default 5). The `median` row is the complete raw row whose
 mode, which permits valid baseline fresh evidence when reuse correctness fails.
 
 Record the exact symtn SHA, lock SHA-256, command, `rustc -Vv`, CPU/OS details,
-and raw CSV under `libraries/reviews/cpu-data-20260912/`. Run the committed
+and the raw CSV with the reported result. Run the committed
 baseline harness and final benchmark commit with the same executable settings.
 Do not report a speedup or non-regression unless the two commits differ in
 production code relevant to the measured path and the measurements support

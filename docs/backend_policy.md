@@ -201,10 +201,11 @@ CUDA_VISIBLE_DEVICES=<free ordinal> scripts/run-device-tests.sh
 |---|---|---|
 | `typed_cuda_into_rejects_a_foreign_device_destination_untouched`, `a_spectrum_from_another_device_is_rejected_by_every_consumer` | Skipped unless `--two-gpu` (then `CUDA_VISIBLE_DEVICES` must list two free devices); the summary prints `NOT RUN` | Needs device 1 as well as device 0 |
 
-**Evidence rule.** For a change that touches CUDA paths, run the script on the
-commit under review and record the SHA, the device line, the counts and the
-`RESULT` line in its pull request. A run with a failing or `NOT RUN` entry
-beyond the table above is not recorded as passing.
+**Evidence rule.** At each roadmap milestone that touches CUDA paths, run the
+script on the milestone commit and record the SHA, the device line, the counts
+and the `RESULT` line as a comment on the CUDA roadmap tracking issue (#1139).
+A milestone with a failing or `NOT RUN` entry beyond the table above is not
+recorded as passing.
 
 **Scaling claims.** Any scaling claim needs fresh, pinned provider, revision,
 configuration, and raw measurement evidence.

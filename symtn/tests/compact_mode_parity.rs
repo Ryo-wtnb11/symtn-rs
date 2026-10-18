@@ -577,7 +577,7 @@ fn compact_twist_allocates_linear_in_the_spectrum_in_both_modes() {
     }
 }
 
-// ---- Leaf B: compose and contract ----
+// ---- Compose and contract ----
 
 /// The compact operand and its dense twin, plus two dense operands that face
 /// the bond: `a: W ⊗ W ← W` and `b: W ← W ⊗ W`.
@@ -776,7 +776,7 @@ fn pick<R: TypedSectorAdmission, D: TensorScalar>(
 /// marks a case both storages reject with the same error.
 ///
 /// The one storage-dependent outcome: checked Generic contraction of a
-/// non-Bosonic rule is unsupported (U15) on the dense route, while the compact
+/// non-Bosonic rule is unsupported on the dense route, while the compact
 /// arm, which only scales and permutes, answers it as TensorKit does. The
 /// caller checks those values against the multiplicity-free mode instead.
 fn bond_rows<R, D>(fixture: &BondFixture<R, D>, cases: &[BondCase]) -> Vec<Option<Vec<Complex64>>>
@@ -916,7 +916,7 @@ fn compact_compose_and_contract_agree_across_modes() {
 fn fermionic_compact_compose_and_contract_agree_across_modes() {
     // What: the fermionic row. Composition is admitted in both modes and
     // agrees. Checked Generic fermionic contraction is unsupported on the
-    // dense route (U15), so the compact arms' values, every listed pattern
+    // dense route, so the compact arms' values, every listed pattern
     // included, are checked against the multiplicity-free mode (whose dense
     // route `bond_rows` already checked).
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
@@ -1306,7 +1306,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
     assert_rows_close(&mf, &checked);
 }
 
-// ---- Leaf C: rank-(1,1) swap and braid ----
+// ---- Rank-(1,1) swap and braid ----
 //
 // TensorKit `cfaa073e` `permute(d::DiagonalTensorMap, ((2,), (1,)))` and
 // `transpose` (`src/tensors/diagonal.jl:215-273`) keep the result diagonal on
@@ -1791,7 +1791,7 @@ fn compact_swap_allocates_linear_in_the_spectrum_in_both_modes() {
     }
 }
 
-// ---- Leaf D: full trace ----
+// ---- Full trace ----
 
 /// The full trace of `d` over `pair`, and the same trace of its dense twin.
 fn full_traces<R, D>(d: &TensorMap<R, D>, pair: (usize, usize)) -> (Complex64, Complex64)

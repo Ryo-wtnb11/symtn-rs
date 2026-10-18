@@ -314,7 +314,7 @@ pub fn check_member<R>(
 }
 
 /// Whether a sector list contains a `|λ|` tie between distinct values, the
-/// ±λ situation of the D4 gate.
+/// ±λ tie the `±λ` fixtures assert.
 pub fn has_plus_minus_tie<R>(d: &TensorMap<R, f64>) -> bool
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,

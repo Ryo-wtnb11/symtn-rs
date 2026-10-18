@@ -223,7 +223,8 @@ perfect square.
 
 Current checked Generic coverage is defined by the public bounds and executable
 tests at this revision. It is a Host path; CUDA typed execution is
-limited to supported multiplicity-free `f64` paths. The
+limited to supported multiplicity-free paths over `f32`, `f64`, `Complex32`
+and `Complex64`. The
 [operation matrix](audit/operation-matrix.md) is retained only as
 revision-pinned historical evidence.
 

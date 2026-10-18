@@ -1,6 +1,6 @@
 //! The Host compile entry of the storage (device) contraction route, and —
 //! with the `cuda` feature, on a real device — its executor replaying the
-//! Host `DynamicTree` artifact (G2c-1a, #1345).
+//! Host `DynamicTree` artifact (#1345).
 //!
 //! The device tests force every orientation and axis-order candidate through
 //! the test-only plan builder, which the typed API cannot reach, and compare
@@ -1912,8 +1912,8 @@ fn a_fermionic_dual_contracted_leg_on_a_transformed_operand_reports_the_twist() 
             TensorContractSpec::new(&lhs_axes, &rhs_axes, OutputAxisOrder::identity()),
         )
         .unwrap();
-    // What: the twist travels in the artifact, which the device now replays
-    // with destination scales (G2c-2).
+    // What: the twist travels in the artifact, which the device replays
+    // with destination scales.
     assert!(resolution.is_dynamic_tree());
     assert!(resolution.requires_source_twist());
 }

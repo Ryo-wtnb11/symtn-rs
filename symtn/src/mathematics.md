@@ -677,5 +677,6 @@ tested for construction, transformations including explicit planar braids,
 tensor products, and composition. Ordinary arbitrary-axis contraction,
 factorization, and general network execution are not supported or claimed.
 Checked Generic support is Host-only. CUDA requires explicit transfer and
-supports a multiplicity-free `f64` subset; unsupported device
+supports a multiplicity-free subset over `f32`, `f64`, `Complex32` and
+`Complex64`; unsupported device
 operations return an explicit error.

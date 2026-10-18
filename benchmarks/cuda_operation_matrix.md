@@ -93,7 +93,7 @@ buffers, not bytes retained.
 | Dimension | Values |
 |---|---|
 | provider | `U1`, `fZ2`, `SU2`, `U1xfZ2` (fermion parity x U(1) product) |
-| dtype | `f64`, `c64` (`qr_compact` rows are real-payload only, the pinned row set; device QR admits every payload since #1271) |
+| dtype | `f64`, `c64` (`qr_compact` rows are real-payload only, the pinned row set; device QR admits every payload, #1271) |
 | family | `many-small`, `few-large` |
 | operation | `to_cuda`, `to_host`, `contract_direct`, `contract_lazy_adjoint_lhs`, `compose`, `scale`, `add_owned`, `add_lazy_fold`, `norm`, `inner`, `svd_compact`, `svd_trunc_composition`, `eigh_full`, `qr_compact`, `network_chain3` |
 | target | `cuda`, `host` |

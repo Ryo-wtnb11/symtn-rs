@@ -184,10 +184,6 @@ impl<S, E> ArtinWriter<S, CheckedGenericSymbolError<E>> for KeyArtinTerms<'_, S>
 /// coefficients are threaded through a `FusionTermAccumulator` (summing paths
 /// that reconverge on the same output tree), exactly as the multiplicity-free
 /// braid does.
-// `pub` to mirror the mult-free split (`multiplicity_free_braid_tree` is `pub`,
-// its per-swap artin helper private). Being a public root also keeps
-// `generic_artin_braid_at_with_inverse` / `mu_index` reachable, so they emit no
-// dead-code warning independent of their other callers.
 /// `tree` follows [`FusionTreeKey::validate_for_rule`]'s provider-domain
 /// precondition.
 #[cfg(test)]
