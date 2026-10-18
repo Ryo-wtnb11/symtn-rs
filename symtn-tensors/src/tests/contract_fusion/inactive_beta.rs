@@ -150,16 +150,16 @@ fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_or
     .unwrap();
     let mut oracle = vec![initial[0]];
     crate::TensorContractFusionExecutionContext::<Complex64, _>::default()
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             &oracle_dst_bound,
             &mut oracle,
-            &adjoint_bound,
+            crate::FusionOperand::direct(adjoint_bound.space()),
             &adjoint_data,
-            &rhs_bound,
+            crate::FusionOperand::direct(rhs_bound.space()),
             &rhs_data,
             TensorContractSpec::with_default_output_order(&[1], &[0]),
             alpha,
-            beta,
+            crate::ContractDestinationInit::Axpby(beta),
         )
         .unwrap();
     // What: the independent eager contraction produces the active block; the
@@ -171,7 +171,7 @@ fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_or
     let mut actual =
         TestTensor::<Complex64>::from_vec_with_fusion_space(initial, dst_space).unwrap();
     let conjugate_axes =
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[0], true, false);
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false);
     let mut context = TensorContractFusionExecutionContext::<Complex64, RuleIdentity>::default();
     for _ in 0..2 {
         actual

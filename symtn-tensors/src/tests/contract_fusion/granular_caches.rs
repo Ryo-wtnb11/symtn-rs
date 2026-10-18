@@ -227,12 +227,6 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
             false,
         ),
     ] {
-        let axes = TensorContractSpec::with_default_output_order_and_conjugation(
-            &[0, 1, 2],
-            &[1, 2, 3],
-            lhs_conjugate,
-            rhs_conjugate,
-        );
         let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
         let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
         let lhs_adjoint_space = lhs_space
@@ -255,6 +249,13 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
         };
         let lowered_lhs_axes = maybe_adjoint_axes::<3, 1>(&[0, 1, 2], lhs_conjugate);
         let lowered_rhs_axes = maybe_adjoint_axes::<1, 3>(&[1, 2, 3], rhs_conjugate);
+        // A set flag names the lazy-adjoint operand, whose legs the axes index.
+        let axes = TensorContractSpec::with_default_output_order_and_conjugation(
+            lowered_lhs_axes.as_slice(),
+            lowered_rhs_axes.as_slice(),
+            lhs_conjugate,
+            rhs_conjugate,
+        );
         let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
             &rule,
             effective_lhs_hom,

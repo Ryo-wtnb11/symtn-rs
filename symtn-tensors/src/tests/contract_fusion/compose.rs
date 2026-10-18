@@ -75,16 +75,16 @@ fn bosonic_tensorcompose_matches_ordinary_contract() {
     let mut context = crate::TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let mut ordinary = vec![0.0; dst.required_len().unwrap()];
     context
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             &dst_bound,
             &mut ordinary,
-            &source_bound,
+            crate::FusionOperand::direct(source_bound.space()),
             &lhs,
-            &source_bound,
+            crate::FusionOperand::direct(source_bound.space()),
             &rhs,
             TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity()),
             1.0,
-            0.0,
+            crate::ContractDestinationInit::Axpby(0.0),
         )
         .unwrap();
     assert!(context.last_resolution_is_core());
@@ -282,16 +282,16 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
     let mut context = crate::TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let mut contracted = vec![0.0; dst.required_len().unwrap()];
     context
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             &dst_bound,
             &mut contracted,
-            &lhs_bound,
+            crate::FusionOperand::direct(lhs_bound.space()),
             &[2.0],
-            &rhs_bound,
+            crate::FusionOperand::direct(rhs_bound.space()),
             &[3.0],
             TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity()),
             1.0,
-            0.0,
+            crate::ContractDestinationInit::Axpby(0.0),
         )
         .unwrap();
     assert_eq!(contracted, [-6.0]);

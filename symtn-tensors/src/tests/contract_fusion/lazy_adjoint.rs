@@ -31,7 +31,7 @@ fn tensorcontract_fusion_lowers_lhs_categorical_adjoint_lazily() {
     )
     .unwrap();
     let axes =
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[0], true, false);
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false);
 
     fusion_contract_into(
         &rule,
@@ -104,7 +104,7 @@ fn tensorcontract_fusion_lowers_rhs_categorical_adjoint_lazily() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[1], false, true),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], false, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -167,7 +167,7 @@ fn tensorcontract_fusion_lowers_both_categorical_adjoint_inputs_lazily() {
     )
     .unwrap();
     let axes =
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[1], true, true);
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, true);
 
     fusion_contract_into(
         &rule,
@@ -244,7 +244,7 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
         &lhs,
         &rhs,
         // TensorKit 1-based pA=((2,), (1,)), pB=((1,), (2,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[0], true, false),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -323,7 +323,7 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
         &lhs,
         &rhs,
         // TensorKit 1-based pA=((2,), (1,)), pB=((1,), (2,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[0], true, false),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -401,7 +401,7 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[1], false, true),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], false, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -480,7 +480,7 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
         &lhs,
         &rhs,
         // TensorKit 1-based pA=((1,), (2,)), pB=((2,), (1,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[1], false, true),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], false, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -562,7 +562,7 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[1], true, true),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -645,7 +645,7 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
         &lhs,
         &rhs,
         // TensorKit 1-based pA=((2,), (1,)), pB=((2,), (1,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[0], &[1], true, true),
+        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -804,16 +804,16 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
             .unwrap();
     let mut oracle = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
     let mut ctx = crate::TensorContractFusionExecutionContext::<Complex64, _>::default();
-    ctx.tensorcontract_fusion_dyn_into(
+    ctx.tensorcontract_prelowered_into(
         &dst_bound,
         &mut oracle,
-        &adj_bound,
+        crate::FusionOperand::direct(adj_bound.space()),
         &adj_data,
-        &rhs_bound,
+        crate::FusionOperand::direct(rhs_bound.space()),
         &rhs_data,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
         Complex64::new(1.0, 0.0),
-        Complex64::new(0.0, 0.0),
+        crate::ContractDestinationInit::Axpby(Complex64::new(0.0, 0.0)),
     )
     .unwrap();
 
@@ -830,7 +830,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     };
     for pass in 0..2 {
         let mut ctx = crate::TensorContractFusionExecutionContext::<Complex64, _>::default();
-        let mut adjoint_view_build_count_rec = probe::record();
+        let adjoint_view_build_count_rec = probe::record();
         let fusion_operand_projection_prepares_rec = probe::record();
         for _ in 0..2 {
             let mut fold = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
@@ -858,31 +858,6 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
             assert!(max < 1e-10, "fold vs eager oracle: max diff {max}");
         }
         if pass == 0 {
-            let mut ordinary = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
-            ctx.tensorcontract_fusion_dyn_into(
-                &dst_bound,
-                &mut ordinary,
-                &lhs_bound,
-                &lhs_data,
-                &rhs_bound,
-                &rhs_data,
-                TensorContractSpec::new_with_conjugation(
-                    &[0],
-                    &[0],
-                    crate::OutputAxisOrder::identity(),
-                    true,
-                    false,
-                ),
-                Complex64::new(1.0, 0.0),
-                Complex64::new(0.0, 0.0),
-            )
-            .unwrap();
-            assert_eq!(ordinary, oracle);
-            // What: a conjugation flag on an owned space is that space's lazy
-            // adjoint, so the ordinary call takes the parent-storage core.
-            assert!(ctx.last_resolution_is_core());
-            adjoint_view_build_count_rec = probe::record();
-
             let mut folded_again =
                 vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
             ctx.tensorcontract_prelowered_into(

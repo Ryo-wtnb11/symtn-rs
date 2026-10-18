@@ -405,16 +405,24 @@ where
     let dst_space = bind(&provider, dst.fusion_space())?;
     let lhs_space = bind(&provider, lhs.fusion_space())?;
     let rhs_space = bind(&provider, rhs.fusion_space())?;
-    context.tensorcontract_fusion_dyn_into(
+    assert!(
+        !axes.lhs_conjugate() && !axes.rhs_conjugate(),
+        "fixture operands are direct"
+    );
+    let output_axes: Vec<usize> = match axes.output_permutation() {
+        OutputAxisOrder::Axes(output) => output.to_vec(),
+        OutputAxisOrder::Identity => (0..dst_space.space().rank()).collect(),
+    };
+    context.tensorcontract_planned_into(
         &dst_space,
         dst.data_mut(),
-        &lhs_space,
-        lhs.data(),
-        &rhs_space,
-        rhs.data(),
-        axes,
+        (FusionOperand::direct(lhs_space.space()), lhs.data()),
+        (FusionOperand::direct(rhs_space.space()), rhs.data()),
+        axes.lhs_contracting_axes(),
+        axes.rhs_contracting_axes(),
+        &output_axes,
         alpha,
-        beta,
+        symtn_tensors::ContractDestinationInit::Axpby(beta),
     )
 }
 

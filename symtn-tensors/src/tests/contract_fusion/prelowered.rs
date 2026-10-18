@@ -91,40 +91,19 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     let mut route_context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let mut ordinary_swapped = vec![0.0; swapped_dst_bound.space().required_len().unwrap()];
     route_context
-        .tensorcontract_fusion_dyn_into(
-            &swapped_dst_bound,
-            &mut ordinary_swapped,
-            &logical_lhs_bound,
-            &eager_lhs_data,
-            &rhs_bound,
-            &rhs_data,
-            swapped_axes(),
-            1.0,
-            0.0,
-        )
-        .unwrap();
-    assert_eq!(ordinary_swapped, [0.0, 6.5, 2.0, 13.5]);
-    let ordinary_orientation = route_context.last_resolution_orientation();
-    let mut prelowered_swapped = vec![0.0; swapped_dst_bound.space().required_len().unwrap()];
-    route_context
         .tensorcontract_prelowered_into(
             &swapped_dst_bound,
-            &mut prelowered_swapped,
-            crate::FusionOperand::direct(&logical_lhs),
+            &mut ordinary_swapped,
+            crate::FusionOperand::direct(logical_lhs_bound.space()),
             &eager_lhs_data,
-            rhs_operand,
+            crate::FusionOperand::direct(rhs_bound.space()),
             &rhs_data,
             swapped_axes(),
             1.0,
             crate::ContractDestinationInit::Axpby(0.0),
         )
         .unwrap();
-    assert_eq!(prelowered_swapped, ordinary_swapped);
-    assert_eq!(
-        route_context.last_resolution_orientation(),
-        ordinary_orientation,
-        "direct prelowered contraction must select the ordinary eager orientation"
-    );
+    assert_eq!(ordinary_swapped, [0.0, 6.5, 2.0, 13.5]);
     let candidate = crate::contract::contracted_axis_order_candidates(&[0], &[0]).remove(0);
     let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
         provider.as_ref(),
@@ -235,36 +214,19 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
         TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let mut ordinary = vec![0.0; dst.required_len().unwrap()];
     namespace_context
-        .tensorcontract_fusion_dyn_into(
-            &dst_bound,
-            &mut ordinary,
-            &logical_lhs_bound,
-            &eager_lhs_data,
-            &rhs_bound,
-            &rhs_data,
-            ordinary_axes(),
-            1.0,
-            0.0,
-        )
-        .unwrap();
-    assert_eq!(ordinary, oracle);
-    let mut direct_prelowered = vec![0.0; dst.required_len().unwrap()];
-    namespace_context
         .tensorcontract_prelowered_into(
             &dst_bound,
-            &mut direct_prelowered,
-            crate::FusionOperand::direct(&logical_lhs),
+            &mut ordinary,
+            crate::FusionOperand::direct(logical_lhs_bound.space()),
             &eager_lhs_data,
-            rhs_operand,
+            crate::FusionOperand::direct(rhs_bound.space()),
             &rhs_data,
             ordinary_axes(),
             1.0,
             crate::ContractDestinationInit::Axpby(0.0),
         )
         .unwrap();
-    // What: the ordinary and prelowered APIs agree when logical and physical
-    // layouts are identical.
-    assert_eq!(direct_prelowered, oracle);
+    assert_eq!(ordinary, oracle);
 
     let ordinary_tensor = TestTensor::<f64>::from_vec_with_fusion_space(
         eager_lhs_data,
@@ -324,16 +286,16 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
     let mut context = crate::TensorContractFusionExecutionContext::<Complex64, _>::default();
     let mut eager = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
     context
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             &dst_bound,
             &mut eager,
-            &adj_bound,
+            crate::FusionOperand::direct(adj_bound.space()),
             &adj_data,
-            &rhs_bound,
+            crate::FusionOperand::direct(rhs_bound.space()),
             &rhs_data,
             TensorContractSpec::with_default_output_order(&[1], &[0]),
             Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
+            crate::ContractDestinationInit::Axpby(Complex64::new(0.0, 0.0)),
         )
         .unwrap();
 
@@ -509,16 +471,16 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         let mut encoded_context =
             TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
         encoded_context
-            .tensorcontract_fusion_dyn_into(
+            .tensorcontract_prelowered_into(
                 &encoded_dst,
                 &mut encoded,
-                &encoded_lhs,
+                crate::FusionOperand::direct(encoded_lhs.space()),
                 &lhs_data,
-                &encoded_rhs,
+                crate::FusionOperand::direct(encoded_rhs.space()),
                 &rhs_data,
                 direct_axes,
                 1.0,
-                0.0,
+                crate::ContractDestinationInit::Axpby(0.0),
             )
             .unwrap();
 
@@ -528,16 +490,16 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         let mut lowered_context =
             TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
         lowered_context
-            .tensorcontract_fusion_dyn_into(
+            .tensorcontract_prelowered_into(
                 &lowered_dst,
                 &mut lowered,
-                &lowered_lhs,
+                crate::FusionOperand::direct(lowered_lhs.space()),
                 &lhs_data,
-                &lowered_rhs,
+                crate::FusionOperand::direct(lowered_rhs.space()),
                 &rhs_data,
                 direct_axes,
                 1.0,
-                0.0,
+                crate::ContractDestinationInit::Axpby(0.0),
             )
             .unwrap();
         // The encoded layout is the independent oracle for the lowered one;
@@ -552,16 +514,16 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         );
         let mut warm = vec![0.0; lowered.len()];
         lowered_context
-            .tensorcontract_fusion_dyn_into(
+            .tensorcontract_prelowered_into(
                 &lowered_dst,
                 &mut warm,
-                &lowered_lhs,
+                crate::FusionOperand::direct(lowered_lhs.space()),
                 &lhs_data,
-                &lowered_rhs,
+                crate::FusionOperand::direct(lowered_rhs.space()),
                 &rhs_data,
                 direct_axes,
                 1.0,
-                0.0,
+                crate::ContractDestinationInit::Axpby(0.0),
             )
             .unwrap();
         assert_eq!(warm, lowered);
@@ -608,12 +570,12 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
     let mut eager = vec![0.0; lazy_dst.space().required_len().unwrap()];
     let mut eager_context = TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
     eager_context
-        .tensorcontract_fusion_dyn_into(
+        .tensorcontract_prelowered_into(
             &lazy_dst,
             &mut eager,
-            &eager_lhs,
+            crate::FusionOperand::direct(eager_lhs.space()),
             &eager_lhs_data,
-            &encoded_rhs,
+            crate::FusionOperand::direct(encoded_rhs.space()),
             &rhs_data,
             TensorContractSpec::new(
                 lazy_axes.lhs_contracting_axes(),
@@ -621,7 +583,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
                 lazy_axes.output_permutation(),
             ),
             1.0,
-            0.0,
+            crate::ContractDestinationInit::Axpby(0.0),
         )
         .unwrap();
 

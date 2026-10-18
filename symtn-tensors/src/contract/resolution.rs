@@ -1113,12 +1113,12 @@ mod tests {
                 let mut dst_data = vec![0.0; dst.space().required_len().unwrap()];
                 let host = warm_counts(|| {
                     context
-                        .tensorcontract_fusion_dyn_into_with_init(
+                        .tensorcontract_prelowered_into(
                             &dst,
                             &mut dst_data,
-                            &lhs,
+                            crate::FusionOperand::direct(lhs.space()),
                             &lhs_data,
-                            &matrix,
+                            crate::FusionOperand::direct(matrix.space()),
                             &matrix_data,
                             axes,
                             1.0,
@@ -1178,12 +1178,12 @@ mod tests {
             let mut dst_data = vec![0.0; dst.space().required_len().unwrap()];
             let counts = warm_counts(|| {
                 context
-                    .tensorcontract_fusion_dyn_into_with_init(
+                    .tensorcontract_prelowered_into(
                         &dst,
                         &mut dst_data,
-                        &lhs,
+                        crate::FusionOperand::direct(lhs.space()),
                         &lhs_data,
-                        &square,
+                        crate::FusionOperand::direct(square.space()),
                         &square_data,
                         axes,
                         1.0,

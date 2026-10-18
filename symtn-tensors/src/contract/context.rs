@@ -387,88 +387,8 @@ where
     BT: TreeTransformBackend<D, C>,
     BC: TensorContractBackend<D, C>,
 {
-    /// Dynamic-rank `tensorcontract!`: the eager Host contraction over
-    /// [`BoundDynamicFusionMapSpace`] handles plus raw slices in the
-    /// coupled-sector matrix layout. `dst_data` must be sized for
-    /// `dst_space.required_len()`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn tensorcontract_fusion_dyn_into<R>(
-        &mut self,
-        dst_space: &BoundDynamicFusionMapSpace<R>,
-        dst_data: &mut [D],
-        lhs_space: &BoundDynamicFusionMapSpace<R>,
-        lhs_data: &[D],
-        rhs_space: &BoundDynamicFusionMapSpace<R>,
-        rhs_data: &[D],
-        axes: TensorContractSpec<'_>,
-        alpha: D,
-        beta: D,
-    ) -> Result<(), OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
-        D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
-    {
-        self.tensorcontract_fusion_dyn_into_with_init(
-            dst_space,
-            dst_data,
-            lhs_space,
-            lhs_data,
-            rhs_space,
-            rhs_data,
-            axes,
-            alpha,
-            ContractDestinationInit::Axpby(beta),
-        )
-    }
-
-    /// [`Self::tensorcontract_fusion_dyn_into`] with the destination
-    /// initialisation made explicit: an owned output born all-zero passes
-    /// [`ContractDestinationInit::Zeroed`] so its inactive blocks are never
-    /// touched.
-    #[allow(clippy::too_many_arguments)]
-    pub fn tensorcontract_fusion_dyn_into_with_init<R>(
-        &mut self,
-        dst_space: &BoundDynamicFusionMapSpace<R>,
-        dst_data: &mut [D],
-        lhs_space: &BoundDynamicFusionMapSpace<R>,
-        lhs_data: &[D],
-        rhs_space: &BoundDynamicFusionMapSpace<R>,
-        rhs_data: &[D],
-        axes: TensorContractSpec<'_>,
-        alpha: D,
-        init: ContractDestinationInit<D>,
-    ) -> Result<(), OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
-        D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
-    {
-        if !axes.lhs_conjugate() && !axes.rhs_conjugate() {
-            return self.tensorcontract_prelowered_into(
-                dst_space,
-                dst_data,
-                FusionOperand::direct(lhs_space.space()),
-                lhs_data,
-                FusionOperand::direct(rhs_space.space()),
-                rhs_data,
-                axes,
-                alpha,
-                init,
-            );
-        }
-        let lowered = lower_conjugated_axes(lhs_space.space(), rhs_space.space(), axes)?;
-        self.tensorcontract_prelowered_into(
-            dst_space,
-            dst_data,
-            conjugation_operand(lhs_space.space(), axes.lhs_conjugate()),
-            lhs_data,
-            conjugation_operand(rhs_space.space(), axes.rhs_conjugate()),
-            rhs_data,
-            lowered.as_spec(),
-            alpha,
-            init,
-        )
-    }
-
+    /// Test entry over unbound spaces: a conjugation flag in `axes` selects
+    /// that operand's lazy adjoint, whose legs the axes then index.
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tensorcontract_fusion_dyn_into_raw<R>(
@@ -488,8 +408,6 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        let lowered = lower_conjugated_axes(lhs_space, rhs_space, axes)?;
-        let axes = lowered.as_spec();
         let output_axes = spec_output_axes(axes, dst_space.rank());
         self.tensorcontract_planned_raw_into::<MultiplicityFreeAdmissionMode, R>(
             &mut (),
@@ -499,14 +417,8 @@ where
                 authority: encoded_layout_primer::<R>,
             },
             dst_data,
-            (
-                conjugation_operand(lhs_space, axes.lhs_conjugate()),
-                lhs_data,
-            ),
-            (
-                conjugation_operand(rhs_space, axes.rhs_conjugate()),
-                rhs_data,
-            ),
+            (lazy_operand(lhs_space, axes.lhs_conjugate()), lhs_data),
+            (lazy_operand(rhs_space, axes.rhs_conjugate()), rhs_data),
             PlannedContraction::Contract((
                 axes.lhs_contracting_axes(),
                 axes.rhs_contracting_axes(),
@@ -534,8 +446,6 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        let lowered = lower_conjugated_axes(lhs_space, rhs_space, axes)?;
-        let axes = lowered.as_spec();
         let output_axes = spec_output_axes(axes, dst_space.rank());
         self.plan_contract_raw::<super::resolution::HostEagerExecutor, R>(
             PlanTarget {
@@ -543,8 +453,8 @@ where
                 space: dst_space,
                 authority: encoded_layout_primer::<R>,
             },
-            conjugation_operand(lhs_space, axes.lhs_conjugate()),
-            conjugation_operand(rhs_space, axes.rhs_conjugate()),
+            lazy_operand(lhs_space, axes.lhs_conjugate()),
+            lazy_operand(rhs_space, axes.rhs_conjugate()),
             (
                 axes.lhs_contracting_axes(),
                 axes.rhs_contracting_axes(),
@@ -553,11 +463,11 @@ where
         )
     }
 
-    /// The prelowered operand seam: logical spaces are the categorical
-    /// authority, storage operands and slices the physical one. Why not a
-    /// public entrypoint: arbitrary callers cannot establish the lazy-adjoint
-    /// coherence contract; the typed facade enters through
-    /// `tensorcontract_into_*_in` (#1870).
+    /// Test seam over [`Self::tensorcontract_planned_into`] taking a
+    /// [`TensorContractSpec`] whose conjugation flags must match the
+    /// operands: logical spaces are the categorical authority, storage
+    /// operands and slices the physical one.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tensorcontract_prelowered_into<R>(
         &mut self,
@@ -1134,29 +1044,12 @@ where
     }
 }
 
-/// A conjugation flag on an owned space requests its categorical
-/// adjoint, with `axes` indexing the stored tensor's legs (TensorOperations'
-/// `conjA`): the lazy-adjoint operand of the space ([`conjugation_operand`]), its
-/// contracted axes mapped onto the adjoint's legs here. Without a flag the
-/// axes are unchanged.
-fn lower_conjugated_axes(
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
-    axes: TensorContractSpec<'_>,
-) -> Result<crate::lowering::LoweredTensorContractSpec, OperationError> {
-    crate::lowering::lower_tensorcontract_adjoint_axes(
-        lhs.nout(),
-        lhs.nin(),
-        rhs.nout(),
-        rhs.nin(),
-        axes,
-    )
-}
-
-/// The operand an owned space and a conjugation flag request: the flag
-/// asks for the categorical adjoint, which is the lazy adjoint of the space.
-fn conjugation_operand(space: &DynamicFusionMapSpace, conjugate: bool) -> FusionOperand<'_> {
-    if conjugate {
+/// The raw test entries' operand: a set flag of the lazy-adjoint operand
+/// form names the space's lazy adjoint, whose legs the axes then index, as in
+/// [`TensorContractFusionExecutionContext::tensorcontract_prelowered_into`].
+#[cfg(test)]
+fn lazy_operand(space: &DynamicFusionMapSpace, adjoint: bool) -> FusionOperand<'_> {
+    if adjoint {
         FusionOperand::adjoint(space)
     } else {
         FusionOperand::direct(space)

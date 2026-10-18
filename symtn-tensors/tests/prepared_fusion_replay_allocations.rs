@@ -8,8 +8,7 @@ use symtn_core::{
 use symtn_operations::ContractDestinationInit;
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, HostEagerExecutor,
-    OutputAxisOrder, TensorContractFusionExecutionContext, TensorContractSpec,
-    TreeTransformRuleCacheKey,
+    TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
 #[path = "../../tests/support/counting_alloc.rs"]
@@ -77,13 +76,6 @@ where
     let (lhs_bound, rhs_bound) = (bind(&lhs_space), bind(&rhs_space));
 
     for (lhs_axes, rhs_axes, output_axes) in WORKLOADS {
-        let axes = || {
-            TensorContractSpec::new(
-                &lhs_axes,
-                &rhs_axes,
-                OutputAxisOrder::from_axes(&output_axes),
-            )
-        };
         let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
             rule,
             lhs_space.homspace(),
@@ -100,16 +92,16 @@ where
         let dst_bound = bind(&dst_space);
         let dst_structure = Arc::clone(dst_space.structure());
         context
-            .tensorcontract_fusion_dyn_into(
+            .tensorcontract_planned_into(
                 &dst_bound,
                 &mut expected,
-                &lhs_bound,
-                &lhs_data,
-                &rhs_bound,
-                &rhs_data,
-                axes(),
+                (FusionOperand::direct(lhs_bound.space()), &lhs_data),
+                (FusionOperand::direct(rhs_bound.space()), &rhs_data),
+                &lhs_axes,
+                &rhs_axes,
+                &output_axes,
                 1.0,
-                0.0,
+                ContractDestinationInit::Axpby(0.0),
             )
             .unwrap();
         let mut actual = expected.clone();

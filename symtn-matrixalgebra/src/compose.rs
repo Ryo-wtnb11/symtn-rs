@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use symtn_core::MultiplicityFreeRigidSymbols;
 use symtn_tensors::{
-    OperationError, TensorContractFusionExecutionContext, TensorContractSpec,
+    ContractDestinationInit, FusionOperand, OperationError, TensorContractFusionExecutionContext,
     TreeTransformRuleCacheKey,
 };
 
@@ -49,16 +49,17 @@ where
             .required_len()
             .map_err(OperationError::from_core_preserving_context)?
     ];
-    context.tensorcontract_fusion_dyn_into(
+    let output_axes: Vec<usize> = (0..dst_space.space().rank()).collect();
+    context.tensorcontract_planned_into(
         &dst_space,
         &mut dst_data,
-        lhs_space,
-        lhs.data(),
-        rhs_space,
-        rhs.data(),
-        TensorContractSpec::with_default_output_order(&lhs_axes, &rhs_axes),
+        (FusionOperand::direct(lhs_space.space()), lhs.data()),
+        (FusionOperand::direct(rhs_space.space()), rhs.data()),
+        &lhs_axes,
+        &rhs_axes,
+        &output_axes,
         D::one(),
-        D::zero(),
+        ContractDestinationInit::Axpby(D::zero()),
     )?;
     let nout = dst_space.space().nout();
     let nin = dst_space.space().nin();

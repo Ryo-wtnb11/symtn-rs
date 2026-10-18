@@ -513,16 +513,16 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
         let dynamic_call =
             |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
              dst: &mut [f64]| {
-                context.tensorcontract_fusion_dyn_into(
+                context.tensorcontract_prelowered_into(
                     &dst_bound,
                     dst,
-                    &lhs_bound,
+                    crate::FusionOperand::direct(lhs_bound.space()),
                     lhs.data(),
-                    &rhs_bound,
+                    crate::FusionOperand::direct(rhs_bound.space()),
                     rhs.data(),
                     axes(),
                     alpha,
-                    beta,
+                    crate::ContractDestinationInit::Axpby(beta),
                 )
             };
         if typed_first {

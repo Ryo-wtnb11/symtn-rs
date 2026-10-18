@@ -65,6 +65,14 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     let lowered_rhs_axes = maybe_adjoint_axes::<1, 3>(&source_rhs_contracting_axes, rhs_conjugate);
     let lowered_lhs_open_axes = complement_axes(4, &lowered_lhs_axes);
     let lowered_rhs_open_axes = complement_axes(4, &lowered_rhs_axes);
+    // The eager entry takes the lazy-adjoint operand form: a set flag names
+    // the operand's lazy adjoint, whose legs the axes index.
+    let lazy_axes = TensorContractSpec::with_default_output_order_and_conjugation(
+        lowered_lhs_axes.as_slice(),
+        lowered_rhs_axes.as_slice(),
+        lhs_conjugate,
+        rhs_conjugate,
+    );
     let effective_lhs_hom = if lhs_conjugate {
         lhs_adjoint_space.homspace()
     } else {
@@ -238,7 +246,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &mut context_dst,
         &lhs,
         &rhs,
-        axes,
+        lazy_axes,
         alpha,
         beta,
     )
@@ -265,7 +273,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &mut context_dst,
         &lhs,
         &rhs,
-        axes,
+        lazy_axes,
         alpha,
         beta,
     )
