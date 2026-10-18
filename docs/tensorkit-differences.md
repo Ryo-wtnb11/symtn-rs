@@ -14,12 +14,14 @@ provider, scalar and placement combinations are in the
   application. Reason: the same small operations should be usable in code
   written by a person or a coding agent, without the library prescribing an
   MPS, PEPS, VMC or device-transfer schedule ([design](design.md)).
-- **Symmetry data in a separate crate.** Coefficient data (SU(2), the AnyonWiki
-  tables) comes from [fusion-symbols](https://github.com/Ryo-wtnb11/fusion-symbols)
+- **Symmetry data in a separate crate.** The symbols of the abelian groups
+  (Z2, Z_N, U(1)), fermion parity, CU(1), SU(2), SU(N) and the AnyonWiki tables
+  come from [fusion-symbols](https://github.com/Ryo-wtnb11/fusion-symbols)
   rather than a symtn-internal sector package. Reason: the provider owns
-  categorical labels and coefficients and symtn does not mirror its tables
-  ([design](design.md), [layering](layering.md)). Some symbols are still
-  generated in symtn; see the tracked deviations in [layering](layering.md#current-deviations-tracked).
+  categorical labels and coefficients, and two authorities for one set of
+  symbols can drift ([design](design.md), [layering](layering.md), #2280).
+  symtn keeps label types, `SectorId` codecs, styles and products of rules
+  (`ProductFusionRule`), whose symbols it composes from the factors'.
 - **Dense kernels in Tenferro.** Dense matrix kernels, factorizations and
   backend resources come from [Tenferro](https://github.com/tensor4all/tenferro-rs).
   Reason: symtn owns categorical semantics and layout decisions; Tenferro owns
@@ -87,7 +89,11 @@ provider, scalar and placement combinations are in the
 - **AnyonWiki tables in their own gauge.** `TableRule` values are the AnyonWiki
   database's, unconverted. Fibonacci matches TensorKit exactly; Ising differs
   by the vertex gauge `u^{σσ}_ψ = −1` and by object order (`1, ψ, σ` against
-  TensorKit's `I, σ, ψ`). Reason not recorded.
+  TensorKit's `I, σ, ψ`). Reason: maintainer decision (2026-10-17) that
+  AnyonWiki is the authority for table categories; values are served
+  unconverted, and TensorKit is used only as a gauge-equivalence oracle
+  ([fusion-symbols#134](https://github.com/Ryo-wtnb11/fusion-symbols/issues/134),
+  #2277).
 - **Braided tables are `Anyonic`.** A `TableRule` with a symmetric braiding is
   still reported as `Anyonic`, so general-axes `permute`, `contract` and `tr`
   are rejected where TensorKit would accept them. Reason: the tables carry no

@@ -323,10 +323,12 @@ Outside the four, by design:
 
 ## Current deviations (tracked)
 
-- **Category symbols generated in symtn.** Abelian groups, fermion parity,
-  CU(1) and products are still generated in symtn; they are later
-  fusion-symbols slices. Fibonacci and its tables moved in #2016; the generic
-  `TableRule` replaced both Fibonacci providers in #2277.
+- **Product symbols composed in symtn.** `ProductFusionRule` composes the
+  symbols of a product from its factors' in symtn until fusion-symbols'
+  planned `product` module ships; every factor's symbols come from
+  fusion-symbols. Abelian groups, fermion parity and CU(1) moved in #2280;
+  Fibonacci and its tables moved in #2016; the generic `TableRule` replaced
+  both Fibonacci providers in #2277.
 - **A tenferro type in symtn's public API.** `symtn-dense` re-exports
   `tenferro_cpu::CpuBackendKind`, and it reaches the facade through
   `symtn::expert` and the `Runtime` builder (`gemm_kind`).
