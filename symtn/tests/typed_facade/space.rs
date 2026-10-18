@@ -713,8 +713,8 @@ fn graded_space_dual_surfaces_a_failing_checked_dual() {
 fn graded_space_dual_reports_a_non_injective_dual_instead_of_panicking() {
     // What: a provider whose dual collapses two sectors onto one id is a
     // broken rigidity structure. The leg cannot hold the result, and the
-    // failure must come back as a typed error — the constructor underneath
-    // used to panic inside this `Result`-returning API.
+    // failure must come back as a typed error, not a panic inside this
+    // `Result`-returning API.
     let provider = Arc::new(ExternalZ3::with(Quirk::CollapsingDual));
     let space = z3_leg(&provider, false);
 
@@ -747,7 +747,7 @@ fn graded_space_carries_a_simple_fusion_provider_too() {
 }
 
 // ---------------------------------------------------------------------------
-// Slice 5: `TensorMap<R, D>` ownership and `zeros`.
+// `TensorMap<R, D>` ownership and `zeros`.
 // ---------------------------------------------------------------------------
 
 #[test]

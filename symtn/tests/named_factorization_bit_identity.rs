@@ -7,10 +7,9 @@
 //! by CPU, its expected values hold only for the recording host class (macOS
 //! aarch64). The original expected values were recorded with the tuple API on
 //! `origin/main` a2ce6c49, single-threaded dense executor, `cpu-faer`.
-//! The SU(3) compact SVD storage hashes now reflect compact `s`; its
+//! The SU(3) compact SVD storage hashes reflect compact `s`; its
 //! materialized factor values are checked against the original exact hashes.
-//! The SU(3) lazy-adjoint SVD, QR and LQ rows were `Err` (checked Generic
-//! refused lazy adjoints) until #1755; they were recorded at that change.
+//! The SU(3) lazy-adjoint SVD, QR and LQ rows were recorded at #1755.
 //! The multiplicity-free polar rows (direct and lazy adjoint) were re-recorded
 //! when polar moved to the shared per-sector MatrixAlgebraKit `PolarViaSVD`
 //! kernel (#1752): structure unchanged, values within rounding.

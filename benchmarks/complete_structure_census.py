@@ -12,10 +12,9 @@ same run. The script
    byte budget, max entry bytes) and checks every step's predicted hits,
    misses, evictions and bypasses against the observed counters;
 3. replays it against FIFO and LRU at larger caps, and prints the tables;
-4. replays it against the current bounds (the degeneracy-structure cache of
-   #2014: no entry cap, 64 MiB over 2 shards, so the largest entry is 32 MiB;
-   before it, FIFO with cap 1024 and 64 MiB since #1993, and 4 MiB with max
-   entry 1_650_641 at #1365) and exits non-zero if any warm miss is not
+4. replays it against the current bounds (the degeneracy-structure cache:
+   no entry cap, 64 MiB over 2 shards, so the largest entry is 32 MiB) and
+   exits non-zero if any warm miss is not
    compulsory or any E1/conj row evicts in a warm call. The FIFO model is
    exact here because no warm call evicts.
 """

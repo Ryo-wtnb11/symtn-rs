@@ -439,7 +439,7 @@ where
 }
 
 // ============================================================================
-// Stage B3c-2: Generic-fusion (SU(N)) siblings.
+// Generic-fusion (SU(N)) siblings.
 //
 // Parallel `*_generic` siblings of the mult-free factorization entry points.
 // The block-level engine — the dense SVD/QR per coupled sector, the gauges,

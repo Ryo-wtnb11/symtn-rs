@@ -1,9 +1,8 @@
 //! Contraction-path optimization via the `opt-einsum-path` crate (Apache-2.0).
 //!
 //! [`OptEinsumPathOptimizer`] wraps `opt_einsum_path::contract_path` as a
-//! [`DenseContractionOptimizer`], so symtn's parser, plan validation, the einsum
-//! facade (`einsum_with_optimizer` (legacy)), and the slicer
-//! ([`crate::greedy_slice`]) all reuse it unchanged. It gives the optimal /
+//! [`DenseContractionOptimizer`], so symtn's plan validation and the slicer
+//! ([`crate::greedy_slice`]) reuse it unchanged. It gives the optimal /
 //! dynamic-programming / branch-and-bound /
 //! random-greedy / auto drivers on top of symtn's built-in greedy.
 //!
@@ -261,12 +260,10 @@ impl PathStrategy {
 /// Dense contraction-order optimizer backed by the `opt-einsum-path` crate.
 ///
 /// Implements [`DenseContractionOptimizer`]; its steps feed
-/// [`crate::ContractionPlan::from_steps`] and the einsum facade
-/// (`einsum_with_optimizer` (legacy)).
+/// [`crate::ContractionPlan::from_steps`].
 ///
 /// ```text
-/// use symtn_contract::prelude::*;
-/// use symtn_contract::OptEinsumPathOptimizer;
+/// use symtn_network::*;
 ///
 /// let ir = NetworkIR::from_labels(vec![vec!["a".into(), "b".into()], vec!["b".into(), "c".into()], vec!["c".into(), "d".into()]], vec!["a".into(), "d".into()])?;
 /// let infos = vec![

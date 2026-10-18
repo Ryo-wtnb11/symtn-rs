@@ -1139,7 +1139,7 @@ where
     )
 }
 
-/// The member replay of one DynamicTree artifact (the pre-H2 test seam).
+/// The member replay of one DynamicTree artifact (a test seam).
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_dynamic_tree_execution_artifact_members_host<E, EC, D, C>(

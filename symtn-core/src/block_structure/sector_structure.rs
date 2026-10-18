@@ -137,7 +137,7 @@ pub struct SectorStructure {
     rank: usize,
     key_kind: Option<BlockKeyKind>,
     /// The canonical arena of every fusion-tree key in `blocks` and
-    /// `fusion_tree_groups` (Rule O, #2192); `None` for other kinds and when
+    /// `fusion_tree_groups` (single-arena ownership, #2192); `None` for other kinds and when
     /// empty. Its per-side row order is the tree order, so a row index is the
     /// tree's rank on its side.
     pub(crate) trees: Option<Arc<TreeArena>>,
@@ -238,7 +238,7 @@ impl SectorStructure {
     }
 
     /// Re-home fusion-tree blocks into this structure's own canonical arena
-    /// (Rule O), sort, reject duplicates, and group.
+    /// (single-arena ownership), sort, reject duplicates, and group.
     fn from_checked_blocks(
         rank: usize,
         expected_kind: Option<BlockKeyKind>,

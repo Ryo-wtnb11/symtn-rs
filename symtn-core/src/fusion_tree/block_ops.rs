@@ -1132,7 +1132,7 @@ where
     ) -> Result<Self::State, CoreError> {
         // Why a plain loop over a monomorphic move, not `run_artin_steps` with
         // a step closure: the closure form measured ~1-3% slower on the cold
-        // braid plan build (#1852 B1/B2a bisection).
+        // braid plan build (#1852).
         let (mut basis, mut columns) = state;
         for step in steps {
             let (next_basis, next_columns) = compact_codomain_artin_block(

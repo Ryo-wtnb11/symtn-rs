@@ -16,12 +16,12 @@
 //! 4. B takes context 1 and downloads `O`: `k <= last_synced[A]`, so on
 //!    separate streams B would skip the event and race the GEMM.
 //!
-//! Until #1391 this read a stale `O` in 40/40 iterations on an A100 and the
-//! test asserted that it did. Since #1391 `CudaDenseContext::new` pins CubeCL
-//! to one stream per device (`streaming.max_streams = 1`), so A's GEMM and
-//! B's download run in enqueue order on that stream and the skipped event no
-//! longer matters. The forced case now asserts no stale read; it no longer
-//! detects a cubecl#16 fix, which only matters if the single stream is lifted.
+//! On separate streams this read a stale `O` (40/40 iterations on an A100).
+//! `CudaDenseContext::new` pins CubeCL to one stream per device
+//! (`streaming.max_streams = 1`, #1391), so A's GEMM and B's download run in
+//! enqueue order on that stream and the skipped event does not matter. The
+//! forced case asserts no stale read; it does not detect a cubecl#16 fix,
+//! which only matters if the single stream is lifted.
 //!
 //! The oracle is a hand calculation: all-ones operands, so every element of
 //! `O` is exactly `REPS * N`. The single-context control runs the same steps

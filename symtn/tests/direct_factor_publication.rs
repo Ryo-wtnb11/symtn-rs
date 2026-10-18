@@ -160,9 +160,8 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
 // scratch once, so it requests no zeroed storage for them. The only zeroed
 // request left is the dense backend's R factor (Tenferro
 // `faer_linalg::upper_triangle_vec_from_mat`), whose total over sectors is
-// the payload of L. Before #1478 both outputs and the scratch also came from
-// `vec![0.0; len]`, i.e. `alloc_zeroed`, which this counter observes for f64:
-// 16928 zeroed bytes before, 4872 (= L) after.
+// the payload of L: 4872 zeroed bytes for this fixture. The counter observes
+// `alloc_zeroed` (e.g. `vec![0.0; len]`) for f64 (#1478).
 // The zeroed R factor is faer's `upper_triangle_vec_from_mat`; a BLAS provider
 // zero-fills its own workspaces (#2107).
 #[test]
@@ -311,16 +310,16 @@ mod checked_generic {
         cases!(Complex64, &runtime);
     }
 
-    // Allocation contract: polar writes W and P into their output regions.
-    // Before #1478 each coupled sector added three temporaries (W, P and a
-    // clone of the scaled factor) that were then copied out. Both polar and
+    // Allocation contract: polar writes W and P into their output regions,
+    // with no per-sector temporaries (W, P or a clone of the scaled factor)
+    // copied out afterwards (#1478). Both polar and
     // `svd_compact` run the same staged per-sector SVD, so absolute counts
     // include backend workspace whose size depends on the dense kernel's SIMD
     // width (macOS and Linux differ by tens of bytes). Scaling every
     // degeneracy keeps the tree structure (and all metadata) fixed, so the
     // growth of the bytes a call allocates beyond its outputs is its
     // payload-proportional scratch. Polar's must not exceed the SVD stage's,
-    // which it would by the size of the temporaries before #1478.
+    // which per-sector temporaries would.
     #[test]
     fn checked_generic_polar_allocates_no_per_sector_temporaries() {
         let _measurement = counting_alloc::serial();

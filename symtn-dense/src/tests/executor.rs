@@ -2015,10 +2015,9 @@ fn identity_executor_replays_strided_grouped_strided_across_shapes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_malformed_runs_route_grouped_over_all_jobs() {
-    // Pins the post-#1182 behaviour: `runs` is consulted only for the O(1)
-    // single-run test, so a short, long, or zero-entry partition can neither
-    // skip trailing jobs (the old release-mode result of a short sum) nor
-    // over-index the job slice (the old panic on a long sum). Every job runs,
+    // `runs` is consulted only for the O(1) single-run test (#1182), so a
+    // short, long, or zero-entry partition can neither skip trailing jobs (a
+    // short sum) nor over-index the job slice (a long sum). Every job runs,
     // grouped, in one submission.
     let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
     let shapes = [(2, 2, 2); 3];
@@ -2238,7 +2237,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
 fn identity_batch_with_malformed_single_run_falls_back_to_grouped() {
     // `runs == [2]` claims one run, but job 1 has a different row count, so the
     // two jobs are not one affine run (issue #1733). Job 1's destination step
-    // (8) still clears job 0's block (2*4), which used to select the strided
+    // (8) still clears job 0's block (2*4), which must not select the strided
     // route and compute job 1 with job 0's shape.
     let jobs = [
         DenseGemmBatchJob {

@@ -136,10 +136,9 @@ fn warm_conjugated_contract_allocations_are_pinned() {
             eprintln!("{name} d{deg}: {calls} calls, {bytes} bytes; adjoint memo {retained} bytes");
         }
         // What: the warm count does not grow with the degeneracy and holds no
-        // per-call adjoint rebuild (before #1368: U1 49, SU2 188, fZ2xU1 49;
-        // before #1858 the legacy conjugated route: 11, 161, 11). The
-        // conjugation flag is now the lazy adjoint of the owned space, which
-        // the core reads in place: 5 calls, 624 bytes for every row.
+        // per-call adjoint rebuild. The conjugation flag is the lazy adjoint
+        // of the owned space, which the core reads in place: 5 calls,
+        // 624 bytes for every row.
         for ((name, (calls, bytes, retained)), (expected_calls, max_bytes)) in
             rows.into_iter().zip([(5, 1024), (5, 1024), (5, 1024)])
         {

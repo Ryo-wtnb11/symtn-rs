@@ -398,9 +398,9 @@ impl DefaultDenseExecutor {
     /// replay that submits one GEMM per Multi block would allocate once per
     /// block on every warm call (#2184); the strided entry allocates nothing.
     ///
-    /// Why not keep a per-run cutoff: it was an empirical constant in tensor
-    /// semantics (user decision 2026-09-14). The disadvantage accepted here: a
-    /// long run plus residual jobs now goes grouped, paying tenferro's
+    /// Why not a per-run cutoff: it would be an empirical constant in tensor
+    /// semantics. The disadvantage accepted here: a long run plus residual
+    /// jobs goes grouped, paying tenferro's
     /// O(J log J) grouped validation per call instead of the cached O(1)
     /// strided analysis plus O(S log S) for the residual.
     #[allow(clippy::too_many_arguments)]

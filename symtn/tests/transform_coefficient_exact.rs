@@ -359,7 +359,7 @@ fn traces_scale_componentwise() {
 /// so `0 * inf` reappears. Fixing it needs the complex destination block to be
 /// driven through the real GEMM as an interleaved real matrix (the column
 /// mixing only touches the source index, so the reinterpretation is exact),
-/// which is a separate leaf at the dense-executor boundary.
+/// which belongs to the dense-executor boundary.
 #[test]
 #[ignore = "multi-block recoupling GEMM still promotes the coefficient (#1398 residual)"]
 fn su2_recoupling_matrix_transforms_scale_componentwise() {

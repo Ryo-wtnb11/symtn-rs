@@ -4,7 +4,7 @@
 //! placement and the tree-keyed `mul!` oracle of `prepared/mod.rs`,
 //! over U(1), SU(2) and fZ2xU(1), f64 and c64, B in {1, 2, 17}, with inactive
 //! destination blocks. `execute_into` must give the same result over a
-//! destination prefilled with NaN or garbage (D2).
+//! destination prefilled with NaN or garbage.
 //!
 //! #1775: the composition is its own kind, not a contraction inferred from
 //! its axes. A fermionic composition over a dual leg differs from the

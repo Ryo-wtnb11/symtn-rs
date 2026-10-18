@@ -1,7 +1,7 @@
 use super::*;
 
 // ======================================================================
-// Stage B2b: Generic-fusion coefficient-vector layer (multi_Fmove /
+// Generic-fusion coefficient-vector layer (multi_Fmove /
 // multi_associator) plus foldright/foldleft/cycle. Outer-multiplicity
 // mirror of the multiplicity-free tree functions below, and of TensorKit
 // `basic_manipulations.jl` / `duality_manipulations.jl` (the GenericFusion

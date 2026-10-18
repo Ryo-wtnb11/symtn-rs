@@ -647,7 +647,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
         .unwrap();
 
     // What: an adjoint operand with noncanonical parent block order compiles
-    // and replays exactly like the former materialized logical structure.
+    // and replays exactly like the materialized logical structure.
     assert_eq!(oriented, old);
     let space = vec![1, 1, 1, 1];
     let src = TestTensor::<f64>::from_vec_with_structure(

@@ -1,5 +1,5 @@
-//! Characterization pins of the CUDA contraction stage sequence (#1859 C1,
-//! C2): eager `contract` / `contract_into` on every route (Core, CopyC,
+//! Characterization pins of the CUDA contraction stage sequence (#1859):
+//! eager `contract` / `contract_into` on every route (Core, CopyC,
 //! DynamicTree) and member replays of one `ContractPlan` on every route.
 //!
 //! The fixtures are exact in binary: dyadic entries, unit U(1) recoupling and
@@ -12,16 +12,16 @@
 //!
 //! Warm transfer and submission counters
 //! `(h2d_calls, h2d_bytes, d2h_calls, device_allocs, gemm_calls, copy_calls,
-//! retained_bytes)` were recorded on the base revisions of #1859 C1 and C2 and
-//! are pinned in [`PINS`]: the stage sequence may regroup the kernels, never add
-//! or remove one, with two #1859 C2 exceptions that [`Recorder::check`]
-//! states exactly: member CopyC no longer refills its temporary
-//! ([`MEMBER_COPY_C`]), and member retained bytes now use the one member
+//! retained_bytes)` are pinned in [`PINS`] at the base revisions named there: the stage
+//! sequence may regroup the kernels, never add or remove one, with two
+//! exceptions (#1859) that [`Recorder::check`] states exactly: member CopyC
+//! does not refill its temporary ([`MEMBER_COPY_C`]), and member retained
+//! bytes use the one member
 //! workspace's Host region accounting, so they differ from the base by a
 //! pinned per-case constant ([`RETAINED_METADATA_DELTA`]) while every device
 //! byte, which grows with `B`, is equal. #2123 adds two more: a warm member
-//! `execute` whose core writes its born-zero output directly no longer
-//! refills its inactive regions ([`BORN_ZERO_OUTPUT`]), and the core fill's
+//! `execute` whose core writes its born-zero output directly does not
+//! refill its inactive regions ([`BORN_ZERO_OUTPUT`]), and the core fill's
 //! context templates are reserved by the first call that fills, an
 //! `execute_into` ([`LAZY_CORE_TEMPLATE`]). The counters are process-wide,
 //! hence `--test-threads=1`:
@@ -188,7 +188,7 @@ impl Recorder {
 /// is the member workspace's core-destination stack, born zero and written
 /// only by the core GEMMs (#1746). Every head call therefore submits the
 /// base's no-refill count: exactly `R` fewer on each base refill call.
-/// Cold rows whose context zero-template growth moved (#1859 C2): the
+/// Cold rows whose context zero-template growth moved (#1859): the
 /// template is a high-water mark of the runtime's device context, shared by
 /// the cases that run one after another. The base grew it for the CopyC
 /// temporary's per-call zero fills (6 elements per member, at B = 17 one
@@ -205,8 +205,8 @@ const ZERO_TEMPLATE_GROWTH: &[(&str, [i64; 2])] = &[
 ];
 
 /// Per-case change of a member workspace's retained bytes against the base
-/// (#1859 C2), the same on every row of the case at every `B`; device bytes,
-/// which grow with `B`, are therefore equal. One accounting now covers every
+/// (#1859), the same on every row of the case at every `B`; device bytes,
+/// which grow with `B`, are therefore equal. One accounting covers every
 /// member region list: inline vector bytes (56 per `CudaRegion`) plus each
 /// region's heap capacity.
 /// - DynamicTree with core zero regions: +56 per region, the inline bytes
@@ -214,7 +214,7 @@ const ZERO_TEMPLATE_GROWTH: &[(&str, [i64; 2])] = &[
 /// - Core with one inactive region: +32, heap capacity where the base
 ///   counted `2 * dims.len()` words.
 /// - CopyC with one inactive region: -88, the base's zero-region list for the
-///   temporary, which no longer exists.
+///   temporary, which the head does not keep.
 const RETAINED_METADATA_DELTA: &[(&str, i64)] = &[
     ("direct member U(1) core route, inactive block f64", 32),
     ("direct member signed core f64", 32),
@@ -238,7 +238,7 @@ const RETAINED_METADATA_DELTA: &[(&str, i64)] = &[
 /// regions of a reused `execute` output on every warm call; the head never
 /// does, because that output is born zero and only the core GEMMs write it.
 /// Every warm `execute` row therefore submits exactly `R` fewer; CopyC and
-/// output-transform rows keep their (#1859 C2) counts.
+/// output-transform rows keep their base counts.
 const BORN_ZERO_OUTPUT: &[(&str, u64)] = &[
     (
         "member U(1) transformed lhs, identity output, inactive block f64",
@@ -597,7 +597,7 @@ fn signed_cases<D: DevicePayload>(runtime: &Runtime) -> [Case<FermionU1, D>; 4] 
     ]
 }
 
-/// Member Core and CopyC (#1859 C2): unit and signed direct cores, swapped
+/// Member Core and CopyC (#1859): unit and signed direct cores, swapped
 /// and unswapped, with and without inactive destination blocks.
 fn direct_member_routes<D: DevicePayload>(recorder: &mut Recorder) {
     let runtime = Runtime::builder().cuda(0).build().unwrap();
@@ -629,8 +629,8 @@ fn member_core_and_copy_c_are_bit_equal_to_host_and_eager_with_base_counters() {
 }
 
 /// Recorded on qg1 (A100-SXM4-40GB): eager and member DynamicTree rows at
-/// #1859 C1 base `fae73f1c` (`a91af835`/`bc8f5de9`), member Core and CopyC
-/// rows at #1859 C2 base `160187c7`; see the module documentation.
+/// base `fae73f1c` (`a91af835`/`bc8f5de9`), member Core and CopyC rows at
+/// base `160187c7`; see the module documentation.
 #[rustfmt::skip]
 const PINS: &[(&str, Counters)] = &[
     ("eager core C0 f64 contract warm", [1, 2544, 0, 1, 5, 0, 0]),
@@ -838,7 +838,7 @@ const PINS: &[(&str, Counters)] = &[
     ("member fB f64 seq=[4, 2, 4] call=2 B=4 execute first", [1, 5888, 0, 1, 5, 7, 0]),
     ("member fB f64 seq=[4, 2, 4] call=2 B=4 execute warm", [0, 0, 0, 0, 8, 7, 9944]),
     ("member fB f64 seq=[4, 2, 4] call=2 B=4 execute_into", [0, 0, 0, 0, 8, 7, 4056]),
-    // Member Core and CopyC: recorded at #1859 C2 base `160187c7` (`74ffb5d7`).
+    // Member Core and CopyC: recorded at base `160187c7` (`74ffb5d7`).
     ("direct member C0 f64 seq=[1, 2, 17, 1] call=0 B=1 execute first", [1, 2544, 0, 1, 5, 0, 0]),
     ("direct member C0 f64 seq=[1, 2, 17, 1] call=0 B=1 execute warm", [0, 0, 0, 0, 5, 0, 2544]),
     ("direct member C0 f64 seq=[1, 2, 17, 1] call=0 B=1 execute_into", [0, 0, 0, 0, 5, 0, 0]),

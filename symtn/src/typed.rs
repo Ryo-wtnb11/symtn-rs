@@ -194,9 +194,9 @@
 //!   non-self-dual sectors. [`TensorMap::adjoint`] is the TensorKit-style lazy
 //!   parent view for dense storage. A compact diagonal, in either admission
 //!   mode, keeps its direct `O(Σ_c k_c)` conjugation path.
-//! - Some outer multiplicity factorization leaves. Checked `Generic` providers
+//! - Some outer multiplicity factorizations. Checked `Generic` providers
 //!   have provider-neutral SVD/QR/LQ, shape-based null spaces, and the admitted
-//!   matrix-function subset; each leaf documents its own lazy-adjoint and
+//!   matrix-function subset; each operation documents its own lazy-adjoint and
 //!   compact-storage boundary.
 //!
 //! Construction consumes only the transactional checked admission path, so a
@@ -473,7 +473,7 @@ pub use twist_flip::TwistExec;
 ///
 /// These live inside the module on purpose: they assert what `tests/` cannot
 /// see without accessors the facade does not otherwise need — which `Arc`
-/// holds what ([`TypedTensorBody`], #580 PR 0), dense-kernel and solver call
+/// holds what ([`TypedTensorBody`], #580), dense-kernel and solver call
 /// counts, cache warmth, and device call counts. The module itself keeps the
 /// representation gates and the shared fixtures; its children group the
 /// remaining gates by operation family: multiplicity-free and checked

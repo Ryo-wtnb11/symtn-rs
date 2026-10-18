@@ -179,7 +179,7 @@ impl Warm {
     /// `calls ≤ 2·G_t + 8`, independent of `P_in` and the source sectors.
     /// The `G_t` term is the dense backend's per-recoupling-group scratch
     /// (Tenferro); the constant is the owned output, the committed space and
-    /// the preview keys. Base was 195 calls at SU(3) rank 4 (`G_t = 12`).
+    /// the preview keys.
     fn assert_permute_bound(&self, what: &str) {
         assert!(self.permute.0 <= 2 * self.permute_groups + 8, "{what}");
     }
@@ -188,7 +188,7 @@ impl Warm {
     /// allocates `calls ≤ 2·(S + G) + 32`. The `G` term is the dense
     /// backend's per-recoupling-GEMM scratch (out of scope, Tenferro); the
     /// constant is the owned output and payload buffers and per-call keys.
-    /// The leaf-A per-output-block relation stays as the anti-regression pin.
+    /// The per-output-block relation is the anti-regression pin.
     fn assert_contract_bounds(&self, what: &str) {
         // Rank 2 transforms nothing (`G = 0`); otherwise all three stages do.
         let transforms = if self.groups == 0 { 0 } else { 3 };
@@ -199,10 +199,9 @@ impl Warm {
     }
 }
 
-/// Permute: the #2154 bound (before it, a warm permute re-admitted its
-/// source; base was 7 / 12 / 51 calls at rank 2 / 4 / 6). Contract: base 114 / 2,552 / 389,907
-/// calls at rank 2 / 4 / 6 before #2129's region core plan, then 18 / 421 /
-/// 70,915 (debug) before #2063 committed the intermediates. Bounds, not
+/// Permute: a warm permute does not re-admit its source (#2154). Contract:
+/// the region core plan (#2129) and committed intermediates (#2063) keep the
+/// count linear in sectors and groups. Bounds, not
 /// equalities: platform allocators and the toy provider may shift
 /// incidental sizes.
 #[test]

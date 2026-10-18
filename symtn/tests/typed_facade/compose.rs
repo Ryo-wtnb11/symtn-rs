@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #569), slice 1: `TensorMap::compose`.
+// `TensorMap::compose`.
 // ---------------------------------------------------------------------------
 
 /// A position-weighted fill whose distinct entries expose individual signs.
@@ -274,7 +274,7 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #569), slice 2: the identity `TensorMap::isomorphism(V, V)`.
+// The identity `TensorMap::isomorphism(V, V)`.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -373,7 +373,7 @@ fn id_needs_at_least_one_leg() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #570), slice 1: compact diagonal storage and the operations
+// Compact diagonal storage and the operations
 // that consume it.
 //
 // Storage claims are measured in `tests/typed_diagonal_allocations.rs`; the

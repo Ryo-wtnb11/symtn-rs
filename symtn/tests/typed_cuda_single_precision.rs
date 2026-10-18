@@ -1,5 +1,5 @@
 //! Device twins of the `f64`/`Complex64` base-family device suites, run at
-//! every admitted device payload (leaf C2, issue #1336).
+//! every admitted device payload (#1336).
 //!
 //! Each gate here is one generic body instantiated for all four dtypes, so the
 //! double-precision instantiation is the control: a helper that silently did
@@ -67,8 +67,7 @@ fn combined(terms: usize, scale: f64) -> Combined {
 
 /// Absolute bound `2 * terms * eps(real(D)) * scale` for the `norm` check,
 /// `scale` an upper bound on `sum |conj(a_i) * b_i|`.
-/// It dates from the payload-dtype device reduction and is looser than the
-/// `f64` accumulation (#1344, #1383) now needs; `inner` uses the workspace
+/// It is looser than the `f64` accumulation (#1344, #1383) needs; `inner` uses the workspace
 /// rule instead.
 fn reduction_tolerance<D: DevicePayload>(terms: usize, scale: f64) -> f64 {
     2.0 * (terms as f64) * D::EPS * scale.max(1.0)

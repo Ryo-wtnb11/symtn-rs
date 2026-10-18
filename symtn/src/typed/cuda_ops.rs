@@ -64,7 +64,7 @@ use super::*;
 ///
 /// The device payload marker alone does not admit a device factorization, and
 /// neither does it together with the *host* factorization marker: the gate is
-/// [`CudaFactorizationPayload`]. Every payload implements it since #1341, but
+/// [`CudaFactorizationPayload`]. Every payload implements it (#1341), but
 /// a *generic* body must still name it — the two bounds below are not enough,
 /// because neither says anything about the device gauge or the device
 /// Hermitian rule.
@@ -238,7 +238,7 @@ where
             let mut right_data = CudaStorage::upload_owned(cuda, vec![D::ZERO; right_len])?;
             #[cfg(test)]
             probe::hit(probe::Event::CudaSvdOutputUpload);
-            // The zero upload is the only device allocation path until #740;
+            // The zero upload is the only device allocation path (#740);
             // every value then arrives by a device copy.
             let mut middle_data = CudaStorage::upload_owned(cuda, vec![D::ZERO; middle_len])?;
             #[cfg(test)]

@@ -43,13 +43,12 @@ where
     /// allocates exactly one device buffer and submits one strided move per
     /// non-empty block. Residual: a whole-buffer bitwise device copy followed
     /// by in-place per-block scaling would submit fewer kernels, but Tenferro
-    /// (0.5.0 and 0.6.0) has no in-place strided scale (`cuda_region_axpby` cannot alias
-    /// its source and destination), so it is not expressible today.
+    /// has no in-place strided scale (`cuda_region_axpby` cannot alias its
+    /// source and destination), so it is not expressible.
     ///
     /// Flat elements that belong to no block — only reachable under a padded
     /// expert layout — are zero here, where Host copies the source bytes
-    /// through; device structural results have carried that convention since
-    /// the transform leaf.
+    /// through; device structural results follow that convention.
     ///
     /// # Errors
     ///

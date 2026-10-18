@@ -335,8 +335,7 @@ fn execution_layout_primer_runs_once_per_derivation() {
     let cold_transform = derive_source(&mut tree_context);
     assert_eq!(execution_primer_calls(), 1);
     let warm_transform = derive_source(&mut tree_context);
-    // What: no context retains the derivation (as under a Runtime before
-    // #2014-3), so the warm call primes its layout key again; the transformer
+    // What: no context retains the derivation, so the warm call primes its layout key again; the transformer
     // itself is the published one.
     assert_eq!(execution_primer_calls(), 2);
     assert_eq!(cold_transform.space, warm_transform.space);

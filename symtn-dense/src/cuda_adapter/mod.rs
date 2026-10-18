@@ -73,11 +73,10 @@ use elementwise::submit_region_axpby;
 // every other region primitive does.
 use elementwise::ensure_payload_dtype;
 
-// Cross-child visibility for private helpers the split test module still
-// needs (it was one `mod tests` inside this same file before #1595, so every
-// private item was already in scope; now it is a sibling of these children,
-// so the items it reaches through a *different* file need `pub(super)`
-// there and a re-export here for its `use super::*` to pick them up). Gated
+// Cross-child visibility for private helpers the test module needs: it is a
+// sibling of these children, so the items it reaches through a *different*
+// file need `pub(super)` there and a re-export here for its `use super::*`
+// to pick them up. Gated
 // to `cfg(test)` so a non-test build does not carry an unused import.
 #[cfg(test)]
 use context::SCALAR_OPERAND_SLOTS;
@@ -414,9 +413,8 @@ fn isize_strides(strides: &[usize]) -> Result<Vec<isize>, DenseError> {
 /// implicitly (truncation decisions are host scalar logic).
 ///
 /// The lane is the caller's, not `f64` by assumption: a single-precision
-/// payload's singular values, eigenvalues and reductions come back as `F32`
-/// (probe `cuda-single-precision-probe-2026-09-20.md`), and demanding `F64`
-/// here is what used to make every such call an error. Widening happens on
+/// payload's singular values, eigenvalues and reductions come back as `F32`,
+/// and demanding `F64` here would make every such call an error. Widening happens on
 /// the host after the transfer, so the bytes moved are the lane's own and
 /// symtn's spectrum contract stays `f64`.
 fn download_values<R: CudaRealScalar>(

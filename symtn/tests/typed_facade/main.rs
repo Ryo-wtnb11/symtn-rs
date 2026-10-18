@@ -232,7 +232,7 @@ impl MultiplicityFreeRigidSymbols for ExternalZ3 {
     }
 }
 
-// Opt-in for the typed unit-leg operations (#580 PR 5): the marker certifies
+// Opt-in for the typed unit-leg operations: the marker certifies
 // that the vacuum obeys the canonical unit laws, which the Z3 vacuum (charge
 // 0, self-dual, trivial unitors) does. A downstream provider makes the same
 // one-line declaration to unlock `insert_unit`/
@@ -438,7 +438,7 @@ fn runtime() -> Runtime {
 }
 
 // ---------------------------------------------------------------------------
-// Slice 4: `GradedSpace<R>`.
+// `GradedSpace<R>`.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -481,7 +481,7 @@ fn typed_fill_value(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3, slice 2: `TensorMap::permute`.
+// `TensorMap::permute`.
 // ---------------------------------------------------------------------------
 
 /// The second Z3 leg shape, deliberately unlike [`z3_leg`]'s: with four legs of
@@ -569,7 +569,7 @@ fn z2_complex_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3, slice 3: `TensorMap::contract`.
+// `TensorMap::contract`.
 // ---------------------------------------------------------------------------
 
 /// A single-sector Z3 leg: the whole tensor map is then one dense block, so a
@@ -707,7 +707,7 @@ impl SectorCodec for PlanarTrivial {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3, slice 4: non-regression gates.
+// Non-regression gates.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -764,7 +764,7 @@ fn a_failing_typed_operation_publishes_no_cache_state() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4, slice 2: `TensorMap::transpose`.
+// `TensorMap::transpose`.
 // ---------------------------------------------------------------------------
 
 /// The `(is_dual, degeneracies)` shape of a typed tensor map's legs, codomain
@@ -783,7 +783,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4, slice 4: `symtn::typed` self-sufficiency (issue #557, O7b).
+// `symtn::typed` self-sufficiency (issue #557).
 // ---------------------------------------------------------------------------
 
 /// Deliberately imports nothing but `symtn::typed` names and the provider
@@ -826,7 +826,7 @@ mod typed_is_self_sufficient {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4, slice 5: planar is not permute.
+// Planar is not permute.
 //
 // The built-in `FermionParityFusionRule` is the only rule reachable from this
 // facade whose braiding is not symmetric (`BraidingStyleKind::Fermionic`), so
@@ -888,7 +888,7 @@ macro_rules! truncated_svd {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 (issue #568), slice 2: `norm`, `norm(Inf)`, `normalize`.
+// `norm`, `norm(Inf)`, `normalize`.
 // ---------------------------------------------------------------------------
 
 /// An SU(2) tensor over two legs, split into `num_codomain <- rest`.
@@ -933,7 +933,7 @@ fn su2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::SU2FusionRule, f64>
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 (issue #568), slice 3: `inner`, `dot`, `tr`.
+// `inner`, `dot`, `tr`.
 // ---------------------------------------------------------------------------
 
 /// A Z2 endomorphism, `[v] <- [v]`: the abelian half of the `tr`
@@ -951,7 +951,7 @@ fn z2_endomorphism(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, 
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 (issue #568), slice 5: `TensorMap::trace_pairs`.
+// `TensorMap::trace_pairs`.
 // ---------------------------------------------------------------------------
 
 /// A fermionic endomorphism `[v] <- [v]` with distinct sector values.
@@ -1155,8 +1155,8 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
 }
 
 // ---------------------------------------------------------------------------
-// Slice: typed constructors — `rand_with_seed` and the structural
-// family (`isomorphism`/`isometry`), issue #580 PR 1.
+// Typed constructors — `rand_with_seed` and the structural
+// family (`isomorphism`/`isometry`).
 // ---------------------------------------------------------------------------
 
 fn u1_typed_leg() -> GradedSpace<symtn::sector::U1FusionRule> {
@@ -1183,7 +1183,7 @@ fn fz2_typed_leg() -> GradedSpace<symtn::sector::FermionParityFusionRule> {
 }
 
 // ---------------------------------------------------------------------------
-// Slice: typed `left_polar` / `right_polar`, issue #580 PR 2.
+// Typed `left_polar` / `right_polar`.
 // ---------------------------------------------------------------------------
 
 /// Elementwise closeness at factorization tolerance, relative to the wanted
@@ -1233,7 +1233,7 @@ fn u1_leg(
 }
 
 // ---------------------------------------------------------------------------
-// #580 PR 5 / PR #620 review: NoBraiding preflight for twist and flip.
+// NoBraiding preflight for twist and flip.
 //
 // External NoBraiding provider: planar Z2 (the symtn-core test fixture
 // `PlanarZ2Rule`, rebuilt from the public vocabulary with a codec). The

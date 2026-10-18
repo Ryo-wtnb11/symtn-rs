@@ -224,7 +224,7 @@ fn host_replay<T: DeviceScalar>(
 }
 
 /// The caller scales the executor must reproduce: one, minus one (the only
-/// other value a fermionic twist folded into a descriptor ever takes, G2c-2),
+/// other value a fermionic twist folded into a descriptor ever takes),
 /// a scale that is neither, both signed zeros, and a genuinely complex one
 /// (its real part on `f64`).
 fn alphas<T: DeviceScalar>() -> Vec<T> {
@@ -953,7 +953,7 @@ fn a_consumer_reserving_first_keeps_its_plans_beside_a_large_executor() {
     // total then exceeds the default bound of 64, so a warm interleave of both
     // evicts nothing. Under an absolute raise the consumer's `64 + 80` and
     // the executor's own total are combined by max, below the joint working
-    // set, and every round thrashes (the origin/main negative control).
+    // set, and every round thrashes (the negative control).
     let mut ctx = context();
     let base = ctx.plan_cache_max_entries().unwrap();
     let consumer_plans = 80;
@@ -998,7 +998,7 @@ fn a_coefficient_of_one_moves_f64_payloads_bitwise() {
     // What: where the host copies bit-exactly, the device's multiply by the
     // uploaded `1` is exact too, so the two agree to the last bit for finite
     // f64 payloads. (Not a contract for other coefficients or for complex
-    // payloads: see the +-inf deviation recorded in G2a-1.)
+    // payloads: the device multiply can deviate from the host at +-inf.)
     let mut ctx = context();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in unit_coefficient_fixtures() {
@@ -1035,7 +1035,7 @@ fn unsupported_modes_are_rejected_before_any_device_work() {
     // plan-cache change — for a Single-block structure and for a recoupling
     // structure, whose pack columns and coefficient upload must not happen on
     // the strength of one unwritable scatter region. Every `beta` is
-    // supported (#1550), so it is no longer a rejection input.
+    // supported (#1550), so it is not a rejection input.
     let mut ctx = context();
     let mut executor = CudaTreeTransformExecutor::default();
 
@@ -2179,7 +2179,7 @@ fn a_zero_caller_scale_is_rejected_in_the_same_order() {
 
 /// θ = −1 on every other non-empty destination block, starting with the
 /// first (so a one-block fixture is scaled too), as the sorted
-/// `(offset, θ)` list `replay_with_destination_scales` takes (G2c-2, #1347).
+/// `(offset, θ)` list `replay_with_destination_scales` takes (#1347).
 /// Alternating per block, not per Multi group: the executor scales each
 /// write by its own block's θ, which is exact whether or not a group is
 /// uniform.

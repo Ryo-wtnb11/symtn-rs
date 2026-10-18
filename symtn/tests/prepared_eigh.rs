@@ -1,4 +1,4 @@
-//! Host gates of `EighFullPlan` (#1499, leaf L3 of #1287).
+//! Host gates of `EighFullPlan` (#1499).
 //!
 //! Per member the plan must equal Host eager `eigh_full` (gauge-fixed, so
 //! the eigenvectors themselves are compared) and the dense Jacobi oracle of

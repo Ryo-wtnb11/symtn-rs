@@ -122,7 +122,7 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
     );
 }
 
-/// #1371 / #1372 review P2-1: `PlannedNetwork::execute` and the sliced path
+/// #1371, #1372: `PlannedNetwork::execute` and the sliced path
 /// reject a non-symmetric braiding before their first step or accumulator:
 /// with the typed `contract`'s error, allocating no more than the typed
 /// `contract` does to reject the same operands (the error itself).

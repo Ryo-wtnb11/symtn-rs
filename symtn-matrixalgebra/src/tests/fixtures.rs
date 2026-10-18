@@ -70,8 +70,8 @@ pub(super) fn assert_factor_layout_matches_legacy_shapes<R>(actual: &BoundDynami
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
 {
-    // What: canonical factor construction has the exact block layout produced
-    // by the former per-tree shape authority.
+    // What: canonical factor construction has the exact block layout of an
+    // independent per-tree shape computation.
     let provider = Arc::clone(actual.provider_arc());
     let homspace = actual.space().homspace().clone();
     let shapes = homspace

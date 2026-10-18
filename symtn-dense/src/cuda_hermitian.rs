@@ -144,7 +144,7 @@ mod tests {
         ));
     }
 
-    /// The C1 hazard, as host arithmetic: a residual of a few `f32` roundings
+    /// The single-precision tolerance hazard, as host arithmetic: a residual of a few `f32` roundings
     /// relative to the input norm is accepted by the single-precision
     /// tolerance and rejected by the double-precision one. Both are expressed
     /// in epsilons of their own lane, so nothing here is a platform-dependent

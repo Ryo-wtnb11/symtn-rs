@@ -1,16 +1,13 @@
-//! Device probe for the N-D strided region accumulation symtn's remaining
-//! basic device operations (G2 structural transforms, trace, `otimes`, `cat`,
-//! mixed owned/lazy `add`) would be built on.
+//! Device probe for the N-D strided region accumulation symtn's basic device
+//! operations (structural transforms, trace, `otimes`, `cat`, mixed
+//! owned/lazy `add`) are built on.
 //!
-//! `reviews/gpu-phase-20260920/basic-path-survey.md` claims, from Tenferro
-//! 0.5.0 sources alone, that `dot_general_read_into_accum` against a 1x1 ones
-//! operand moves a strided, offset, rank-N source region into a strided,
+//! Tenferro's sources imply that `dot_general_read_into_accum` against a 1x1
+//! ones operand moves a strided, offset, rank-N source region into a strided,
 //! offset, rank-N destination region with alpha/beta and conjugation -- the
-//! N-D generalization of the production `cuda_axpby_owned` pattern
-//! (`symtn/src/typed.rs:11328`). Only rank-2 regions have device evidence
-//! today. This file converts the source-level claim into device evidence, and
-//! records the exact rejection text where Tenferro declines (written against
-//! 0.5.0; runs against the pinned 0.6.0).
+//! N-D generalization of the production `cuda_axpby_owned` pattern. This file converts that source-level claim into
+//! device evidence, and records the exact rejection text where Tenferro
+//! declines.
 //!
 //! The oracle is an independent host strided loop over the same index space;
 //! nothing here is derived from a symtn descriptor. Comparison is bitwise
@@ -19,8 +16,8 @@
 //! involved.
 //!
 //! These tests call Tenferro directly rather than through `cuda_adapter`:
-//! the adapter's region views are rank-2 and its `Tensor` handles are private,
-//! and this leaf deliberately adds no production surface. The device is the
+//! its `Tensor` handles are private, and the probe deliberately adds no
+//! production surface. The device is the
 //! unit under test, so every test is `#[ignore]` like the rest of the device
 //! suite.
 

@@ -1,5 +1,5 @@
 //! Cold degeneracy-structure build allocations are independent of the block
-//! count at every rank (#2192 R1, #2012): a block's shape and strides are
+//! count at every rank (#2192, #2012): a block's shape and strides are
 //! written straight into the packed `DegeneracyStructure` arena, so no
 //! rank-sized per-block (or per-tree) buffer can spill above rank 8.
 

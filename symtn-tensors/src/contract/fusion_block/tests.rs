@@ -1350,7 +1350,7 @@ fn run_core_plan(
     output
 }
 
-/// What (#2129 leaf A): the checked Generic core plan of canonical staged
+/// What (#2129): the checked Generic core plan of canonical staged
 /// structures compiles from coupled regions (no per-subblock layout) and is
 /// bitwise identical to the per-subblock builder; a non-canonical operand
 /// tiling falls back to that builder. Outer multiplicity (`1 ⊗ 1 → 1` twice),

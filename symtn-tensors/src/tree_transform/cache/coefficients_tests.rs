@@ -1,4 +1,4 @@
-//! The process-global composed-coefficient owner (#2014-4): key
+//! The process-global composed-coefficient owner: key
 //! completeness, staged and epoch-guarded publication, degeneracy-only reuse
 //! and output identity against the uncached eager producer.
 

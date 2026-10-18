@@ -49,7 +49,7 @@ type TreeRows = SmallVec<[TreeRow; 2]>;
 /// the base's one externals `Arc` per tuple plus one inner-line `Arc` per
 /// tree, instead of the whole rank.
 ///
-/// Rule O: every holder of keys owns the arena those keys point into. A
+/// Single-arena ownership: every holder of keys owns the arena those keys point into. A
 /// `SectorStructure` holds handles only into its own arena, a published
 /// composed-coefficient entry only into its entry arena.
 pub(crate) struct TreeArena {

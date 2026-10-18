@@ -298,21 +298,15 @@ fn single_precision_factorizations_allocate_like_double() {
         "Complex32 against Complex64"
     );
 
-    // Equality, not a bound (#1337). This used to allow `f32`, `Complex32` and
-    // `Complex64` a slack of one allocation per coupled sector of every
-    // spectrum factor built: `typed.rs::diagonal_factor_on` converted the
-    // `Vec<f64>` spectrum into the `Vec<D>` payload by
-    // `into_iter().map(to_scalar).collect()`, and the standard library's
-    // in-place collect reuses the source buffer only when `D` matches `f64` in
-    // size *and* alignment — which `f32` (align 4), `Complex32` (align 4) and
-    // `Complex64` (16 bytes) all fail. The asymmetry was never "single
-    // precision costs more": `Complex64` paid it too, since long before single
-    // precision existed, and `f64` was the one payload dtype whose spectrum
-    // factor was free. The factor is now filled from a borrowed slice, so the
-    // buffer count is a property of the algorithm rather than of the payload
-    // layout. Found by diffing a per-call-site allocation-backtrace histogram
-    // between the `f64` and `f32` runs; the dense backend's own SVD entry
-    // points and conversion chain are allocation-identical at all four dtypes.
+    // Equality, not a bound (#1337). The spectrum factor is filled from a
+    // borrowed slice, so the buffer count is a property of the algorithm
+    // rather than of the payload layout. Why not
+    // `into_iter().map(to_scalar).collect()` from the `Vec<f64>` spectrum:
+    // the standard library's in-place collect reuses the source buffer only
+    // when `D` matches `f64` in size *and* alignment, which `f32` (align 4),
+    // `Complex32` (align 4) and `Complex64` (16 bytes) all fail, costing one
+    // allocation per coupled sector. The dense backend's own SVD entry points
+    // and conversion chain are allocation-identical at all four dtypes.
     for (single, double, what) in [
         (f32_calls, f64_calls, "f32 against f64"),
         (c32_calls, c64_calls, "Complex32 against Complex64"),

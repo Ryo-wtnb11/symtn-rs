@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #576), slice 1: `inv`.
+// `inv`.
 // ---------------------------------------------------------------------------
 
 /// An endomorphism whose every coupled-sector block is nonsingular: the fill
@@ -158,7 +158,7 @@ fn inv_accepts_isomorphic_but_unequal_codomain_and_domain() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #576), slice 2: `pinv`.
+// `pinv`.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -426,7 +426,7 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 (issue #576), slice 3: `exp`.
+// `exp`.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -453,9 +453,8 @@ fn exp_of_the_identity_is_e_times_the_identity() {
 
 #[test]
 fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
-    // What: issue #577 closed the recorded divergence — TensorKit's `exp` is a
-    // general per-block Pade approximant with no hermiticity gate, and so is
-    // this one now. `exp(A) exp(-A) = id` pins the actual exponential.
+    // What: like TensorKit's `exp`, a general per-block Pade approximant
+    // with no hermiticity gate (#577). `exp(A) exp(-A) = id` pins the actual exponential.
     let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
@@ -889,7 +888,7 @@ fn c64_compact_inv_and_pinv_are_elementwise_reciprocals() {
             .zip(&pseudo.values)
         {
             // Within 1 ulp, not bitwise, per `docs/testing_numerics.md`: the
-            // compact reciprocal now runs a literal port of Julia's
+            // compact reciprocal runs a literal port of Julia's
             // `inv(::ComplexF64)` (#1463, `symtn/src/typed.rs`
             // `julia_complex64_reciprocal`), whose fast path uses `mul_add`
             // where the naive `1/z` computed here does not, so this is a

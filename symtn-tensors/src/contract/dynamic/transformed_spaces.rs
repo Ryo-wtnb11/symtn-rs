@@ -1,8 +1,7 @@
 //! The multiplicity-free transformed-source and core-destination
 //! derivations of a dynamic-tree contraction. Nothing here retains anything:
 //! the derived spaces come from the complete-HomSpace cache and the
-//! transformers from the process-global completed-transformer cache
-//! (#2014-3).
+//! transformers from the process-global completed-transformer cache.
 
 use super::*;
 use crate::tree_transform::TreeTransformPlanning;

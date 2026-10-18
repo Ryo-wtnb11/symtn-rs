@@ -926,7 +926,7 @@ mod copy_c_scratch_tests {
             .all(|&value| value == 1.0));
     }
 
-    /// #1870 B1 (was #1631's "densified once on the copyC route"): a
+    /// #1870: a
     /// reordered `t · D` writes the scaled `t` through one transform `_into`
     /// (TensorKit's `copyC` of a `mul!` with a `Diagonal`), so the compact
     /// operand is never densified and the contraction's copyC scratch is

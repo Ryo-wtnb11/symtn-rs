@@ -168,7 +168,7 @@ fn transpose_rejects_malformed_axes_without_panicking() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4, slice 3: `TensorMap::repartition`.
+// `TensorMap::repartition`.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -294,7 +294,7 @@ fn repartition_is_sign_free_even_for_a_fermionic_provider() {
 }
 
 // ---------------------------------------------------------------------------
-// #580 PR 4: typed cat / absorb.
+// Typed cat / absorb.
 // ---------------------------------------------------------------------------
 
 /// Position-weighted value from typed U(1) labels.

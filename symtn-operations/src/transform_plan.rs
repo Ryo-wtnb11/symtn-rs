@@ -702,7 +702,7 @@ impl<T> TreeTransformGroupBlockSpec<T> {
 /// through the spec's shared `Arc<[T]>`, as TensorKit's transformer references
 /// the cached per-`FusionTreeBlock` `U`, and copies only Single scalars. Why
 /// not one flattened payload per plan: plans are assembled from cached group
-/// specs (#2014-4), and flattening would copy every reused matrix.
+/// specs, and flattening would copy every reused matrix.
 #[derive(Clone)]
 pub struct TreeTransformGroupPlan<T> {
     specs: Vec<TreeTransformGroupBlockSpec<T>>,
@@ -961,7 +961,7 @@ impl<T: Copy> TreeTransformGroupPlan<T> {
     }
 }
 
-/// One source group's specs as the composed-coefficient cache (#2014-4)
+/// One source group's specs as the composed-coefficient cache
 /// holds them, plus the payload last bound from a group set that starts
 /// with this group.
 ///
@@ -1010,7 +1010,7 @@ impl<T> TreeTransformSpecGroup<T> {
 }
 
 /// A categorical transform assembled from shared cached groups (the
-/// composed-coefficient cache's entries, #2014-4), bound without copying
+/// composed-coefficient cache's entries), bound without copying
 /// any spec: a plan miss whose groups all hit allocates only the group list.
 /// Every binding of one group set shares one coefficient payload, so a
 /// degeneracy-only rebinding neither rebuilds it on the host nor, through

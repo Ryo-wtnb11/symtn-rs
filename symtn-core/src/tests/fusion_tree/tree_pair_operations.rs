@@ -368,7 +368,7 @@ fn tree_pair_block_apis_reject_invalid_later_vertex_before_symbols() {
 #[test]
 fn split_only_su2_braid_matches_legacy_composition_in_both_directions() {
     // What: SU(2) 2|2 -> 3|1 and 2|2 -> 1|3 retain the exact tree keys,
-    // dual flags, and bend coefficients of the old all-codomain route.
+    // dual flags, and bend coefficients of the all-codomain reference route.
     let source = FusionTreePairKey::try_pair_from_sector_ids(
         [1, 2],
         [2, 1],

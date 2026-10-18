@@ -843,7 +843,7 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
         destination.dense_data().unwrap(),
         expected.dense_data().unwrap()
     );
-    // #1870 B1: the compact operand scales `u`'s leg into the destination,
+    // #1870: the compact operand scales `u`'s leg into the destination,
     // as eager's arm does, and is never densified.
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }

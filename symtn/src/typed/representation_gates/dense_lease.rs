@@ -272,8 +272,7 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
 }
 
 /// #1866: a checked Generic compact full trace reads the spectrum, as the
-/// multiplicity-free one does, so it materializes nothing (#2142 pinned the
-/// former densify inside the Host pool here).
+/// multiplicity-free one does, so it materializes nothing (#2142).
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_trace_reads_the_spectrum_without_materializing() {

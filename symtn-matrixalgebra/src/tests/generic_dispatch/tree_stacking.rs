@@ -32,9 +32,8 @@ fn region_payloads(
 }
 
 // #1494: the leg-degeneracy (facade) builder lists multi-leg Generic trees in
-// its own order, which the former `FusionTreeKey`-Ord admission refused, so
-// every one of these packed the whole payload before QR/SVD/LQ and the
-// value-only spectra. A coupled-sector tiling is the same matricization the
+// its own order, which a `FusionTreeKey`-Ord admission would refuse, packing
+// the whole payload before QR/SVD/LQ and the value-only spectra. A coupled-sector tiling is the same matricization the
 // pack would build, so no pack may happen.
 #[test]
 #[expect(

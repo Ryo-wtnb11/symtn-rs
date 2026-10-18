@@ -4,7 +4,7 @@
 //!
 //! Used by `typed_facade.rs`'s
 //! `c64_compact_inv_and_pinv_are_elementwise_reciprocals` (#1463), whose
-//! exact equality assumption no longer holds once `Complex64`'s compact
+//! exact equality assumption does not hold because `Complex64`'s compact
 //! reciprocal runs the Julia-ported `inv` (`symtn/src/typed.rs`
 //! `julia_complex64_reciprocal`) instead of the naive `1/z` it compares
 //! against: the new fast path's `mul_add` gives a different, still valid,

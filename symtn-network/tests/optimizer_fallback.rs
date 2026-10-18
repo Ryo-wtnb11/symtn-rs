@@ -1,6 +1,6 @@
 //! `DynamicProgramming` and `AutoHq` must survive networks the upstream `opt-einsum-path`
 //! drivers reject (all-dim-1 gram topology from finite-torus CTRG) by
-//! falling back down the legacy auto-hq -> auto -> dp -> greedy chain.
+//! falling back down the auto-hq -> auto -> dp -> greedy chain.
 #![cfg(feature = "opt-path")]
 
 use std::sync::Arc;

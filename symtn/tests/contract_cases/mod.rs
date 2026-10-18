@@ -1,6 +1,6 @@
 //! General-axes contraction fixtures and their independent oracles, shared by
 //! the Host pin (`typed_contract_host_oracle.rs`, ungated) and the device gate
-//! (`typed_cuda_contract.rs`, G2c-1a #1345).
+//! (`typed_cuda_contract.rs`, #1345).
 //!
 //! Two oracles, neither of which passes through the Host `DynamicTree`
 //! compiler whose device replay is under test:
@@ -986,7 +986,7 @@ pub fn fz2_tensorkit_loops<T>(
     ]
 }
 
-/// Every fermionic fixture (G2c-2, #1347), handed to `check` with the
+/// Every fermionic fixture (#1347), handed to `check` with the
 /// provider's typed twist; shared by the Host pin and the device gate. A
 /// macro because each provider's twist has its own dispatch bound.
 macro_rules! for_each_fermionic_fixture {

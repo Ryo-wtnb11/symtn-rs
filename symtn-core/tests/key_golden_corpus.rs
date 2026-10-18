@@ -1,11 +1,11 @@
-//! Golden corpus for the block-key identity contract (#2192 L1a).
+//! Golden corpus for the block-key identity contract (#2192).
 //!
 //! What: `Debug`, `Ord` and the cache hasher's `Hash` of `FusionTreeKey`,
 //! `FusionTreePairKey`, `FusionTreeGroupKey` and `BlockKey`, plus the block
 //! order of real structures, equal the values recorded in
 //! `tests/golden/key_corpus.txt`. That file was computed from the `Arc`-slice
-//! representation at `53ddf679` before any representation change, so it is
-//! the independent oracle for the arena representation (L1b).
+//! representation at `53ddf679`, so it is an oracle independent of the arena
+//! representation.
 //!
 //! Regenerate only for an intentional contract change:
 //! `SYMTN_BLESS_KEY_CORPUS=1 cargo test -p symtn-core --test key_golden_corpus`.
@@ -433,8 +433,7 @@ fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
             ),
         ),
         // Identical codomain and domain legs: swapped pairs built from the
-        // structure's own trees name real blocks on the other side (#2192
-        // design review R2-1).
+        // structure's own trees name real blocks on the other side (#2192).
         (
             "su2-r4-symmetric",
             unpack(

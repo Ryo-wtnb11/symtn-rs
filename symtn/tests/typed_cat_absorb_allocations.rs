@@ -1,5 +1,4 @@
-//! Allocation gates for the typed `cat`/`braid`/`absorb`
-//! (#580 PR 4), alongside the compact-storage gates in
+//! Allocation gates for the typed `cat`/`braid`/`absorb`, alongside the compact-storage gates in
 //! `typed_diagonal_allocations.rs`: bytes counted through a global allocator
 //! while one warmed operation runs.
 //!

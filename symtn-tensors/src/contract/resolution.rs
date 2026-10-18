@@ -1141,8 +1141,8 @@ mod tests {
                     core_dst = resolution.direct_destination_inactive_blocks().is_none();
                 });
                 // What: no core preflight (Host and device share the planner,
-                // which rejects every candidate on axes alone; the Host
-                // ladder ran one before #1858), no core destination check
+                // which rejects every candidate on axes alone), no core
+                // destination check
                 // for a non-core request, and only the HomSpaces TensorKit
                 // also forms: one permuted HomSpace per transformed source
                 // plus the core destination when the output transform is not

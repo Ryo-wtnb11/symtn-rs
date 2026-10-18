@@ -456,9 +456,8 @@ struct CacheEntry<V> {
 ///
 /// A byte budget alone bounds the device memory but not the entry count, so a
 /// replay alternating thousands of tiny structures would grow the cache without
-/// limit. The host completed-transformer cache is byte-bounded only (#2014-3),
-/// so this count is a device-side bound of its own, kept at the former host
-/// entry cap. A workload alternating more than 256 transformers on one device
+/// limit. The host completed-transformer cache is byte-bounded only, so this
+/// count is a device-side bound of its own. A workload alternating more than 256 transformers on one device
 /// re-uploads the excess per replay; for large transformers the byte budget,
 /// not this count, is the binding limit.
 pub(crate) const DEFAULT_STRUCTURE_CACHE_ENTRIES: usize = 256;

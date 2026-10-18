@@ -608,7 +608,7 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
     let after_a = crate::test_cache::completed();
     let expected_b = source_b.permute(&[1], &[2, 0]).unwrap();
     let after_b = crate::test_cache::completed();
-    // What: one process-global entry serves both Runtimes (#2014-3).
+    // What: one process-global entry serves both Runtimes (#2014).
     assert_eq!((after_a.entries(), after_a.misses()), (1, 1));
     assert_eq!((after_b.entries(), after_b.misses()), (1, 1));
     assert_eq!(after_b.hits(), after_a.hits() + 1);

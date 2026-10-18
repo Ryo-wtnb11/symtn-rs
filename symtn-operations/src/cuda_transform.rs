@@ -15,7 +15,7 @@
 //! back out. This executor submits exactly that sequence, in the compile-time
 //! recoupling plan's own job order.
 //!
-//! Reference record for the replayed dataflow (`g2-design.md` §8): TensorKit
+//! Reference record for the replayed dataflow: TensorKit
 //! `add_transform!` / `add_transform_kernel!`
 //! (src/tensors/indexmanipulations.jl:547/:579/:648/:660 @cfaa073), whose
 //! recoupling step is `mul!(dst, src, transpose(U))`
@@ -615,8 +615,8 @@ struct DeviceWorkspace {
 /// One executor belongs next to one device execution context. Entries of other
 /// contexts can never be read back, because the context identity is part of
 /// every key. Because a replay needs `&mut self` and `&mut CudaDenseContext`
-/// at once, its owner in G2b is the runtime's device state beside the
-/// `CudaDenseContext`, inside the same device mutex the GL-3 lease takes; it
+/// at once, its owner is the runtime's device state beside the
+/// `CudaDenseContext`, inside the same device mutex the device lease takes; it
 /// is deliberately not global and not owned by any structure.
 pub struct CudaTreeTransformExecutor {
     prepared: PreparedDeviceCache<PreparedStructure>,
@@ -1352,13 +1352,10 @@ impl CudaTreeTransformExecutor {
             .and_then(|len| len.checked_mul(core::mem::size_of::<D>()))
             .ok_or(OperationError::ElementCountOverflow)?;
         // Growth costs one host↔device transfer of zeros per buffer, the same
-        // way every other device allocation in symtn is made (#740).
-        // `cubecl::Session::alloc_zero_output` was unusable here in Tenferro
-        // 0.5.0: broken for complex dtypes (tenferro-rs#1833) and unpublished
-        // for kernel-written outputs. 0.6.0 routes it through a dtype-agnostic
-        // `fill_zero_write`; adopting that is leaf M3. The values are irrelevant —
-        // every column is fully written before it is read — and a warm replay
-        // pays none of it.
+        // way every other device allocation in symtn is made (#740), rather
+        // than through `cubecl::Session::alloc_zero_output` (tenferro-rs#1833).
+        // The values are irrelevant — every column is fully written before it
+        // is read — and a warm replay pays none of it.
         let source = CudaDenseStorage::upload_owned::<D>(ctx, vec![D::ZERO; source_len])
             .map_err(OperationError::Dense)?;
         let destination = CudaDenseStorage::upload_owned::<D>(ctx, vec![D::ZERO; destination_len])
@@ -1632,7 +1629,7 @@ fn storage_snapshot<D: CudaScalar>(
 }
 
 /// Describes the device workspace and the uploaded recoupling matrices for
-/// Stage C, exactly as they now exist.
+/// Stage C, exactly as they exist at that point.
 ///
 /// The whole resident workspace buffer is the slot's capacity: Stage C compares
 /// it with what this structure requires, so reporting the high-water mark a

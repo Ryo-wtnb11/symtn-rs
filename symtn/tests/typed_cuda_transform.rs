@@ -1,5 +1,5 @@
 //! Real-device gates for typed structural transforms on CUDA tensors
-//! (issue #1322, G2b-2): `permute`, `braid`, `transpose`
+//! (issue #1322): `permute`, `braid`, `transpose`
 //! and `repartition` on `TensorMap<R, D, CudaStorage<D>>`.
 //!
 //! Evidence chain, as the design review fixed it:
@@ -369,7 +369,7 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
     );
 }
 
-/// #2192 L4: Unique fusion is `NoCache`, so a degeneracy-only change misses
+/// #2192: Unique fusion is `NoCache`, so a degeneracy-only change misses
 /// the completed transformer and every block's phase is recomputed. The
 /// device permute right after that change, and the warm one after it, must
 /// match the Host. The timings are an observation, not a gate.
@@ -999,7 +999,7 @@ fn device_transforms_of_an_empty_tensor_produce_an_empty_tensor() {
 }
 
 // ---------------------------------------------------------------------------
-// `*_into` (issue #1329, G2b-3)
+// `*_into` (issue #1329)
 // ---------------------------------------------------------------------------
 
 /// A destination whose every element is NaN, on the model's space. Overwrite
@@ -1529,7 +1529,7 @@ fn device_into_of_an_empty_tensor_succeeds() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_reads_a_lazy_source_through_its_parent_like_the_host() {
-    // #1870 leaf D: a lazy-adjoint source of the device `*_into` is read
+    // #1870: a lazy-adjoint source of the device `*_into` is read
     // through its parent's device payload (storage-mapped structure, storage
     // conjugation per task), as on Host. Each call is compared against the
     // Host `*_into` of the same lazy source and against the reference steps

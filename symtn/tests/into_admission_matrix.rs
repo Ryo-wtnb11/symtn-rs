@@ -25,14 +25,14 @@
 //! 5. the source stays cold: a lazy adjoint or compact diagonal is not
 //!    materialized by the call.
 //!
-//! Rows: owned dense (leaf A1) and lazy-adjoint (leaf A2) rank-(2, 2) sources
+//! Rows: owned dense and lazy-adjoint rank-(2, 2) sources
 //! × {permute, braid, transpose, repartition}; compact rank-(1, 1) diagonal
-//! sources (leaf A2) × {identity permute, swap permute, swap transpose,
+//! sources × {identity permute, swap permute, swap transpose,
 //! braid, repartition to (0, 2) and (2, 0)}. Columns: multiplicity-free real
 //! symbols (U(1), SU(2), fermion parity, each with dual legs),
 //! multiplicity-free complex symbols (Fibonacci), checked Generic (SU(2),
 //! SU(3) with outer multiplicity) × {f64, Complex64 scaled by `1 + 2i`}.
-//! Contraction rows (leaf B1): `[v, w'] ← [v, w']` against `[v, w'] ← [v]`
+//! Contraction rows: `[v, w'] ← [v, w']` against `[v, w'] ← [v]`
 //! over the domain as owned, lazy-adjoint and adjoint-view (`other`) operands
 //! in the core and two reordered output orders; and every compact arm
 //! pattern (`t · D`, `D · t` with a direct and a lazy `t`, `D · D`) in its own
@@ -40,13 +40,13 @@
 //! oracle contracts the materialized operands; reordered `D · D` is the row
 //! that proves `contract = permute(compose)` there (eager takes the dense
 //! route).
-//! Complex-symbol contraction rows (leaf B2): a `Complex64` embedding of U(1)
+//! Complex-symbol contraction rows: a `Complex64` embedding of U(1)
 //! equals the real-symbol lane (exactly, up to the sign of zero) on owned
 //! operands in every order, plus its compact arms and their decline; a
 //! Bosonic Z3 × Z3 with an alternating-bicharacter `R` matches a hand
 //! calculation of the braiding phase; Fibonacci `contract_into` is refused
 //! like eager.
-//! Trace rows (leaf C): TensorKit `tensortrace!` → `trace_permute!`
+//! Trace rows: TensorKit `tensortrace!` → `trace_permute!`
 //! (`tensoroperations.jl:79, 208`) checks `space(tdst)` before the pair
 //! duality and runs `_trace_permute!` (L242, L267) with its `β` pass first.
 //! Owned and lazy-adjoint `[v, w'] ← [v, w']` sources × {both partial
@@ -1798,7 +1798,7 @@ fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
     }
 }
 
-// ---- #1870 leaf B2: symmetric complex-symbol contraction ----
+// ---- symmetric complex-symbol contraction ----
 //
 // TensorKit `tensorcontract!` has no symbol-type dispatch: a symmetric rule
 // with `Complex64` symbols contracts like a real-symbol one. No in-tree
@@ -1930,7 +1930,7 @@ impl SectorCodec for ComplexU1 {
 /// `SymmetricBraiding` branch, `braiding_manipulations.jl:221-229`), which
 /// takes `R(b, a)` for `a` crossing `b`. That equals the Artin path's `R(a, b)`
 /// only for a real `R`; for this one it is the conjugate (reported with
-/// #1870 B2, outside the contraction lane).
+/// #1870, outside the contraction lane).
 #[derive(Clone, Copy)]
 struct AlternatingZ3Squared;
 

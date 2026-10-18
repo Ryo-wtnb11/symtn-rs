@@ -1,5 +1,5 @@
 //! Host pin of the general-contraction oracles the device gate
-//! (`typed_cuda_contract.rs`, G2c-1a #1345) compares against.
+//! (`typed_cuda_contract.rs`, #1345) compares against.
 //!
 //! An oracle is only independent evidence for the device once it is shown to
 //! agree with the Host on the same fixtures; this file does that without a
@@ -9,13 +9,13 @@
 //!   fixture and payload dtype;
 //! * the physical-basis dense contraction, for the U(1) and SU(2) fixtures
 //!   whose contracted legs do not bend;
-//! * for fermionic providers (G2c-2, #1347), the same sequence with
+//! * for fermionic providers (#1347), the same sequence with
 //!   TensorKit's `twist!` on the B role and on the A role — which must agree
 //!   with each other and with the Host — and a twist-free control the Host
 //!   must *not* match, so every fixture really exercises the twist;
 //! * the TensorKit-valued FZ2 closed loops as explicit `contract` calls;
 //! * `contract_into` over a NaN-poisoned destination equals the
-//!   returning contraction on every fixture (G2c-1b, #1346), so the Host
+//!   returning contraction on every fixture (#1346), so the Host
 //!   overwrite is the same oracle the device overwrite is gated against.
 
 mod common;

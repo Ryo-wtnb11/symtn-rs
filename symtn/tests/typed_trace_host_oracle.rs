@@ -1,5 +1,5 @@
 //! Host pin of the partial-trace oracles the device gate
-//! (`typed_cuda_trace.rs`, G2c-4 #1349) compares against: the physical-basis
+//! (`typed_cuda_trace.rs`, #1349) compares against: the physical-basis
 //! diagonal sum (U(1), SU(2)) and the identity contraction (twist-free
 //! providers) agree with Host `trace_pairs` on every fixture and payload
 //! dtype, without a device, so ordinary CI holds them.

@@ -138,7 +138,7 @@ fn generic_pair_fallback_validation_indexes_each_sector_once() {
                 lookups: total,
             }
         );
-        // F + T = 64 hashes versus the former F * T_c = 32 * 8 = 256
+        // F + T = 64 hashes versus a per-sector F * T_c = 32 * 8 = 256
         // comparisons.
         assert!(index.indexed_trees + index.lookups < total * trees_per_sector);
     }
@@ -224,7 +224,7 @@ fn generic_pair_publication_preserves_vertex_tree_payload_placement() {
         (2, 2)
     );
     // Row and column key validation each build a one-sided table; the
-    // scatter loop shares one two-sided table (formerly four tables).
+    // scatter loop shares one two-sided table (not four tables).
     assert_eq!(
         placement_index_rec.placement_index(),
         PlacementIndexProbe {
@@ -701,9 +701,8 @@ fn generic_pair_fallback_scatters_each_output_block_once() {
                 (probe.left_scatter_calls, probe.right_scatter_calls),
                 (16, 16)
             );
-            // Formerly G_s * B = 4 * 16 = 64 block visits per side; now
-            // one grouping pass over B = 16 plus the F = 16 scattered
-            // blocks.
+            // One grouping pass over B = 16 plus the F = 16 scattered
+            // blocks, not G_s * B = 4 * 16 = 64 block visits per side.
             assert_eq!(
                 *visits,
                 ScatterVisitProbe {
@@ -794,7 +793,7 @@ fn paired_output_homs<D>(
     )
 }
 
-/// One checked factor space built the former way: keys enumerated, then
+/// One checked factor space built in two passes: keys enumerated, then
 /// the bound space enumerated again.
 fn two_enumeration_space<R: CheckedGenericFusion>(
     provider: &Arc<R>,
@@ -873,9 +872,8 @@ fn assert_checked_pair_matches_two_enumeration_construction<
 #[allow(clippy::arc_with_non_send_sync)] // The checked API needs Arc identity; the recorder is a single-threaded RefCell log.
 fn checked_paired_enumerates_each_factor_layout_once() {
     // What: one paired publication issues exactly the provider queries of
-    // one left enumeration followed by one right enumeration; the former
-    // route (keys, then a bound space, per side) issued each of those
-    // sequences twice. Canonical (`reverse = false`) and fallback
+    // one left enumeration followed by one right enumeration (not keys and
+    // then a bound space per side, which would issue each sequence twice). Canonical (`reverse = false`) and fallback
     // (`reverse = true`) geometries publish the same structure and data
     // as the two-enumeration construction.
     for reverse in [false, true] {
@@ -957,9 +955,9 @@ fn checked_paired_placement_error_precedes_bound_space() {
     // What: a factor key whose tree the matricization lacks fails after
     // that side's single enumeration and before any publication; the
     // left side is validated completely before the right side is
-    // enumerated. Formerly the left error surfaced after 3 queries and
-    // the right error after 9 (left keys, left space, right keys); now
-    // after 3 and 6.
+    // enumerated: the left error surfaces after 3 queries and the right
+    // error after 6 (a two-pass route would take 3 and 9: left keys, left
+    // space, right keys).
     for side in [FactorSide::Left, FactorSide::Right] {
         let (homspace, mut matrix, pair) = vertex_tree_factor_fixture(false);
         match side {

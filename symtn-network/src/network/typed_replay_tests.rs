@@ -1825,7 +1825,7 @@ fn typed_split_moving_step_is_one_contract_equal_to_contract_then_permute() {
         .unwrap();
     // Step 0 contracts `c` of a[a; c] and b[c; b, d] into (a | b, d); its
     // consumer takes it as rhs against c[b, d; e], so the next-use
-    // orientation is (b, d | a) — a split move, now the contract's own spec.
+    // orientation is (b, d | a) — a split move, the contract's own spec.
     let step = &planned.schedule.steps[0];
     assert_eq!((step.lhs_slot, step.rhs_slot), (0, 1));
     assert_eq!(

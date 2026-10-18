@@ -1,5 +1,5 @@
 //! Device twins of the `f64`/`Complex64` device *factorization* suites, run at
-//! every admitted device payload (leaf C4, issue #1341).
+//! every admitted device payload (#1341).
 //!
 //! Each gate is one generic body instantiated for the dtypes the marker under
 //! test admits, so the double-precision instantiation is the control: a helper
@@ -968,11 +968,9 @@ fn device_factorization_rejections_do_not_depend_on_the_payload() {
 /// #1320 at 4- and 8-byte elements.
 ///
 /// The aligned whole-factor route copies each block straight into its sector
-/// region, and Tenferro 0.5.0 told cuTENSOR that an offset destination view
-/// is 256-byte aligned when it is not (0.6.0 reports the true alignment, so
-/// the copy now runs at every offset). Which offsets are affected depends on
-/// the element size, so admitting `f32` (4 bytes) and `Complex32` (8 bytes)
-/// changes the set: every degeneracy pair below puts the second sector's
+/// region, so the copy must report each offset destination view's true
+/// alignment to cuTENSOR. Which offsets are unaligned depends on the element
+/// size, so `f32` (4 bytes) and `Complex32` (8 bytes) change the set: every degeneracy pair below puts the second sector's
 /// block at an **odd** element offset (9, 25, 9), which is unaligned for all
 /// four payload sizes at once. `(4, 2)` and `(2, 2)` are the controls.
 #[test]

@@ -39,7 +39,7 @@ type CheckedContractResult<P, D> = Result<
     CheckedGenericPlanError<<P as symtn_core::CheckedGenericFusion>::Error>,
 >;
 
-/// The U15 boundary of general checked contraction.
+/// The braiding boundary of general checked contraction.
 pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError =
     OperationError::UnsupportedTensorContractScope {
         message: "checked Generic contraction requires Bosonic braiding",
@@ -93,8 +93,8 @@ where
 
     /// General contraction may braid and twist; the checked engine
     /// implements neither TensorKit `blas_contract!`'s fermionic supertrace
-    /// branch nor non-symmetric braiding, so it admits Bosonic braiding only
-    /// (U15), read once from the left provider.
+    /// branch nor non-symmetric braiding, so it admits Bosonic braiding only,
+    /// read once from the left provider.
     pub(crate) fn contraction(
         binding: &'a BoundDynamicFusionMapSpace<P>,
         sides: [CheckedSide<'a>; 2],
@@ -1261,7 +1261,7 @@ mod tests {
 
     /// What: a canonical contraction plans the shared Core rung (zero-copy
     /// candidate, identity output). Its provider events are the pair
-    /// admission, the U15 braiding read, the destination stage and the
+    /// admission, the braiding read, the destination stage and the
     /// commit guard's style (#2046): planning and replay query nothing, and
     /// no second (core) destination is derived. The left binding owns the
     /// result; a failing destination query surfaces exactly and publishes
@@ -1748,7 +1748,7 @@ mod tests {
         );
     }
 
-    /// What (#2063, F7 of the #1860 design review): the three-stage fixture
+    /// What (#2063): the three-stage fixture
     /// plans a `DynamicTree` artifact that stages the lhs, the rhs and the
     /// core destination; two of its four committed spaces (the destination
     /// and three intermediates) share a HomSpace, so within the first call
@@ -1805,7 +1805,7 @@ mod tests {
         }
     }
 
-    /// What (U15): general checked contraction with a fermionic or anyonic
+    /// What: general checked contraction with a fermionic or anyonic
     /// provider returns the typed `Unsupported` after the pair admission and
     /// one braiding read, before any structural query; canonical
     /// composition crosses no legs and stays admitted.

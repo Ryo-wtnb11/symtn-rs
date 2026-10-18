@@ -184,8 +184,8 @@ fn warm_contract_compile_allocations_do_not_scale_with_rank() {
         // permuted HomSpace and the two `Arc`s the replay scratch shares; the
         // same for the core destination; the core plan; the artifact. An
         // empty twist list is an empty scale list and allocates nothing
-        // (#1975). The layout lookup key is no longer one of them
-        // (#1367): it borrows the HomSpace content.
+        // (#1975). The layout lookup key is not one of them (#1367): it
+        // borrows the HomSpace content.
         assert_eq!(core, 5, "core route at rank {rank}");
         assert_eq!(plan, 3, "plan at rank {rank}");
         assert_eq!(dynamic_tree, 18, "dynamic-tree route at rank {rank}");
@@ -194,7 +194,7 @@ fn warm_contract_compile_allocations_do_not_scale_with_rank() {
 
 /// Allocations of one warm DynamicTree compile of
 /// `A(V^codomain ← V^domain)` contracted on its codomain axis 0 with
-/// `M(V ← V)` on its domain axis, identity output (the E1 `contract` row):
+/// `M(V ← V)` on its domain axis, identity output:
 /// A's source transform sends leg 0 to the domain and its `domain` legs to
 /// the codomain, and M's transform swaps its two legs.
 fn crossing_compile_allocations(
@@ -278,7 +278,7 @@ fn warm_contract_compile_allocates_nothing_per_crossing_leg_the_dual_moves() {
 /// each operand's open legs reversed: TensorKit's `copyC` shape (C1p at rank
 /// 2), so the planner builds the temporary space, its core and one permute.
 /// Paired with the same contraction through the core-then-`DynamicTree`
-/// ladder, the device route before #1857.
+/// ladder.
 fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
     let provider = Arc::new(U1FusionRule);
     let lhs = space(&provider, rank, rank);
@@ -344,10 +344,9 @@ fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
 #[test]
 fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
     let _serial = counting_alloc::serial();
-    // Rank 6 is the #1998 acceptance: its complete HomSpace (formerly
-    // 111 MB), its transform (formerly 249 MB) and its fusion-tree layouts
-    // used to exceed the 64 MiB budgets or the 8 MiB entry limits, so each
-    // warm call rebuilt them (#1993).
+    // Rank 6 is the largest case (#1998): its complete HomSpace, transform
+    // and fusion-tree layouts must fit the 64 MiB budgets and the 8 MiB entry
+    // limits, or each warm call would rebuild them (#1993).
     for rank in [2, 3, 4, 5, 6] {
         let complete_bypasses =
             symtn_core::structure_cache_info(symtn_core::StructureCacheKind::DegeneracyStructure)
@@ -360,8 +359,7 @@ fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
         // What: device-eager CopyC planning stays a small bounded count once
         // its structures are warm (9-10 through rank 4, 18 at ranks 5 and 6
         // where rank-sized inline axis vectors spill), and never above the
-        // DynamicTree compile it replaced for this contraction. Rank 5 was
-        // 850,760 before #1993; rank 6 was 23,467 before #1998.
+        // DynamicTree compile of the same contraction.
         assert!(copy_c <= 20, "rank {rank}: {copy_c}");
         assert!(
             copy_c <= dynamic_tree,
@@ -387,7 +385,7 @@ fn rank_six_complete_owner_reuses_content_across_derivations() {
     let _serial = counting_alloc::serial();
     // What (#1998): the U(1) `V^6 <- V^6` content (73,789 blocks) fits the
     // complete owner, so independent ordinary derivations share its content.
-    // Expert from_parts construction is deliberately fresh after #2044.
+    // Expert from_parts construction is deliberately fresh (#2044).
     let provider = Arc::new(U1FusionRule);
     let first = space(&provider, 6, 6);
     let cache = symtn_core::StructureCacheKind::DegeneracyStructure;
@@ -406,12 +404,12 @@ fn rank_six_complete_owner_reuses_content_across_derivations() {
 #[test]
 fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
     let _serial = counting_alloc::serial();
-    // What (#2011, re-homed by #2014-3): the rank-6 C1p working set — the
+    // What (#2011): the rank-6 C1p working set — the
     // CopyC output transform and the DynamicTree route's transforms — fits
     // the default 64 MiB process-global completed-transformer cache, so
     // alternating the two routes evicts nothing and every warm call reuses
-    // its retained transformers. Before #2011 each 65 MB transform evicted
-    // the other and the DynamicTree call recompiled with 8.26 M allocations.
+    // its retained transformers instead of recompiling the DynamicTree route
+    // (8.26 M allocations) after each 65 MB transform evicts the other.
     let rank = 6;
     let provider = Arc::new(U1FusionRule);
     let lhs = space(&provider, rank, rank);

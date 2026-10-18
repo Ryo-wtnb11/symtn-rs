@@ -1047,8 +1047,7 @@ fn unique_production_valid_groups_are_singleton_and_preserve_source_order() {
         packed_fixture_structure(2, source_order.iter().cloned().map(|key| (key, vec![1, 1])))
             .unwrap();
     // What: canonical UniqueFusion admits exactly one tree for each external
-    // group; the former interleaved same-group fixture relied on the removed
-    // rank-zero coupled alias.
+    // group, so an interleaved same-group fixture is not constructible.
     assert!(source_structure
         .fusion_tree_groups()
         .iter()

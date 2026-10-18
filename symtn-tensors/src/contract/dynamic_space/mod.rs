@@ -651,8 +651,7 @@ impl DynamicFusionMapSpace {
 
     /// Generic-fusion sibling of [`Self::transformed`]: the permuted /
     /// braided / transposed result space, enumerated with multiplicity-aware
-    /// keys. Not cached (the Generic path is not on a hot loop yet — same
-    /// non-memoized rationale as the Stage B3b cache siblings).
+    /// keys. Not cached: the Generic path is not on a hot loop.
     pub(crate) fn transformed_generic<R>(
         &self,
         rule: &R,
@@ -985,11 +984,10 @@ impl DynamicFusionMapSpace {
         )
     }
 
-    /// Generic-fusion (Stage B3c-1) sibling of [`Self::contracted`]: the
+    /// Generic-fusion sibling of [`Self::contracted`]: the
     /// contraction result space for an outer-multiplicity rule, enumerated with
     /// multiplicity-aware fusion-tree keys (`fusion_tree_keys_generic`). Not
-    /// cached (the Generic path is not on a hot loop yet — same non-memoized
-    /// rationale as the B3b transform siblings). The final HomSpace is consumed
+    /// cached: the Generic path is not on a hot loop. The final HomSpace is consumed
     /// directly by the multiplicity-aware single-pass layout builder.
     pub(crate) fn contracted_generic<R>(
         rule: &R,

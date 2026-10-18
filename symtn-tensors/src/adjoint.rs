@@ -288,7 +288,7 @@ where
     validate_adjoint_data_extent(space.required_len(), data.len())?;
     validate_adjoint_source_structure(rule, space.homspace(), space.structure())?;
     // Uncached build: the eager adjoint (SVD/eigh consumers) is a separate,
-    // out-of-scope path from the cached lazy `adjoint_space_dyn` (#118 PR-1),
+    // out-of-scope path from the cached lazy `adjoint_space_dyn` (#118),
     // and routing it here keeps the replay-cache-key bound off matrix algebra.
     let adjoint_space = build_adjoint_target_space_with_primer(rule, space.homspace(), primer)?;
     let result = materialize_adjoint_data_dyn(space, &adjoint_space, data)?;
@@ -914,7 +914,7 @@ mod cache_tests {
     #[test]
     fn final_homspace_is_the_adjoint_layout_authority_for_rank_one_rules() {
         // What: asymmetric U(1), half-integer SU(2), and odd fZ2 typed and
-        // dynamic daggers preserve the legacy complete layout and conjugate
+        // dynamic daggers preserve the complete layout and conjugate
         // transpose numbers without a pivotal or fermionic phase.
         assert_rank_one_final_layout(
             &U1FusionRule,
@@ -1361,7 +1361,7 @@ mod cache_tests {
 
     #[test]
     fn generic_adjoint_final_homspace_matches_reconstructed_layout() {
-        // What: a genuine outer-multiplicity adjoint keeps the legacy tree
+        // What: a genuine outer-multiplicity adjoint keeps the reconstructed tree
         // order, shapes, strides, offsets, and storage length when its target
         // layout is derived directly from the swapped final HomSpace.
         let source = toy_generic_bound::<1>();

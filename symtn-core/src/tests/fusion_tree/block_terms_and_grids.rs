@@ -563,7 +563,7 @@ fn transpose_tree_pair_block_matches_complex_f_oracle() {
             .any(|(_, coefficient)| coefficient.im.abs() > 1.0e-12));
 
         // What: both compact cycle directions preserve ordered multi-row
-        // non-real F products and conjugation against the old full keys.
+        // non-real F products and conjugation against the full-key oracle.
         assert_compact_transpose_matches_full_key_oracle(
             &rule,
             &sources,

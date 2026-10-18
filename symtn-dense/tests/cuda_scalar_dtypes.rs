@@ -1,5 +1,5 @@
 //! Adapter-level device tests over every admitted [`CudaScalar`] payload
-//! (`f32`, `f64`, `Complex32`, `Complex64`), issue #1326 (leaf C1).
+//! (`f32`, `f64`, `Complex32`, `Complex64`), issue #1326.
 //!
 //! What this file owns that the `f64`/`Complex64` suites do not: the paths
 //! that were typed by `f64` rather than by the payload's real lane — the

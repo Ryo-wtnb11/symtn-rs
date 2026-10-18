@@ -1528,12 +1528,11 @@ impl core::fmt::Display for ProductSectorCodecError {
 
 impl std::error::Error for ProductSectorCodecError {}
 
-/// Cantor-pairing product codec retained for expert compatibility.
+/// Cantor-pairing product codec.
 ///
-/// This remains the default codec parameter of core's `ProductFusionRule` so
-/// explicitly constructed expert rules keep their historical behavior.
+/// This is the default codec parameter of core's `ProductFusionRule`.
 /// Built-in user-layer product spaces use [`PackedProductCodec`] instead.
-/// Cantor pairing preserves the older numeric IDs, but nested decoding is
+/// Nested Cantor decoding is
 /// magnitude-dependent and its representable component domain shrinks as
 /// pairing is nested.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]

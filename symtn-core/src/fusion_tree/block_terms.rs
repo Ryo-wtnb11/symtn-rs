@@ -174,7 +174,7 @@ impl<K, S> OrderedBlockLinearMap<K, S> {
 /// One block transform's structurally present entries per source column
 /// (TensorKit's `U[dst, src]` of `fsbraid`, sparse, column-major): the trace
 /// lowering's permutation input, and, over the lowered (open) destinations,
-/// the trace value cache 4 retains.
+/// the trace value the composed-coefficient cache retains.
 ///
 /// `column(n)` lists source `n`'s present `(destination index, coefficient)`
 /// pairs. A present zero is an entry; a structurally absent coefficient is
@@ -233,7 +233,7 @@ impl<K, S> BlockSourceColumns<K, S> {
     }
 
     /// Replace every destination in place, in order; a cache re-homes its
-    /// keys into the entry's own arena this way (Rule O, #2192).
+    /// keys into the entry's own arena this way (single-arena ownership, #2192).
     pub fn rehome_destinations(&mut self, mut rehome: impl FnMut(&K) -> K) {
         for destination in self.destinations.iter_mut() {
             *destination = rehome(destination);

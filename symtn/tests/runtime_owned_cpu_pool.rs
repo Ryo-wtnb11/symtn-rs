@@ -145,7 +145,7 @@ fn each_runtime_runs_host_work_on_its_own_pool_in_either_build_order() {
         .build_global()
         .unwrap();
 
-    // The issue's order: a serial runtime first no longer caps a later one.
+    // A serial runtime built first does not cap a later one.
     let (serial, wide) = (runtime(1), runtime(4));
     let wide_pool = assert_on_own_pool(&wide, 4, 0);
     let serial_pool = assert_on_own_pool(&serial, 1, 1);

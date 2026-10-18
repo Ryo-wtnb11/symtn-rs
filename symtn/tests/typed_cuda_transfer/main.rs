@@ -108,8 +108,7 @@ fn device_lease_probe(runtime: &Runtime) {
 
 /// One-sector provider whose dimension callback re-enters the Runtime's device
 /// lease. A reduction deadlocks here if it calls provider code under that
-/// lease. (Before #1281 the callback re-entered the coarse state lock through
-/// `cuda_device_ordinal`, which no longer locks anything.)
+/// lease. (`cuda_device_ordinal` takes no lock, #1281.)
 struct ReentrantDimensionRule {
     runtime: Runtime,
     calls: Arc<AtomicUsize>,
@@ -338,7 +337,7 @@ fn assert_cuda_svd_result<R>(
 }
 
 // ---------------------------------------------------------------------------
-// Complex64 device payload (#1268, G1a). Every fixture below has nonzero
+// Complex64 device payload (#1268). Every fixture below has nonzero
 // imaginary parts in every stored entry: a real value cast to `Complex64`
 // cannot distinguish a conjugation defect from a transpose.
 // ---------------------------------------------------------------------------

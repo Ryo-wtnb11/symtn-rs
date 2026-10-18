@@ -160,9 +160,9 @@ fn checked_generic_pair_publication_reuses_one_sector_owners() {
         (0, 0)
     );
     // The checked route validates each staged key once (one cursor event per
-    // block) and commits the structure it validated, so the admitted-key
-    // equality of a two-source construction (formerly one visit and one more
-    // event per block: `blocks` visits, `2 * blocks` events) no longer runs.
+    // block) and commits the structure it validated, so no admitted-key
+    // equality of a two-source construction (`blocks` visits, `2 * blocks`
+    // events) runs.
     assert_eq!(probe.ordered_key_validation_events, blocks);
     assert_eq!(
         (probe.fallback_row_lookups, probe.fallback_col_lookups),
@@ -289,8 +289,8 @@ where
     let qr_probe = generic_pair_rec.generic_pair_publication();
     let qr_blocks = qr.q.space().space().structure().block_count()
         + qr.r.space().space().structure().block_count();
-    // Formerly `qr_blocks` visits and `2 * qr_blocks` events: the checked
-    // route no longer cross-checks a separate key list against its structure.
+    // Not `qr_blocks` visits and `2 * qr_blocks` events: the checked route
+    // does not cross-check a separate key list against its structure.
     assert_eq!(qr_probe.ordered_key_validation_events, qr_blocks);
     assert_eq!(
         (qr_probe.fallback_row_lookups, qr_probe.fallback_col_lookups),

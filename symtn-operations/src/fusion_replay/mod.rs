@@ -25,7 +25,7 @@ use crate::{
 
 /// Storage-handle replay accepts only operands whose coupled-sector matrices
 /// sit directly in storage. Host replay also supports group-local pack/scatter,
-/// but storage/device kernels do not yet expose that capability.
+/// but storage/device kernels do not expose that capability.
 const NON_COUPLED_OPERAND_MESSAGE: &str =
     "storage-handle core fusion-block replay requires the coupled sector matrix layout";
 

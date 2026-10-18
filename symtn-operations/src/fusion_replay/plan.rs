@@ -686,7 +686,7 @@ mod scaled_group_tests {
         assert_eq!(runs, [3, 3]);
     }
 
-    /// The reviewer's geometry: J0 alone in group A, then J1 and J2 in group
+    /// Geometry: J0 alone in group A, then J1 and J2 in group
     /// B with a stride unlike J0→J1. Splitting a whole-list partition at the
     /// group boundary gives [1, 1, 1]; per-group runs give [1, 2].
     #[test]

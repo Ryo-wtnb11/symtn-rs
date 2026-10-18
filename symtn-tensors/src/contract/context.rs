@@ -2028,7 +2028,7 @@ where
 
 #[cfg(test)]
 /// Canonical storage contraction over parent buffers with lazy operand
-/// orientation. A miss is unsupported; this device leaf never prepares
+/// orientation. A miss is unsupported; this device route never prepares
 /// logical-key projections or source transforms.
 ///
 /// Free function, not a context method: the storage-direct route resolves and

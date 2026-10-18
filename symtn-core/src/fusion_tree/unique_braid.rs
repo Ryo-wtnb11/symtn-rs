@@ -140,7 +140,7 @@ where
     R::Scalar: Mul<Output = R::Scalar>,
 {
     // Why not rebuild every Unique key directly: symtn's public checked
-    // constructor still accepts noncanonical innerline data, whose legacy
+    // constructor still accepts noncanonical innerline data, whose given
     // Artin behavior must not be silently normalized into a different key.
     if !(rule.braiding_style().is_symmetric()
         && rule.has_trivial_associator_gauge()

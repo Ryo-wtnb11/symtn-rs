@@ -2,7 +2,7 @@
 //! the same way in both admission modes (#1866): the same storage form, the
 //! same values, and the dense route's answer once materialized.
 //!
-//! Twist (leaf A). TensorKit `cfaa073e` `twist(t, inds; inv)`
+//! Twist. TensorKit `cfaa073e` `twist(t, inds; inv)`
 //! (`src/tensors/indexmanipulations.jl:90`) allocates `similar(t, …)`, which
 //! for a `DiagonalTensorMap` is `similar_diagonal` (`src/tensors/diagonal.jl:85`),
 //! so the result stays diagonal; `twist!` (`indexmanipulations.jl:62`) scales
@@ -11,7 +11,7 @@
 //! `s_c[i] · θ(c)^{|inds|}` for the real θ of these rules. QSpace has no
 //! twist.
 //!
-//! Compose and contract (leaf B). TensorKit `cfaa073e` `compose`
+//! Compose and contract. TensorKit `cfaa073e` `compose`
 //! (`src/tensors/linalg.jl:38`) with `compose_dest(::Diagonal, ::Diagonal)`
 //! (`src/tensors/diagonal.jl:325`) keeps `D * D` diagonal, and `t * D` /
 //! `D * t` dispatch `mul!` on `block(d, c)::Diagonal` (`diagonal.jl:153`,
@@ -19,7 +19,7 @@
 //! the materialized operands (the dense route). QSpace has no compact
 //! diagonal contraction (`contractQS.cc` expands a diagonal first).
 //!
-//! Full trace (leaf D). TensorKit `cfaa073e` has no `DiagonalTensorMap`
+//! Full trace. TensorKit `cfaa073e` has no `DiagonalTensorMap`
 //! trace method: the generic `tensortrace!` runs, so the compact result must
 //! equal the dense route's. Both modes read the compiled trace coefficients
 //! the dense route replays and sum each spectrum block, so the oracle is the
@@ -365,9 +365,9 @@ macro_rules! twist_rows {
 
 #[test]
 fn compact_twist_stays_compact_and_agrees_across_modes() {
-    // What: a fermionic compact twist is one mode-free arm. The checked
-    // Generic fZ2 twin used to densify; now both modes keep the spectrum and
-    // give the identical values.
+    // What: a fermionic compact twist is one mode-free arm: both modes,
+    // including the checked Generic fZ2 twin, keep the spectrum and give
+    // identical values.
     let real = |x: f64| x;
     let mf = twist_rows!(FermionParityFusionRule, -1.0, f64, real);
     let checked = twist_rows!(
@@ -740,7 +740,7 @@ const CONTRACT_CASES: [BondCase; 10] = [
         'b',
         Some(spec(&[1], &[0], &[0, 1], &[2])),
     ),
-    // Reordered `D . D` is the product spectrum and one permute (#1870 B1):
+    // Reordered `D . D` is the product spectrum and one permute (#1870):
     // a swap stays compact (TensorKit `diagonal.jl:291`), a bend is dense.
     (
         "contract D . D swapped",
@@ -879,8 +879,7 @@ fn parity(sector: &Z2Irrep) -> f64 {
 #[test]
 fn compact_compose_and_contract_agree_across_modes() {
     // What: compose and one-leg contract against a compact diagonal are one
-    // mode-free arm. Checked Generic used to densify (`D * D` came back
-    // dense); both modes now give the same storage form and values, equal to
+    // mode-free arm: both modes give the same storage form and values, equal to
     // the dense route, for f64 and Complex64 and for every output order.
     use symtn::sector::Z2FusionRule;
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
@@ -941,8 +940,7 @@ fn fermionic_compact_compose_and_contract_agree_across_modes() {
             ),
             &cases,
         );
-        // Every pattern is an arm now, reordered `D . D` included (#1870
-        // B1: it used to take the dense route and stay rejected here).
+        // Every pattern is an arm, reordered `D . D` included (#1870).
         assert_rows_close(&mf, &checked);
     }
 }
@@ -974,8 +972,8 @@ fn multiplicity_free_u1_compact_compose_and_contract_match_the_dense_route() {
 
 #[test]
 fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
-    // What: the complex-symbol coefficient lane used to skip the compact arms
-    // (#1866 X6); compose now stays compact for `D * D` and scales for
+    // What: the complex-symbol coefficient lane takes the compact arms
+    // (#1866); compose stays compact for `D * D` and scales for
     // `t * D` / `D * t`. Fibonacci is anyonic, so `contract` keeps rejecting
     // it before any arm, compact or not.
     use symtn::sector::{TableRule, TableSector};
@@ -1304,7 +1302,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
         &fixture(z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0))),
         &cases,
     );
-    // No row is rejected: reordered `D . D` is an arm too (#1870 B1).
+    // No row is rejected: reordered `D . D` is an arm too (#1870).
     assert_rows_close(&mf, &checked);
 }
 
@@ -1316,7 +1314,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
 // rank-one tree pair. `braid` has no diagonal method: `similar(t, T, V)`
 // (`src/tensors/abstracttensor.jl:614-618`) makes it a dense `TensorMap`.
 // QSpace has no braiding. The per-sector swap coefficients below were read
-// from TensorKit at `cfaa073e` (script and output in the #1866 leaf C
+// from TensorKit at `cfaa073e` (script and output in the #1866
 // record): fZ2 permute θ-sign `-1` on the odd sector and transpose `+1`; Z2,
 // U(1) and SU(2) (j = 0, 1/2, 1) all `1`.
 
@@ -1447,8 +1445,7 @@ where
 #[test]
 fn compact_swap_and_braid_agree_across_modes() {
     // What: the rank-(1,1) swap and braid of a compact diagonal are one
-    // mode-free arm. Checked Generic used to densify the swap (and refuse
-    // `map_diagonal` after it); both modes now keep it compact on
+    // mode-free arm: both modes keep it compact on
     // `dual(domain)` with TensorKit's coefficient, and both read the braid's
     // dense result from the spectrum, equal to the dense route.
     use symtn::sector::Z2FusionRule;
@@ -1813,8 +1810,8 @@ where
 
 #[test]
 fn compact_full_trace_agrees_across_modes() {
-    // What: the full trace of a compact bond is one mode-free arm. Checked
-    // Generic used to densify; both modes now read the spectrum with the
+    // What: the full trace of a compact bond is one mode-free arm: both
+    // modes read the spectrum with the
     // dense route's compiled coefficients and agree with it, with each other
     // and with the hand supertrace (θ(odd) = -1 for fZ2).
     use symtn::sector::Z2FusionRule;
@@ -2238,7 +2235,7 @@ fn checked_transform_into_reports_the_same_error_cold_and_warm() {
     }
 }
 
-// ---- #1870 leaf A2: compact-source transform `_into` ----
+// ---- compact-source transform `_into` ----
 
 /// Every rank-(1, 1) transform a compact source's `_into` takes.
 const BOND_INTO_OPS: [&str; 6] = [
@@ -2609,7 +2606,7 @@ fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() 
         .permute_into(&[1, 0], &[2], d, 1.0, 0.5));
 }
 
-// ---- #1870 leaf B1: contraction `_into` ----
+// ---- contraction `_into` ----
 
 /// A zero destination on the legs of `case`'s contraction of `fixture`,
 /// built on those legs directly: the shape is read from a throwaway rule, as
@@ -2934,7 +2931,7 @@ fn compact_contract_into_is_alpha_eager_plus_beta_destination_in_every_mode() {
     }
 }
 
-// ---- #1870 leaf C: trace `_into` ----
+// ---- trace `_into` ----
 
 /// The trace sources `_into` reads: a dense `[W, W] ← [W, W]` and its lazy
 /// adjoint (partial trace over `(0, 2)`), and a compact diagonal (full trace

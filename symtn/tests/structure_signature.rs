@@ -1,4 +1,4 @@
-//! `StructureSignature` is content identity (#1495, leaf L0 of #1287).
+//! `StructureSignature` is content identity (#1495).
 //!
 //! Every test takes one process-wide lock: the eviction, reset and
 //! pointer-sharing cases observe the global structure caches. Those cases read

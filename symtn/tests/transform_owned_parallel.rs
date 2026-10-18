@@ -1,8 +1,8 @@
 //! Owned transforms on a multi-threaded recoupling backend (#1217): the
 //! uninitialised owned writer runs under the parallel schedule, so the result
 //! is bit-identical to the serial owned result and the caller thread makes the
-//! same allocations as the serial path, with no allocator-zeroed payload (the
-//! `vec![zero; P]` fallback that the thread-count gate used to force).
+//! same allocations as the serial path, with no allocator-zeroed payload (no
+//! `vec![zero; P]` fallback).
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -230,9 +230,9 @@ fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
     let _measurement = counting_alloc::serial();
     // What: with `recoupling_threads > 1` a warmed owned permute makes the
     // same caller-thread allocations as the serial owned path and none of them
-    // is allocator-zeroed. Before #1217 the multi-threaded backend returned
-    // `None` from the owned writer and fell back to `vec![0.0; P]` (one
-    // `alloc_zeroed` of `P * 8` bytes) plus a destination-reading replay.
+    // is allocator-zeroed: the multi-threaded backend writes the owned output
+    // directly, with no `vec![0.0; P]` fallback and destination-reading
+    // replay (#1217).
     let (serial, parallel) = runtimes();
     let provider = Arc::new(U1FusionRule.product(SU2FusionRule));
     let space = u1_su2_space(&provider);

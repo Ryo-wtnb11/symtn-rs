@@ -1,5 +1,5 @@
 //! Lazy-adjoint payload reads go through `FusionOperand` plus the shared
-//! strided owner (#1201). Expected values are the pre-change kernel written
+//! strided owner (#1201). Expected values are a per-element adjoint kernel written
 //! out literally (`common::literal_adjoint_payload`) and TensorKit's `tr`
 //! definition (`common::literal_weighted_trace`); neither touches the
 //! production adjoint kernel.

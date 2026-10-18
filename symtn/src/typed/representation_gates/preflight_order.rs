@@ -30,7 +30,7 @@ fn unsupported_solve() -> String {
 }
 
 /// The row text of a result: `ok`, or the error's root cause without the
-/// per-mode wrapper (the facade error type is per mode by design, #1862 D4).
+/// per-mode wrapper (the facade error type is per mode by design, #1862).
 fn text<T, E: std::error::Error + 'static>(result: &Result<T, E>) -> String {
     match result {
         Ok(_) => "ok".to_string(),
@@ -485,8 +485,7 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
 
 /// Neither a square stored-sector intersection nor an equal total dimension
 /// substitutes for the coupled-sector isomorphism the preflight checks;
-/// the `_into` seams assume an admitted operand (formerly pinned on the
-/// deleted multiplicity-free seam wrappers).
+/// the `_into` seams assume an admitted operand.
 #[test]
 fn isomorphism_is_checked_per_coupled_sector() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

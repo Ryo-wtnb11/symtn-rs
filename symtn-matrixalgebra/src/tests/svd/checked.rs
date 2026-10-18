@@ -432,7 +432,7 @@ fn checked_generic_full_svd_vh_builder_failure_preserves_provider_context() {
 fn checked_generic_full_svd_enumerates_each_output_layout_once() {
     // What: the provider sees the dimension preflights plus exactly one
     // layout enumeration per one-sided output; the diagonal S publication
-    // adds none. Formerly 22 calls (each output enumerated twice), now 16.
+    // adds none: 16 calls (enumerating each output twice would be 22).
     let (source, data) = generic_factorization_input();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -781,9 +781,7 @@ impl CheckedGenericRigidSymbols for FailSingleLegFold {
 fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
     // What: a provider error while laying out checked compact SVD's dense `S`
     // is returned unchanged as `Provider(e)`, after both dense SVDs and with
-    // the input untouched. (Formerly asserted through the removed
-    // `svd_trunc_factors_dyn_checked_generic`, whose compact call built this
-    // `S`; #1534.) U and Vh each enumerate their layout once and fold both
+    // the input untouched. U and Vh each enumerate their layout once and fold both
     // one-leg bond sectors (U 1-2, Vh 3-4), so S's first fold is the fifth.
     const FIRST_S_FOLD: usize = 5;
     let (source, data) = generic_factorization_input();
@@ -818,9 +816,7 @@ fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
 )]
 fn checked_generic_svd_compact_enumerates_each_factor_layout_once() {
     // What: checked compact SVD queries the provider for exactly one
-    // enumeration of each of the U, S and Vh spaces. (The truncating half of
-    // the former test went with `svd_trunc_factors_dyn_checked_generic`,
-    // #1534.)
+    // enumeration of each of the U, S and Vh spaces.
     let (source, data) = generic_factorization_input();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -980,7 +976,7 @@ fn padded_layout(space: &DynamicFusionMapSpace) -> DynamicFusionMapSpace {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
-    // What (#1994 review P2-1): the admission of inv/pinv/exp/solve is a
+    // What (#1994): the admission of inv/pinv/exp/solve is a
     // structural check on the bond's blocks. Warm, it allocates nothing and
     // queries no provider, on the canonical and on an expert layout, in both
     // fusion modes; misuse is still refused.
@@ -1080,7 +1076,7 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
 
 #[test]
 fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admission() {
-    // What (#1994 review): compact QR/LQ/polar keep the input space and emit
+    // What (#1994): compact QR/LQ/polar keep the input space and emit
     // their spectra in region order. On an aligned expert layout whose
     // blocks are not in sector order that order is not sector order, so the
     // elementwise admission must accept an unsorted spectrum exactly as the

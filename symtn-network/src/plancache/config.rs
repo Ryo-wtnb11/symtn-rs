@@ -30,7 +30,7 @@ pub enum Optimizer {
     /// topology. Requires the `opt-path` feature.
     #[cfg(feature = "opt-path")]
     DynamicProgramming,
-    /// The legacy `EinsumPlan::compile` default: opt_einsum `"auto-hq"`
+    /// opt_einsum `"auto-hq"`
     /// with fallback to `"auto"`, then `"dp"`, then greedy when a driver
     /// errors (upstream `opt-einsum-path` rejects some all-dim-1 networks).
     /// Near-optimal orders for the large gram / environment-body networks

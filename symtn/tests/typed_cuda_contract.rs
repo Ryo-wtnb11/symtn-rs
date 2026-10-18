@@ -1,5 +1,5 @@
 //! Real-device gates for general-axes contraction on device tensors
-//! (G2c-1a, issue #1345): the Host `DynamicTree` artifact replayed by device
+//! (issue #1345): the Host `DynamicTree` artifact replayed by device
 //! executors.
 //!
 //! Evidence chain:
@@ -15,10 +15,10 @@
 //!    Host typed ops (bosonic providers), and device == the physical-basis
 //!    dense contraction (U(1), SU(2)). Both oracles are pinned against the
 //!    Host by the ungated `typed_contract_host_oracle.rs`;
-//! 4. fermionic providers (G2c-2, #1347): device == Host == TensorKit's
+//! 4. fermionic providers (#1347): device == Host == TensorKit's
 //!    sequence with the twist on either role, and the TensorKit-valued FZ2
 //!    loops as explicit device `contract` calls;
-//! 5. `contract_into` (G2c-1b, #1346): into a NaN-poisoned device
+//! 5. `contract_into` (#1346): into a NaN-poisoned device
 //!    destination, device == Host eager `contract` (whose overwrite twin is
 //!    pinned ungated) == the same independent oracles, on every fixture
 //!    above plus destinations with blocks no GEMM writes; warm calls transfer
@@ -504,7 +504,7 @@ fn device_contract<R: DeviceRule, D: DevicePayload>(case: &Case<R, D>) -> Tensor
 }
 
 /// Device == Host and device == TensorKit's `blas_contract!` with the twist
-/// on the B role and on the A role (G2c-2, #1347).
+/// on the B role and on the A role (#1347).
 fn check_fermionic<R, D>(
     case: Case<R, D>,
     twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
@@ -737,7 +737,7 @@ fn malformed_rank_five_specs() -> [ContractSpec<'static>; 4] {
 }
 
 // ---------------------------------------------------------------------------
-// `contract_into` (G2c-1b, #1346)
+// `contract_into` (#1346)
 // ---------------------------------------------------------------------------
 
 /// Device `contract_into` of `case` into a NaN-poisoned device

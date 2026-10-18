@@ -647,7 +647,7 @@ fn eigh_uses_eps_three_quarters_relative_tolerance_for_every_factor_dtype() {
 #[test]
 fn eigh_explicit_hermitian_tol_moves_the_threshold() {
     // What: an explicit tolerance replaces the default in both directions;
-    // the former 64·eps rule is one such tolerance.
+    // a 64·eps rule is one such tolerance.
     for tol in [64.0 * f64::EPSILON, 1.0e-6] {
         let hermitian_tol = HermitianTol::relative(tol).unwrap();
         let [within, outside] = hermitian_threshold_pair::<f64>(tol, 1.0);

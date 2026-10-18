@@ -120,7 +120,7 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
 
 #[test]
 fn checked_and_encoded_entries_share_the_same_layout_cache() {
-    // What: old-first and lowered-first construction converge on the same
+    // What: encoded-first and lowered-first construction converge on the same
     // Arc rather than publishing parallel layouts for one semantic key.
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()

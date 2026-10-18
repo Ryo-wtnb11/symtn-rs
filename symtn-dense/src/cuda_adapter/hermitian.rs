@@ -113,7 +113,7 @@ pub fn cuda_hermitian_regions<D: CudaScalar>(
 ///
 /// Real payloads only: a complex payload returns [`DenseError::Unsupported`].
 /// Why: Tenferro 0.7.1 scales a complex tensor by a real operand only when the
-/// operand is rank 0, so a per-member real normalizer has no complex form yet.
+/// operand is rank 0, so a per-member real normalizer has no complex form.
 #[doc(hidden)]
 pub fn cuda_hermitian_regions_batched<D: CudaScalar>(
     ctx: &mut CudaDenseContext,

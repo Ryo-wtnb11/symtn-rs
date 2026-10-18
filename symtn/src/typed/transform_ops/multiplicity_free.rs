@@ -54,7 +54,7 @@ where
 {
     // Only an owned dense source keys the exact-layout proof: its key is a
     // direct, unconjugated source content, which neither a lazy adjoint's
-    // parent nor a compact payload is (#1870 D5).
+    // parent nor a compact payload is (#1870).
     let direct = match &source.repr {
         TypedTensorRepr::Owned(body) => match body.data.as_ref() {
             TypedData::Dense(data) => body

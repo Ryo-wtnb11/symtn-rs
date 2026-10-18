@@ -71,9 +71,9 @@ fn checked_one_sided_many_tree_publication_reuses_one_index_per_sector() {
                 }
             );
 
-            // Fallback: the single prevalidation table is reused (formerly
+            // Fallback: the single prevalidation table is reused (rather than
             // one table per sector, G_s = 2), so lookups double without a
-            // rebuild; 60 hashes replace the former
+            // rebuild; 60 hashes instead of the per-sector route's
             // 2 * (6 * 6 + 14 * 14) = 464 key comparisons.
             let mut reversed = fresh();
             reversed.reverse();
@@ -357,7 +357,7 @@ fn checked_one_sided_canonical_transfer_across_sectors_and_extra_pairs() {
         }
 
         // An extra pair is rejected as in the multiplicity-free mode
-        // (approval A1: mode divergences take MF semantics). The bound space
+        // (mode divergences take MF semantics). The bound space
         // is already enumerated and committed when the error fires, but no
         // factor data is published. Unreachable from the public API: pairs
         // come from the same matricization.
@@ -511,8 +511,8 @@ fn two_sector_checked_fixture(keep: &dyn Fn(SectorId) -> bool) -> TwoSectorCheck
 #[allow(clippy::arc_with_non_send_sync)] // The checked API needs Arc identity; the recorder is a single-threaded RefCell log.
 fn checked_one_sided_enumerates_the_output_layout_once() {
     // What: one publication issues exactly the provider queries of a
-    // single layout enumeration; the former route (keys, then a bound
-    // space) issued that identical sequence twice, and the committed
+    // single layout enumeration (not keys and then a bound space, which
+    // would issue that identical sequence twice), and the committed
     // block order equals the enumerated key order.
     let dimensions = BTreeMap::from([(SectorId::new(1), 2)]);
     for reverse in [false, true] {
@@ -621,7 +621,7 @@ fn checked_one_sided_placement_error_precedes_bound_space() {
 fn checked_one_sided_structure_matches_two_enumeration_construction() {
     // What: with identity-only sectors before or after the populated one,
     // the committed structure, required length, data length and provider
-    // binding equal those of a space built by the former separate
+    // binding equal those of a space built by a separate key-then-space
     // enumeration, for both sides and both scalar types.
     let rule = TestGenericRule;
     let provider = Arc::new(InfallibleGeneric::new(&rule));

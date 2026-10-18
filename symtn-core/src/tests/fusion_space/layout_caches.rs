@@ -460,7 +460,7 @@ fn complete_cache_separates_multiplicity_free_and_generic_modes() {
     assert_eq!(rejected_generic.as_ref(), generic.as_ref());
     assert_ne!(rejected_mf.content_id(), multiplicity_free.content_id());
     assert_ne!(rejected_generic.content_id(), generic.content_id());
-    // What: residency alone makes content canonical (#2014-3 N1): admitted
+    // What: residency alone makes content canonical (#2014): admitted
     // winners are, zero-budget rejections are not.
     assert!(multiplicity_free.is_canonical() && generic.is_canonical());
     assert!(!rejected_mf.is_canonical() && !rejected_generic.is_canonical());
@@ -523,7 +523,7 @@ fn complete_cache_drops_a_build_that_started_before_a_reset() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_structure_caches();
     let homspace = reset_test_homspace();
-    // A1: a build records its epoch and interns content, then a reset runs,
+    // Order 1: a build records its epoch and interns content, then a reset runs,
     // then the build admits.
     let epoch = core_reset_epoch();
     let (key, stale) = complete_build(&homspace);
@@ -552,7 +552,7 @@ fn complete_cache_drops_a_build_that_ran_inside_a_reset() {
     let source = homspace
         .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
         .unwrap();
-    // A2: a build runs after the reset cleared the complete cache but before
+    // Order 2: a build runs after the reset cleared the complete cache but before
     // it cleared the intern tables, so it interns the pre-reset content.
     let during = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot = std::rc::Rc::clone(&during);
@@ -751,9 +751,8 @@ impl MultiplicityFreeFusionRule for RepeatedChannelRule {}
 
 #[test]
 fn repeated_fusion_channels_are_a_typed_error_not_a_duplicate_block() {
-    // What (#2014 review F1): duplicate tree keys from a provider with
-    // repeated channels stay `DuplicateBlockKey`, as before the sector
-    // structure was shared, instead of a structure with two equal keys.
+    // What (#2014): duplicate tree keys from a provider with repeated
+    // channels are `DuplicateBlockKey`, not a structure with two equal keys.
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg(), leg()]),
@@ -1037,9 +1036,10 @@ fn a_committed_permutation_memoizes_its_destination_in_the_source_entry() {
 
 #[test]
 fn a_sector_layout_entry_charges_its_tree_arena_once() {
-    // What (#2192 L2, Rule O): the layout keys and the sector structure built
-    // from them share one canonical arena, and the cache-1 entry charges it
-    // once, through the structure, not again for the keys.
+    // What (single-arena ownership, #2192): the layout keys and the sector
+    // structure built from them share one canonical arena, and the
+    // layout-cache entry charges it once, through the structure, not again
+    // for the keys.
     let leg = SectorLeg::new([(u1(-1), 1), (u1(0), 2), (u1(1), 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg.clone(), leg.clone(), leg.clone()]),

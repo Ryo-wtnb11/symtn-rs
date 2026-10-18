@@ -271,8 +271,8 @@ where
         // `⊗(p1,p2) = SectorSet(product(map(⊗, ...)))`. No dedup: each sub-rule
         // is multiplicity-free (distinct channels) and `encode_sector` is the
         // Cantor pairing (a bijection), so distinct (left,right) pairs always
-        // encode to distinct ids — the old `channels.contains()` guard was
-        // provably dead and made this O(k²) instead of O(k) in k = |L|·|R|.
+        // encode to distinct ids — a `channels.contains()` guard would be
+        // provably dead and make this O(k²) instead of O(k) in k = |L|·|R|.
         let mut channels = SectorVec::with_capacity(left_channels.len() * right_channels.len());
         for right_channel in right_channels {
             for &left_channel in &left_channels {

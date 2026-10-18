@@ -1117,7 +1117,7 @@ mod tests {
         );
     }
 
-    /// What (#2095 F1): runs that do not cover the block exactly, or are
+    /// What (#2095): runs that do not cover the block exactly, or are
     /// empty, unsorted, overlapping or one short of the rank, and a source
     /// envelope past the end, are typed errors raised before the first
     /// write: nothing is published and no span walk ran.

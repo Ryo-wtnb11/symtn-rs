@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn operation_values_expose_all_logical_segments_at_runtime_rank() {
         // What: every operation kind preserves its logical segments, including
-        // values above the former inline-rank boundary.
+        // values above the inline-storage rank.
         let transpose = TreeTransformOperation::transpose(0..9, [9]);
         assert_eq!(transpose.kind(), TreeTransformOperationKind::Transpose);
         assert_eq!(

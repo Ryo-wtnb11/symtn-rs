@@ -1,18 +1,16 @@
 //! Device probe for single-precision (`f32` / `Complex32`) payloads on
-//! Tenferro CUDA (written against 0.5.0; runs against the pinned 0.6.0).
+//! Tenferro CUDA.
 //!
-//! `reviews/gpu-phase-20260920/single-precision-survey.md` establishes, from
-//! Tenferro sources alone, that F32/C32 coverage is symmetric with F64/C64 in
-//! every CUDA file symtn reaches. That is a source-level expectation: NVRTC
+//! Tenferro's sources make F32/C32 coverage symmetric with F64/C64 in every
+//! CUDA file symtn reaches. That is a source-level expectation: NVRTC
 //! compiles a fresh kernel per dtype, cuTENSOR selects a different algorithm
 //! per dtype, and TensorKit's own CUDA suite records a Float32 cuTENSOR
 //! failure for the outer product (`test/cuda/tensors.jl:523`). This file turns
 //! the expectation into device evidence, or records the exact rejection text
 //! where Tenferro declines.
 //!
-//! The operation list is exactly what `symtn-dense/src/cuda_adapter.rs` calls
-//! today, so leaf C1 (`CudaScalar` for f32/Complex32) has one probe per call
-//! it would newly reach:
+//! The operation list is what the symtn-dense CUDA adapter calls, one probe
+//! per call a single-precision `CudaScalar` reaches:
 //!
 //! | Adapter site | Tenferro call |
 //! |---|---|
@@ -24,7 +22,7 @@
 //! | `upload_scalar` / `download_values` | rank-0 `upload_tensor`; `download_tensor` of a real metadata tensor |
 //! | `cuda_copy_region_into` | `copy_read_into` |
 //! | `cuda_svd_region` / `cuda_qr_region` / `cuda_eigh_region` | `svd_read` / `qr_with_options_read(PositiveDiagonal)` / `eigh_read` under `with_backend_session` |
-//! | (not reached today; #1065 gate) | `solve`, `lu` |
+//! | (not reached by symtn; #1065 gate) | `solve`, `lu` |
 //!
 //! Oracles are independent host loops in the *same* dtype, never a symtn
 //! descriptor and never the f64 device path. Pure moves (`alpha = 1`,
@@ -32,8 +30,8 @@
 //! compared at `k * sqrt(n) * eps(real(T))`, and factorization laws at a
 //! `sqrt(eps)`-scaled bound.
 //!
-//! Tenferro is called directly: symtn's `CudaScalar` is sealed to
-//! `f64`/`Complex64` and this leaf deliberately adds no production surface.
+//! Tenferro is called directly, so the probe adds no production surface and
+//! isolates Tenferro's behaviour from symtn's adapter.
 //! The device is the unit under test, so every test is `#[ignore]`.
 
 #![cfg(feature = "cuda")]
@@ -51,8 +49,8 @@ use tenferro_tensor::{
 
 // ---------------------------------------------------------------------------
 // Probe scalar: the two dtypes under test, plus the host arithmetic the
-// oracles need. Deliberately NOT `symtn_dense::CudaScalar` -- that trait is
-// sealed to the double pair and stays so until leaf C1.
+// oracles need. Deliberately NOT `symtn_dense::CudaScalar`, so the probe does
+// not depend on the adapter it checks.
 // ---------------------------------------------------------------------------
 
 trait ProbeScalar:
@@ -198,8 +196,7 @@ impl Probe {
 
     /// The production `download_values` shape: a small real metadata tensor
     /// (spectrum, reduction) widened to `f64` on the host. The adapter's own
-    /// helper accepts `Tensor::F64` only (`cuda_adapter.rs:677-694`), which is
-    /// exactly the C1 boundary this records.
+    /// helper widens the real lane to `f64`; this records that boundary.
     fn download_real(&mut self, tensor: &Tensor, what: &str) -> Vec<f64> {
         let dtype = tensor.dtype();
         let host = download_tensor(self.backend.runtime(), tensor).expect("download");
@@ -458,7 +455,7 @@ fn region_gemm_with_ops_c32() {
 
 // ---------------------------------------------------------------------------
 // 3. Strided N-D region accumulation against a 1x1 ones operand -- the
-//    #1298/#1301 form behind `cuda_axpby_owned` and the planned G2 transforms.
+//    #1298/#1301 form behind `cuda_axpby_owned` and the structural transforms.
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
@@ -769,19 +766,17 @@ fn hermitian_chain_case<D: ProbeScalar>(probe: &mut Probe) {
         D::NAME
     );
 
-    // Rank-0 scalar upload in the *real* component dtype, which is the shape
-    // `upload_scalar` must take once it is typed by `D::Real` (survey hazard
-    // T1 / leaf C1): the production chain divides a complex payload by a real
-    // scale, never by a complex one.
+    // Rank-0 scalar upload in the *real* component dtype, the shape
+    // `upload_scalar` takes when typed by `D::Real`: the production chain
+    // divides a complex payload by a real scale, never by a complex one.
     let scale_tensor = probe.upload_shaped(Vec::new(), vec![input_scale as f32]);
     let normal_scaled = probe
         .backend
         .div(&normal, &scale_tensor)
         .unwrap_or_else(|err| panic!("{} div by a rank-0 f32 scalar FAILED: {err}", D::NAME));
 
-    // The production `upload_scalar` uploads an *f64* scalar
-    // (`cuda_adapter.rs:715`). Against a single-precision payload that is a
-    // dtype mismatch; record it, because C1 must switch it to `D::Real`.
+    // An *f64* scalar against a single-precision payload is a dtype
+    // mismatch; record what Tenferro does with it.
     let f64_scalar = probe.upload_shaped(Vec::new(), vec![input_scale]);
     match probe.backend.div(&normal, &f64_scalar) {
         Ok(_) => println!("  div({}, f64 scalar): ACCEPTED (mixed dtype)", D::NAME),
@@ -789,7 +784,7 @@ fn hermitian_chain_case<D: ProbeScalar>(probe: &mut Probe) {
     }
     if D::IS_COMPLEX {
         // A same-dtype (complex) rank-0 divisor is *not* the production shape;
-        // record what it does, so C1 does not reach for it by symmetry.
+        // record what it does, so the adapter does not reach for it by symmetry.
         let complex_scalar = probe.upload_shaped(Vec::new(), vec![D::from_parts(input_scale, 0.0)]);
         match probe.backend.div(&normal, &complex_scalar) {
             Ok(_) => println!("  div({}, {} scalar): accepted", D::NAME, D::NAME),
@@ -872,9 +867,9 @@ fn hermitian_chain_case<D: ProbeScalar>(probe: &mut Probe) {
         D::NAME
     );
 
-    // Survey hazard T1, as recorded when the device admission constant was
-    // `64 * f64::EPSILON`. Production now resolves the caller's
-    // `HermitianTol` in the payload's own lane (#1987).
+    // A fixed `64 * f64::EPSILON` admission constant would be meaningless in
+    // single precision; production resolves the caller's `HermitianTol` in
+    // the payload's own lane (#1987).
     println!(
         "  residual_scale {residual_scale:e}, input_ss {got:e}; \
          64*f64::EPSILON = {:e}, 64*f32::EPSILON = {:e}",
@@ -1213,11 +1208,9 @@ fn qr_region_f32() {
     qr_case::<f32>(&mut probe, 4, 4).expect("f32 device QR");
 }
 
-/// Raw Tenferro device QR of a `Complex32` region. Up to Tenferro 0.5.0 it
-/// failed like `Complex64` (#1271): the `triu` zero `E::cast_from(0u32)` did
-/// not compile for `cuFloatComplex` (tenferro-rs#1833). Tenferro 0.6.0 pins
-/// the t4a-cubecl 0.10.1 fix (#1837), so this probe now requires the
-/// reconstruction and gauge checks of `qr_case`; #1271 admits it in symtn.
+/// Raw Tenferro device QR of a `Complex32` region: the probe requires the
+/// reconstruction and gauge checks of `qr_case` (the `triu` zero must compile
+/// for `cuFloatComplex`, tenferro-rs#1833, #1837); #1271 admits it in symtn.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn qr_region_c32() {
@@ -1242,7 +1235,7 @@ fn eigh_region_c32() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. `lu` / `solve`: not reached by symtn today (#1065 keeps solve behind its
+// 8. `lu` / `solve`: not reached by symtn (#1065 keeps solve behind its
 //    own gate); the raw Tenferro results are checked against host oracles.
 // ---------------------------------------------------------------------------
 

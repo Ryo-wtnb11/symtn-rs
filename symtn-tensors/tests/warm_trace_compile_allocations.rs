@@ -57,8 +57,8 @@ where
 }
 
 /// The structural gate: a fixed overhead plus at most one allocation per
-/// destination block and per term. Before #2149 every permutation row was
-/// split per call (tens of allocations per row), far above this bound.
+/// destination block and per term. A per-call split of every permutation row
+/// (tens of allocations per row) is far above this bound.
 fn assert_bounded(label: &str, sizes: &[(u64, usize, usize)]) {
     eprintln!("{label}: (warm calls, destination blocks, terms) = {sizes:?}");
     for &(calls, dst_blocks, terms) in sizes {

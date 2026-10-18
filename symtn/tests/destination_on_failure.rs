@@ -235,7 +235,7 @@ macro_rules! u1_suite {
         );
         rejects!(
             $snap,
-            // Both lanes admit a lazy source (#1870 A2 Host, D device) and
+            // Both lanes admit a lazy source (#1870, Host and device) and
             // report the space.
             format!("{op} lazy source, wrong space"),
             wrong(&permuted),
@@ -789,7 +789,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         }
     );
     // A lazy-adjoint source is read through its parent's storage, so a
-    // destination that is that parent aliases it (#1870 A2). The adjoint of
+    // destination that is that parent aliases it (#1870). The adjoint of
     // `[v] ← [v]` has the destination's own space: only the alias rejects.
     rejects!(
         host_snap,
@@ -801,7 +801,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
             source.permute_into(&[0], &[1], d, 1.0, 0.5)
         }
     );
-    // A compact source is admitted (#1870 A2), so its destination checks run:
+    // A compact source is admitted (#1870), so its destination checks run:
     // here the space, on every leg dualized.
     let (_, w) = legs();
     let dual = TensorMap::<_, f64>::rand_with_seed(&rt, [&w], [&w], 1).unwrap();

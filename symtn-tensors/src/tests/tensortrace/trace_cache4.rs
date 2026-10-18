@@ -1,5 +1,5 @@
 //! Trace permutation columns through cache 4 (#2072): multiplicity-free
-//! output bits pinned to the pre-cache revision, cold and warm; per-group
+//! output bits pinned to a revision without this cache, cold and warm; per-group
 //! hits and misses, key splits, presence and the per-pair oracle.
 
 use super::*;
@@ -240,7 +240,7 @@ fn mf_trace_bits_match_pinned_revision_cold_and_warm() {
 }
 
 /// Recorded through [`portable`] at 25724aa2, whose f64 bits equal
-/// a04e59c2's (before #2072) on macOS arm64.
+/// those of a04e59c2 (a revision without cache 4) on macOS arm64.
 const PIN_SU2_OPEN: Prints = [
     11611427905873280266,
     10875861184201763681,

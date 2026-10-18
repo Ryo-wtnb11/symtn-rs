@@ -25,7 +25,7 @@ const PLAN_HEADER: &str = "symtn-contract-plan-v1";
 ///   <https://github.com/jcmgray/cotengra>
 ///
 /// ```text
-/// use symtn_contract::prelude::*;
+/// use symtn_network::*;
 ///
 /// let ir = NetworkIR::from_labels(vec![vec!["a".into(), "b".into()], vec!["b".into(), "c".into()], vec!["c".into(), "d".into()]], vec!["a".into(), "d".into()])?;
 /// let infos = vec![
@@ -98,7 +98,7 @@ impl ActivePair {
 /// expression structure and compatible dimensions when executed.
 ///
 /// ```text
-/// use symtn_contract::prelude::*;
+/// use symtn_network::*;
 ///
 /// let ir = NetworkIR::from_labels(vec![vec!["a".into(), "b".into()], vec!["b".into(), "c".into()]], vec!["a".into(), "c".into()])?;
 /// let infos = vec![

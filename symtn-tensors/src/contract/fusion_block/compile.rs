@@ -901,7 +901,7 @@ impl FusionBlockMatrixGroupBuilder {
         })
     }
 
-    /// Generic-fusion (Stage B3c-1) sibling of [`Self::finish`]: byte-for-byte
+    /// Generic-fusion sibling of [`Self::finish`]: byte-for-byte
     /// the same block/matrix layout, with the coefficient fixed to `1.0`.
     /// SU(N) is bosonic, so there is no supertrace twist — exactly the value
     /// `R::Scalar::one()` returns on the mult-free path. Takes no rule (the

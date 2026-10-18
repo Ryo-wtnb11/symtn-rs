@@ -371,7 +371,7 @@ fn checked_tree_pair_preserves_validation_precedence() {
 #[test]
 fn fusion_subset_structural_proof_precedes_algebra_and_preserves_legacy_work() {
     // What: HomSpace metadata is proved without provider calls, while the
-    // legacy categorical phase retains the former local-validator work.
+    // categorical phase makes exactly the local validator's provider calls.
     let scalar = FusionTreeKey::new([], SectorId::new(0), [], [], []);
     let malformed = FusionTreeKey::new(
         [SectorId::new(0); 2],
@@ -449,7 +449,7 @@ fn fusion_subset_structural_proof_precedes_algebra_and_preserves_legacy_work() {
 
 #[test]
 fn checked_layout_and_space_admission_reject_finite_nonclosure_transactionally() {
-    // What: caller-order layout validation and same-rule legacy admission
+    // What: caller-order layout validation and same-rule unchecked admission
     // surface the exact finite-algebra error without publishing a new stamp.
     let scalar_zero = FusionTreeKey::new([], SectorId::new(0), [], [], []);
     let valid = FusionTreeKey::new(
@@ -1001,7 +1001,7 @@ fn multiplicity_free_per_block_seam_rejects_misreported_style_under_identity_pla
 
     // What: identity rows never consult the rule, so the per-block seam's
     // own style check is the only guard; it rejects in release builds too
-    // (#1950 review P2).
+    // (#1950).
     assert_eq!(
         proof
             .execute_multiplicity_free_for_block_index(0, &identity)

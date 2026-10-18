@@ -597,8 +597,8 @@ fn signed_cross_sector_eigenvalue_ties_are_broken_in_tensorkit_sector_order() {
     let identity: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&leg], [&leg]).unwrap();
     // diag(+2, -2) in every sector: three sectors x two magnitudes, all equal.
     // Annotated: the payload dtype is taken solely from float literals, and
-    // `f32` reaching `FactorizationScalar` (#1324) means `eigh_full` no longer
-    // pins `{float}` to `f64` before `value.abs()` below resolves.
+    // `f32` reaching `FactorizationScalar` (#1324) means `eigh_full` does not
+    // pin `{float}` to `f64` before `value.abs()` below resolves.
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
             if indices[0] != indices[1] {

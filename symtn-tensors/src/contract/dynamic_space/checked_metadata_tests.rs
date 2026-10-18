@@ -210,8 +210,8 @@ fn final_derived_layout_selects_authority_keys_once() {
 #[test]
 fn final_homspace_layout_matches_shape_oracle_across_supported_rules() {
     // What: U1, SU2, fZ2, their supported products, and scalar/vector
-    // boundaries produce the exact legacy-oracle block layout without
-    // entering the legacy shape or scratch-cache path.
+    // boundaries produce the exact shape-oracle block layout without
+    // entering the per-tree shape or scratch-cache path.
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -317,7 +317,7 @@ fn final_homspace_normalizes_zero_degeneracy_sectors() {
 #[test]
 fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
     // What: root and derived canonical spaces retain the caller's provider
-    // allocation while avoiding legacy shape reconstruction and scratch
+    // allocation while avoiding per-tree shape reconstruction and scratch
     // admission; the explicit expert shape constructor remains available.
     let _guard = CACHE_TEST_LOCK
         .lock()
@@ -398,7 +398,7 @@ fn final_and_derived_homspaces_preserve_provider_and_skip_shape_cache() {
 #[test]
 fn lowered_final_homspace_keeps_single_pass_and_publishes_only_success() {
     // What: the lowered final builder matches the encoded single-pass
-    // layout, never materializes the legacy per-tree shape batch, and an
+    // layout, never materializes the per-tree shape batch, and an
     // extent failure reaches no layout commit or scratch publication.
     let _guard = CACHE_TEST_LOCK
         .lock()
@@ -523,9 +523,9 @@ fn lowered_metadata_routes_every_eager_result_through_the_primer() {
 #[test]
 fn metadata_error_maps_to_the_exact_codec_cause() {
     // What: a malformed product ID crosses into the operation layer with
-    // its codec cause intact rather than as a static message. The lowered
-    // enumerator used to flatten this to InvalidArgument; the checked one
-    // is the only enumerator now and it preserves the typed cause.
+    // its codec cause intact rather than as a static message: the checked
+    // enumerator preserves the typed cause instead of flattening it to
+    // InvalidArgument.
     let malformed = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(SectorId::new(usize::MAX), 1)], false)]),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
@@ -1240,8 +1240,8 @@ fn admission_rejects_a_product_containing_the_excluded_u1_id_without_publication
 fn transform_invalid_axis_error_is_reported_exactly() {
     // What: malformed transform axes retain their exact structural error
     // precedence even when a legal boundary crossing would overflow U1 dual.
-    // The min-dual leg is rejected at admission now, so axis validation
-    // and dual representability no longer race: build the precedence
+    // The min-dual leg is rejected at admission, so axis validation and
+    // dual representability do not race: build the precedence
     // fixture on a leg whose dual exists.
     let representable = U1Irrep::new(1).sector_id();
     let source = BoundDynamicFusionMapSpace::from_degeneracy_shapes_lowered(

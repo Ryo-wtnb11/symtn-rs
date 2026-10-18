@@ -125,7 +125,7 @@ fn grouped_multi_fmove_matches_legacy_order_and_reuses_stage_symbols() {
     let (tree, grouped, grouped_calls, legacy, legacy_calls) =
         fixture.expect("rank-six Fibonacci must repeat stage-local F arguments");
 
-    // What: grouped forward execution preserves the legacy candidate order
+    // What: grouped forward execution preserves the ungrouped oracle's candidate order
     // and coefficients while evaluating one complete F sextuple per stage.
     assert_eq!(grouped, legacy);
     assert_eq!(grouped_calls.len(), 7);
@@ -490,7 +490,7 @@ fn split_only_tree_pair_braid_uses_only_the_required_bend() {
 #[test]
 fn split_only_nested_product_braid_matches_legacy_composition() {
     // What: a non-Abelian fZ2 x U(1) x SU(2) tree preserves the product
-    // bend sign and duality bookkeeping of the old all-codomain route in
+    // bend sign and duality bookkeeping of the all-codomain reference route in
     // both split directions.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;

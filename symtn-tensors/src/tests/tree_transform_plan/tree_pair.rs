@@ -448,7 +448,7 @@ fn eager_product_tree_pair_plan_bypasses_legacy_row_assembly() {
     let direct =
         build_tree_pair_transform_group_plan(&rule, operation, src_space.structure()).unwrap();
 
-    // What: the eager Simple builder preserves the exact legacy plan while
+    // What: the eager Simple builder reproduces the per-row assembler's plan while
     // consuming one core ordered map per whole group instead of rebuilding
     // full-key rows per source column.
     assert_eq!(direct, legacy);

@@ -36,11 +36,9 @@ fn tensor(runtime: &Runtime) -> TensorMap<U1FusionRule, f64> {
 // tensor (first call warms the structure caches; the first call's factors are
 // kept alive so both factor structures stay live), single dense thread.
 // Everything outside `compact_factor_plan` (dense kernels, output storage,
-// spectra) is unchanged between the two figures, so the difference is the
-// plan's per-call constant. Measured with the pinned faer provider:
-//   svd_compact: 153 before #1216, 144 after (plan ≈15 -> 6 allocations);
-//   qr_compact:  120 before,        111 after;
-//   eigh_full:   129 before,        120 after.
+// spectra) is fixed, so the bound pins the plan's per-call constant
+// (about 6 allocations, #1216). Measured with the pinned faer provider:
+// svd_compact 144, qr_compact 111, eigh_full 120.
 #[test]
 fn second_compact_factorization_builds_the_plan_with_a_bounded_constant() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

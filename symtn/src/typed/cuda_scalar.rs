@@ -8,8 +8,7 @@ use super::*;
 /// flag, never as a materialized conjugated buffer. All four payload dtypes are
 /// admitted (#1336); see [`CudaPayload`].
 ///
-/// Checked Generic providers deliberately have no device execution methods in
-/// this leaf:
+/// Checked Generic providers deliberately have no device execution methods:
 ///
 /// ```compile_fail
 /// use symtn::sector::{CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, TypedSectorAdmission};

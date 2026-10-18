@@ -1,5 +1,5 @@
-//! #1859 Host H1: the DynamicTree route has one Host executor for eager and
-//! member (any B) replays.
+//! The DynamicTree route has one Host executor for eager and
+//! member (any B) replays (#1859).
 //!
 //! The characterization compares, bit for bit, the executor against `d416b1a2`'s
 //! eager step sequence spelled with the replay primitives
@@ -469,7 +469,7 @@ where
 
 #[test]
 fn a_warm_one_member_replay_converts_no_coefficient_pack() {
-    // Why (F1): each member stage replays into its own workspace at every B,
+    // Why: each member stage replays into its own workspace at every B,
     // so a warm B = 1 replay of Multi transforms finds all three packs
     // installed instead of rebuilding them per stage.
     let su2 = su2_rank5_case();

@@ -168,8 +168,7 @@ pub struct StructureCache<K, V: ?Sized> {
     /// therefore either wiped by the clear or refused by the epoch check.
     publication: RwLock<()>,
     /// The last admitted entry: a repeated hit compares keys (an `Arc`
-    /// pointer first) instead of hashing one. The former layout cache kept
-    /// the same front for the same reason. Why weak: the front must not keep
+    /// pointer first) instead of hashing one. Why weak: the front must not keep
     /// an entry alive once the budget evicted it, so it retains no charged
     /// bytes; an evicted entry no caller holds simply misses here.
     last: RwLock<Option<(K, Weak<V>)>>,

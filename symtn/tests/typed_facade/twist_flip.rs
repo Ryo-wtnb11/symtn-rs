@@ -21,7 +21,7 @@ fn fz2_typed_fill(
 }
 
 // ---------------------------------------------------------------------------
-// #580 PR 5: typed twist / flip / unit-leg insert & remove.
+// Typed twist / flip / unit-leg insert & remove.
 // ---------------------------------------------------------------------------
 
 /// One typed fZ2 operand: rank `2 <- 1` with a dual codomain leg. The codomain carries a non-dual
@@ -654,7 +654,7 @@ fn external_z3_twist_flip_and_units_hold_by_value() {
 
 #[test]
 fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
-    // What (PR #620 review P2): under `BraidingStyleKind::NoBraiding` the
+    // What: under `BraidingStyleKind::NoBraiding` the
     // twist eigenvalue is undefined, so twist/flip on a leg carrying any
     // non-unit sector must fail — TensorKit `has_shared_twist`
     // (`tensors/indexmanipulations.jl:34-41`) throws `SectorMismatch` there
@@ -703,7 +703,7 @@ fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
 
 #[test]
 fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
-    // What (PR #620 review P2, second round): the TK asymmetry on
+    // What: the TK asymmetry on
     // vacuum-only legs under NoBraiding. `twist` carries an explicit
     // unit-sector carve-out (`has_shared_twist`,
     // `tensors/indexmanipulations.jl:34-41`) and is the identity (shared

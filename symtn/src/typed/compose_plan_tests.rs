@@ -161,8 +161,8 @@ fn corrupted_stack_errors_are_pinned() {
     );
 }
 
-/// Since #1775 `ComposePlan` runs `ContractPlan`'s per-call checks
-/// (approved stricter errors A23): a payload whose length differs from its
+/// `ComposePlan` runs `ContractPlan`'s per-call checks (#1775, stricter
+/// errors than TensorKit): a payload whose length differs from its
 /// structure is a typed `InvalidArgument` before any work. A corruption that
 /// keeps length and structure consistent reaches the route executor, which
 /// reports the operand's length against the plan's. Base `ec3dea5d`
@@ -305,10 +305,8 @@ fn regions_match_hand_derivation<R>(
     }
 }
 
-/// #1980, superseded by #1775: the regions now come from the one member
-/// stage, which also validates each within the stack; the base's own
-/// `prepare_zero_regions` covered the same positions (checked on a device
-/// at the base `8eb8ddbc`).
+/// #1980, #1775: the regions come from the one member stage, which also
+/// validates each within the stack.
 #[cfg(feature = "cuda")]
 #[test]
 fn cuda_zero_regions_match_the_hand_derivation() {

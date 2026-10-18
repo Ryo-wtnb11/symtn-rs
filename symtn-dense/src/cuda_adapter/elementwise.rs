@@ -192,8 +192,8 @@ pub(super) fn submit_region_axpby<D: CudaScalar>(
 /// operand (a context `1` or zero-template coefficient, or any
 /// [`cuda_region_zero`]) that is used from a
 /// thread other than the one that created it can force a device-wide
-/// synchronize per call. Today every such call happens under the device lease,
-/// which serializes them; a future multi-threaded device executor should keep
+/// synchronize per call. Every such call happens under the device lease,
+/// which serializes them; a multi-threaded device executor must keep
 /// operand creation and use on the same stream slot or pass its own
 /// coefficient buffer.
 #[allow(clippy::too_many_arguments)]

@@ -1,8 +1,8 @@
 //! Provider and braiding admission shared by every entry that accepts a
 //! checked-Generic provider or needs a symmetric braiding (#1840).
 //!
-//! The facade, the network preflight and the tensor engines previously each
-//! carried a copy; one owner keeps the checks, their order and the public
+//! The facade, the network preflight and the tensor engines all route through
+//! this one owner, which keeps the checks, their order and the public
 //! messages identical everywhere.
 
 use symtn_core::{

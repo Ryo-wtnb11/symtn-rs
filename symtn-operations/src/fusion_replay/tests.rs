@@ -1755,7 +1755,7 @@ fn canonical_plan_zeroed_replay_skips_the_inactive_coupled_range() {
     assert_eq!(required, 2 * 2 + 3 * 3);
     // What: the accessor names exactly the odd 3x3 block no job writes, as
     // one contiguous range — the set a retained device destination must
-    // zero (G2c-1a).
+    // zero.
     assert_eq!(
         plan.inactive_destination_regions(),
         [FusionScaleBlockLayout {

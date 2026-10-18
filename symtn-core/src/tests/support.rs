@@ -1114,7 +1114,7 @@ pub(super) fn assert_compact_transpose_matches_full_key_oracle<R>(
 
     assert_eq!(compact.len(), full_key.len());
     for (compact_rows, full_key_rows) in compact.iter().zip(&full_key) {
-        // What: compact execution reaches every legacy destination label of
+        // What: compact execution reaches every full-key destination label of
         // each source with the same coefficient. Row order within a source is
         // unspecified, so rows are matched by key.
         assert_eq!(compact_rows.len(), full_key_rows.len());
@@ -1154,18 +1154,16 @@ pub(super) fn assert_compact_transpose_matches_full_key_oracle<R>(
     }
 }
 
-// --- Stage A: outer-multiplicity (Generic fusion) foundation ----------
+// --- Outer-multiplicity (Generic fusion) wiring rule -----------------
 //
 // `ToyOmRule` is purely synthetic (following `AsymmetricAnyonicRule`
 // above as a template): sector 1 ("a") fuses with itself to sector 3
 // ("c") via two independent channels, i.e. N(a,a,c) = 2. It exists only
-// to exercise the `GenericFusionSymbols` wiring and provider-owned
-// `FusionStyleKind::Generic` gate added in this stage.
-// Pentagon/hexagon are NOT required to hold — see
-// scratchpad/toy-om-stageA-plan.md, this is wiring validation only, not
-// a physical anyon model. The recoupling engine (recouple wrapper,
-// `UnsupportedFusionStyle` guards) does not consume this rule; that is
-// explicitly Stage B.
+// to exercise the `GenericFusionSymbols` wiring and the provider-owned
+// `FusionStyleKind::Generic` gate. Pentagon/hexagon are NOT required to
+// hold: this is wiring validation only, not a physical anyon model. The
+// recoupling engine (recouple wrapper, `UnsupportedFusionStyle` guards)
+// does not consume this rule; `UnitaryToyOmRule` below covers recoupling.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ToyOmRule;
 
@@ -1238,10 +1236,9 @@ impl GenericFusionSymbols for ToyOmRule {
             // (nu = N(c,0,c) = 1, kappa = N(a,0,a) = 1 are trivial), so
             // this F-block is genuinely a 2x2 matrix. Filled with a
             // pi/4 rotation — an actual orthogonal matrix, not just
-            // shape-correct filler — because the design doc wants F's
-            // (mu, lambda) block orthogonal so a later (Stage B)
-            // braid * inverse == identity self-consistency check has
-            // something real to check.
+            // shape-correct filler — so that F's (mu, lambda) block is
+            // orthogonal and a braid * inverse == identity
+            // self-consistency check has something real to check.
             let s = std::f64::consts::FRAC_1_SQRT_2;
             GenericFArray::new(vec![s, -s, s, s], (n_mu, n_nu, n_kappa, n_lambda))
         } else {
@@ -1266,10 +1263,9 @@ impl GenericFusionSymbols for ToyOmRule {
     }
 }
 
-// --- Stage B1: Generic-fusion Artin braid (braid × inverse == identity) --
+// --- Generic-fusion Artin braid (braid × inverse == identity) ----------
 //
-// `UnitaryToyOmRule` is a *new* rule (pure addition — Stage A's
-// `ToyOmRule` is left byte-for-byte untouched) with the same fusion
+// `UnitaryToyOmRule` is a separate rule from `ToyOmRule`, with the same fusion
 // structure (a⊗a→c has N=2, everything else N≤1, mixing an OM vertex with
 // multiplicity-1 vertices), but with UNITARY F/R blocks so that TensorKit's
 // inverse-braid identity actually holds:
@@ -1282,7 +1278,7 @@ impl GenericFusionSymbols for ToyOmRule {
 //     hexagon-consistent, and for the index>1 braid the round-trip
 //     coefficient works out to `Rθᵀ·M·Rθ·M` (M = that F block); with
 //     nontrivial rotations Rθ, M that equals I *iff* M = I. A hexagon-
-//     consistent model would let a nontrivial F cancel, but B1 only needs
+//     consistent model would let a nontrivial F cancel, but this rule only needs
 //     the wiring + inverse-adjoint handling exercised, which the nontrivial
 //     R already does. (Since both braided legs are the sector `a`,
 //     R(a,b,c)=R(b,a,c), so no hexagon relation between the two R's is
@@ -1635,16 +1631,15 @@ pub(super) fn unitary_rank3_tree(vertex1: usize) -> FusionTreeKey {
     )
 }
 
-// ===================== Stage B2a: Generic bend / repartition =============
+// ======================== Generic bend / repartition ======================
 //
 // Oracle & gate rule: the REAL A4Irrep(3) outer-multiplicity sub-block.
 // A4Irrep(3) is self-dual (dual(3)=3), 3⊗3 = {0,1,2,3} with N(3,3,3)=2 (the
 // only outer multiplicity) AND 3⊗3 ∋ vacuum — so it is genuinely rigid and
 // can bend. (Contrast the braid-only `UnitaryToyOmRule`: its sector `a` has
 // NO proper dual — a⊗a ∌ vacuum — so every B-symbol there is degenerate and
-// bending is undefined. Extending it was therefore impossible without
-// changing its fusion structure; a new rigid rule is used instead, per the
-// "stop if existing code must change" constraint.)
+// bending is undefined; extending it would change its fusion structure, so a
+// separate rigid rule is used.)
 //
 // Constants computed out-of-band from TensorKit v0.16.2 + TensorKitSectors
 // v0.3.6 (git-tree-sha1 334a0ed5a0a0088a2b6fe7a39f78dda928038d85), by
@@ -1657,8 +1652,8 @@ pub(super) fn unitary_rank3_tree(vertex1: usize) -> FusionTreeKey {
 // √dim(c)·(1/√dim(a)) coefficient (√3 vs 1 across the varied innerline in the
 // rank-3 table — a sqrt/invsqrt swap changes these), μ = last-codomain-vertex
 // selection, ν → domain vertex-label storage, and the F→B derivation. A
-// μ↔ν-discriminating BEND oracle needs a non-diagonal Bsymbol (e.g. SU(3));
-// none is available here as verified constants — flagged for B2b.
+// μ↔ν-discriminating BEND oracle needs a non-diagonal Bsymbol; the SU(3)
+// rule below supplies it.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct A4BendRule;
 
@@ -2237,23 +2232,23 @@ pub(super) fn tp_expected_b() -> [[f64; 2]; 2] {
     b
 }
 
-// ================= Stage B2b: Generic fold / multi_Fmove =================
+// ===================== Generic fold / multi_Fmove ========================
 //
 // ORACLE PROVENANCE. All numeric constants below are TensorKit's own values
 // for `A4Irrep(3)`, extracted by running the mirrored source:
 //   TensorKit.jl @ git cfaa073 (v0.17.0), TensorKitSectors v0.3.9
-//   (Fsymbol values identical to v0.3.6, the version the B2a A4 constants
-//   cite — the A4 category data is version-stable).
+//   (Fsymbol values identical to v0.3.6, the version the `A4BendRule`
+//   constants cite — the A4 category data is version-stable).
 // The `multi_Fmove` tables come from `TensorKit.multi_Fmove(f)` and the
 // `foldright` tables from `TensorKit.foldright(FusionTreeBlock)`, both called
 // directly on A4 fusion trees. F-symbol arrays are transcribed ROW-MAJOR
 // over the TK axis order (μ, ν, κ, λ) — Julia's `vec()` is column-major, so
-// the transcription applies `permutedims(F,(4,3,2,1))` first. (The B2a
-// A4BendRule blocks are all transpose-symmetric, so they never exposed this;
+// the transcription applies `permutedims(F,(4,3,2,1))` first. (The
+// `A4BendRule` blocks are all transpose-symmetric, so they never exposed this;
 // the non-trivial F(3,3,3,3,3,3) block below does.)
 
-// Full A4Irrep(3) fusion rule with the COMPLETE F(3,3,3,3,e,f) table — the
-// B2a A4BendRule only modelled the handful of bend/A-symbol tuples, which is
+// Full A4Irrep(3) fusion rule with the COMPLETE F(3,3,3,3,e,f) table —
+// `A4BendRule` only models the handful of bend/A-symbol tuples, which is
 // insufficient for multi_Fmove/associator (they consult every (e,f)).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct A4FoldRule;
@@ -2426,11 +2421,11 @@ pub(super) fn a4f_rank3(inner: usize, v1: usize, v2: usize) -> FusionTreeKey {
     )
 }
 
-// ===================== Residual (b): complex conj path =====================
+// ============================ Complex conj path ============================
 //
-// The B2a complex path (`CategoricalScalar for Complex64`, the fold's
-// `coeff₂.conj()`, and the A derivation's inner `conj`) was only
-// verified by source-matching. This closes it numerically: a synthetic
+// The complex path of bend and fold (`CategoricalScalar for Complex64`, the
+// fold's `coeff₂.conj()`, and the A derivation's inner `conj`) is checked
+// numerically here: a synthetic
 // Complex64 Generic rule whose A-move / B-move are a genuinely complex 2×2
 // UNITARY U (non-Hermitian, non-real). Self-dual sector 1, N(1,1,1)=2,
 // dim=1 (all coeff factors = 1). U = (1/√2)[[1, i],[i, 1]].
@@ -2533,11 +2528,11 @@ impl GenericRigidSymbols for ComplexUnitaryRule {
     }
 }
 
-// ============ Residual (a): real non-diagonal SU(3) B-symbol ============
+// ================= Real non-diagonal SU(3) B-symbol ======================
 //
-// B2a's A4 bend oracle could NOT discriminate a μ↔ν B-matrix transpose:
-// A4Irrep(3)'s Bsymbol is I₂ (its own transpose). It flagged that a
-// *non-diagonal Bsymbol from a real category* (SU(3)) was needed. Extracted
+// The A4 bend oracle cannot discriminate a μ↔ν B-matrix transpose:
+// A4Irrep(3)'s Bsymbol is I₂ (its own transpose), so a *non-diagonal
+// Bsymbol from a real category* (SU(3)) is used here. Extracted
 // from SUNRepresentations.jl v0.4.0 + TensorKitSectors v0.3.9:
 //   Bsymbol((4,2,0),(3,1,0),(3,1,0)) = [[-1/(2√2), -√(7/8)], [√(7/8), -1/(2√2)]]
 //   Bsymbol((3,1,0),(3,2,0),(4,2,0)) = its inverse (real orthogonal, so the
@@ -2658,9 +2653,9 @@ fn su3_bend_b(a: SectorId, b: SectorId, c: SectorId) -> [f64; 4] {
 }
 
 // ==================================================================
-// Stage B2c: generic tree-pair permute / braid / transpose composers.
+// Generic tree-pair permute / braid / transpose composers.
 // These are thin structural mirrors of the multiplicity-free tree-pair
-// functions, chaining the adversarially-verified B1/B2a/B2b primitives
+// functions, chaining the independently tested primitives
 // (generic_braid_tree, generic_repartition_tree_pair, generic_cycle_*).
 // The tests below prove the COMPOSITION adds no math: each composer
 // equals the hand-chained primitives it is built from.

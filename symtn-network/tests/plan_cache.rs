@@ -623,9 +623,9 @@ fn enabled_reconfiguration_retains_plans_and_workspaces() {
 
 #[test]
 fn a_foreign_extension_value_coexists_with_the_plan_cache() {
-    // Another crate's value in the runtime's extension slot used to make the
+    // Another crate's value in the runtime's extension slot must not make the
     // first contraction panic ("runtime plan-cache slot claimed by another
-    // type"). Each type now has its own entry: the plan cache works and the
+    // type"). Each type has its own entry: the plan cache works and the
     // foreign value is neither read as a cache nor dropped.
     use symtn::typed::__network::with_extension_slot;
     let runtime = Runtime::builder().build().unwrap();

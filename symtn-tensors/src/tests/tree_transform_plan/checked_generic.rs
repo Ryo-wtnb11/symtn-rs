@@ -562,7 +562,7 @@ fn checked_generic_adjoint_storage_rejects_distinct_provider_allocation() {
 }
 
 /// What: a checked transform whose commit fails after its groups were
-/// composed publishes none of them (C6 commit-deferred publication), so a
+/// composed publishes none of them (publication is deferred to the commit), so a
 /// retry composes them again; the committed retry publishes them.
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]

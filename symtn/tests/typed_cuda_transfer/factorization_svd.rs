@@ -375,9 +375,8 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     assert_typed_cuda_svd_trunc_composition_matches_host(&reentrant_source, &Truncation::rank(1));
     assert!(dimension_calls.load(Ordering::SeqCst) > 0);
 
-    // `[3, 2] <- [3, 2]` factors put a 2x2 block at element offset 9, the
-    // unaligned destination that used to fault the device factor copy
-    // (#1320); these two fixtures cover that layout through the composition.
+    // `[3, 2] <- [3, 2]` factors put a 2x2 block at element offset 9, an
+    // unaligned destination for the device factor copy (#1320); these two fixtures cover that layout through the composition.
     let rank_deficient = TensorMap::from_subblock_fn(&runtime, [&rows], [&rows], |_, indices| {
         (indices[0] + 1) as f64 * (indices[1] + 1) as f64
     })
@@ -442,7 +441,7 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
         .unwrap();
     assert_typed_cuda_svd_trunc_composition_matches_host(&product_tensor, &Truncation::rank(2));
 
-    // Repetition and concurrency now bear on the device half of the
+    // Repetition and concurrency bear on the device half of the
     // composition, which is `svd_compact`.
     let device = mixed.to_cuda().unwrap();
     let expected = device

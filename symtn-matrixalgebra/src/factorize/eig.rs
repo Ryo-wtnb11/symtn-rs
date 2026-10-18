@@ -183,7 +183,7 @@ where
     let dynamic = input.dynamic();
     let out = eigh_full_dyn(dense, &dynamic, HermitianTol::DEFAULT)?;
     // Materialize the dense diagonal here (this wrapper returns a dense `D`);
-    // the dyn producer no longer builds it (#56 item N).
+    // the dyn producer does not build it.
     let d = diagonal_bond_svd_factor(dynamic.space(), &out.eigenvalues, &D::from_real)?;
     Ok(EighFull {
         d: typed_from_bound_factor(d)?,
@@ -562,7 +562,7 @@ where
     let dynamic = input.dynamic();
     let out = eig_full_dyn::<E, R, D>(dense, &dynamic)?;
     // Materialize the dense diagonal here (this wrapper returns a dense `D`); the
-    // dyn producer no longer builds it (#56 item N).
+    // dyn producer does not build it.
     let d = diagonal_bond_svd_factor(
         dynamic.space(),
         &out.eigenvalues,
