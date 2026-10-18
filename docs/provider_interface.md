@@ -258,19 +258,23 @@ are part of the Rust type and of the `ProductSector` label; `U(1) ⊠ fZ2` and
   (compact and full), left and right polar, `eigh_vals`/`eigh_full`,
   `eig_vals`/`eig_full`, `left_null`/`right_null`, `exp`, `inv`, `pinv`,
   `solve` and `map_diagonal`, together with truncation
-  (`GradedSpace::find_truncated`, then `restrict_leg`). Those weights,
+  (`GradedSpace::find_truncated`, then `restrict_leg`), and on the Host
+  `twist` and `flip` (also of a lazy adjoint and, for `twist`, of a compact
+  diagonal), with θ, χ and their inverses θ̄, χ̄ in `Complex64` as in
+  TensorKit. Those weights,
   truncation included, read the real
   quantum dimension: a `Complex64` dimension with a nonzero imaginary part
   is refused with `InvalidArgument`, since no unitary category has one.
   `TableRule` payloads are `Complex64` only, so the prepared batched
   `EighFullPlan`, which admits real payloads only, refuses them with its
   typed error. Ordinary arbitrary-axis contraction, `trace_pairs`, prepared
-  contraction and composition plans, twist, flip, and general network
+  contraction and composition plans, and general network
   execution are not supported or claimed; a planar contraction is the
   crossing-free `transpose` of each operand followed by `compose`, as in
   TensorKit's `planarcontract!`. A complex-symbol tensor's payload can be
-  uploaded with `to_cuda` (storage only), but every device operation needs
-  `Scalar = f64` symbols, so device use is a compile-time boundary.
+  uploaded with `to_cuda` (storage only), but every device operation,
+  `twist` included, needs `Scalar = f64` symbols, so device use is a
+  compile-time boundary.
   A fusion-only table reports `NoBraiding`: every operation that needs an
   R-symbol or a twist is rejected with its typed error before any provider
   call, and `r_symbol_scalar`/`twist_scalar` are defined only for a braided

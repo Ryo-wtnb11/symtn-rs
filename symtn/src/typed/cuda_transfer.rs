@@ -50,6 +50,21 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     ///     Ok(())
     /// }
     /// ```
+    ///
+    /// The Host `twist` of such a rule exists, but the device twist keeps
+    /// its `Scalar = f64` bound:
+    ///
+    /// ```compile_fail
+    /// use num_complex::Complex64;
+    /// use symtn::sector::TableRule;
+    /// use symtn::typed::{Direction, Error, TensorMap};
+    ///
+    /// fn no_table_device_twist(tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
+    ///     let device = tensor.to_cuda()?;
+    ///     let _ = device.twist(&[0], Direction::Forward);
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn to_cuda(&self) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
         let mut lease = self.runtime.lease_cuda()?;
         let cuda = &mut *lease;

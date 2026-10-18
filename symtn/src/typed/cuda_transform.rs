@@ -171,16 +171,16 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
     D: CudaPayload,
 {
-    fn scale_blocks(
+    fn scale_blocks<C: TwistCoefficient<D>>(
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
-        factor_of: &dyn Fn(&BlockKey) -> f64,
+        factor_of: &dyn Fn(&BlockKey) -> C,
         operation: &'static str,
     ) -> Result<TensorMap<R, D, Self>, Error> {
         let src = t.direct_cuda_storage(operation)?;
         let space = t.logical_space().clone();
         let required_len = space.space().required_len()?;
-        let blocks = cuda_twist_regions::<D>(space.space(), factor_of, operation)?;
+        let blocks = cuda_twist_regions::<D, C>(space.space(), factor_of, operation)?;
 
         let mut lease = t.runtime.lease_cuda()?;
         let cuda = &mut *lease;
@@ -225,9 +225,9 @@ where
 /// per block with that block's factor as the descriptor scale. A block whose
 /// factor is 1 still has to be moved — the output starts as zeros, where the
 /// Host started from a copy of the source. No provider is queried here.
-pub(super) fn cuda_twist_regions<D: CudaPayload>(
+pub(super) fn cuda_twist_regions<D: CudaPayload, C: TwistCoefficient<D>>(
     space: &DynamicFusionMapSpace,
-    factor_of: &dyn Fn(&BlockKey) -> f64,
+    factor_of: &dyn Fn(&BlockKey) -> C,
     operation: &'static str,
 ) -> Result<Vec<(symtn_dense::CudaRegion, D)>, Error> {
     let structure = space.structure();
@@ -241,7 +241,7 @@ pub(super) fn cuda_twist_regions<D: CudaPayload>(
             )
             .and_then(|region| region.validate_as_destination(operation).map(|()| region))
             .map_err(|err| Error::from(symtn_tensors::OperationError::Dense(err)))?;
-            Ok((region, D::from_real(factor_of(block.key()))))
+            Ok((region, factor_of(block.key()).as_data()))
         })
         .collect()
 }

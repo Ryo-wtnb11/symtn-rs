@@ -146,20 +146,20 @@ where
 /// inverse), and one for a block without a fusion tree. `theta` is the mode's
 /// staged [`TypedTensorTwistDispatch::twist_values`], so evaluating this
 /// never fails on the provider.
-pub(super) fn twist_block_factor<'a>(
-    theta: &'a impl Fn(SectorId) -> f64,
+pub(super) fn twist_block_factor<'a, C: CategoricalScalar + Copy>(
+    theta: &'a impl Fn(SectorId) -> C,
     nout: usize,
     legs: &'a [usize],
     inverse: bool,
-) -> impl Fn(&BlockKey) -> f64 + 'a {
+) -> impl Fn(&BlockKey) -> C + 'a {
     move |key| match key {
         BlockKey::FusionTree(key) => twist_factor_with_inverse(
             legs.iter()
                 .map(|&leg| theta(uncoupled_sector_of_leg(key, nout, leg)))
-                .product(),
+                .fold(C::one(), |product, factor| product * factor),
             inverse,
         ),
-        _ => 1.0,
+        _ => C::one(),
     }
 }
 
@@ -171,19 +171,19 @@ pub trait TwistExec<R, D>: TypedStorage<R, D> {
     /// A fresh owned dense payload on owned `t`'s space with every block
     /// scaled by `factor_of(block key)`; `operation` names the call in a
     /// capability error.
-    fn scale_blocks(
+    fn scale_blocks<C: TwistCoefficient<D>>(
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
-        factor_of: &dyn Fn(&BlockKey) -> f64,
+        factor_of: &dyn Fn(&BlockKey) -> C,
         operation: &'static str,
     ) -> Result<TensorMap<R, D, Self>, Error>;
 }
 
 impl<R, D: TensorScalar> TwistExec<R, D> for Vec<D> {
-    fn scale_blocks(
+    fn scale_blocks<C: TwistCoefficient<D>>(
         _: ExecToken,
         t: &TensorMap<R, D>,
-        factor_of: &dyn Fn(&BlockKey) -> f64,
+        factor_of: &dyn Fn(&BlockKey) -> C,
         _: &'static str,
     ) -> Result<TensorMap<R, D>, Error> {
         let space = t.logical_space();
@@ -212,14 +212,17 @@ where
     /// layout are unchanged; each fusion-tree block picks up the
     /// Z-isomorphism phase of TensorKit's fusion-tree `flip`
     /// per flipped leg with uncoupled sector `a` and pre-flip duality `d`
-    /// (χ = Frobenius–Schur phase, θ = ribbon twist; both real for every
-    /// rule in scope): codomain leg → `d ? χ·θ : 1`; domain leg →
-    /// `d ? χ : θ`.
+    /// (χ = Frobenius–Schur phase, θ = ribbon twist, both in the provider's
+    /// scalar, complex for an anyonic table): codomain leg → `d ? χ·θ : 1`;
+    /// domain leg → `d ? χ̄ : θ`.
     ///
     /// Like TensorKit's, this `flip` is *not* an involution: flipping the
-    /// same leg twice returns to the original spaces but can scale odd
-    /// blocks (e.g. by θ = −1 on fermionic legs); only `flip⁴ = id` in
-    /// general. [`Direction::Inverse`] applies the inverse isomorphism.
+    /// same leg twice returns to the original spaces but scales each block
+    /// by `χ_a·θ_a` (codomain) or `θ_a·χ̄_a` (domain), e.g. by θ = −1 on
+    /// fermionic legs; so `flip⁴ = id` only when every `θ_a² = 1`, and for
+    /// an anyon it is `θ_a²`. [`Direction::Inverse`] applies the inverse
+    /// isomorphism, and the lazy-adjoint redirect relies on it being the
+    /// conjugate one (a unitary category's χ and θ are phases).
     ///
     /// One scaled copy of the dense payload into a fresh body, O(len); a
     /// compact spectrum factor materializes first (the flipped space is no
@@ -307,7 +310,9 @@ where
                 BlockKey::FusionTree(key) => {
                     flip_block_factor(&values, key, nout, &occurrences, inverse)
                 }
-                _ => 1.0,
+                _ => {
+                    <<R::Mode as TypedTensorFlipDispatch<R, D>>::Coeff as CategoricalScalar>::one()
+                }
             })?;
             data
         };
