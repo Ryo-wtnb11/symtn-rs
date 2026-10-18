@@ -270,7 +270,15 @@ fn krylov_reports_operation_errors_as_vector_errors() {
     let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
         x.axpby_into(y, 2.0, 0.0)
     };
-    let result = krylov::linsolve(&mut op, &b, &x0, &krylov::Cg::new(), 0.0, 1.0, &mut ws);
+    let result = krylov::linsolve(
+        &mut op,
+        &b,
+        &x0,
+        &krylov::Cg::new(100, 1e-12),
+        0.0,
+        1.0,
+        &mut ws,
+    );
     match result {
         Err(krylov::Error::Vector(e)) => assert!(is_space_mismatch(&e), "{e:?}"),
         other => panic!("{:?}", other.map(|_| ())),
@@ -382,7 +390,7 @@ macro_rules! eigsolve_case {
 }
 
 fn f64_alg() -> Lanczos {
-    Lanczos::new().krylovdim(10)
+    Lanczos::new(10, 100, 1e-12)
 }
 
 #[test]
@@ -398,7 +406,7 @@ fn eigsolve_in_single_precision() {
     )
     .unwrap();
     let want = heisenberg_eigenvalues(2);
-    let alg = || Lanczos::new().krylovdim(10).tol(1e-5);
+    let alg = || Lanczos::new(10, 100, 1e-5);
     let h = su2_heisenberg::<f32>(&rt, &v, 2);
     let x0 = filled!(&rt, [&v, &v], [&w], f32, 7);
     eigsolve_case!("su2 2s=2 f32", &rt, h, x0, want.clone(), alg(), 1e-5);
@@ -491,7 +499,7 @@ macro_rules! exponentiate_case {
         let t = $t;
         let mut op =
             |x: &_, y: &mut _| h.contract_into(x, &APPLY, y, Sample::real(1.0), Sample::real(0.0));
-        let alg = Lanczos::new().krylovdim(10).tol(1e-13);
+        let alg = Lanczos::new(10, 100, 1e-13);
         let mut ws = Workspace::with_capacity(x, 10).unwrap();
         let (y, info) = krylov::exponentiate(&mut op, t, x, &alg, &mut ws).unwrap();
         assert_eq!(info.converged, 1, "{}", $what);
@@ -643,7 +651,7 @@ fn fibonacci_vectors_carry_the_golden_ratio_weight() {
             .axpby_into(y, Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0))
     };
     let mut ws = Workspace::with_capacity(&x, 6).unwrap();
-    let alg = Lanczos::new().krylovdim(6);
+    let alg = Lanczos::new(6, 100, 1e-12);
     let (vals, _, info) =
         krylov::eigsolve(&mut op, &x, 2, Which::SmallestReal, &alg, &mut ws).unwrap();
     assert_eq!(info.converged, 2);
@@ -673,7 +681,7 @@ fn warm_eigsolve_allocates_only_its_results() {
     let x0 = filled!(&rt, [&v, &v], [&w], f64, 13);
     let payload = std::mem::size_of_val(x0.dense_data().unwrap());
     let howmany = 2;
-    let alg = Lanczos::new().krylovdim(12).maxiter(20);
+    let alg = Lanczos::new(12, 20, 1e-12);
     let mut ws = Workspace::with_capacity(&x0, 12).unwrap();
     let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
         h.contract_into(x, &APPLY, y, 1.0, 0.0)

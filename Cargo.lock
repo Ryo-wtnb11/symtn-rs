@@ -1858,9 +1858,9 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "krylov"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "196257dabf65d3c9dab827eac19f5f5c7ee218bd46d0b3f85522767f8aa55c69"
+checksum = "cb0adaad81fb8f6c2d5b9a7adf7468c716dd17575ab4e7a76d75e89be6d7ed72"
 dependencies = [
  "lapack",
  "num-complex",
