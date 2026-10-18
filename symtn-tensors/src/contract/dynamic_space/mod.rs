@@ -31,13 +31,6 @@ pub(crate) use metadata::{
 pub use operand::FusionOperand;
 pub(crate) use operand::FusionOperandLayout;
 
-/// Builds scratch structures in the coupled-sector matrix layout. Scratch
-/// spaces enumerate the full tree set of their hom spaces, so the coupled
-/// grid is always complete; there is no other layout.
-// `R: FusionRule` (not mult-free): the coupled-sector matrix layout only needs
-// fusion channels/dual, so this helper serves both the mult-free and the
-// Generic-fusion space builders. Relaxing the bound leaves the mult-free
-// callers unchanged.
 use super::fusion::FusionContractPlan;
 use super::structure::TensorContractAxisPlan;
 

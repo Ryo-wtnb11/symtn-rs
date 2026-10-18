@@ -936,6 +936,9 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
     D: Copy + Zero,
 {
+    for (_, dimension, data) in blocks {
+        assert_eq!(data.len(), dimension * dimension);
+    }
     let sectors = blocks
         .iter()
         .map(|(sector, dimension, _)| (*sector, *dimension))
