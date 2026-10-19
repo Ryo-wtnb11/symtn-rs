@@ -967,6 +967,14 @@ pub fn save_plan_cache(runtime: &Runtime) -> String {
 /// replay now-suboptimal orders and silently drift truncation, so it is
 /// dropped rather than trusted. Returns the number of orders parsed.
 ///
+/// A corrupt entry is skipped, not fatal: an entry whose `PLAN` line is
+/// missing or has no numeric count, whose plan has fewer lines than that
+/// count before the next `TOPO ` line, or whose plan text does not parse is
+/// dropped, and loading resumes at the next line starting with `TOPO `, so
+/// later valid entries still load. A plan line can only start with `TOPO `
+/// when a label contains whitespace or a line break, which plan text does not
+/// escape.
+///
 /// The persisted store is bounded by `PlanCacheConfig::capacity` entries
 /// with least-recently-used eviction, the same bound as the compiled plans;
 /// a larger file keeps its last `capacity` orders. [`clear_plan_cache`]
@@ -996,26 +1004,37 @@ pub fn load_plan_cache(runtime: &Runtime, text: &str) -> usize {
         if cache.disk.cap() != capacity {
             cache.disk.resize(capacity);
         }
+        // Plan lines start with the plan header, `tensor_count`, `output` or
+        // `step`, so the next "TOPO " line is a resynchronisation point after a
+        // corrupt entry. This holds only while labels contain no whitespace or
+        // line breaks: plan text writes labels unescaped.
+        let mut lines = lines.peekable();
         let mut loaded = 0;
         while let Some(topo_line) = lines.next() {
             let Some(topo) = topo_line.strip_prefix("TOPO ") else {
                 continue;
             };
             let Some(count) = lines
-                .next()
+                .peek()
                 .and_then(|l| l.strip_prefix("PLAN "))
                 .and_then(|n| n.trim().parse::<usize>().ok())
             else {
-                break;
+                continue;
             };
-            let plan_text: String =
-                (0..count)
-                    .filter_map(|_| lines.next())
-                    .fold(String::new(), |mut acc, l| {
-                        acc.push_str(l);
-                        acc.push('\n');
-                        acc
-                    });
+            lines.next();
+            let mut plan_text = String::new();
+            let mut framed = 0;
+            while framed < count {
+                let Some(l) = lines.next_if(|l| !l.starts_with("TOPO ")) else {
+                    break;
+                };
+                plan_text.push_str(l);
+                plan_text.push('\n');
+                framed += 1;
+            }
+            if framed != count {
+                continue;
+            }
             if let Ok(plan) = crate::plan::ContractionPlan::from_text(&plan_text) {
                 cache.disk.put(topo.to_string(), plan);
                 loaded += 1;
