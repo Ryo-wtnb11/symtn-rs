@@ -1283,3 +1283,62 @@ fn checked_compact_lq_adds_no_per_sector_allocation_over_the_multiplicity_free_r
     check::<f64>();
     check::<Complex64>();
 }
+
+#[test]
+fn positive_diagonal_gauge_complex_phase_and_zero_diagonal() {
+    use num_complex::Complex64;
+    let c = Complex64::new;
+    // q: 3 x 3, r: 3 x 3 upper triangular with complex diagonal phases and a
+    // zero diagonal entry (row 1), column-major.
+    let q: Vec<Complex64> = (0..9)
+        .map(|i| c((i as f64 * 0.7 - 2.0).sin(), (i as f64 * 1.3 + 0.5).cos()))
+        .collect();
+    let r = vec![
+        c(-3.0, 4.0),
+        c(0.0, 0.0),
+        c(0.0, 0.0),
+        c(1.0, -2.0),
+        c(0.0, 0.0),
+        c(0.0, 0.0),
+        c(0.5, 0.25),
+        c(2.0, 1.0),
+        c(0.0, -7.0),
+    ];
+    let product = |q: &[Complex64], r: &[Complex64]| -> Vec<Complex64> {
+        let mut out = vec![c(0.0, 0.0); 9];
+        for col in 0..3 {
+            for row in 0..3 {
+                for k in 0..3 {
+                    out[row + 3 * col] += q[row + 3 * k] * r[k + 3 * col];
+                }
+            }
+        }
+        out
+    };
+    let before = product(&q, &r);
+    let mut q_gauged = q.clone();
+    let mut r_gauged = r.clone();
+    crate::factorize::positive_diagonal_gauge(&mut q_gauged, 3, &mut r_gauged, 3, 3);
+    // Diagonal of R is real non-negative; the zero entry keeps phase 1.
+    for j in 0..3 {
+        let diagonal = r_gauged[j + 3 * j];
+        assert!(
+            diagonal.im.abs() < 1e-14,
+            "R[{j},{j}] = {diagonal} not real"
+        );
+        assert!(diagonal.re >= 0.0, "R[{j},{j}] = {diagonal} negative");
+    }
+    let zero_diagonal_row = 1;
+    let leading_dimension = 3;
+    let zero_diagonal_index = zero_diagonal_row + leading_dimension * zero_diagonal_row;
+    assert_eq!(r_gauged[zero_diagonal_index], c(0.0, 0.0));
+    assert_eq!(q_gauged[3], q[3], "zero diagonal must not rescale Q column");
+    // Q * R is unchanged.
+    let after = product(&q_gauged, &r_gauged);
+    for (lhs, rhs) in after.iter().zip(&before) {
+        assert!(
+            (lhs - rhs).norm() < 1e-13,
+            "product changed: {lhs} vs {rhs}"
+        );
+    }
+}

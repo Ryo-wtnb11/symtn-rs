@@ -2,7 +2,7 @@ use super::*;
 
 #[cfg(feature = "tenferro")]
 #[test]
-fn dense_tensor_consuming_vectors_preserve_f64_and_c64_owners() {
+fn dense_tensor_consuming_vectors_preserve_owners_for_every_dtype() {
     let mut executor = DefaultDenseExecutor::new();
     let shape = [2, 2];
     let strides = [1, 2];

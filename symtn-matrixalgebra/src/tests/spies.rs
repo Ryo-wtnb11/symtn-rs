@@ -851,3 +851,18 @@ where
     );
     BoundDynamicFusionMapSpace::bind_generic(admitted.space().clone(), Arc::clone(spy)).unwrap()
 }
+
+#[test]
+fn scripted_default_eig_vals_reaches_the_forwarded_eig() {
+    // What: the trait's default `eig_vals` calls `eig`; with `EigVals` at
+    // `Default` and `Eig` at `Forward`, the scripted executor routes it back
+    // through its own `eig`, so the values come from the wrapped backend and
+    // both entries are counted (as the hand-written doubles did).
+    let mut dense = ScriptedExecutor::<CountingDense>::default();
+    let data = [2.0_f64, 0.0, 0.0, -1.0];
+    let input = DenseRead::F64(symtn_dense::DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap());
+    let values = dense.eig_vals(input).unwrap();
+    assert_eq!(values.shape(), [2]);
+    assert_eq!(dense.counts().eig_vals, 1);
+    assert_eq!(dense.counts().eig, 1);
+}

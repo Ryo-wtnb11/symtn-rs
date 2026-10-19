@@ -28,7 +28,7 @@ fn upload(backend: &CudaBackend, data: Vec<f64>) -> Tensor {
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn rank_beyond_cutensor_mode_limit_is_reported() {
+fn rank_eight_strided_region_is_accepted_and_the_mode_limit_is_logged() {
     let mut backend = CudaBackend::new(CudaDeviceId::from_ordinal(0))
         .expect("CUDA device 0 must be available for the device probe");
     let src = upload(&backend, (0..64).map(|index| index as f64).collect());

@@ -690,3 +690,45 @@ fn polar_factors_are_isometric_and_hermitian_positive_on_both_sides() {
     check_polar_laws_on_su2::<f64>(|re, _| re);
     check_polar_laws_on_su2(Complex64::new);
 }
+
+#[test]
+fn polar_validates_every_sector_before_direct_or_fallback_svd_execution() {
+    // What: a later invalid sector prevents SVD of an earlier valid sector on both layouts.
+    let rule = Z2FusionRule;
+    let direct = mixed_rectangular_tensor((4, 2), (1, 3));
+    let direct_bound = bound_tensor(Arc::new(rule), &direct);
+    assert!(
+        crate::factorize::compact_factor_plan_for_test(direct_bound.space())
+            .unwrap()
+            .is_some()
+    );
+    let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
+    let direct_error = left_polar(&mut dense, &direct_bound.as_ref()).unwrap_err();
+    assert!(matches!(
+        direct_error,
+        OperationError::InvalidArgument { message }
+            if message.contains("left_polar")
+                && message.contains("coupled-sector")
+    ));
+    assert_eq!(dense.counts().svd, 0);
+
+    let fallback_source = mixed_rectangular_tensor((2, 4), (3, 1));
+    let fallback_bound = bound_tensor(Arc::new(rule), &fallback_source);
+    let fallback_space = fallback_bound.space().adjoint_view().unwrap();
+    assert!(
+        crate::factorize::compact_factor_plan_for_test(&fallback_space)
+            .unwrap()
+            .is_none()
+    );
+    let fallback_input =
+        BoundDynamicTensorRef::try_new(&fallback_space, fallback_bound.data()).unwrap();
+    let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
+    let fallback_error = left_polar_dyn(&mut dense, &fallback_input).unwrap_err();
+    assert!(matches!(
+        fallback_error,
+        OperationError::InvalidArgument { message }
+            if message.contains("left_polar")
+                && message.contains("coupled-sector")
+    ));
+    assert_eq!(dense.counts().svd, 0);
+}
