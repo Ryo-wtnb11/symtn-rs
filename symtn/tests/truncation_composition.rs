@@ -151,7 +151,7 @@ macro_rules! assert_svd_composition {
         assert_canonical_layout!(got_s, format!("{case}: s"));
         assert_canonical_layout!(got_vh, format!("{case}: vh"));
 
-        assert_kept_magnitudes(case, &got_s.diagview().unwrap(), &offers, terms);
+        assert_kept_magnitudes(case, &got_s.diagview().unwrap(), &offers, &kept, terms);
         assert_relation!(
             source.compose(&got_vh.adjoint().unwrap()).unwrap(),
             got_u.compose(&got_s).unwrap(),
@@ -202,7 +202,13 @@ macro_rules! assert_eigh_composition {
         let truncation: &Truncation = &$truncation;
         let case: &str = $case;
 
-        let Eigh { d, v } = source.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+        let Eigh { d, v } = source
+            .eigh_full(
+                &codomain_axes(source),
+                &domain_axes(source),
+                HermitianTol::DEFAULT,
+            )
+            .unwrap();
         let bond = d.domain()[0].clone();
         let spectra = d.diagview().unwrap();
         let found = bond.find_truncated(&spectra, truncation).unwrap();
@@ -226,7 +232,7 @@ macro_rules! assert_eigh_composition {
         assert_canonical_layout!(got_d, format!("{case}: d"));
         assert_canonical_layout!(got_v, format!("{case}: v"));
 
-        assert_kept_magnitudes(case, &got_d.diagview().unwrap(), &offers, terms);
+        assert_kept_magnitudes(case, &got_d.diagview().unwrap(), &offers, &kept, terms);
         assert_relation!(
             source.compose(&got_v).unwrap(),
             got_v.compose(&got_d).unwrap(),
@@ -498,6 +504,51 @@ fn fermionic_eigh_composition_matches_the_oracle_for_every_policy() {
         .unwrap();
     let source = raw.axpby(1.0, &raw.adjoint().unwrap(), 1.0).unwrap();
     eigh_policy_sweep!(source, fz2_leg(&[(false, 2), (true, 1)]), "fz2 eigh f64");
+}
+
+/// Rank-(2,2) Hermitian sources: each coupled block stacks several fusion
+/// trees (SU(2) spin 1/2 arises from four uncoupled pairs, fermion parity
+/// even from `ee` and `oo`), so the eigh composition is checked across tree
+/// groups rather than on a rank-(1,1) block that is one tree.
+#[test]
+fn su2_multi_tree_eigh_composition_matches_the_oracle_for_every_policy() {
+    let leg = su2_leg(&[(0, 1), (1, 2), (2, 1)]);
+    let mut state = 0x2310_0001u64;
+    let raw: TensorMap<_, Complex64> =
+        TensorMap::from_subblock_fn(&host_runtime(), [&leg, &leg], [&leg, &leg], move |_, _| {
+            Complex64::new(fill(&mut state), fill(&mut state))
+        })
+        .unwrap();
+    let one = Complex64::new(1.0, 0.0);
+    let source = raw.axpby(one, &raw.adjoint().unwrap(), one).unwrap();
+    assert!(
+        sector_matrices!(source)
+            .iter()
+            .any(|(sector, matrix)| *sector == SU2Irrep::from_twice_spin(1) && matrix.rows > 2),
+        "spin 1/2 must stack several trees"
+    );
+    eigh_policy_sweep!(
+        source,
+        su2_leg(&[(0, 2), (1, 1)]),
+        "su2 multi-tree eigh c64"
+    );
+}
+
+#[test]
+fn fermionic_multi_tree_eigh_composition_matches_the_oracle_for_every_policy() {
+    let leg = fz2_leg(&[(false, 2), (true, 1)]);
+    let mut state = 0x2310_0002u64;
+    let raw: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(&host_runtime(), [&leg, &leg], [&leg, &leg], move |_, _| {
+            fill(&mut state)
+        })
+        .unwrap();
+    let source = raw.axpby(1.0, &raw.adjoint().unwrap(), 1.0).unwrap();
+    eigh_policy_sweep!(
+        source,
+        fz2_leg(&[(false, 2), (true, 1)]),
+        "fz2 multi-tree eigh f64"
+    );
 }
 
 // ---------------------------------------------------------------------------

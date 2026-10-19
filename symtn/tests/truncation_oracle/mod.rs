@@ -313,34 +313,46 @@ pub fn kept_values<S: PartialEq, V: Copy>(
 }
 
 /// The kept spectrum of a restricted factor has, sector by sector, the
-/// magnitudes of the offered prefix, within the tolerance of its own dtype.
-/// The offers are descending; the kept values are compared as a multiset of
-/// magnitudes, since an `eigh` spectrum is stored ascending (#1985).
+/// offered magnitudes at the hand selection's kept positions, within the
+/// tolerance of its own dtype. The offers are descending; the kept values are
+/// compared as a multiset of magnitudes, since an `eigh` spectrum is stored
+/// ascending (#1985).
 #[track_caller]
 pub fn assert_kept_magnitudes<S, V>(
     what: &str,
-    kept: &[SectorSpectrum<S, V>],
+    got: &[SectorSpectrum<S, V>],
     offers: &[Offer<S>],
+    kept: &[Vec<usize>],
     terms: usize,
 ) where
     S: PartialEq + std::fmt::Debug,
     V: SpectrumMagnitude + crate::numerics::Numeric,
 {
-    for entry in kept {
+    for entry in got {
         let offer = offers
             .iter()
             .find(|offer| offer.sector == entry.sector)
             .unwrap_or_else(|| panic!("{what}: {:?} was not offered", entry.sector));
-        let want = &offer.magnitudes[..entry.values.len()];
-        let bound =
-            crate::numerics::tolerance::<V>(terms, want.iter().copied().fold(0.0, f64::max));
+        let want = kept_values(offers, kept, &entry.sector, &offer.magnitudes);
+        assert_eq!(
+            entry.values.len(),
+            want.len(),
+            "{what}: {:?} kept count",
+            entry.sector
+        );
+        // Scaled by the sector's largest value, not the largest kept one: a
+        // policy keeping the smallest values sees the block's absolute error.
+        let bound = crate::numerics::tolerance::<V>(
+            terms,
+            offer.magnitudes.iter().copied().fold(0.0, f64::max),
+        );
         let mut got: Vec<f64> = entry
             .values
             .iter()
             .map(|&value| SpectrumMagnitude::magnitude(value))
             .collect();
         got.sort_by(|x, y| y.total_cmp(x));
-        for (index, (&got, &want)) in got.iter().zip(want).enumerate() {
+        for (index, (&got, &want)) in got.iter().zip(&want).enumerate() {
             assert!(
                 (got - want).abs() <= bound,
                 "{what}: {:?} value {index} is {got} against the oracle {want} (bound {bound:e})",
@@ -387,6 +399,15 @@ pub enum Policy<S> {
     RelativeInfCutoff(f64),
     /// Discard ascending while `sum dim v^2 <= (rtol * norm)^2`.
     RelativeError(f64),
+    /// Keep `v >= atol`.
+    AbsoluteCutoff(f64),
+    /// Keep `v <= max(atol, rtol * sqrt(sum dim v^2))`.
+    Below {
+        atol: f64,
+        rtol: f64,
+    },
+    /// Keep the smallest values while `sum dim <= rank`.
+    RankSmallest(usize),
     /// A fixed per-sector prefix (absent sector: zero).
     Space(Vec<(S, usize)>),
     /// Both components must keep a value.
@@ -434,12 +455,16 @@ pub fn select<S: Ord + Clone>(offers: &[Offer<S>], policy: &Policy<S>) -> Vec<Ve
     };
     match policy {
         Policy::Full => offers.iter().map(all).collect(),
-        Policy::Rank(rank) => {
+        Policy::Rank(rank) | Policy::RankSmallest(rank) => {
+            let largest = matches!(policy, Policy::Rank(_));
             let mut candidates = candidates();
             candidates.sort_by(|a, b| {
-                b.0.total_cmp(&a.0)
-                    .then_with(|| a.1.cmp(b.1))
-                    .then(a.2.cmp(&b.2))
+                let by_value = if largest {
+                    b.0.total_cmp(&a.0)
+                } else {
+                    a.0.total_cmp(&b.0)
+                };
+                by_value.then_with(|| a.1.cmp(b.1)).then(a.2.cmp(&b.2))
             });
             let mut kept = vec![Vec::new(); offers.len()];
             let mut used = 0.0;
@@ -456,6 +481,18 @@ pub fn select<S: Ord + Clone>(offers: &[Offer<S>], policy: &Policy<S>) -> Vec<Ve
             kept
         }
         Policy::RelativeCutoff(rtol) => filter(rtol * weighted_norm(offers)),
+        Policy::AbsoluteCutoff(atol) => filter(*atol),
+        Policy::Below { atol, rtol } => {
+            let threshold = atol.max(rtol * weighted_norm(offers));
+            offers
+                .iter()
+                .map(|o| {
+                    (0..o.magnitudes.len())
+                        .filter(|&p| o.magnitudes[p] <= threshold)
+                        .collect()
+                })
+                .collect()
+        }
         Policy::RelativeInfCutoff(rtol) => {
             let max = offers
                 .iter()
@@ -588,6 +625,32 @@ macro_rules! policies {
                 "ToleranceInf",
                 Truncation::relative_inf_cutoff(0.4).unwrap(),
                 Policy::RelativeInfCutoff(0.4),
+            ),
+            (
+                "AbsoluteCutoff",
+                Truncation::absolute_cutoff(0.5).unwrap(),
+                Policy::AbsoluteCutoff(0.5),
+            ),
+            (
+                "Below(atol)",
+                Truncation::below(0.5, 0.0).unwrap(),
+                Policy::Below {
+                    atol: 0.5,
+                    rtol: 0.0,
+                },
+            ),
+            (
+                "Below(rtol)",
+                Truncation::below(0.0, 0.25).unwrap(),
+                Policy::Below {
+                    atol: 0.0,
+                    rtol: 0.25,
+                },
+            ),
+            (
+                "RankSmallest(3)",
+                Truncation::rank_smallest(3),
+                Policy::RankSmallest(3),
             ),
             (
                 "DiscardWeight",
