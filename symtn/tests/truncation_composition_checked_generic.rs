@@ -150,7 +150,7 @@ macro_rules! assert_su3_svd_composition {
             assert_canonical_layout!(got_s, format!("{case}: s"));
             assert_canonical_layout!(got_vh, format!("{case}: vh"));
 
-            assert_kept_magnitudes(&case, &got_s.diagview().unwrap(), &offers, terms);
+            assert_kept_magnitudes(&case, &got_s.diagview().unwrap(), &offers, &kept, terms);
             assert_relation!(
                 source.compose(&owned_adjoint!(got_vh, $one)).unwrap(),
                 got_u.compose(&got_s).unwrap(),
@@ -214,7 +214,7 @@ macro_rules! assert_su3_eigh_composition {
             assert_canonical_layout!(got_d, format!("{case}: d"));
             assert_canonical_layout!(got_v, format!("{case}: v"));
 
-            assert_kept_magnitudes(&case, &got_d.diagview().unwrap(), &offers, terms);
+            assert_kept_magnitudes(&case, &got_d.diagview().unwrap(), &offers, &kept, terms);
             assert_relation!(
                 source.compose(&got_v).unwrap(),
                 got_v.compose(&got_d).unwrap(),
