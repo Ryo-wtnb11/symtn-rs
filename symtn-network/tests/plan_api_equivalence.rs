@@ -7,13 +7,13 @@ use symtn_network::{
 // The public plan and slice text formats, small enough to check by hand: the
 // chain a-b-c-d contracts (0, 1) -> 3 with labels a c, then 3 with 2 -> 4 with
 // labels a d, each step line reading `lhs rhs result cost "labels"`; slicing the
-// internal label c of extent 8 yields 8 slices.
+// internal label c of extent 8 yields 8 slices, each `slice <kind> "label"`.
 const DENSE_PATH: &str =
     "symtn-contract-plan-v2\ntensor_count 3\noutput \"a\" \"d\"\nstep 0 1 3 32 \"a\" \"c\"\nstep 2 3 4 50 \"a\" \"d\"\n";
 const DENSE_GREEDY: &str =
     "symtn-contract-plan-v2\ntensor_count 3\noutput \"a\" \"d\"\nstep 0 1 3 24 \"a\" \"c\"\nstep 3 2 4 40 \"a\" \"d\"\n";
-const SLICE_INTERNAL: &str = "symtn-slice-plan-v1\nnslices 8\nsliced_width 4\nunsliced_width 16\nper_slice_flops 8\nslice internal c\n";
-const SLICE_OUTPUT: &str = "symtn-slice-plan-v1\nnslices 6\nsliced_width 6\nunsliced_width 36\nper_slice_flops 7\nslice output a\n";
+const SLICE_INTERNAL: &str = "symtn-slice-plan-v2\nnslices 8\nsliced_width 4\nunsliced_width 16\nper_slice_flops 8\nslice internal \"c\"\n";
+const SLICE_OUTPUT: &str = "symtn-slice-plan-v2\nnslices 6\nsliced_width 6\nunsliced_width 36\nper_slice_flops 7\nslice output \"a\"\n";
 
 fn chain_ir() -> NetworkIR {
     NetworkIR::from_labels(

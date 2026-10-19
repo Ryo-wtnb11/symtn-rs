@@ -12,6 +12,7 @@ use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     load_plan_cache, plan_cache_stats, save_plan_cache, ContractError, ContractionPlan, Network,
+    SliceKind, SlicePlan, SlicedPlan,
 };
 
 #[path = "../../tests/support/network.rs"]
@@ -355,4 +356,97 @@ fn plan_cache_persists_and_replays_an_order_for_labels_needing_escapes() {
         expected.dense_data().unwrap(),
         4,
     );
+}
+
+// A `SlicedPlan` section marker preceded and followed by a line break.
+const MARKER_LIKE: &str = "x\nEND_SLICE_PLAN\nBEGIN_SLICE_PLAN";
+
+/// A slice decision over `odd_chain`'s legs plus `MARKER_LIKE`, labels
+/// escaped by hand.
+const ODD_SLICE: &str = r#"symtn-slice-plan-v2
+nslices 24
+sliced_width 2
+unsliced_width 16
+per_slice_flops 4
+slice internal "j\tk\\"
+slice output "i j\nTOPO x"
+slice output "TOPO \"l\u{301}'"
+slice internal "x\nEND_SLICE_PLAN\nBEGIN_SLICE_PLAN"
+"#;
+
+#[test]
+fn slice_plan_text_round_trips_labels_with_whitespace_line_breaks_and_escapes() {
+    let slice = SlicePlan::from_text(ODD_SLICE).unwrap();
+    let [i, j, _, l] = ODD;
+    assert_eq!(
+        slice
+            .sliced_with_kinds()
+            .map(|(label, kind)| (label.as_str(), kind))
+            .collect::<Vec<_>>(),
+        [
+            (j, SliceKind::Internal),
+            (i, SliceKind::Output),
+            (l, SliceKind::Output),
+            (MARKER_LIKE, SliceKind::Internal),
+        ]
+    );
+    assert_eq!(slice.to_text(), ODD_SLICE);
+    assert_eq!(SlicePlan::from_text(&slice.to_text()), Ok(slice.clone()));
+
+    // A marker-like label stays inside its quoted string, so the bundle keeps
+    // exactly one line per section marker and restores both halves.
+    let plan = ContractionPlan::from_text(&odd_b_c_first()).unwrap();
+    let sliced = SlicedPlan::new(plan.clone(), slice.clone());
+    let text = sliced.to_text();
+    for marker in [
+        "BEGIN_CONTRACTION_PLAN",
+        "END_CONTRACTION_PLAN",
+        "BEGIN_SLICE_PLAN",
+        "END_SLICE_PLAN",
+    ] {
+        assert_eq!(text.lines().filter(|line| *line == marker).count(), 1);
+    }
+    let restored = SlicedPlan::from_text(&text).unwrap();
+    assert_eq!(restored.plan(), &plan);
+    assert_eq!(restored.slice(), &slice);
+
+    for (case, text, reason) in [
+        (
+            "bare label",
+            ODD_SLICE.replacen(r#""j\tk\\""#, "j", 1),
+            "label is not a quoted string",
+        ),
+        (
+            "unknown escape",
+            ODD_SLICE.replacen(r#""j\tk\\""#, r#""j\q""#, 1),
+            "invalid quoted label",
+        ),
+        (
+            "unterminated label",
+            ODD_SLICE.replacen(r#""j\tk\\""#, r#""j"#, 1),
+            "invalid quoted label",
+        ),
+        (
+            "two labels",
+            ODD_SLICE.replacen(r#""j\tk\\""#, r#""j" "k""#, 1),
+            "exactly one label",
+        ),
+        (
+            "missing label",
+            ODD_SLICE.replacen(r#"internal "j\tk\\""#, "internal", 1),
+            "invalid slice line",
+        ),
+        (
+            "v1 header",
+            ODD_SLICE.replacen("v2", "v1", 1),
+            "unsupported slice plan header",
+        ),
+    ] {
+        match SlicePlan::from_text(&text) {
+            Err(ContractError::InvalidContractionPlan(message)) => {
+                assert!(message.contains(reason), "{case}: {message}");
+            }
+            other => panic!("{case}: expected InvalidContractionPlan, got {other:?}"),
+        }
+    }
 }
