@@ -220,8 +220,9 @@ pub trait FusionRule: 'static {
 }
 
 /// A sector's position in TensorKit's sector order, used where a symtn result
-/// depends on sector order and must agree with TensorKit's: today, which
-/// sector a truncation keeps at an exact cross-sector tie.
+/// depends on sector order and must agree with TensorKit's, such as which
+/// sector a truncation keeps at an exact cross-sector tie or which fusion
+/// trees a partial identity selects.
 ///
 /// `SectorId` stays the storage and interning key; this is only a sort key.
 ///
@@ -254,6 +255,13 @@ impl SectorOrderKey {
     pub fn product(mut left: Self, right: Self) -> Self {
         left.0.extend_from_slice(&right.0);
         left
+    }
+
+    /// The flattened per-factor positions, for an order other than `isless`
+    /// over the same positions (TensorKit's `⊗` iteration of a product).
+    #[doc(hidden)]
+    pub fn positions(&self) -> &[u64] {
+        &self.0
     }
 
     fn degree(&self) -> u128 {

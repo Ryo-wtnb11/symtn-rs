@@ -39,7 +39,9 @@ apply their own ordering rather than relying on the returned `Vec` order.
 ## Sector order where TensorKit's order is observable
 
 symtn sorts by `SectorId` for storage, but a result that depends on sector
-order must use TensorKit's. Today one result does: which sector a truncation
+order must use TensorKit's. Two results do.
+
+The first is which sector a truncation
 keeps at an exact cross-sector tie. TensorKit 0.17.1
 `findtruncated(::SectorVector, ...)` (`src/factorizations/truncation.jl`)
 sorts the flat values of a `SectorVector` with `sortperm` or
@@ -52,6 +54,25 @@ cross-sector tie. `select_truncation` takes its decision in the order of
 which is TensorKitSectors `findindex - 1` per factor, ordered by degree and
 then lexicographically, as TensorKitSectors 0.3.9 `isless` does for products
 (`src/product.jl`).
+
+The second is `isomorphism(W ← V)` and `isometry(W ← V)` with `V ≠ W`.
+TensorKit 0.17.1 `isomorphism!` / `isometry!` (`src/tensors/linalg.jl`)
+call `one!` on each block, whose rows and columns follow `fusiontrees`
+(`src/spaces/structure.jl` `sectorstructure`). A partial identity therefore
+selects TensorKit's leading trees, and an isomorphism pairs row and column
+trees by their TensorKit position. `FusionTreeIterator`
+(`src/fusiontrees/iterator.jl`) varies the last uncoupled sector slowest,
+then the inner line into the top vertex, then that vertex, then the rest of
+the tree. A leg iterates `sectors(V)`, which for `V'` is `dual(s)` in `V`'s
+order. symtn writes the identity in that order (`write_identity_blocks_generic`):
+uncoupled sectors by `sector_order_key`, and inner lines in TensorKit's
+`c ⊗ dual(b)` iteration order. That is position order for every simple
+TensorKitSectors type, and for a product it varies the first factor fastest
+(TensorKitSectors 0.3.9 `src/product.jl` `⊗`, `Iterators.product`), so
+symtn compares a line's flattened factor positions last factor first rather
+than by product `isless`. SU(N) is the exception: SUNRepresentations 0.4.0
+`⊗` iterates a `Dict`, so with three or more legs on a side TensorKit's line
+order is hash order, and symtn uses sector order there.
 
 | Provider | TensorKit order (TensorKitSectors 0.3.9) | Key | `SectorId` monotone? |
 | --- | --- | --- | --- |

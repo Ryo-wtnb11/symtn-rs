@@ -694,21 +694,33 @@ where
     }
 }
 
-pub(super) fn write_identity_blocks_generic<R, D>(tensor: &mut TensorMap<R, D>) -> Result<(), Error>
+/// Writes TensorKit's `one!` into every coupled-sector block: `δ_ij` with
+/// rows and columns taken in TensorKit `fusiontrees` order, so the partial
+/// identity of a rectangular block selects the trees TensorKit selects.
+///
+/// `order_key(sector, dual)` is the provider's `sector_order_key` of `sector`,
+/// or of its dual when `dual` is set.
+pub(super) fn write_identity_blocks_generic<R, D, E>(
+    tensor: &mut TensorMap<R, D>,
+    order_key: impl FnMut(SectorId, bool) -> Result<symtn_core::SectorOrderKey, E>,
+) -> Result<(), E>
 where
     D: TensorScalar,
+    E: From<Error>,
 {
     let TypedTensorRepr::Owned(body) = &mut tensor.repr else {
         unreachable!()
     };
-    write_dense_identity_blocks(Arc::get_mut(body).expect("fresh identity body"))
+    write_dense_identity_blocks(Arc::get_mut(body).expect("fresh identity body"), order_key)
 }
 
-pub(super) fn write_dense_identity_blocks<R, D>(
+fn write_dense_identity_blocks<R, D, E>(
     body: &mut TypedTensorBody<R, D>,
-) -> Result<(), Error>
+    mut order_key: impl FnMut(SectorId, bool) -> Result<symtn_core::SectorOrderKey, E>,
+) -> Result<(), E>
 where
     D: TensorScalar,
+    E: From<Error>,
 {
     let regions = {
         let space = body.space.space();
@@ -719,11 +731,75 @@ where
         unreachable!()
     };
     for region in regions.iter() {
-        for i in 0..region.rows().min(region.cols()) {
-            data[region.range().start + i * (region.rows() + 1)] = D::from_real(1.0);
+        let rows = tensorkit_tree_order(region.row_trees(), &mut order_key)?;
+        let cols = tensorkit_tree_order(region.col_trees(), &mut order_key)?;
+        let start = region.range().start;
+        for (row, col) in rows.into_iter().flatten().zip(cols.into_iter().flatten()) {
+            data[start + row + col * region.rows()] = D::from_real(1.0);
         }
     }
     Ok(())
+}
+
+/// One slot of a tree's TensorKit iteration key. Each slot position holds
+/// the same variant in every tree of one block side.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum TreeOrderSlot {
+    /// An uncoupled sector: `sectors(V)` walks its `SectorDict` in `isless`
+    /// order.
+    Uncoupled(symtn_core::SectorOrderKey),
+    /// An inner line: `c ⊗ dual(b)` order, the per-factor positions compared
+    /// last factor first.
+    Line(Vec<u64>),
+    Vertex(usize),
+}
+
+/// The matrix index ranges of `trees` (one side of a coupled block, in
+/// storage order) listed in TensorKit `fusiontrees` order.
+///
+/// TensorKit 0.17.1 `FusionTreeIterator` (`src/fusiontrees/iterator.jl`,
+/// `_fusiontree_iterate`) varies the last uncoupled sector slowest, then the
+/// inner line feeding the top vertex, then that vertex, then recurses into
+/// the remaining tree; for two legs `(u₂, u₁, μ)`. Uncoupled sectors iterate
+/// as `sectors(V)`, which for a dual leg is `dual(s)` in `V`'s order. Inner
+/// lines iterate as `c ⊗ dual(b)`: for every simple TensorKitSectors type
+/// that is position order, and for a product (TensorKitSectors 0.3.9
+/// `src/product.jl` `⊗`, `Iterators.product`) the first factor varies
+/// fastest. SU(N) is the exception: SUNRepresentations iterates a `Dict`
+/// (see `docs/sector_id_compatibility.md`). Within a tree, indices stay in
+/// storage order, which is TensorKit's column-major subblock order.
+fn tensorkit_tree_order<E>(
+    trees: &[CoupledTreeExtent],
+    order_key: &mut impl FnMut(SectorId, bool) -> Result<symtn_core::SectorOrderKey, E>,
+) -> Result<Vec<core::ops::Range<usize>>, E>
+where
+    E: From<Error>,
+{
+    let mut ranked = Vec::with_capacity(trees.len());
+    for extent in trees {
+        let tree = extent.tree();
+        let (uncoupled, lines, dual) = (tree.uncoupled(), tree.innerlines(), tree.is_dual());
+        let mut key = Vec::with_capacity(3 * uncoupled.len());
+        for leg in (1..uncoupled.len()).rev() {
+            key.push(TreeOrderSlot::Uncoupled(order_key(
+                uncoupled[leg],
+                dual[leg],
+            )?));
+            key.push(if leg >= 2 {
+                let line = order_key(lines[leg - 2], false)?;
+                TreeOrderSlot::Line(line.positions().iter().rev().copied().collect())
+            } else {
+                TreeOrderSlot::Uncoupled(order_key(uncoupled[0], dual[0])?)
+            });
+            key.push(TreeOrderSlot::Vertex(tree.vertices()[leg - 1].get()));
+        }
+        let len = extent
+            .extent()
+            .map_err(|error| E::from(Error::from(error)))?;
+        ranked.push((key, extent.offset()..extent.offset() + len));
+    }
+    ranked.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(ranked.into_iter().map(|(_, range)| range).collect())
 }
 
 #[cfg(test)]
