@@ -11,12 +11,12 @@ busy=$(ps -Ao comm | grep -E '(^|/)(cargo|rustc|julia)$' || true)
 [ -z "$busy" ] || { echo "machine busy: $busy" >&2; exit 1; }
 
 CARGO_PROFILE_RELEASE_DEBUG=line-tables-only \
-    cargo build --manifest-path "$root/Cargo.toml" --release --locked --offline \
-    -p symtn --example eager_overhead_ledger
-bin=${CARGO_TARGET_DIR:-$root/target}/release/examples/eager_overhead_ledger
+    cargo bench --no-run --profile release --manifest-path "$root/Cargo.toml" --locked --offline \
+    -p symtn --bench eager_overhead_ledger --message-format=json > "$out/build.jsonl"
+bin=$(python3 -c 'import json,sys; print(next(r["executable"] for r in map(json.loads, sys.stdin) if r.get("executable") and r.get("target", {}).get("name") == "eager_overhead_ledger"))' < "$out/build.jsonl")
 
 # A second one-thread and TensorKit pass measures run-to-run spread.
-for run in one default symtn1 dense1 one-run2; do
+for run in one default one-run2; do
     LEDGER_THREADS=${run%-run2} "$bin" > "$out/symtn-$run.csv"
 done
 for run in tensorkit tensorkit-run2; do

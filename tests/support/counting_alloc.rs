@@ -1,6 +1,6 @@
 //! The one counting allocator for allocation-budget tests and probes.
 //!
-//! Test and example targets include this file with
+//! Test and bench targets include this file with
 //! `#[path = ".../tests/support/counting_alloc.rs"] mod counting_alloc;` and
 //! install it with one line:
 //! `#[global_allocator] static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;`
@@ -13,7 +13,7 @@
 //!
 //! A consequence: with a multi-threaded runtime (for example
 //! `transform_owned_parallel`, the CUDA tests, or the default row of the
-//! `eager_overhead_ledger` example) a measurement gates only the calling
+//! `eager_overhead_ledger` bench) a measurement gates only the calling
 //! thread's allocations, not those made on worker threads.
 
 #![allow(dead_code)]

@@ -65,8 +65,8 @@ baseline revision):
 cp benchmarks/cpu_shape_reuse.Cargo.lock Cargo.lock
 RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1 \
-CARGO_TARGET_DIR=../tenet/target cargo run --locked --release \
-  -p symtn-network --example microbench_cpu_shape_reuse --no-default-features \
+CARGO_TARGET_DIR=../tenet/target cargo bench --locked --profile release \
+  -p symtn-network --bench microbench_cpu_shape_reuse --no-default-features \
   --features cpu-faer > /absolute/path/to/raw.csv
 ```
 

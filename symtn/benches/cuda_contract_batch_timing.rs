@@ -1,7 +1,7 @@
 //! Timing harness for the CUDA `ContractPlan` batch (Core, SwappedCore,
 //! signed Core and DynamicTree routes) against the eager per-member loop.
-//! Run on a free GPU with `cargo run --release -p symtn --no-default-features
-//! --features cuda,cpu-faer --example cuda_contract_batch_timing`.
+//! Run on a free GPU with `cargo bench -p symtn --no-default-features
+//! --features cuda,cpu-faer --bench cuda_contract_batch_timing`.
 //!
 //! Timings are evidence, never a CI threshold. Host elapsed times bracket host
 //! submission without an explicit device synchronization, so they are not GPU

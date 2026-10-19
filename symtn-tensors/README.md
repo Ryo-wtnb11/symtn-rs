@@ -6,4 +6,4 @@ and contraction plans, and backend traits; ordinary code should use
 `symtn::typed::TensorMap` methods.
 
 `cuda` enables device seams and `cgc-gen` forwards generated SUN
-support. Its examples are diagnostics, not a user tutorial.
+support. User examples live in the `symtn` crate.

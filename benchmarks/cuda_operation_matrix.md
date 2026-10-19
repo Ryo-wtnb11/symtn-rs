@@ -6,7 +6,7 @@ current device path costs per call, it is never a CI timing gate, and no
 measured value feeds a dispatch decision.
 
 Runner: `benchmarks/cuda_operation_matrix.sh`
-Executable: `symtn-network/examples/cuda_operation_matrix.rs`
+Executable: `symtn-network/benches/cuda_operation_matrix.rs`
 (feature `cuda`; without it the binary prints an unsupported message and exits
 with status 2).
 

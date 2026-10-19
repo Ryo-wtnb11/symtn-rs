@@ -50,7 +50,7 @@ lock_sha256="$(sha256_file Cargo.lock)"
 cargo metadata --locked --offline --format-version 1 \
     --manifest-path symtn/Cargo.toml --no-default-features \
     --features "$OP_MATRIX_CARGO_FEATURES" >"$metadata_file"
-cargo build --locked --offline --release -p symtn --example operation_matrix \
+cargo bench --no-run --profile release --locked --offline -p symtn --bench operation_matrix \
     --no-default-features --features "$OP_MATRIX_CARGO_FEATURES" \
     --message-format=json-render-diagnostics >"$build_file"
 resolved_authorities="$(python3 - "$metadata_file" "$build_file" <<'PY'
@@ -126,7 +126,7 @@ printf '# cargo_package=symtn cargo_features=%s gemm_backend=%s locked=true offl
 printf '# racah_authority=%s\n' "$RACAH_AUTHORITY"
 
 for sample in 0 1 2; do
-    cargo run --locked --offline --release -p symtn --example operation_matrix --quiet \
+    cargo bench --profile release --locked --offline -p symtn --bench operation_matrix --quiet \
         --no-default-features --features "$OP_MATRIX_CARGO_FEATURES" >"$sample_dir/$sample"
 done
 if [[ "$(sha256_file Cargo.lock)" != "$lock_sha256" ]]; then

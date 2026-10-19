@@ -40,3 +40,12 @@ lru = "0.12"
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }
+
+[[bench]]
+name = "cuda_operation_matrix"
+harness = false
+required-features = ["cuda"]
+
+[[bench]]
+name = "microbench_cpu_shape_reuse"
+harness = false

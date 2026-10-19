@@ -23,8 +23,8 @@ env:
   CI_HEAVY_TEST_DEBUG: '0'
   # Test steps pass `--tests` (every target with `test = true`: what `cargo
   # test` runs) and `--doc` separately. Why-not the default selection: it also
-  # compiles and links every example, which are timing programs no test job
-  # runs; the lint job's `clippy --all-targets` already compiles them.
+  # compiles and links user examples and measurement benches; the lint job's
+  # `clippy --all-targets` already compiles them.
 
 jobs:
   # One runner for the light lint gates: GitHub's per-account job concurrency,

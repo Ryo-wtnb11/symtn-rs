@@ -1,6 +1,6 @@
 //! Timing harness for the Host `ContractPlan` batch (copyC, Core,
 //! SwappedCore, signed direct and dynamic source-twist routes) against the
-//! eager per-member loop. Run with `cargo run --release -p symtn --example
+//! eager per-member loop. Run with `cargo bench -p symtn --bench
 //! contract_batch_timing`.
 //!
 //! Timings and caller-thread allocation counts are evidence, never a CI

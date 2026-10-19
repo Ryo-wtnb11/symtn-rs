@@ -10,7 +10,7 @@
 //! `a.adjoint()` as the conjugated left operand).
 //!
 //! ```text
-//! cargo run --release --example eager_overhead_ledger -- [filter ...]
+//! cargo bench -p symtn --bench eager_overhead_ledger -- [filter ...]
 //! ```
 //!
 //! Each `filter` must equal one field of `symmetry,dtype,case,op` for a row
@@ -359,7 +359,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         other => return Err(format!("unknown LEDGER_THREADS={other}").into()),
     };
     let runtime = builder.build()?;
-    let filters: Vec<String> = std::env::args().skip(1).collect();
+    let filters: Vec<String> = std::env::args()
+        .skip(1)
+        .filter(|arg| arg != "--bench")
+        .collect();
     let sample = std::env::var("LEDGER_SAMPLE").ok().map(|path| {
         let seconds = std::env::var("LEDGER_SECONDS")
             .ok()

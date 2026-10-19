@@ -41,7 +41,7 @@ jobs:
         working-directory: symtn
 
   # Measurements that reach private phases or a counting global allocator
-  # run here in release: the Host contract-batch timing example, and
+  # run here in release: the Host contract-batch timing bench, and
   # measurement-only tests that live beside the suites they measure, tagged
   # `#[ignore = "benchmark: run via benchmarks.yml"]` and run one thread so
   # their samples do not contend. Why not PR CI: they print numbers and
@@ -64,7 +64,7 @@ jobs:
           key: benchmarks-ignored-measurements
       - name: typed contract batch measurements
         if: ${{ !cancelled() }}
-        run: cargo run --locked --release -p symtn --example contract_batch_timing
+        run: cargo bench --locked --profile release -p symtn --bench contract_batch_timing
         working-directory: symtn
       - name: transform-replay member batch measurement
         if: ${{ !cancelled() }}

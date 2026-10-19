@@ -1,4 +1,4 @@
-# TensorKit reference for symtn/examples/eager_overhead_ledger.rs (#1313):
+# TensorKit reference for symtn/benches/eager_overhead_ledger.rs (#1313):
 # the same cases, operations, timing rule, and CSV columns.
 # Usage:
 #   julia -t 1 --project=benchmarks/tensorkit_benchmark \
