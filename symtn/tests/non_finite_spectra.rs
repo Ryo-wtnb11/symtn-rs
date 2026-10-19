@@ -13,14 +13,14 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{Error, TensorMap, Truncation};
+use symtn::typed::{Error, OperationError, TensorMap, Truncation};
 use symtn::typed::{GradedSpace, SectorSpectrum};
 
 #[path = "../../tests/support/fixtures.rs"]
 mod fixtures;
 #[path = "support/report.rs"]
 mod report;
-use report::report;
+use report::cause;
 
 use fixtures::host_runtime;
 
@@ -163,9 +163,12 @@ fn compact_svd_rejects_infinite_input_without_changing_spectrum() {
     .unwrap();
     let before = input.diagview().unwrap();
     let error = input.svd_compact(&[0], &[1]).err().unwrap();
-    assert!(
-        report(&error).contains("svd input components must be finite"),
-        "{error}"
+    assert_eq!(
+        cause::<OperationError>(&error),
+        Some(&OperationError::InvalidArgument {
+            message: "svd input components must be finite"
+        }),
+        "{error:?}"
     );
     assert_eq!(input.diagview().unwrap(), before);
 }

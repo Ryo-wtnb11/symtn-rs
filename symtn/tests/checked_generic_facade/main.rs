@@ -6,7 +6,6 @@ mod common;
 mod numerics;
 #[path = "../support/report.rs"]
 mod report;
-use report::report;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

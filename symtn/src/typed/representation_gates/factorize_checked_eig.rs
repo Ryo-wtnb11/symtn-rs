@@ -245,9 +245,10 @@ fn checked_compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_direct
         .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
         .unwrap_err();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    assert!(compact_error
-        .report()
-        .contains("eigh input components must be finite"));
+    assert!(
+        is_finite_input_refusal(&compact_error, "eigh"),
+        "{compact_error:?}"
+    );
 }
 
 #[cfg(feature = "cgc-gen")]
@@ -1464,9 +1465,10 @@ fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_direct
         .map(drop)
         .unwrap_err();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    assert!(compact_error
-        .report()
-        .contains("eigh input components must be finite"));
+    assert!(
+        is_finite_input_refusal(&compact_error, "eigh"),
+        "{compact_error:?}"
+    );
 }
 
 #[cfg(feature = "cgc-gen")]

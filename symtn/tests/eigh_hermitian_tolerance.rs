@@ -53,7 +53,15 @@ where
     assert_eq!(vals.is_ok(), full.is_ok());
     if let Err(error) = vals {
         assert!(
-            format!("{error:?}").contains("eigh requires Hermitian coupled-sector blocks"),
+            matches!(
+                &error,
+                symtn::typed::Error::Operation(operation) if matches!(
+                    **operation,
+                    symtn::typed::OperationError::InvalidArgument {
+                        message: "eigh requires Hermitian coupled-sector blocks"
+                    }
+                )
+            ),
             "{error:?}"
         );
         return false;

@@ -102,10 +102,10 @@ fn composition_resolves_to_the_unswapped_unit_core() {
 }
 
 #[test]
-fn corrupted_stack_errors_are_pinned() {
+fn corrupted_stack_errors_are_typed() {
     // What: a stack whose payload disagrees with its structure (reachable
     // only through these private fields) is rejected with a typed error, and
-    // a destination likewise; the observed errors are pinned row by row.
+    // a destination likewise.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let (v, w) = u1_legs();
     let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
@@ -132,51 +132,38 @@ fn corrupted_stack_errors_are_pinned() {
     short_dst.member_len = dst.member_len;
     short_dst.storage = vec![1.0; dst.storage.len() - 1];
 
-    let show = |result: Result<(), Error>| format!("{:?}", result.err());
     let observed = [
-        (
-            "execute: consistent short lhs",
-            show(plan.execute(&consistent, &rhs, &mut workspace).map(|_| ())),
-        ),
-        (
-            "execute: payload shorter than structure",
-            show(plan.execute(&short, &rhs, &mut workspace).map(|_| ())),
-        ),
-        (
-            "execute_into: payload shorter than structure",
-            show(plan.execute_into(&short, &rhs, &mut dst, &mut workspace)),
-        ),
-        (
-            "execute_into: destination shorter than structure",
-            show(plan.execute_into(&lhs, &rhs, &mut short_dst, &mut workspace)),
-        ),
-    ];
-    for (row, error) in &observed {
-        eprintln!("    ({row:?}, {error:?}),");
-    }
+        plan.execute(&consistent, &rhs, &mut workspace).map(|_| ()),
+        plan.execute(&short, &rhs, &mut workspace).map(|_| ()),
+        plan.execute_into(&short, &rhs, &mut dst, &mut workspace),
+        plan.execute_into(&lhs, &rhs, &mut short_dst, &mut workspace),
+    ]
+    .map(Result::err);
     assert!(short_dst.storage.iter().all(|&value| value == 1.0));
+    let payload =
+        Error::InvalidArgument("stacked payload length differs from its structure".into());
+    // `ComposePlan` runs `ContractPlan`'s per-call checks (#1775, stricter
+    // than TensorKit): a payload whose length differs from its structure is
+    // an `InvalidArgument` before any work. The consistent corruption reaches
+    // the route executor, which reports the operand's length (two members of
+    // 31) against the plan's (two of 32).
     assert_eq!(
-        observed.map(|(row, error)| (row, error)),
-        CORRUPTED.map(|(row, error)| (row, error.to_string()))
+        observed,
+        [
+            Some(Error::Operation(Box::new(
+                OperationError::ElementCountMismatch {
+                    expected: 64,
+                    actual: 62
+                }
+            ))),
+            Some(payload.clone()),
+            Some(payload),
+            Some(Error::InvalidArgument(
+                "destination payload length differs from its structure".into()
+            )),
+        ]
     );
 }
-
-/// `ComposePlan` runs `ContractPlan`'s per-call checks (#1775, stricter
-/// errors than TensorKit): a payload whose length differs from its
-/// structure is a typed `InvalidArgument` before any work. A corruption that
-/// keeps length and structure consistent reaches the route executor, which
-/// reports the operand's length against the plan's. Base `ec3dea5d`
-/// observations, in row order: `Operation(InvalidArgument { "stacked operand
-/// does not match the replay's members or layout" })`, then
-/// `Operation(ElementCountMismatch { expected: 64, actual: 63 })` twice and
-/// `Operation(ElementCountMismatch { expected: 78, actual: 77 })`.
-#[rustfmt::skip]
-const CORRUPTED: [(&str, &str); 4] = [
-    ("execute: consistent short lhs", "Some(Operation(ElementCountMismatch { expected: 64, actual: 62 }))"),
-    ("execute: payload shorter than structure", "Some(InvalidArgument(\"stacked payload length differs from its structure\"))"),
-    ("execute_into: payload shorter than structure", "Some(InvalidArgument(\"stacked payload length differs from its structure\"))"),
-    ("execute_into: destination shorter than structure", "Some(InvalidArgument(\"destination payload length differs from its structure\"))"),
-];
 
 /// Every linear position of a strided region.
 #[cfg(feature = "cuda")]

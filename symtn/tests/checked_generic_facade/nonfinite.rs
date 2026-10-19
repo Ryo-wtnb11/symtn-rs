@@ -62,19 +62,19 @@ fn checked_generic_factorizations_refuse_nonfinite_input() {
         let errors = vec![
             (
                 "polar",
-                format!("{:?}", adjoint.left_polar(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(&adjoint.left_polar(&[0], &[1]).unwrap_err()),
             ),
             (
                 "polar",
-                format!("{:?}", adjoint.right_polar(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(&adjoint.right_polar(&[0], &[1]).unwrap_err()),
             ),
             (
                 "null",
-                format!("{:?}", adjoint.left_null(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(&adjoint.left_null(&[0], &[1]).unwrap_err()),
             ),
             (
                 "null",
-                format!("{:?}", adjoint.right_null(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(&adjoint.right_null(&[0], &[1]).unwrap_err()),
             ),
         ];
         assert_finite_input_refusals(errors, &format!("lazy adjoint {bad}"));
@@ -104,9 +104,11 @@ fn checked_generic_polar_reports_shape_before_values() {
     let col = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let wide: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&row], [&col], |_, _| f64::NAN).unwrap();
-    let error = format!("{:?}", wide.left_polar(&[0], &[1]).unwrap_err());
-    assert!(
-        error.contains("left_polar requires rows >= columns"),
+    let (message, error) =
+        nonfinite_factor_input::refusal(&wide.left_polar(&[0], &[1]).unwrap_err());
+    assert_eq!(
+        message,
+        Some("left_polar requires rows >= columns in every coupled-sector matrix"),
         "{error}"
     );
 }

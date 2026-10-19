@@ -545,7 +545,14 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
         },
     );
     let late = late.unwrap_err();
-    assert!(format!("{late:?}").contains("InvalidSector"));
+    assert!(
+        matches!(
+            &late,
+            Error::FusionAlgebra(error)
+                if matches!(**error, symtn_core::FusionAlgebraError::InvalidSector { .. })
+        ),
+        "{late:?}"
+    );
     assert_eq!(callbacks.load(Ordering::Relaxed), 0);
     assert_eq!(crate::test_cache::completed(), cache_before);
 

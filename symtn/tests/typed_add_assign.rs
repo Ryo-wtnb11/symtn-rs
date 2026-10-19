@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::Error;
+use symtn::typed::{Error, OperationError};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 #[path = "../../tests/support/counting_alloc.rs"]
@@ -62,7 +62,15 @@ fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
     let mut destination = tensor(&runtime, 2, 2.0);
     let x = tensor(&runtime, 3, 3.0);
     let error = x.axpby_into(&mut destination, 1.0, 1.0).unwrap_err();
-    assert!(error.report().contains("different spaces"));
+    assert!(
+        matches!(
+            &error,
+            Error::Operation(operation)
+                if matches!(**operation, OperationError::SpaceMismatch { .. })
+        ),
+        "{}",
+        error.report()
+    );
     assert_eq!(destination.dense_data().unwrap(), &[2.0, 0.0, 0.0, 2.0]);
 }
 

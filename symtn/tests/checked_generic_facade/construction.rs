@@ -26,7 +26,6 @@ fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
     assert!(std::ptr::eq(real.provider(), provider.as_ref()));
     assert_eq!(real.codomain()[0], bond);
     assert_eq!(real.domain()[0], bond);
-    assert!(!format!("{real:?}").contains("elements: 5"));
     assert_eq!(
         symtn::expert::diagonal_spectrum(&real).unwrap().unwrap(),
         [
@@ -272,7 +271,9 @@ fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
         )
         .unwrap();
         assert!(std::ptr::eq(diagonal.provider(), provider.as_ref()));
-        assert!(!format!("{diagonal:?}").contains("elements: 4"));
+        assert!(symtn::expert::diagonal_spectrum(&diagonal)
+            .unwrap()
+            .is_some());
         // This provider has outer multiplicity two, but a rank-one spectrum has no μ axis.
         assert_eq!(diagonal.subblock_count(), 1);
         assert_eq!(diagonal.subblock(0).unwrap().shape(), &[2, 2]);

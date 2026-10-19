@@ -1,3 +1,6 @@
+#[path = "support/report.rs"]
+mod report;
+
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,7 +16,9 @@ use symtn::sector::{
 use symtn::typed::{
     CheckedGenericPlanError, GenericTensorError, GradedSpace, TensorMap, TensorScalar,
 };
-use symtn::typed::{Complex64, Error, Runtime};
+use symtn::typed::{Complex64, Error, OperationError, Runtime};
+
+use report::cause;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum Label {
@@ -1277,27 +1282,30 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
         })
         .unwrap();
     assert!(t.svd_compact(&[0], &[1]).is_ok());
+    let anyonic_permute = |error: &GenericTensorError<_>| {
+        matches!(
+            cause::<OperationError>(error),
+            Some(OperationError::UnsupportedBraidingStyle {
+                style: BraidingStyleKind::Anyonic,
+                ..
+            })
+        )
+    };
     for error in [
-        format!("{:?}", t.svd_compact(&[1], &[0]).err().unwrap()),
-        format!("{:?}", t.qr_compact(&[1], &[0]).err().unwrap()),
-        format!("{:?}", t.left_null(&[1], &[0]).err().unwrap()),
+        t.svd_compact(&[1], &[0]).err().unwrap(),
+        t.qr_compact(&[1], &[0]).err().unwrap(),
+        t.left_null(&[1], &[0]).err().unwrap(),
     ] {
-        assert!(error.contains("UnsupportedBraidingStyle"), "{error}");
+        assert!(anyonic_permute(&error), "{error:?}");
     }
 
     let square: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&unit], [&unit]).unwrap();
     assert!(square.solve(&[0], &[1], &square, &[0], &[1]).is_ok());
     for error in [
-        format!(
-            "{:?}",
-            square.solve(&[1], &[0], &square, &[0], &[1]).err().unwrap()
-        ),
-        format!(
-            "{:?}",
-            square.solve(&[0], &[1], &square, &[1], &[0]).err().unwrap()
-        ),
+        square.solve(&[1], &[0], &square, &[0], &[1]).err().unwrap(),
+        square.solve(&[0], &[1], &square, &[1], &[0]).err().unwrap(),
     ] {
-        assert!(error.contains("UnsupportedBraidingStyle"), "{error}");
+        assert!(anyonic_permute(&error), "{error:?}");
     }
 }
 
@@ -1321,14 +1329,23 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
         .unwrap();
         for pairs in [vec![], vec![(0, 1)], vec![(0, 0)], vec![(0, 7)]] {
             let result = square.trace_pairs(&pairs).map(|_| ());
-            let text = format!("{result:?}");
             if braiding.is_symmetric() {
                 let malformed = pairs.iter().any(|&(lhs, rhs)| lhs == rhs || rhs > 1);
-                assert_eq!(result.is_ok(), !malformed, "{braiding:?} {pairs:?}: {text}");
+                assert_eq!(
+                    result.is_ok(),
+                    !malformed,
+                    "{braiding:?} {pairs:?}: {result:?}"
+                );
             } else {
+                let error = result.expect_err("a non-symmetric trace is rejected");
                 assert!(
-                    text.contains("fusion tensortrace requires symmetric braiding"),
-                    "{braiding:?} {pairs:?}: {text}"
+                    matches!(
+                        cause::<OperationError>(&error),
+                        Some(OperationError::UnsupportedTensorContractScope {
+                            message: "fusion tensortrace requires symmetric braiding"
+                        })
+                    ),
+                    "{braiding:?} {pairs:?}: {error:?}"
                 );
             }
         }

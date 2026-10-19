@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
+use symtn::typed::{
+    ContractSpec, CoreError, Error, GradedSpace, OperationError, Runtime, TensorMap,
+};
 use symtn_sectors::{
     BraidingStyleKind, FusionRule, ProductFusionRuleExt, SectorCodec, SectorId, TableRule,
     TableSector, Z2FusionRule,
@@ -174,6 +176,20 @@ fn crossing_free_operations_work_without_braiding() {
     assert!(a.iter().zip(e.iter()).all(|(x, y)| (x - y).norm() <= BOUND));
 }
 
+/// A braid crossing two non-unit sectors of a `NoBraiding` rule.
+fn is_no_braiding_sector_braid(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Operation(operation) if matches!(
+            **operation,
+            OperationError::Core(CoreError::UnsupportedSectorBraid {
+                style: BraidingStyleKind::NoBraiding,
+                ..
+            })
+        )
+    )
+}
+
 #[test]
 fn braiding_operations_are_rejected_before_any_work() {
     let runtime = Runtime::builder().build().unwrap();
@@ -184,11 +200,7 @@ fn braiding_operations_are_rejected_before_any_work() {
     let source = seeded(&runtime, &[&mixed, &mixed], &[&mixed], 12);
 
     let error = source.braid(&[1, 0], &[2], &[0, 1, 2]).unwrap_err();
-    let text = format!("{error:?}");
-    assert!(
-        text.contains("UnsupportedSectorBraid") && text.contains("NoBraiding"),
-        "{text}"
-    );
+    assert!(is_no_braiding_sector_braid(&error), "{error:?}");
 
     let mut destination = seeded(&runtime, &[&mixed, &mixed], &[&mixed], 13);
     let before = destination.dense_data().unwrap().to_vec();
@@ -202,12 +214,21 @@ fn braiding_operations_are_rejected_before_any_work() {
             Complex64::new(0.0, 0.0),
         )
         .unwrap_err();
-    assert!(format!("{error:?}").contains("NoBraiding"), "{error:?}");
+    assert!(is_no_braiding_sector_braid(&error), "{error:?}");
     assert_eq!(destination.dense_data().unwrap(), &before[..]);
 
     let error = source.permute(&[1, 0], &[2]).unwrap_err();
     assert!(
-        format!("{error:?}").contains("UnsupportedBraidingStyle"),
+        matches!(
+            &error,
+            Error::Operation(operation) if matches!(
+                **operation,
+                OperationError::UnsupportedBraidingStyle {
+                    style: BraidingStyleKind::NoBraiding,
+                    ..
+                }
+            )
+        ),
         "{error:?}"
     );
 
@@ -224,7 +245,11 @@ fn braiding_operations_are_rejected_before_any_work() {
         )
         .unwrap_err();
     assert!(
-        format!("{error:?}").contains("UnsupportedTensorContractScope"),
+        matches!(
+            &error,
+            Error::Operation(operation)
+                if matches!(**operation, OperationError::UnsupportedTensorContractScope { .. })
+        ),
         "{error:?}"
     );
 }
@@ -258,10 +283,6 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
             Complex64::new(0.0, 0.0),
         )
         .unwrap_err();
-    let text = format!("{error:?}");
-    assert!(
-        text.contains("UnsupportedSectorBraid") && text.contains("NoBraiding"),
-        "{text}"
-    );
+    assert!(is_no_braiding_sector_braid(&error), "{error:?}");
     assert_eq!(destination.dense_data().unwrap(), &before[..]);
 }

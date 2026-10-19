@@ -6,8 +6,8 @@
 //! Every product and partial sum of the fixtures is exact, so the value
 //! digest (±0 and NaN folded) does not depend on the dense kernel's
 //! summation order. [`DIGESTS`] pins every value digest, recorded on the
-//! base and unchanged by #1775; [`ERRORS`] pins the variant and message of
-//! every rejected call, with the #1775 changes in [`CHANGED_ERRORS`].
+//! base and unchanged by #1775; `expected_errors` lists the typed error of
+//! every rejected call.
 //!
 //! Allocation counts and retained bytes are structural contracts, not exact
 //! sizes, so a dense-backend release or a struct layout change cannot fail
@@ -39,7 +39,7 @@ use std::fmt::Debug;
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
-use symtn::typed::{ComposePlan, GradedSpace, Runtime, StackedTensorMap};
+use symtn::typed::{ComposePlan, Error, GradedSpace, Runtime, SignatureField, StackedTensorMap};
 
 use common::Payload;
 use prepared::{filled, fz2u1_legs, members, su2_legs, u1_legs};
@@ -178,8 +178,8 @@ fn record<R, D>(
 }
 
 /// Every rejected call of `mismatched_stacks_are_typed_errors_before_any_work`
-/// and the foreign workspace, as `Debug` of the error.
-fn error_matrix() -> Vec<(&'static str, String)> {
+/// and the foreign workspace, as the error each returns.
+fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let (v, w) = u1_legs();
@@ -198,7 +198,7 @@ fn error_matrix() -> Vec<(&'static str, String)> {
         StackedTensorMap::pack(&filled::<_, f64>(&runtime, &[&v, &v], &[&v], 2, 1.0)).unwrap();
     let mut dst =
         StackedTensorMap::pack(&filled::<_, f64>(&runtime, &[&v, &v], &[&v], 3, 1.0)).unwrap();
-    let show = |result: Result<(), symtn::typed::Error>| format!("{:?}", result.err());
+    let show = |result: Result<(), Error>| result.err();
     vec![
         (
             "new: foreign runtime",
@@ -253,38 +253,60 @@ fn host_compose_plan_values_bytes_allocations_and_errors_are_pinned() {
     record::<_, f64>("fZ2xU1", fz2u1_legs(), &mut rows);
     record::<_, Complex64>("fZ2xU1", fz2u1_legs(), &mut rows);
     let errors = error_matrix();
-    for (row, error) in &errors {
-        eprintln!("    ({row:?}, {error:?}),");
-    }
     let pinned: Vec<_> = DIGESTS
         .iter()
         .map(|&(key, digest)| (key.to_string(), digest))
         .collect();
     assert_eq!(rows, pinned, "observed digests are printed above");
-    let pinned_errors: Vec<_> = ERRORS
-        .iter()
-        .map(|&(row, base)| {
-            let error = CHANGED_ERRORS
-                .iter()
-                .find(|(changed, _)| *changed == row)
-                .map_or(base, |&(_, head)| head);
-            (row, error.to_string())
-        })
-        .collect();
-    assert_eq!(errors, pinned_errors, "observed errors are printed above");
+    assert_eq!(errors, expected_errors());
 }
 
-/// Error rows the head changes (#1775, approved stricter errors A23): a
-/// member-count mismatch is rejected at `new`, the member-count messages are
-/// `ContractPlan`'s, and the foreign-workspace message names no operation.
-#[rustfmt::skip]
-const CHANGED_ERRORS: &[(&str, &str)] = &[
-    ("new: member counts differ", "Some(InvalidArgument(\"operand stacks have different member counts\"))"),
-    ("execute: member counts differ", "Some(InvalidArgument(\"operand stacks have different member counts\"))"),
-    ("execute_into: short destination", "Some(InvalidArgument(\"destination member count differs from operands\"))"),
-    ("execute_into: foreign workspace", "Some(InvalidArgument(\"workspace belongs to another plan\"))"),
-    ("execute: foreign workspace", "Some(InvalidArgument(\"workspace belongs to another plan\"))"),
-];
+/// The error of every [`error_matrix`] row. A member-count mismatch is
+/// rejected at `new` (#1775, approved stricter errors A23).
+fn expected_errors() -> Vec<(&'static str, Option<Error>)> {
+    let signature = |field| {
+        Some(Error::BatchSignatureMismatch {
+            member: None,
+            field,
+        })
+    };
+    let invalid = |message: &str| Some(Error::InvalidArgument(message.to_string()));
+    vec![
+        ("new: foreign runtime", Some(Error::RuntimeMismatch)),
+        (
+            "new: member counts differ",
+            invalid("operand stacks have different member counts"),
+        ),
+        (
+            "execute: swapped operands",
+            signature(SignatureField::HomSpace),
+        ),
+        (
+            "execute: foreign runtime",
+            signature(SignatureField::Runtime),
+        ),
+        (
+            "execute: member counts differ",
+            invalid("operand stacks have different member counts"),
+        ),
+        (
+            "execute_into: wrong destination",
+            signature(SignatureField::HomSpace),
+        ),
+        (
+            "execute_into: short destination",
+            invalid("destination member count differs from operands"),
+        ),
+        (
+            "execute_into: foreign workspace",
+            invalid("workspace belongs to another plan"),
+        ),
+        (
+            "execute: foreign workspace",
+            invalid("workspace belongs to another plan"),
+        ),
+    ]
+}
 
 /// Value digests, recorded on the base `ec3dea5d` (macOS aarch64 and qg1
 /// x86_64 Linux alike) and unchanged by #1775.
@@ -314,17 +336,4 @@ const DIGESTS: &[(&str, u64)] = &[
     ("fZ2xU1 c64 call=1 B=2", 0xf59530db98534636),
     ("fZ2xU1 c64 call=2 B=17", 0x758b6a9cb59609e),
     ("fZ2xU1 c64 call=3 B=1", 0xdf19f94b2386f04c),
-];
-
-#[rustfmt::skip]
-const ERRORS: &[(&str, &str)] = &[
-    ("new: foreign runtime", "Some(RuntimeMismatch)"),
-    ("new: member counts differ", "None"),
-    ("execute: swapped operands", "Some(BatchSignatureMismatch { member: None, field: HomSpace })"),
-    ("execute: foreign runtime", "Some(BatchSignatureMismatch { member: None, field: Runtime })"),
-    ("execute: member counts differ", "Some(InvalidArgument(\"operand stacks hold 3 and 2 members\"))"),
-    ("execute_into: wrong destination", "Some(BatchSignatureMismatch { member: None, field: HomSpace })"),
-    ("execute_into: short destination", "Some(InvalidArgument(\"destination stack holds 2 members, operands 3\"))"),
-    ("execute_into: foreign workspace", "Some(InvalidArgument(\"compose workspace belongs to another plan\"))"),
-    ("execute: foreign workspace", "Some(InvalidArgument(\"compose workspace belongs to another plan\"))"),
 ];

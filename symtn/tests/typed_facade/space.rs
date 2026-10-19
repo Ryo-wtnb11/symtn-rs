@@ -465,7 +465,13 @@ fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
     symtn::cache::clear();
     let before = crate::completed_transformers();
     let error = source.permute(&[0, 2, 1], &[3]).unwrap_err();
-    assert!(format!("{error:?}").contains("UnsupportedBraidingStyle"));
+    assert!(
+        matches!(
+            crate::report::cause::<symtn::typed::OperationError>(&error),
+            Some(symtn::typed::OperationError::UnsupportedBraidingStyle { .. })
+        ),
+        "{error:?}"
+    );
     assert_eq!(crate::completed_transformers(), before);
 }
 
