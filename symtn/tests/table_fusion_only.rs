@@ -191,7 +191,7 @@ fn is_no_braiding_sector_braid(error: &Error) -> bool {
 }
 
 #[test]
-fn braiding_operations_are_rejected_before_any_work() {
+fn braiding_operations_are_rejected_without_touching_the_destination() {
     let runtime = Runtime::builder().build().unwrap();
     let rule = rep_s3();
     // Mixed blocks: the unit-unit and unit-x crossings are structural, the

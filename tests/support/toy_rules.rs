@@ -6,7 +6,7 @@
 //! Test targets include this file with
 //! `#[path = ".../tests/support/toy_rules.rs"] mod toy_rules;`. The
 //! instrumented checked toys of `checked_generic_facade` and
-//! `checked_generic_twist` stay local: they fuse different sectors.
+//! `checked_generic_braiding` stay local: they fuse different sectors.
 
 #![allow(dead_code)]
 

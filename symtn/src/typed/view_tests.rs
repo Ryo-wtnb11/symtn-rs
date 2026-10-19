@@ -376,7 +376,7 @@ fn deligne_product_refuses_an_adjoint_view() {
 }
 
 #[test]
-fn a_plain_view_is_the_tensor_itself() {
+fn otimes_materializes_a_lazy_operand_and_a_plain_view_is_the_tensor_itself() {
     let runtime = runtime();
     let v = u1(&[(0, 2), (1, 1)]);
     let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v, &v], 1).unwrap();

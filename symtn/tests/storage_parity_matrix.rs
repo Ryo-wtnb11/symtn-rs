@@ -1465,7 +1465,7 @@ macro_rules! contract_rows {
         let (alpha_c, beta_c) = (Complex64::from(alpha), Complex64::from(beta));
         let ab = inner_oracle(&a_entries, &b_entries);
         let aa = inner_oracle(&a_entries, &a_entries);
-        let differ = |x: &TensorMap<_, $D>, y: &TensorMap<_, $D>| {
+        let agree = |x: &TensorMap<_, $D>, y: &TensorMap<_, $D>| {
             x.axpby(one, y, minus_one).unwrap().norm(2.0).unwrap()
                 <= 1e-12 * (1.0 + y.norm(2.0).unwrap())
         };
@@ -1482,7 +1482,7 @@ macro_rules! contract_rows {
             let flat = x.contract(&twisted_b, &FLAT).unwrap();
             let permuted = contracted.permute(FLAT.codomain, FLAT.domain).unwrap();
             assert_eq!(flat.codomain(), permuted.codomain(), "{name}: flat");
-            assert!(differ(&flat, &permuted), "{name}: flat = contract then permute");
+            assert!(agree(&flat, &permuted), "{name}: flat = contract then permute");
 
             let mut destination = x.compose(&a).unwrap();
             x.contract_into(&twisted_b, &CANONICAL, &mut destination, alpha, beta)
@@ -1508,13 +1508,13 @@ macro_rules! contract_rows {
         let compact = TensorMap::<_, $D>::diagonal(runtime, &leg, spectra).unwrap();
         let dense = compact.materialize().unwrap();
         let scaled = b.contract(&dense, &SCALE).unwrap();
-        assert!(differ(&b.contract(&compact, &SCALE).unwrap(), &scaled), "compact contract");
-        assert!(differ(&b.compose(&compact).unwrap(), &b.compose(&dense).unwrap()), "compact compose");
+        assert!(agree(&b.contract(&compact, &SCALE).unwrap(), &scaled), "compact contract");
+        assert!(agree(&b.compose(&compact).unwrap(), &b.compose(&dense).unwrap()), "compact compose");
         let mut destination = b.contract(&dense, &SCALE).unwrap();
         b.contract_into(&compact, &SCALE, &mut destination, alpha, beta)
             .unwrap();
         let expected = scaled.scale(conv(alpha_c + beta_c)).unwrap();
-        assert!(differ(&destination, &expected), "compact contract_into");
+        assert!(agree(&destination, &expected), "compact contract_into");
 
         // Admission: malformed axes, an aliasing, a lazy, a mismatched and a
         // shared destination, each leaving the destination untouched.
@@ -1539,14 +1539,14 @@ macro_rules! contract_rows {
             x.contract_into(&b, &CANONICAL, &mut mismatched, alpha, beta),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
-        assert!(differ(&mismatched, &a), "a rejected destination is untouched");
+        assert!(agree(&mismatched, &a), "a rejected destination is untouched");
         let mut shared = x.compose(&a).unwrap();
         let keep = shared.clone();
         assert!(matches!(
             x.contract_into(&b, &CANONICAL, &mut shared, alpha, beta),
             Err(Error::DestinationShared)
         ));
-        assert!(differ(&keep, &x.compose(&a).unwrap()), "a shared destination is untouched");
+        assert!(agree(&keep, &x.compose(&a).unwrap()), "a shared destination is untouched");
 
         $cuda(&a, &b, alpha, beta);
     }};
@@ -1769,7 +1769,7 @@ macro_rules! trace_rows {
         let (one, minus_one) = (conv(Complex64::new(1.0, 0.0)), conv(Complex64::new(-1.0, 0.0)));
         let (alpha, beta) = (conv(Complex64::new(2.0, 0.5)), conv(Complex64::new(-0.5, 0.25)));
         let (alpha_c, beta_c) = (Complex64::from(alpha), Complex64::from(beta));
-        let differ = |x: &TensorMap<_, $D>, y: &TensorMap<_, $D>| {
+        let agree = |x: &TensorMap<_, $D>, y: &TensorMap<_, $D>| {
             x.axpby(one, y, minus_one).unwrap().norm(2.0).unwrap()
                 <= 1e-12 * (1.0 + y.norm(2.0).unwrap())
         };
@@ -1840,14 +1840,14 @@ macro_rules! trace_rows {
             a.trace_pairs_into(&[(0, 2)], &mut mismatched, alpha, beta),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
-        assert!(differ(&mismatched, &b), "a rejected destination is untouched");
+        assert!(agree(&mismatched, &b), "a rejected destination is untouched");
         let mut shared = b.trace_pairs(&[(0, 2)]).unwrap();
         let keep = shared.clone();
         assert!(matches!(
             a.trace_pairs_into(&[(0, 2)], &mut shared, alpha, beta),
             Err(Error::DestinationShared)
         ));
-        assert!(differ(&keep, &b.trace_pairs(&[(0, 2)]).unwrap()), "a shared destination is untouched");
+        assert!(agree(&keep, &b.trace_pairs(&[(0, 2)]).unwrap()), "a shared destination is untouched");
 
         $cuda(&a, &b, alpha, beta);
     }};

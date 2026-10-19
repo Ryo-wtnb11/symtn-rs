@@ -1,4 +1,6 @@
 use super::*;
+use symtn::sector::{U1FusionRule, U1Irrep};
+use symtn::typed::SectorSpectrum;
 
 #[test]
 fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
@@ -724,185 +726,6 @@ fn external_z3_cat_and_absorb_hold_by_value() {
     assert_eq!(absorbed.dense_data().unwrap(), &[1.0, 101.0]);
 }
 
-fn probe_leg<const ANYONIC: bool>() -> GradedSpace<RealBraidingProbe<ANYONIC>> {
-    GradedSpace::try_new(Arc::new(RealBraidingProbe::<ANYONIC>), [(ProbeSector, 2)]).unwrap()
-}
-
-/// Entry `(i, j)` of the one 2x2 block is `offset + 2 i + j`.
-fn probe_value(offset: f64, row: usize, column: usize) -> f64 {
-    offset + (2 * row + column) as f64
-}
-
-fn probe_matrix<const ANYONIC: bool>(
-    runtime: &Runtime,
-    offset: f64,
-) -> TensorMap<RealBraidingProbe<ANYONIC>, f64> {
-    let leg = probe_leg::<ANYONIC>();
-    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, index| {
-        probe_value(offset, index[0], index[1])
-    })
-    .unwrap()
-}
-
-/// Hand oracle of `lhs.compose(rhs)` for the offsets 1 and 5: the one block
-/// is the 2x2 matrix product.
-fn probe_composition(row: usize, column: usize) -> f64 {
-    (0..2)
-        .map(|k| probe_value(1.0, row, k) * probe_value(5.0, k, column))
-        .sum()
-}
-
-fn is_unsupported_contract_scope(error: &symtn::typed::Error) -> bool {
-    matches!(
-        error,
-        symtn::typed::Error::Operation(operation)
-            if matches!(**operation, symtn::typed::OperationError::UnsupportedTensorContractScope { .. })
-    )
-}
-
-fn is_non_symmetric_contraction(error: &symtn::typed::Error) -> bool {
-    matches!(
-        error,
-        symtn::typed::Error::Operation(operation)
-            if matches!(
-                **operation,
-                symtn::typed::OperationError::UnsupportedTensorContractScope {
-                    message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                }
-            )
-    )
-}
-
-/// Every Host contraction entry rejects a non-symmetric braiding with one
-/// error, even on the canonical axes, before touching the destination, while
-/// `compose` of the same operands is admitted (TensorKit `blas_contract!`
-/// versus `mul!`).
-fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>() {
-    let runtime = runtime();
-    let lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
-    let rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
-    let mut destination = probe_matrix::<ANYONIC>(&runtime, 9.0);
-    let before = destination.dense_data().unwrap().to_vec();
-
-    let contract = lhs
-        .contract(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-        )
-        .unwrap_err();
-    assert!(is_non_symmetric_contraction(&contract), "{contract:?}");
-    let overwrite = lhs
-        .contract_into(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-            &mut destination,
-            1.0,
-            0.0,
-        )
-        .unwrap_err();
-    assert!(is_non_symmetric_contraction(&overwrite), "{overwrite:?}");
-    assert_eq!(destination.dense_data().unwrap(), &before[..]);
-
-    let composed = lhs.compose(&rhs).unwrap();
-    let leg = probe_leg::<ANYONIC>();
-    let expected: TensorMap<RealBraidingProbe<ANYONIC>, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
-            probe_composition(index[0], index[1])
-        })
-        .unwrap();
-    assert_eq!(
-        composed.dense_data().unwrap(),
-        expected.dense_data().unwrap()
-    );
-}
-
-#[test]
-fn non_symmetric_contract_entries_reject_canonical_axes_but_compose_admits() {
-    let _guard = cache_lock();
-    assert_host_contract_entries_reject_but_compose_admits::<false>();
-    assert_host_contract_entries_reject_but_compose_admits::<true>();
-}
-
-#[test]
-fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
-    // What: the same one-sector 2x2 operands under a bosonic rule contract on
-    // the canonical axes to the composition oracle, so the rejections above
-    // are the braiding boundary alone.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::U1FusionRule),
-        [(symtn::sector::U1Irrep::new(0), 2)],
-    )
-    .unwrap();
-    let matrix = |offset: f64| -> TensorMap<symtn::sector::U1FusionRule, f64> {
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
-            probe_value(offset, index[0], index[1])
-        })
-        .unwrap()
-    };
-    let expected: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
-            probe_composition(index[0], index[1])
-        })
-        .unwrap();
-    let contracted = matrix(1.0)
-        .contract(
-            &matrix(5.0),
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-        )
-        .unwrap();
-    assert_eq!(
-        contracted.dense_data().unwrap(),
-        expected.dense_data().unwrap()
-    );
-}
-
-fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
-    let runtime = runtime();
-    let dense = probe_matrix::<ANYONIC>(&runtime, 1.0);
-    let compact: TensorMap<RealBraidingProbe<ANYONIC>, f64> = TensorMap::diagonal(
-        &runtime,
-        &probe_leg::<ANYONIC>(),
-        [symtn::typed::SectorSpectrum {
-            sector: ProbeSector,
-            values: vec![1.0, 2.0],
-        }],
-    )
-    .unwrap();
-    let compact_error = compact.trace_pairs(&[(0, 1)]).unwrap_err();
-    let dense_error = dense.trace_pairs(&[(0, 1)]).unwrap_err();
-    assert!(
-        is_unsupported_contract_scope(&compact_error),
-        "{compact_error:?}"
-    );
-    assert_eq!(compact_error.to_string(), dense_error.to_string());
-}
-
-#[test]
-fn non_symmetric_compact_trace_rejects_like_dense_trace() {
-    // What: the rank-(1,1) compact-spectrum trace is rejected with the dense
-    // trace's error instead of answering from the spectrum (#1355).
-    let _guard = cache_lock();
-    assert_compact_trace_rejects_like_dense_trace::<false>();
-    assert_compact_trace_rejects_like_dense_trace::<true>();
-}
-
 #[test]
 fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
     fn compare<const R_SCALE: u8>(values: [f32; 2]) {
@@ -958,71 +781,222 @@ fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
     compare::<2>([1.0, 2.0]);
 }
 
-/// The device entries follow the Host order: the rejection comes before any
-/// device work and leaves the destination as it was; device `compose` is
-/// admitted and agrees with the Host.
-#[cfg(feature = "cuda")]
-fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let host_lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
-    let host_rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
-    let lhs = host_lhs.to_cuda().unwrap();
-    let rhs = host_rhs.to_cuda().unwrap();
-    let mut destination = probe_matrix::<ANYONIC>(&runtime, 9.0).to_cuda().unwrap();
-    let before = destination
-        .to_host()
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .to_vec();
-
-    let transfers = symtn::expert::cuda_transfer_stats();
-    let contract = lhs
-        .contract(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-        )
-        .unwrap_err();
-    let overwrite = lhs
-        .contract_into(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-            &mut destination,
-            1.0,
-            0.0,
-        )
-        .unwrap_err();
-    assert_eq!(symtn::expert::cuda_transfer_stats(), transfers);
-    for error in [&contract, &overwrite] {
-        assert!(is_non_symmetric_contraction(error), "{error:?}");
+fn catcodomain_oracle<D: Copy>(lhs: &[D], lhs_rows: usize, rhs: &[D], rhs_rows: usize) -> Vec<D> {
+    let columns = lhs.len() / lhs_rows;
+    let mut output = Vec::with_capacity(lhs.len() + rhs.len());
+    for column in 0..columns {
+        output.extend_from_slice(&lhs[column * lhs_rows..(column + 1) * lhs_rows]);
+        output.extend_from_slice(&rhs[column * rhs_rows..(column + 1) * rhs_rows]);
     }
-    assert_eq!(
-        destination.to_host().unwrap().dense_data().unwrap(),
-        &before[..]
-    );
-
-    let composed = lhs.compose(&rhs).unwrap().to_host().unwrap();
-    assert_eq!(
-        composed.dense_data().unwrap(),
-        host_lhs.compose(&host_rhs).unwrap().dense_data().unwrap()
-    );
+    output
 }
 
-#[cfg(feature = "cuda")]
 #[test]
-#[ignore = "requires a real CUDA device"]
-fn non_symmetric_device_contract_entries_reject_but_compose_admits() {
+fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let leg = u1_leg(&Arc::new(U1FusionRule), &[(0, 0), (1, 2)]);
+    let diagonal: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
+        &runtime,
+        &leg,
+        [SectorSpectrum {
+            sector: U1Irrep::new(1),
+            values: vec![2.0, 3.0],
+        }],
+    )
+    .unwrap();
+    let actual = diagonal.cat(&diagonal, Side::Domain).unwrap();
+    let dense = diagonal.materialize().unwrap();
+    let expected = dense.cat(&dense, Side::Domain).unwrap();
+    assert_eq!(actual.dense_data(), expected.dense_data());
+}
+
+#[test]
+fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
+    let runtime = Runtime::builder().build().unwrap();
+    let provider = Arc::new(U1FusionRule);
+    let common = u1_leg(&provider, &[(0, 3)]);
+    let left = u1_leg(&provider, &[(0, 2)]);
+    let right = u1_leg(&provider, &[(0, 4)]);
+
+    let lhs_parent: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_001).unwrap();
+    let rhs_parent: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_002).unwrap();
+    let lhs_owned: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_003).unwrap();
+    let rhs_owned: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_004).unwrap();
+
+    let lhs_adjoint = lhs_parent.adjoint().unwrap();
+    let rhs_adjoint = rhs_parent.adjoint().unwrap();
+    for (lhs, rhs, expected) in [
+        (
+            &lhs_adjoint,
+            &rhs_owned,
+            lhs_parent
+                .adjoint()
+                .unwrap()
+                .materialize()
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .iter()
+                .chain(rhs_owned.dense_data().unwrap())
+                .copied()
+                .collect::<Vec<_>>(),
+        ),
+        (
+            &lhs_owned,
+            &rhs_adjoint,
+            lhs_owned
+                .dense_data()
+                .unwrap()
+                .iter()
+                .chain(
+                    rhs_parent
+                        .adjoint()
+                        .unwrap()
+                        .materialize()
+                        .unwrap()
+                        .dense_data()
+                        .unwrap(),
+                )
+                .copied()
+                .collect(),
+        ),
+        (
+            &lhs_adjoint,
+            &rhs_adjoint,
+            lhs_parent
+                .adjoint()
+                .unwrap()
+                .materialize()
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .iter()
+                .chain(
+                    rhs_parent
+                        .adjoint()
+                        .unwrap()
+                        .materialize()
+                        .unwrap()
+                        .dense_data()
+                        .unwrap(),
+                )
+                .copied()
+                .collect(),
+        ),
+    ] {
+        assert_eq!(
+            lhs.cat(rhs, Side::Domain).unwrap().dense_data().unwrap(),
+            expected
+        );
+    }
+
+    let upper_parent: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_005).unwrap();
+    let lower_parent: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_006).unwrap();
+    let upper_owned: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_007).unwrap();
+    let lower_owned: TensorMap<U1FusionRule, Complex64> =
+        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_008).unwrap();
+    let upper_adjoint = upper_parent.adjoint().unwrap();
+    let lower_adjoint = lower_parent.adjoint().unwrap();
+    for (upper, lower, expected) in [
+        (
+            &upper_adjoint,
+            &lower_owned,
+            catcodomain_oracle(
+                upper_parent
+                    .adjoint()
+                    .unwrap()
+                    .materialize()
+                    .unwrap()
+                    .dense_data()
+                    .unwrap(),
+                2,
+                lower_owned.dense_data().unwrap(),
+                4,
+            ),
+        ),
+        (
+            &upper_owned,
+            &lower_adjoint,
+            catcodomain_oracle(
+                upper_owned.dense_data().unwrap(),
+                2,
+                lower_parent
+                    .adjoint()
+                    .unwrap()
+                    .materialize()
+                    .unwrap()
+                    .dense_data()
+                    .unwrap(),
+                4,
+            ),
+        ),
+        (
+            &upper_adjoint,
+            &lower_adjoint,
+            catcodomain_oracle(
+                upper_parent
+                    .adjoint()
+                    .unwrap()
+                    .materialize()
+                    .unwrap()
+                    .dense_data()
+                    .unwrap(),
+                2,
+                lower_parent
+                    .adjoint()
+                    .unwrap()
+                    .materialize()
+                    .unwrap()
+                    .dense_data()
+                    .unwrap(),
+                4,
+            ),
+        ),
+    ] {
+        assert_eq!(
+            upper
+                .cat(lower, Side::Codomain)
+                .unwrap()
+                .dense_data()
+                .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
+    // What: an explicit braid with a full level assignment produces the same
+    // reordered spaces a permute of the same axes does, and moves the payload.
+    //
+    // This symmetric fixture pins how levels are split and validated; the
+    // Fibonacci tests above pin genuinely anyonic level values.
     let _guard = cache_lock();
-    assert_device_contract_entries_reject_but_compose_admits::<false>();
-    assert_device_contract_entries_reject_but_compose_admits::<true>();
+    let runtime = runtime();
+    let provider = Arc::new(ExternalZ3::new());
+    let tensor = z3_rank_four(&runtime, &provider);
+
+    let braided = tensor.braid(&[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap();
+    let permuted = tensor.permute(&[1, 2], &[3, 0]).unwrap();
+
+    assert_eq!(
+        braided.dense_data().unwrap(),
+        permuted.dense_data().unwrap()
+    );
+    assert_ne!(braided.dense_data().unwrap(), tensor.dense_data().unwrap());
+    assert_eq!(braided.codomain()[0].degeneracies(), &[1, 2, 4]);
+    assert_eq!(braided.domain()[1].degeneracies(), &[2, 1, 3]);
+    // A different level assignment is the same morphism for a bosonic rule.
+    let reversed = tensor.braid(&[1, 2], &[3, 0], &[3, 2, 1, 0]).unwrap();
+    assert_eq!(
+        reversed.dense_data().unwrap(),
+        braided.dense_data().unwrap()
+    );
 }

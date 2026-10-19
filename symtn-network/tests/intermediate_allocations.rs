@@ -1081,7 +1081,11 @@ fn run_typed_overwrite_worker(
     reuse: bool,
 ) -> Vec<AllocationSample> {
     let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "measured_typed_overwrite_witness", "--nocapture"])
+        .args([
+            "--exact",
+            "typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm",
+            "--nocapture",
+        ])
         .env("SYMTN_TYPED_ALLOC_RULE", rule)
         .env("SYMTN_TYPED_ALLOC_DTYPE", dtype)
         .env(
@@ -1246,7 +1250,7 @@ fn warm_lazy_conj_replay_does_not_materialize_the_input() {
 }
 
 #[test]
-fn measured_typed_overwrite_witness() {
+fn typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm() {
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     if let Ok(dtype) = std::env::var("SYMTN_TYPED_ALLOC_DTYPE") {
         let chi = std::env::var("SYMTN_TYPED_ALLOC_CHI")

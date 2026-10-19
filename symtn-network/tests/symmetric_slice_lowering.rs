@@ -13,7 +13,7 @@ fn label(name: &str) -> TemporaryLabel {
 }
 
 #[test]
-fn common_lowering_is_atomic_and_reconstructs_after_dense_roundtrip() {
+fn common_lowering_reconstructs_the_network_after_dense_roundtrip() {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let two = GradedSpace::try_new(

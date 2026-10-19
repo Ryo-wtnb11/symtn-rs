@@ -1486,7 +1486,7 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
 }
 
 #[test]
-fn compact_trace_boundary_geometries_keep_their_existing_routes() {
+fn compact_trace_of_no_pairs_returns_the_source_and_malformed_pairs_fail_first() {
     // What: the compact arm's boundaries. Tracing nothing on a compact factor
     // returns the source (the pre-guard short-circuit), and a malformed pair
     // list errors before the arm can run — the same validation order as on

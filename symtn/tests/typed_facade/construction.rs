@@ -973,3 +973,63 @@ fn typed_leg_dims_route_each_axis_to_its_own_leg() {
         TensorMap::zeros(&runtime, [&a, &b], [&c]).unwrap();
     assert_eq!(typed.leg_dims().unwrap(), vec![5, 2, 7]);
 }
+
+#[test]
+fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
+    // What: `zeros` admits a runtime-rank multi-block layout through the
+    // checked path and returns a zero buffer of exactly the layout's length.
+    let _guard = cache_lock();
+    let provider = Arc::new(ExternalZ3::new());
+    let leg = z3_leg(&provider, false);
+    let dual = leg.try_dual().unwrap();
+    let runtime = runtime();
+
+    let tensor: TensorMap<ExternalZ3, f64> =
+        TensorMap::zeros(&runtime, [&leg, &leg], [&dual, &dual]).unwrap();
+
+    assert!(tensor.subblock_count() >= 2);
+    assert!(!tensor.dense_data().unwrap().is_empty());
+    assert!(tensor
+        .dense_data()
+        .unwrap()
+        .iter()
+        .all(|&value| value == 0.0));
+}
+
+#[test]
+fn id_writes_the_nonuniform_fused_diagonal() {
+    // What: the identity on a leg list whose per-sector degeneracies differ
+    // from leg to leg — the case where the
+    // diagonal offsets inside a coupled-sector block are not all the same.
+    let _guard = cache_lock();
+    let runtime = runtime();
+    let z2 = Arc::new(symtn::sector::Z2FusionRule);
+    let typed_leg = |even, odd| {
+        GradedSpace::try_new(
+            Arc::clone(&z2),
+            [
+                (symtn::sector::Z2Irrep::EVEN, even),
+                (symtn::sector::Z2Irrep::ODD, odd),
+            ],
+        )
+        .unwrap()
+    };
+
+    let wide = typed_leg(2, 3);
+    let narrow = typed_leg(1, 4);
+    let typed =
+        TensorMap::<_, f64>::isomorphism(&runtime, [&wide, &narrow], [&wide, &narrow]).unwrap();
+
+    // Not the zero tensor, and not the all-ones one either: a genuine diagonal.
+    // 14 even + 11 odd fused states: `2*1 + 3*4` and `2*4 + 3*1`.
+    assert_eq!(
+        typed
+            .dense_data()
+            .unwrap()
+            .iter()
+            .filter(|&&v| v == 1.0)
+            .count(),
+        25
+    );
+    assert!(typed.dense_data().unwrap().contains(&0.0));
+}

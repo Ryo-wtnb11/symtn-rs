@@ -946,3 +946,107 @@ fn checked_generic_left_solve_covers_all_lazy_input_pairs() {
         assert_eq!(provider.queries_since_reset.load(Ordering::Relaxed), 2);
     }
 }
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
+    // Checked compact SVD publishes `s` as a compact diagonal on its bond.
+    use symtn::sector::SUNFusionRule;
+
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    for n in [3, 4] {
+        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
+        let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
+        let source: TensorMap<_, f64> =
+            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
+                trees.codomain_vertices()[0].get() as f64 + 1.0
+            })
+            .unwrap();
+        let Svd { s, .. } = source.svd_compact(&[0, 1], &[2]).unwrap();
+        assert!(s.dense_data().is_err());
+        let root = s.map_diagonal(f64::sqrt).unwrap();
+        assert!(std::ptr::eq(root.provider(), s.provider()));
+        assert_eq!(root.codomain(), s.codomain());
+        assert_eq!(root.domain(), s.domain());
+        assert!(symtn::typed::__network::runtime_identity(root.runtime()).matches(s.runtime()));
+        let square = root.compose(&root).unwrap();
+        assert!(square.dense_data().is_err(), "D * D stays compact");
+        assert!(square
+            .materialize()
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .iter()
+            .zip(s.materialize().unwrap().dense_data().unwrap())
+            .all(|(actual, expected)| (actual - expected).abs() < 1.0e-10));
+
+        let negative: TensorMap<_, Complex64> = TensorMap::diagonal(
+            &runtime,
+            &leg,
+            leg.sectors()
+                .unwrap()
+                .into_iter()
+                .map(|sector| SectorSpectrum {
+                    sector,
+                    values: vec![Complex64::new(-1.0, 0.0)],
+                }),
+        )
+        .unwrap();
+        let principal = negative.map_diagonal(|value| value.sqrt()).unwrap();
+        assert!(principal
+            .diagview()
+            .unwrap()
+            .iter()
+            .flat_map(|entry| &entry.values)
+            .all(|value| *value == Complex64::new(0.0, 1.0)));
+    }
+}
+
+#[test]
+fn checked_generic_map_diagonal_rejects_dense_before_queries_and_preserves_source() {
+    let _cache = cache_shared();
+    // What: dense storage is refused before any provider query, whether or not
+    // it is bond shaped, and the source is untouched.
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let provider = Arc::new(CheckedOnlyToy::new(0));
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
+    let bond_leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
+    let non_bond: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, _| 2.0).unwrap();
+    let dense_diagonal: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(&runtime, [&bond_leg], [&bond_leg], |_, ij| {
+            if ij[0] == ij[1] {
+                4.0
+            } else {
+                0.0
+            }
+        })
+        .unwrap();
+    for tensor in [non_bond, dense_diagonal] {
+        let before = tensor.dense_data().unwrap().to_vec();
+        reset_provider_queries(&provider);
+        match tensor.map_diagonal(f64::sqrt) {
+            Err(symtn::typed::Error::InvalidArgument(message)) => {
+                assert!(message.contains("compact diagonal"), "{message}");
+            }
+            other => panic!("expected dense rejection, got {other:?}"),
+        }
+        assert_no_provider_queries(&provider);
+        assert_eq!(tensor.dense_data().unwrap(), before.as_slice());
+    }
+
+    let compact: TensorMap<_, f64> = TensorMap::diagonal(
+        &runtime,
+        &bond_leg,
+        [SectorSpectrum {
+            sector: Label::X,
+            values: vec![4.0, 9.0],
+        }],
+    )
+    .unwrap();
+    reset_provider_queries(&provider);
+    let root = compact.map_diagonal(f64::sqrt).unwrap();
+    assert_no_provider_queries(&provider);
+    assert_eq!(root.diagview().unwrap()[0].values, [2.0, 3.0]);
+}

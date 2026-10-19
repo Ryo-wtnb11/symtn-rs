@@ -48,8 +48,8 @@ fn recompose(
 #[test]
 fn svd_compact_reconstructs_the_source_through_the_typed_contract() {
     // What: the factors really are a factorization in this facade's own
-    // vocabulary. There is no typed `compose`, so the composition runs through
-    // `contract` — bosonic here, where the two agree.
+    // vocabulary. The composition runs through `contract`, which agrees with
+    // `compose` for this bosonic rule.
     let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);

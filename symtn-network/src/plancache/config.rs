@@ -353,7 +353,7 @@ mod tests {
     use super::CotengraPythonConfig;
 
     #[test]
-    fn cotengra_timeout_defaults_to_five_minutes_and_is_cache_identity() {
+    fn cotengra_timeout_defaults_to_five_minutes_and_without_timeout_clears_it() {
         let default = CotengraPythonConfig::default();
         let unbounded = default.clone().without_timeout();
 

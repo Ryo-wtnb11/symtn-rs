@@ -1508,7 +1508,7 @@ fn single_precision_costs_the_same_device_calls_and_half_the_bytes() {
 /// factorization device families (device QR included, #1271) are open for all
 /// four payloads.
 #[test]
-fn the_device_admission_markers_hold_exactly_where_the_table_says() {
+fn every_payload_dtype_satisfies_both_device_marker_traits() {
     fn device_payload<D: symtn::typed::CudaPayload>() {}
     fn device_factorization_payload<D: symtn::typed::CudaFactorizationPayload>() {}
 
