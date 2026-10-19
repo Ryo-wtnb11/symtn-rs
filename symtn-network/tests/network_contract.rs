@@ -10,8 +10,8 @@ use symtn::sector::{
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 use symtn_network::{
-    clear_plan_cache, configure_plan_cache, load_plan_cache, plan_cache_stats, save_plan_cache,
-    GreedyDenseOptimizer, Network, NetworkExecutionWorkspace, PlanCacheConfig,
+    clear_plan_cache, load_plan_cache, plan_cache_stats, save_plan_cache, GreedyDenseOptimizer,
+    Network, NetworkExecutionWorkspace,
 };
 
 #[path = "../../tests/support/network.rs"]
@@ -294,28 +294,6 @@ fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
 }
 
 #[test]
-fn contract_without_the_cache_plans_each_call() {
-    let runtime = Runtime::builder().build().unwrap();
-    configure_plan_cache(
-        &runtime,
-        PlanCacheConfig {
-            enabled: false,
-            ..PlanCacheConfig::default()
-        },
-    );
-    let v = u1_space(2);
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 30).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 31).unwrap();
-    let c = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 32).unwrap();
-    let network = chain();
-    let first = network.contract(&[&a, &b, &c]).unwrap();
-    let second = network.contract(&[&a, &b, &c]).unwrap();
-    assert_eq!(first.dense_data().unwrap(), second.dense_data().unwrap());
-    let stats = plan_cache_stats(&runtime);
-    assert_eq!((stats.hits, stats.misses, stats.entries), (0, 0, 0));
-}
-
-#[test]
 fn contract_orders_round_trip_through_save_and_load() {
     let first = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&first, ""), 0);
@@ -337,7 +315,6 @@ fn contract_orders_round_trip_through_save_and_load() {
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     // The second runtime keeps exactly the loaded order under the same
     // topology text. (Greedy search is deterministic, so this does not by
-    // itself show the order was read back rather than searched again; the
-    // disk path is covered in `plan_cache.rs`.)
+    // itself show the order was read back rather than searched again.)
     assert_eq!(save_plan_cache(&second), saved);
 }

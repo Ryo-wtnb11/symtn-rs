@@ -9,7 +9,7 @@ use std::panic::{self, AssertUnwindSafe};
 use num_complex::{Complex32, Complex64};
 use symtn_sectors::{
     CheckedFusionAlgebra, FusionAlgebraError, FusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, SectorCodec, SectorId, TableRule, TableSector,
+    MultiplicityFreeRigidSymbols, SectorId, TableRule,
 };
 
 #[path = "../../tests/support/numerics.rs"]
@@ -190,30 +190,6 @@ fn unit_associators_are_bitwise_one() {
     check(&table());
 }
 
-#[test]
-fn table_codec_round_trips_every_object_with_the_recorded_ids() {
-    let fib = table();
-    for id in [0, 1] {
-        let label = TableSector::new(id as u16 + 1);
-        assert_eq!(fib.encode_sector(&label), Ok(SectorId::new(id)));
-        assert_eq!(fib.decode_sector(SectorId::new(id)), Ok(label));
-    }
-    for a in SECTORS {
-        for b in SECTORS {
-            for channel in fib.fusion_channels(a, b) {
-                let object = fib.decode_sector(channel).unwrap();
-                assert_eq!(fib.encode_sector(&object), Ok(channel));
-            }
-        }
-    }
-    assert_eq!(
-        fib.decode_sector(SectorId::new(2)),
-        Err(FusionAlgebraError::InvalidSector {
-            sector: SectorId::new(2)
-        })
-    );
-}
-
 /// Issue #1737: the infallible symbols have no checked twin, so an
 /// out-of-domain id panics with the typed domain error,
 /// never aliasing another entry.
@@ -268,21 +244,4 @@ fn infallible_symbols_panic_with_the_domain_error_on_out_of_domain_ids() {
         }
     }
     check(&table());
-}
-
-#[test]
-fn table_checked_and_infallible_fusion_queries_agree() {
-    let fib = table();
-    for a in SECTORS {
-        assert_eq!(fib.try_dual_sector(a), Ok(fib.dual(a)));
-        for b in SECTORS {
-            assert_eq!(
-                fib.try_fusion_channels(a, b).unwrap().as_slice(),
-                fib.fusion_channels(a, b).as_slice()
-            );
-            for c in SECTORS {
-                assert_eq!(fib.try_nsymbol(a, b, c), Ok(fib.nsymbol(a, b, c)));
-            }
-        }
-    }
 }

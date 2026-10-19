@@ -113,11 +113,6 @@ fn zn_infallible_entry_points_match_checked_domain() {
     assert_dual_forwards(&rule, &ids);
     assert_fusion_channels_forwards(&rule, &all_pairs(&ids));
     assert_nsymbol_forwards(&rule, &all_triples(&ids));
-
-    let table = TableRule::fibonacci();
-    assert_dual_forwards(&table, &ids);
-    assert_fusion_channels_forwards(&table, &all_pairs(&ids));
-    assert_nsymbol_forwards(&table, &all_triples(&ids));
 }
 
 #[test]
@@ -229,12 +224,10 @@ fn cu1_infallible_entry_points_match_checked_domain() {
 #[test]
 fn fibonacci_infallible_entry_points_match_checked_domain() {
     let rule = TableRule::fibonacci();
-    let ids = [
-        SectorId::new(0),
-        SectorId::new(1),
-        SectorId::new(2),
-        SectorId::new(usize::MAX),
-    ];
+    let ids: Vec<SectorId> = (0..7)
+        .map(SectorId::new)
+        .chain([SectorId::new(usize::MAX)])
+        .collect();
 
     assert_dual_forwards(&rule, &ids);
     assert_fusion_channels_forwards(&rule, &all_pairs(&ids));

@@ -1195,36 +1195,6 @@ fn tree_transform_structure_replays_product_without_recompiling() {
 }
 
 #[test]
-fn tree_pair_transform_context_accepts_custom_host_storage() {
-    let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
-    type RuleKey = <FpU1Su2Rule as TreeTransformRuleCacheKey>::Key;
-    let operation = TreeTransformOperation::permute([1, 0], [2]);
-    let src = TestTensor::from_vec_with_fusion_space(vec![10.0_f64, 20.0], src_space).unwrap();
-    let mut dst = TestTensor::from_vec_with_fusion_space(vec![1.0_f64, 2.0], dst_space).unwrap();
-    let plan =
-        build_tree_pair_transform_group_plan(&rule, operation.clone(), src.structure()).unwrap();
-    let expected = expected_single_tree_pair_replay(
-        &plan,
-        dst.structure(),
-        src.structure(),
-        dst.data(),
-        src.data(),
-        2.0,
-        3.0,
-    );
-    let mut context = TreeTransformExecutionContext::<f64, RuleKey>::default();
-
-    context_tree_transform_into(&mut context, &rule, operation, &mut dst, &src, 2.0, 3.0).unwrap();
-
-    for (actual, expected) in dst.data().iter().zip(expected) {
-        assert!(
-            (actual - expected).abs() < 1.0e-12,
-            "actual {actual} != expected {expected}"
-        );
-    }
-}
-
-#[test]
 fn tree_transform_overwrite_context_ignores_destination_bits() {
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     type RuleKey = <FpU1Su2Rule as TreeTransformRuleCacheKey>::Key;

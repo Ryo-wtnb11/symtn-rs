@@ -327,26 +327,6 @@ fn inverse_index_ops_cover_the_fermionic_simple_product() {
 }
 
 #[test]
-fn typed_flip_and_twist_pin_the_doctest_values() {
-    // What: the flip-doctest values ([2.0, 3.0] -> flip(1) -> [2.0, -3.0])
-    // and the twist involution θ² = 1, both pinned directly on the typed API.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let typed = typed_fz2_doctest(&runtime);
-    let flipped: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed.flip(&[1], Direction::Forward).unwrap();
-    assert_eq!(flipped.dense_data().unwrap(), &[2.0, -3.0]);
-    assert_eq!(flipped.domain()[0].is_dual(), !typed.domain()[0].is_dual());
-
-    let twisted: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed.twist(&[1], Direction::Forward).unwrap();
-    assert_eq!(twisted.dense_data().unwrap(), &[2.0, -3.0]);
-    let back: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        twisted.twist(&[1], Direction::Forward).unwrap();
-    assert_eq!(back.dense_data().unwrap(), typed.dense_data().unwrap());
-}
-
-#[test]
 fn typed_multi_leg_dense_twist_is_the_per_leg_product_by_value() {
     // What: the multi-leg dense twist coefficient is pinned by a hand-computed
     // value. A mutation that drops the per-leg product in the shared
@@ -362,6 +342,9 @@ fn typed_multi_leg_dense_twist_is_the_per_leg_product_by_value() {
     let one: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
         typed.twist(&[0], Direction::Forward).unwrap();
     assert_eq!(one.dense_data().unwrap(), &[2.0, -3.0]);
+    let domain_leg: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
+        typed.twist(&[1], Direction::Forward).unwrap();
+    assert_eq!(domain_leg.dense_data().unwrap(), &[2.0, -3.0]);
     // Two *different* legs: the odd block scales by θ·θ = (−1)² = +1 — the
     // per-leg product, not a single factor.
     let both: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
@@ -383,6 +366,8 @@ fn typed_flip_is_a_fourth_root_of_identity_and_flip_squared_scales_odd_blocks() 
     let typed = typed_fz2_doctest(&runtime);
     let f1: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
         typed.flip(&[1], Direction::Forward).unwrap();
+    assert_eq!(f1.dense_data().unwrap(), &[2.0, -3.0]);
+    assert_eq!(f1.domain()[0].is_dual(), !typed.domain()[0].is_dual());
     let f2: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
         f1.flip(&[1], Direction::Forward).unwrap();
     assert_same_legs(&f2.codomain(), &typed.codomain());

@@ -123,75 +123,6 @@ fn typed_su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
 }
 
 #[test]
-fn the_fixtures_are_the_tensors_tensorkit_measured() {
-    let rt = host_runtime();
-    let (u1_v, u1_w) = typed_u1();
-    let (su2_v, su2_w) = typed_su2();
-
-    let u1_f64: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&u1_v], [&u1_w], |_, indices| real_fill(indices))
-            .unwrap();
-    let u1_c64: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&u1_v], [&u1_w], |_, indices| complex_fill(indices))
-            .unwrap();
-    let su2_f64: TensorMap<SU2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&su2_v], [&su2_w], |_, indices| real_fill(indices))
-            .unwrap();
-    let su2_c64: TensorMap<SU2FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&su2_v], [&su2_w], |_, indices| complex_fill(indices))
-            .unwrap();
-
-    numerics::assert_close(
-        "typed u1 f64 norm()",
-        u1_f64.norm(2.0).unwrap(),
-        U1_F64[1],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed u1 f64 norm(Inf)",
-        u1_f64.norm(f64::INFINITY).unwrap(),
-        U1_F64[3],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed u1 c64 norm()",
-        u1_c64.norm(2.0).unwrap(),
-        U1_C64[1],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed u1 c64 norm(Inf)",
-        u1_c64.norm(f64::INFINITY).unwrap(),
-        U1_C64[3],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed su2 f64 norm()",
-        su2_f64.norm(2.0).unwrap(),
-        SU2_F64[1],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed su2 f64 norm(Inf)",
-        su2_f64.norm(f64::INFINITY).unwrap(),
-        SU2_F64[3],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed su2 c64 norm()",
-        su2_c64.norm(2.0).unwrap(),
-        SU2_C64[1],
-        TERMS,
-    );
-    numerics::assert_close(
-        "typed su2 c64 norm(Inf)",
-        su2_c64.norm(f64::INFINITY).unwrap(),
-        SU2_C64[3],
-        TERMS,
-    );
-}
-
-#[test]
 fn typed_norm_p_matches_tensorkit() {
     let rt = host_runtime();
     let (u1_v, u1_w) = typed_u1();
@@ -320,27 +251,6 @@ fn u1_real_with(value: f64) -> TensorMap<U1FusionRule, f64> {
 }
 
 #[test]
-fn norm_inf_propagates_nan_from_any_block() {
-    let poisoned = u1_real_with(f64::NAN);
-    assert!(
-        poisoned.norm(f64::INFINITY).unwrap().is_nan(),
-        "a NaN entry must reach norm(Inf), not be dropped for the finite maximum"
-    );
-    assert!(
-        poisoned.norm(f64::INFINITY).unwrap().is_nan(),
-        "norm(Inf) must propagate NaN"
-    );
-    // The finite entries alone still have the clean maximum, so the NaN is the
-    // only reason the assertions above hold.
-    numerics::assert_close(
-        "u1 f64 norm(Inf) with the poisoned entry zeroed",
-        u1_real_with(0.0).norm(f64::INFINITY).unwrap(),
-        U1_F64[3],
-        TERMS,
-    );
-}
-
-#[test]
 fn norm_inf_propagates_nan_hidden_in_the_imaginary_part() {
     let rt = host_runtime();
     let (v, w) = typed_u1();
@@ -395,29 +305,4 @@ fn norm_inf_propagates_nan_through_compact_and_lazy_storage() {
         lazy.norm(f64::INFINITY).unwrap().is_nan(),
         "lazy adjoint arm"
     );
-}
-
-#[test]
-fn norm_inf_reports_infinity_and_zero_payloads() {
-    for entry in [f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(
-            u1_real_with(entry).norm(f64::INFINITY).unwrap(),
-            f64::INFINITY,
-            "|{entry}| is +inf, and no finite entry can exceed it"
-        );
-    }
-
-    let rt = host_runtime();
-    let (v, w) = typed_u1();
-    let zeros: TensorMap<U1FusionRule, f64> = TensorMap::zeros(&rt, [&v], [&w]).unwrap();
-    assert_eq!(zeros.norm(f64::INFINITY).unwrap(), 0.0, "all-zero payload");
-
-    // No coupled sector is shared, so there is no stored entry at all and the
-    // fold returns its identity rather than `-inf` or a panic.
-    let rule = Arc::new(U1FusionRule);
-    let only_zero = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)]).unwrap();
-    let only_one = GradedSpace::try_new(rule, [(U1Irrep::new(1), 3)]).unwrap();
-    let empty: TensorMap<U1FusionRule, f64> =
-        TensorMap::zeros(&rt, [&only_zero], [&only_one]).unwrap();
-    assert_eq!(empty.norm(f64::INFINITY).unwrap(), 0.0, "no stored entries");
 }

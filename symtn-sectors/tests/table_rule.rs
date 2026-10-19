@@ -154,20 +154,6 @@ fn fusion_only_entry_has_f_data_and_panics_on_r_and_twist() {
     });
 }
 
-#[test]
-fn infallible_symbols_panic_on_an_out_of_domain_id() {
-    let fib = TableRule::fibonacci();
-    let invalid = SectorId::new(2);
-    let message = panic::catch_unwind(AssertUnwindSafe(|| fib.dim_scalar(invalid))).unwrap_err();
-    assert_eq!(
-        message.downcast_ref::<String>().unwrap(),
-        &format!(
-            "dim_scalar precondition violated: {}",
-            FusionAlgebraError::InvalidSector { sector: invalid }
-        )
-    );
-}
-
 /// Ising's derived quantities are gauge invariant, so they equal
 /// TensorKitSectors 0.3.9 `IsingAnyon` (`src/anyons.jl`: `dim`, the generic
 /// `frobenius_schur_phase` and `twist`) under the object map

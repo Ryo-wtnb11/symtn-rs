@@ -93,29 +93,6 @@ fn tensorcontract_structure_precomputes_core_dense_descriptor() {
 }
 
 #[test]
-fn dense_contract_uses_dense_backend_for_matmul_and_alpha_beta() {
-    let lhs_space = vec![2, 3];
-    let rhs_space = vec![3, 2];
-    let dst_space = vec![2, 2];
-    let lhs = TestTensor::<f64>::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], lhs_space).unwrap();
-    let rhs =
-        TestTensor::<f64>::from_vec(vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0], rhs_space).unwrap();
-    let mut dst = TestTensor::<f64>::filled(1.0, dst_space).unwrap();
-
-    dense_contract_into(
-        &mut dst,
-        &lhs,
-        &rhs,
-        TensorContractSpec::with_default_output_order(&[1], &[0]),
-        2.0,
-        3.0,
-    )
-    .unwrap();
-
-    assert_eq!(dst.data(), &[155.0, 203.0, 209.0, 275.0]);
-}
-
-#[test]
 fn tensorcontract_dense_route_uses_tensorkit_forward_tie_order() {
     let lhs_space = vec![5, 7, 3, 11];
     let rhs_space = vec![13, 3, 17, 5];

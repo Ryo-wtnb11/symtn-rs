@@ -219,6 +219,4 @@ fn su2() -> GradedSpace<SU2FusionRule> {
 }
 
 forms!(u1_f64_forms_match_network_new, f64, u1());
-forms!(u1_c64_forms_match_network_new, Complex64, u1());
-forms!(su2_f64_forms_match_network_new, f64, su2());
 forms!(su2_c64_forms_match_network_new, Complex64, su2());

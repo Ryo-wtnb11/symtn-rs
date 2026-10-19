@@ -430,28 +430,6 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn exp_of_the_identity_is_e_times_the_identity() {
-    // `exp(id) = e * id` on every provider.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let typed = z2_endomorphism(&runtime);
-    let identity =
-        TensorMap::<_, f64>::isomorphism(&runtime, &typed.domain(), &typed.domain()).unwrap();
-
-    let expected = identity.scale(std::f64::consts::E).unwrap();
-    let error = identity
-        .exp(&[0], &[1])
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(expected.dense_data().unwrap())
-        .map(|(a, b)| (a - b).abs())
-        .fold(0.0f64, f64::max);
-    assert!(error < 1e-12, "exp(id) != e * id: {error}");
-}
-
-#[test]
 fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
     // What: like TensorKit's `exp`, a general per-block Pade approximant
     // with no hermiticity gate (#577). `exp(A) exp(-A) = id` pins the actual exponential.

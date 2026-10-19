@@ -26,6 +26,11 @@ cgc-gen = ["symtn-core/cgc-gen", "symtn-tensors/cgc-gen"]
 # (a `blas-*` feature, or one linked by the application).
 krylov = ["dep:krylov"]
 
+# The CUDA batch timing harness needs a device runtime.
+[[example]]
+name = "cuda_contract_batch_timing"
+required-features = ["cuda"]
+
 [dependencies]
 krylov = { version = "0.2", optional = true, default-features = false }
 num-complex = "0.4"

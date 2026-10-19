@@ -38,36 +38,18 @@ fn assert_generic_factor_close<R>(
 }
 
 #[test]
-fn provider_neutral_generic_compact_factorizations_remain_covered() {
-    let (space, data) = generic_factorization_input();
-    let (provider, space) = bind_checked_layout(&space);
-    let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    assert!(!svd_vals_dyn_checked_generic(&mut dense, &input)
-        .unwrap()
-        .is_empty());
-    let (u, vh, values) =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &input).unwrap();
-    assert!(!values.is_empty());
-    assert!(Arc::ptr_eq(u.space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(vh.space().provider_arc(), &provider));
-    qr_compact_dyn_checked_generic(&mut dense, &input).unwrap();
-    lq_compact_dyn_checked_generic(&mut dense, &input).unwrap();
-}
-
-#[test]
 fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (padded_space, padded_data) =
         padded_generic_factorization_input(&canonical_space, &canonical_data);
-    let (_, canonical_space) = bind_checked_layout(&canonical_space);
+    let (provider, canonical_space) = bind_checked_layout(&canonical_space);
     let (_, padded_space) = bind_checked_layout(&padded_space);
     let canonical = BoundDynamicTensorRef::try_new(&canonical_space, &canonical_data).unwrap();
     let padded = BoundDynamicTensorRef::try_new(&padded_space, &padded_data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let canonical_values = svd_vals_dyn_checked_generic(&mut dense, &canonical).unwrap();
+    assert!(!canonical_values.is_empty());
     let padded_values = svd_vals_dyn_checked_generic(&mut dense, &padded).unwrap();
     assert_real_spectra_close(&padded_values, &canonical_values);
 
@@ -78,6 +60,14 @@ fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
     assert_generic_factor_close(&padded_svd.0, &canonical_svd.0);
     assert_generic_factor_close(&padded_svd.1, &canonical_svd.1);
     assert_real_spectra_close(&padded_svd.2, &canonical_svd.2);
+    assert!(Arc::ptr_eq(
+        canonical_svd.0.space().provider_arc(),
+        &provider
+    ));
+    assert!(Arc::ptr_eq(
+        canonical_svd.1.space().provider_arc(),
+        &provider
+    ));
 
     let canonical_qr = qr_compact_dyn_checked_generic(&mut dense, &canonical).unwrap();
     let padded_qr = qr_compact_dyn_checked_generic(&mut dense, &padded).unwrap();

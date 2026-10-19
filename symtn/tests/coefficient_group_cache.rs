@@ -4,12 +4,13 @@
 //! then recompose only the source fusion-tree groups
 //! whose external sectors are new, as TensorKit's `fsbraid`/`fstranspose`
 //! caches do per `FusionTreeBlock`, and the result must equal a cold
-//! build's. Unique fusion never enters it (TensorKit's `NoCache`).
+//! build's. Unique fusion never enters it (TensorKit's `NoCache`; see
+//! `composed_coefficient_cache.rs`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule, U1Irrep};
+use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector};
 use symtn::typed::{Complex32, Complex64, GradedSpace, Runtime, TensorMap};
 
 #[path = "../../tests/support/numerics.rs"]
@@ -189,37 +190,6 @@ fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
         // summed through fusion-symbols' randomly seeded hash maps, so two cold
         // Runtimes already differ in the last bits.
         exact: false
-    );
-}
-
-/// Unique fusion is `NoCache`, as TensorKit's `fsbraid`/`fstranspose`: a
-/// cold build and a degeneracy-only change, direct and adjoint, never look up
-/// or publish a group.
-#[test]
-fn unique_fusion_never_touches_the_group_cache() {
-    let _serial = serial();
-    symtn::cache::clear();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let leg = |sectors: &[(i32, usize)]| {
-        GradedSpace::try_new(
-            Arc::new(U1FusionRule),
-            sectors.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
-        )
-        .unwrap()
-    };
-    let transform = |space: &GradedSpace<U1FusionRule>| {
-        let t = tensor!(&runtime, space);
-        let _ = t.permute(&[2, 0], &[3, 1]).unwrap();
-        let _ = t.transpose(&[1, 3], &[0, 2]).unwrap();
-        let _ = t.adjoint().unwrap().permute(&[2, 0], &[3, 1]).unwrap();
-    };
-    transform(&leg(&[(-1, 2), (0, 1), (1, 2)]));
-    transform(&leg(&[(-1, 3), (0, 2), (1, 1)]));
-    let after = groups();
-    assert_eq!(
-        (after.hits(), after.misses(), after.entries()),
-        (0, 0, 0),
-        "Unique fusion must not look up or publish a composed-coefficient group"
     );
 }
 

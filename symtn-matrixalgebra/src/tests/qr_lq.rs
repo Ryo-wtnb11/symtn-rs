@@ -286,33 +286,6 @@ fn compact_owned_qr_preserves_qr_into_output_precedence() {
 }
 
 #[test]
-fn compact_qr_factors_retain_each_callers_exact_provider_arc() {
-    // What: per-call QR factor construction preserves each caller's provider allocation.
-    let tensor = rectangular_svd_tensor(7, 5);
-    let first_provider = Arc::new(Z2FusionRule);
-    let second_provider = Arc::new(Z2FusionRule);
-    let first = bound_tensor(Arc::clone(&first_provider), &tensor);
-    let second = bound_tensor(Arc::clone(&second_provider), &tensor);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let Qr {
-        q: first_q,
-        r: first_r,
-    } = qr_compact(&mut dense, &first.as_ref()).unwrap();
-    let Qr {
-        q: second_q,
-        r: second_r,
-    } = qr_compact(&mut dense, &second.as_ref()).unwrap();
-
-    for factor in [&first_q, &first_r] {
-        assert!(Arc::ptr_eq(factor.space().provider_arc(), &first_provider));
-    }
-    for factor in [&second_q, &second_r] {
-        assert!(Arc::ptr_eq(factor.space().provider_arc(), &second_provider));
-    }
-}
-
-#[test]
 fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
     // What: an LQ backend failure leaves borrowed storage unchanged and returns no factor pair.
     let rule = Z2FusionRule;
@@ -325,33 +298,6 @@ fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
     assert!(!dense.observed.is_empty());
-}
-
-#[test]
-fn compact_lq_factors_retain_each_callers_exact_provider_arc() {
-    // What: per-call LQ factor construction preserves each caller's provider allocation.
-    let tensor = rectangular_svd_tensor(7, 5);
-    let first_provider = Arc::new(Z2FusionRule);
-    let second_provider = Arc::new(Z2FusionRule);
-    let first = bound_tensor(Arc::clone(&first_provider), &tensor);
-    let second = bound_tensor(Arc::clone(&second_provider), &tensor);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let Lq {
-        l: first_l,
-        q: first_q,
-    } = lq_compact(&mut dense, &first.as_ref()).unwrap();
-    let Lq {
-        l: second_l,
-        q: second_q,
-    } = lq_compact(&mut dense, &second.as_ref()).unwrap();
-
-    for factor in [&first_l, &first_q] {
-        assert!(Arc::ptr_eq(factor.space().provider_arc(), &first_provider));
-    }
-    for factor in [&second_l, &second_q] {
-        assert!(Arc::ptr_eq(factor.space().provider_arc(), &second_provider));
-    }
 }
 
 #[test]

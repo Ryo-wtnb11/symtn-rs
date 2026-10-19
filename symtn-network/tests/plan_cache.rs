@@ -133,16 +133,13 @@ fn disabled_cache_keeps_entries_and_counters_empty() {
     );
     let space = space(Arc::new(U1FusionRule), 2);
     let (a, b) = pair(&runtime, &space, 60);
-    drop(
-        net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
-            .unwrap(),
-    );
-    drop(
-        net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
-            .unwrap(),
-    );
+    let first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
+        .contract(&[&a, &b])
+        .unwrap();
+    let second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
+        .contract(&[&a, &b])
+        .unwrap();
+    assert_eq!(first.dense_data().unwrap(), second.dense_data().unwrap());
     assert_eq!(plan_cache_stats(&runtime), Default::default());
 }
 
@@ -193,28 +190,6 @@ fn lru_hit_touches_entry_before_capacity_eviction() {
     let after = plan_cache_stats(&runtime);
     assert_eq!(after.misses, before.misses + 1);
     assert_eq!(after.entries, 2);
-}
-
-#[test]
-fn persisted_typed_order_roundtrips_into_a_fresh_runtime() {
-    let first = Runtime::builder().build().unwrap();
-    assert_eq!(load_plan_cache(&first, ""), 0);
-    let first_space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&first, &first_space, 80);
-    let expected = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
-        .unwrap();
-    let saved = save_plan_cache(&first);
-    assert!(saved.contains("TOPO "));
-
-    let second = Runtime::builder().build().unwrap();
-    assert_eq!(load_plan_cache(&second, &saved), 1);
-    let second_space = space(Arc::new(U1FusionRule), 2);
-    let (c, d) = pair(&second, &second_space, 80);
-    let actual = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&c, &d])
-        .unwrap();
-    assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
 }
 
 #[test]

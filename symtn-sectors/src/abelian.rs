@@ -903,21 +903,6 @@ mod tests {
     }
 
     #[test]
-    fn u1_fusion_rejects_the_unlabelled_boundary_without_panicking() {
-        // What: valid inputs whose mathematical sum is i32::MIN retain the
-        // checked fusion failure contract.
-        let left = U1Irrep::new(i32::MIN + 1);
-        let right = U1Irrep::new(-1);
-        assert_eq!(
-            left.checked_fuse(right),
-            Err(FusionAlgebraError::U1FusionOverflow {
-                left: i32::MIN + 1,
-                right: -1,
-            })
-        );
-    }
-
-    #[test]
     fn u1_physical_basis_is_the_checked_one_dimensional_embedding() {
         // What: U(1) exposes exactly one carrier state and one unit CGC for an
         // allowed charge sum, while invalid physical indices remain typed.

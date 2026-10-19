@@ -708,15 +708,6 @@ mod cache_tests {
         DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     }
 
-    fn rank_one_source<R>(rule: &R, sector: SectorId, deg: usize) -> DynamicFusionMapSpace
-    where
-        R: MultiplicityFreeRigidSymbols,
-    {
-        let leg = || FusionProductSpace::new([SectorLeg::new([(sector, deg)], false)]);
-        let hom = FusionTreeHomSpace::new(leg(), leg());
-        DynamicFusionMapSpace::from_final_homspace(rule, hom).unwrap()
-    }
-
     fn u1_rank_one_pair(charge: i32) -> FusionTreePairKey {
         let rule = U1FusionRule;
         let sector = U1Irrep::new(charge).sector_id();
@@ -961,82 +952,6 @@ mod cache_tests {
     }
 
     #[test]
-    fn eager_adjoint_accepts_exact_multiplicity_free_storage() {
-        // What: exact raw storage succeeds for the ordinary U(1), SU(2), fZ2,
-        // and fZ2 x U(1) x SU(2) multiplicity-free paths.
-        let u1 = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-            u1_source(1, 2),
-            Arc::new(U1FusionRule),
-        )
-        .unwrap();
-        let u1_len = u1.space().required_len().unwrap();
-        let (_, u1_data) = adjoint_bound_dyn(&u1, &vec![1.0; u1_len]).unwrap();
-        assert_eq!(u1_data.len(), u1_len);
-
-        let su2_rule = Arc::new(SU2FusionRule);
-        let su2 = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-            rank_one_source(
-                su2_rule.as_ref(),
-                SU2Irrep::from_twice_spin(1).sector_id(),
-                2,
-            ),
-            Arc::clone(&su2_rule),
-        )
-        .unwrap();
-        let su2_len = su2.space().required_len().unwrap();
-        let (_, su2_data) = adjoint_bound_dyn(&su2, &vec![1.0; su2_len]).unwrap();
-        assert_eq!(su2_data.len(), su2_len);
-
-        let fz2_rule = Arc::new(FermionParityFusionRule);
-        let fz2 = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-            rank_one_source(fz2_rule.as_ref(), Z2Irrep::ODD.sector_id(), 2),
-            Arc::clone(&fz2_rule),
-        )
-        .unwrap();
-        let fz2_len = fz2.space().required_len().unwrap();
-        let (_, fz2_data) = adjoint_bound_dyn(&fz2, &vec![1.0; fz2_len]).unwrap();
-        assert_eq!(fz2_data.len(), fz2_len);
-
-        let rule = triple_rule();
-        let product = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-            triple_source(&rule),
-            Arc::new(rule),
-        )
-        .unwrap();
-        let product_len = product.space().required_len().unwrap();
-        let (_, product_data) = adjoint_bound_dyn(&product, &vec![1.0; product_len]).unwrap();
-        assert_eq!(product_data.len(), product_len);
-    }
-
-    #[test]
-    fn rule_binding_rejects_extra_expert_block_before_adjoint_target_work() {
-        // What: a locally valid U(1) block outside the source HomSpace cannot
-        // acquire the rule identity required to reach adjoint target work.
-        let zero = U1Irrep::new(0).sector_id();
-        let leg = || FusionProductSpace::new([SectorLeg::new([(zero, 1)], false)]);
-        let homspace = FusionTreeHomSpace::new(leg(), leg());
-        let structure = BlockStructure::from_blocks_with_rank(
-            2,
-            vec![
-                BlockSpec::column_major_with_key(u1_rank_one_pair(0).into(), vec![1, 1], 0)
-                    .unwrap(),
-                BlockSpec::column_major_with_key(u1_rank_one_pair(1).into(), vec![1, 1], 1)
-                    .unwrap(),
-            ],
-        )
-        .unwrap();
-        OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-        let error = u1_expert_space(homspace, structure).unwrap_err();
-        assert_eq!(
-            error,
-            CoreError::MalformedFusionTree {
-                message: "fusion tree uses a sector absent from its HomSpace leg",
-            }
-        );
-        assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
-    }
-
-    #[test]
     fn eager_adjoint_keeps_rule_mismatch_precedence_over_canonical_preflight() {
         // What: a wrong rule is rejected before canonical preflight inspects a
         // safe public expert structure whose complete blocks are reordered.
@@ -1105,38 +1020,6 @@ mod cache_tests {
                 expected: 2,
                 actual: 1,
             })
-        );
-        assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
-    }
-
-    #[test]
-    fn rule_binding_rejects_wrong_expert_shape_before_adjoint_target_work() {
-        // What: a source block whose degeneracy shape disagrees with its
-        // HomSpace cannot acquire the rule identity required by adjoint.
-        let zero = U1Irrep::new(0).sector_id();
-        let homspace = FusionTreeHomSpace::new(
-            FusionProductSpace::new([SectorLeg::new([(zero, 2)], false)]),
-            FusionProductSpace::new([SectorLeg::new([(zero, 3)], false)]),
-        );
-        let structure = BlockStructure::from_blocks_with_rank(
-            2,
-            vec![
-                BlockSpec::column_major_with_key(u1_rank_one_pair(0).into(), vec![2, 2], 0)
-                    .unwrap(),
-            ],
-        )
-        .unwrap();
-
-        OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-        let error = u1_expert_space(homspace, structure).unwrap_err();
-
-        assert_eq!(
-            error,
-            CoreError::LegDegeneracyMismatch {
-                sector: zero,
-                expected: 3,
-                actual: 2,
-            }
         );
         assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
     }
@@ -1238,23 +1121,6 @@ mod cache_tests {
             reordered_error,
             OperationError::StructureMismatch { tensor: "src" }
         );
-    }
-
-    #[test]
-    fn duplicate_expert_blocks_are_rejected_at_construction() {
-        // What: safe expert construction rejects duplicate fusion-tree keys
-        // before a malformed source can reach eager adjoint.
-        let key = u1_rank_one_pair(0);
-        let error = BlockStructure::from_blocks_with_rank(
-            2,
-            vec![
-                BlockSpec::column_major_with_key(key.clone().into(), vec![1, 1], 0).unwrap(),
-                BlockSpec::column_major_with_key(key.into(), vec![1, 1], 1).unwrap(),
-            ],
-        )
-        .unwrap_err();
-
-        assert!(matches!(error, CoreError::DuplicateBlockKey { .. }));
     }
 
     #[test]

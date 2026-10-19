@@ -113,37 +113,6 @@ mod tests {
         epsilon.powf(0.75)
     }
 
-    #[test]
-    fn the_rule_uses_the_shared_half_residual_threshold() {
-        let input_ss: f64 = 2.0;
-        let tolerance = tolerance(f64::EPSILON);
-        let threshold = tolerance * input_ss.sqrt();
-        assert!(scaled_hermitian_residual_accepts(
-            input_ss,
-            2.0 * threshold * 0.99,
-            1.0,
-            tolerance,
-        ));
-        assert!(!scaled_hermitian_residual_accepts(
-            input_ss,
-            2.0 * threshold * 1.01,
-            1.0,
-            tolerance,
-        ));
-        assert!(!scaled_hermitian_residual_accepts(
-            input_ss,
-            f64::NAN,
-            1.0,
-            tolerance
-        ));
-        assert!(!scaled_hermitian_residual_accepts(
-            input_ss,
-            1.0,
-            f64::INFINITY,
-            tolerance,
-        ));
-    }
-
     /// The single-precision tolerance hazard, as host arithmetic: a residual of a few `f32` roundings
     /// relative to the input norm is accepted by the single-precision
     /// tolerance and rejected by the double-precision one. Both are expressed
@@ -181,9 +150,10 @@ mod tests {
     }
 
     /// The threshold on the half-residual is exactly
-    /// `tolerance * ||A||_F` at every input scale.
+    /// `tolerance * ||A||_F` at every input scale; a non-finite residual or
+    /// scale is rejected.
     #[test]
-    fn the_double_precision_decisions_are_unchanged() {
+    fn the_half_residual_threshold_is_tolerance_times_the_input_norm() {
         let tolerance = tolerance(f64::EPSILON);
         for &input_ss in &[1.0_f64, 2.0, 1e-30, 1e30] {
             let threshold = 2.0 * tolerance * input_ss.sqrt();
@@ -200,6 +170,18 @@ mod tests {
                 tolerance
             ));
         }
+        assert!(!scaled_hermitian_residual_accepts(
+            2.0,
+            f64::NAN,
+            1.0,
+            tolerance
+        ));
+        assert!(!scaled_hermitian_residual_accepts(
+            2.0,
+            1.0,
+            f64::INFINITY,
+            tolerance,
+        ));
     }
 
     /// Every finite positive scale of either lane lands in `[1, 2)` except

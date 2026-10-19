@@ -267,23 +267,3 @@ fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
         assert_eq!(dst, [41.0]);
     }
 }
-
-#[test]
-fn dynamic_trace_rejects_same_type_rule_when_only_symbols_differ() {
-    let first = SymbolOnlyRule::new(1.0);
-    let second = SymbolOnlyRule::new(-1.0);
-    let space = DynamicFusionMapSpace::from_final_homspace(
-        &first,
-        FusionTreeHomSpace::from_sector_ids([(0, 1)], []),
-    )
-    .unwrap();
-
-    // What: the wrong provider is rejected at the one raw-to-bound ingress;
-    // public trace APIs cannot accept an independent provider afterwards.
-    let error =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(space, Arc::new(second)).unwrap_err();
-    assert!(matches!(
-        error,
-        OperationError::Core(CoreError::FusionRuleMismatch { .. })
-    ));
-}

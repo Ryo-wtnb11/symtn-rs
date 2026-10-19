@@ -484,30 +484,6 @@ fn z2_matrix_space() -> DynamicFusionMapSpace {
 }
 
 #[test]
-fn bound_space_rejects_wrong_and_missing_rule_identity() {
-    let space = z2_matrix_space();
-    let wrong =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(space.clone(), Arc::new(U1FusionRule))
-            .unwrap_err();
-    assert!(matches!(
-        wrong,
-        OperationError::Core(CoreError::FusionRuleMismatch { .. })
-    ));
-
-    let unbound = DynamicFusionMapSpace {
-        admission: FusionSpaceAdmission::Unbound,
-        ..space
-    };
-    let missing =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(unbound, Arc::new(Z2FusionRule))
-            .unwrap_err();
-    assert!(matches!(
-        missing,
-        OperationError::Core(CoreError::MissingFusionRuleIdentity)
-    ));
-}
-
-#[test]
 fn bound_space_rejects_wrong_and_missing_identity_before_provider_enumeration() {
     let source_rule = CountingRule::new();
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1), (0, 1)], []);

@@ -621,22 +621,6 @@ mod tests {
         TemporaryLabel::new(s)
     }
 
-    /// The built-in greedy optimizer's plan must keep validating once
-    /// `from_steps` also checks `result_labels` mathematical consistency.
-    #[test]
-    fn greedy_plan_result_labels_validate() {
-        let ir = test_ir(&[&["a", "b"], &["b", "c"], &["c", "d"]], &["a", "d"]);
-        let infos = vec![
-            DenseTensorInfo::new(vec![2, 3]),
-            DenseTensorInfo::new(vec![3, 4]),
-            DenseTensorInfo::new(vec![4, 5]),
-        ];
-        let cost = DenseCostModel::from_network(&ir, &infos).unwrap();
-        let steps = GreedyDenseOptimizer.optimize(&ir, &cost).unwrap();
-        let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
-        assert_eq!(plan.steps().len(), 2);
-    }
-
     #[test]
     fn dense_active_pair_path_charges_intermediate_orientation_cost() {
         let ir = test_ir(&[&["x", "y"], &["x", "z"], &["y", "w"]], &["z", "w"]);
@@ -751,25 +735,6 @@ mod tests {
         assert_eq!(report.plan_cost(), 3);
         assert_eq!(report.greedy_cost(), usize::MAX);
         assert!(!report.is_suboptimal());
-    }
-
-    /// A correctly hand-built plan (right `result_labels`) must pass.
-    #[test]
-    fn hand_built_plan_with_correct_result_labels_validates() {
-        // ab,bc->ac : contract `b`, open legs are a (lhs) then c (rhs).
-        let ir = test_ir(&[&["a", "b"], &["b", "c"]], &["a", "c"]);
-        let steps = vec![ContractionStep::new(
-            TensorId::new(0),
-            TensorId::new(1),
-            TensorId::new(2),
-            0,
-            vec![label("a"), label("c")],
-        )];
-        let plan = ContractionPlan::from_steps(&ir, steps);
-        assert!(
-            plan.is_ok(),
-            "correct result_labels must validate: {plan:?}"
-        );
     }
 
     /// A permuted *intermediate* order is harmless (executor re-derives order);

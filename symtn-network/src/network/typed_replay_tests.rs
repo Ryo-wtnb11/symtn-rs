@@ -1779,6 +1779,25 @@ fn typed_replay_restores_buffers_after_injected_failures() {
     let mut workspace = NetworkExecutionWorkspace::default();
     drop(planned.execute(&refs, &mut workspace).unwrap());
 
+    // A failure inside the step that owns the retained destination keeps
+    // that exact allocation.
+    let retained = |workspace: &NetworkExecutionWorkspace<U1FusionRule, f64>| {
+        workspace.intermediates[0]
+            .output
+            .as_ref()
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .as_ptr()
+    };
+    let before = retained(&workspace);
+    let codomain = std::mem::replace(&mut planned.schedule.steps[0].codomain, vec![usize::MAX]);
+    assert!(planned.execute(&refs, &mut workspace).is_err());
+    assert_eq!(retained(&workspace), before);
+    planned.schedule.steps[0].codomain = codomain;
+    drop(planned.execute(&refs, &mut workspace).unwrap());
+    assert_eq!(retained(&workspace), before);
+
     let rhs_axes = std::mem::replace(
         &mut planned.schedule.steps[1].rhs_contract_axes,
         vec![usize::MAX],
@@ -1889,43 +1908,6 @@ fn default_cached_contract_replays_rank_four_orientation_after_shape_drift_c64()
     );
     let provider = Arc::new(U1FusionRule);
     assert_rank_four_orientation_replay(&runtime, &provider, Complex64::new);
-}
-
-#[test]
-fn typed_replay_keeps_the_step_destination_after_its_contract_fails() {
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(U1FusionRule);
-    let space = |degeneracy| {
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
-    };
-    let left = space(5);
-    let bond = space(4);
-    let right = space(6);
-    let tail = space(7);
-    let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&left], [&bond], 21).unwrap();
-    let b = TensorMap::rand_with_seed(&runtime, [&bond], [&right], 22).unwrap();
-    let c = TensorMap::rand_with_seed(&runtime, [&left.try_dual().unwrap()], [&tail], 23).unwrap();
-    let refs = [&a, &b, &c];
-    let mut planned = crossed_plan();
-    let mut workspace = NetworkExecutionWorkspace::default();
-    drop(planned.execute(&refs, &mut workspace).unwrap());
-    let retained = |workspace: &NetworkExecutionWorkspace<U1FusionRule, f64>| {
-        workspace.intermediates[0]
-            .output
-            .as_ref()
-            .unwrap()
-            .dense_data()
-            .unwrap()
-            .as_ptr()
-    };
-    let before = retained(&workspace);
-
-    let codomain = std::mem::replace(&mut planned.schedule.steps[0].codomain, vec![usize::MAX]);
-    assert!(planned.execute(&refs, &mut workspace).is_err());
-    assert_eq!(retained(&workspace), before);
-    planned.schedule.steps[0].codomain = codomain;
-    drop(planned.execute(&refs, &mut workspace).unwrap());
-    assert_eq!(retained(&workspace), before);
 }
 
 /// `A[i;j] * B[j;k]`, optionally times the closed pair `C[x;y] * D[y;x]`.

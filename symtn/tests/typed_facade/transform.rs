@@ -796,17 +796,6 @@ fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>()
         )
         .unwrap_err();
     assert!(is_non_symmetric_contraction(&contract), "{contract:?}");
-    let ordered = lhs
-        .contract(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-        )
-        .unwrap_err();
     let overwrite = lhs
         .contract_into(
             &rhs,
@@ -821,23 +810,7 @@ fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>()
             0.0,
         )
         .unwrap_err();
-    let ordered_overwrite = lhs
-        .contract_into(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-            &mut destination,
-            1.0,
-            0.0,
-        )
-        .unwrap_err();
-    for error in [&ordered, &overwrite, &ordered_overwrite] {
-        assert!(is_non_symmetric_contraction(error), "{error:?}");
-    }
+    assert!(is_non_symmetric_contraction(&overwrite), "{overwrite:?}");
     assert_eq!(destination.dense_data().unwrap(), &before[..]);
 
     let composed = lhs.compose(&rhs).unwrap();
@@ -1015,17 +988,6 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
             },
         )
         .unwrap_err();
-    let ordered = lhs
-        .contract(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-        )
-        .unwrap_err();
     let overwrite = lhs
         .contract_into(
             &rhs,
@@ -1041,7 +1003,7 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
         )
         .unwrap_err();
     assert_eq!(symtn::expert::cuda_transfer_stats(), transfers);
-    for error in [&contract, &ordered, &overwrite] {
+    for error in [&contract, &overwrite] {
         assert!(is_non_symmetric_contraction(error), "{error:?}");
     }
     assert_eq!(

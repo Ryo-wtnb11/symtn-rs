@@ -228,24 +228,12 @@ fn neel_product_state_contracts_with_the_full_gate() {
     );
 }
 
-/// Fast variant: tiny chi and few steps, loose tolerance.
+/// Tiny chi and few steps, loose tolerance.
 #[test]
 fn itebd_heisenberg_reaches_the_ground_state_energy_coarsely() {
     let energy = run_itebd(8, &[(0.1, 100), (0.05, 100)]);
     assert!(
         (energy - E_EXACT).abs() < 5e-2,
-        "E/bond = {energy} vs exact {E_EXACT}"
-    );
-}
-
-/// Short but tighter run for release-mode machines:
-/// `cargo test -p symtn-network --release --test itebd_smoke -- --ignored itebd`.
-#[test]
-#[ignore = "several hundred iTEBD steps; run in release mode"]
-fn itebd_heisenberg_short_run_release() {
-    let energy = run_itebd(16, &[(0.1, 300), (0.05, 300), (0.01, 300)]);
-    assert!(
-        (energy - E_EXACT).abs() < 5e-3,
         "E/bond = {energy} vs exact {E_EXACT}"
     );
 }

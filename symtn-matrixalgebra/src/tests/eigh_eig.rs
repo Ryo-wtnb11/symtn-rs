@@ -160,79 +160,6 @@ fn checked_generic_eigh_late_dense_failure_publishes_no_factors() {
     );
 }
 
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_eigh_uses_owned_dense_output() {
-    let x = SectorId::new(1);
-    let leg = SectorLeg::new([(x, 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg.clone(), leg.clone()]),
-        FusionProductSpace::new([leg.clone(), leg]),
-    );
-    let source = BoundDynamicFusionMapSpace::from_final_homspace_generic(
-        Arc::new(FactorGenericRule),
-        homspace,
-    )
-    .unwrap();
-    let data = vec![0.0; source.space().required_len().unwrap()];
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: RuleIdentity::new_unique::<LateGenericSpy>(),
-    });
-    let checked = bind_to_spy(&source, &provider);
-    let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let mut dense = ScriptedExecutor::<RejectEighInto>::default();
-
-    let full = eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
-
-    assert_eq!(dense.counts().eigh, 2);
-    assert_eq!(dense.counts().eigh_into, 0);
-    assert!(Arc::ptr_eq(full.v().space().provider_arc(), &provider));
-}
-
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_eigh_keeps_owned_vectors_in_live_pairs_before_publication() {
-    let x = SectorId::new(1);
-    let leg = SectorLeg::new([(x, 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg.clone(), leg.clone()]),
-        FusionProductSpace::new([leg.clone(), leg]),
-    );
-    let source = BoundDynamicFusionMapSpace::from_final_homspace_generic(
-        Arc::new(FactorGenericRule),
-        homspace,
-    )
-    .unwrap();
-    let data = vec![0.0; source.space().required_len().unwrap()];
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: RuleIdentity::new_unique::<LateGenericSpy>(),
-    });
-    let checked = bind_to_spy(&source, &provider);
-    let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let mut dense = ScriptedExecutor::<RejectEighInto>::default();
-    let eigh_pairs_rec = crate::probe::record();
-
-    let full = eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
-    let before_publication = eigh_pairs_rec.checked_eigh_pairs();
-
-    assert_eq!(dense.counts().eigh_into, 0);
-    assert_eq!(dense.vector_ptrs, before_publication);
-    assert_eq!(dense.vector_ptrs.len(), 2);
-    assert_eq!(dense.vector_ptrs.len(), full.eigenvalues().len());
-}
-
 #[expect(
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
@@ -1025,29 +952,6 @@ fn eigh_rejects_non_finite_owned_eigenvalues_before_sorting() {
             }))
         );
     }
-}
-
-#[test]
-fn eigh_vectors_retain_each_callers_exact_provider_arc() {
-    // What: per-call EIGH factor construction preserves each caller's provider allocation.
-    let tensor = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
-    let first_provider = Arc::new(Z2FusionRule);
-    let second_provider = Arc::new(Z2FusionRule);
-    let first = bound_tensor(Arc::clone(&first_provider), &tensor);
-    let second = bound_tensor(Arc::clone(&second_provider), &tensor);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let first_eigh = eigh_full(&mut dense, &first.as_ref()).unwrap();
-    let second_eigh = eigh_full(&mut dense, &second.as_ref()).unwrap();
-
-    assert!(Arc::ptr_eq(
-        first_eigh.v.space().provider_arc(),
-        &first_provider
-    ));
-    assert!(Arc::ptr_eq(
-        second_eigh.v.space().provider_arc(),
-        &second_provider
-    ));
 }
 
 #[test]

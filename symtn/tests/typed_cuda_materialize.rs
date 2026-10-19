@@ -184,6 +184,21 @@ where
         bits(host.dense_data().unwrap()),
         "{what}: owned bits"
     );
+    // The adjoint of the lazy adjoint materializes to the parent.
+    let twice = lazy
+        .adjoint()
+        .unwrap()
+        .materialize()
+        .unwrap()
+        .to_host()
+        .unwrap();
+    assert_eq!(twice.codomain(), host.codomain(), "{what}: adjoint twice");
+    assert_eq!(twice.domain(), host.domain(), "{what}: adjoint twice");
+    assert_eq!(
+        bits(twice.dense_data().unwrap()),
+        bits(host.dense_data().unwrap()),
+        "{what}: adjoint twice"
+    );
 
     // Independence: the device overwrite rejects a destination that aliases
     // its source, so accepting the copy proves a fresh payload, and the
