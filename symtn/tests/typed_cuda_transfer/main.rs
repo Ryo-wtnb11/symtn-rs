@@ -8,6 +8,10 @@
 include!("../common/predicate_chains.rs");
 include!("../common/predicate_chain_coefficients.rs");
 
+#[path = "../support/report.rs"]
+mod report;
+use report::Report;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use symtn::typed::HermitianTol;

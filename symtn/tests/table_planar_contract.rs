@@ -397,9 +397,8 @@ macro_rules! bosonic_planar_is_contract {
             x.contract(&y, &G5).unwrap().dense_data().unwrap()
         );
         // Planarity is checked for Bosonic rules too (as `@planar`).
-        assert!(a
-            .planar_contract(&b, &spec(&[0, 2], &[2, 0], &[1, 0], &[3, 2]))
-            .is_err());
+        assert!(matches!(a
+            .planar_contract(&b, &spec(&[0, 2], &[2, 0], &[1, 0], &[3, 2])), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. })));
         assert!(a
             .contract(&b, &spec(&[0, 2], &[2, 0], &[1, 0], &[3, 2]))
             .is_ok());

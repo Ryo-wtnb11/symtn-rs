@@ -13,6 +13,10 @@ mod common;
 mod numerics;
 mod prepared;
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::fmt::Debug;
 use symtn::typed::HermitianTol;
 
@@ -410,7 +414,10 @@ fn complex_payloads_and_other_signatures_are_typed_errors() {
         &[1],
         HermitianTol::DEFAULT
     )
-    .is_err());
+    .err()
+    .unwrap()
+    .report()
+    .contains("eigh requires an endomorphism"));
 }
 
 #[test]

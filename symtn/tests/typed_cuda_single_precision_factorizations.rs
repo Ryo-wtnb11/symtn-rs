@@ -36,6 +36,10 @@
 
 #![cfg(feature = "cuda")]
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
@@ -861,7 +865,10 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
     assert!(
         perturbed::<f64>(&runtime, &leg, skew)
             .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
-            .is_err(),
+            .err()
+            .unwrap()
+            .report()
+            .contains("eigh requires Hermitian coupled-sector blocks"),
         "the same numbers at f64 exceed eps(f64)^(3/4) and must be rejected"
     );
 

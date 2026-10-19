@@ -329,7 +329,12 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
         TensorMap::from_subblock_fn(&runtime, [&zn4_leg], [&zn4_leg], |_, _| 1.0).unwrap();
     let zn3_device = zn3_tensor.to_cuda().unwrap();
     let zn4_device = zn4_tensor.to_cuda().unwrap();
-    assert!(zn3_device.compose(&zn4_device).is_err());
+    assert!(zn3_device
+        .compose(&zn4_device)
+        .err()
+        .unwrap()
+        .report()
+        .contains("fusion rule mismatch"));
     assert_eq!(zn3_device.to_host().unwrap().dense_data().unwrap(), [1.0]);
     assert_eq!(zn4_device.to_host().unwrap().dense_data().unwrap(), [1.0]);
 

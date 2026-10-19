@@ -73,14 +73,12 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         assert!((x - y).norm() < 1e-11);
     }
 
-    assert!(matches!(
-        a.solve(&[0, 0], &[1, 3], &b, b_rows, b_cols),
-        Err(Error::Operation(_))
-    ));
-    assert!(matches!(
-        a.solve(a_rows, a_cols, &b, &[0, 0], &[1, 3]),
-        Err(Error::Operation(_))
-    ));
+    assert!(
+        matches!(a.solve(&[0, 0], &[1, 3], &b, b_rows, b_cols), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
+    assert!(
+        matches!(a.solve(a_rows, a_cols, &b, &[0, 0], &[1, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
 
     let before = completed_transformers();
     assert!(matches!(

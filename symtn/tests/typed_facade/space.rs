@@ -575,14 +575,29 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         summed.degeneracy(&symtn::sector::U1Irrep::new(1)).unwrap(),
         2
     );
-    assert!(left.oplus(&right.try_dual().unwrap()).is_err());
+    assert!(left
+        .oplus(&right.try_dual().unwrap())
+        .err()
+        .unwrap()
+        .report()
+        .contains("opposite duality"));
     let huge = GradedSpace::try_new(
         Arc::clone(&provider),
         [(symtn::sector::U1Irrep::new(0), usize::MAX)],
     )
     .unwrap();
-    assert!(huge.oplus(&ordinary).is_err());
-    assert!(huge.fuse(&left).is_err());
+    assert!(huge
+        .oplus(&ordinary)
+        .err()
+        .unwrap()
+        .report()
+        .contains("oplus: degeneracy overflow"));
+    assert!(huge
+        .fuse(&left)
+        .err()
+        .unwrap()
+        .report()
+        .contains("fuse: degeneracy multiplication overflow"));
 
     let su2_provider = Arc::new(SU2FusionRule);
     let half = SU2Irrep::from_twice_spin(1);
@@ -730,7 +745,10 @@ fn graded_space_dual_reports_a_non_injective_dual_instead_of_panicking() {
     assert!(
         GradedSpace::try_new(provider, [(Z3Charge(0), 1), (Z3Charge(1), 1)])
             .and_then(|space| space.try_dual())
-            .is_err()
+            .err()
+            .unwrap()
+            .report()
+            .contains("not injective")
     );
 }
 

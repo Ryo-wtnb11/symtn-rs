@@ -881,15 +881,14 @@ fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
     let repr = header_end(&bytes);
     assert_eq!(bytes[repr], 2, "diagonal record tag");
     bytes.insert(repr, 3);
-    assert!(matches!(
-        TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+    assert!(
+        matches!(TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
             &runtime,
             &bytes,
             DecodeLimits::default(),
             &codec,
-        ),
-        Err(DecodeError::InvalidFormat(_))
-    ));
+        ), Err(DecodeError::InvalidFormat(m)) if m.contains("unknown lazy-adjoint parent representation"))
+    );
 }
 
 #[test]
@@ -904,10 +903,9 @@ fn malformed_framing_limits_and_provider_failures_are_typed_and_ordered() {
     for (offset, value) in [(0, b'X'), (10, 2), (11, 1)] {
         let mut malformed = bytes.clone();
         malformed[offset] = value;
-        assert!(matches!(
-            decode(&malformed, DecodeLimits::default(), &codec),
-            Err(DecodeError::InvalidFormat(_))
-        ));
+        assert!(
+            matches!(decode(&malformed, DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains(match offset { 0 => "bad magic", 10 => "wrong object kind", 11 => "wrong scalar kind", _ => unreachable!() }))
+        );
     }
     let mut unsupported = bytes.clone();
     unsupported[8..10].copy_from_slice(&2u16.to_le_bytes());
@@ -921,20 +919,17 @@ fn malformed_framing_limits_and_provider_failures_are_typed_and_ordered() {
     let mut bad_dual = bytes.clone();
     let dual_offset = header_end(&bad_dual);
     bad_dual[dual_offset] = 2;
-    assert!(matches!(
-        decode(&bad_dual, DecodeLimits::default(), &codec),
-        Err(DecodeError::InvalidFormat(_))
-    ));
-    assert!(matches!(
-        decode(&bytes[..bytes.len() - 1], DecodeLimits::default(), &codec),
-        Err(DecodeError::InvalidFormat(_))
-    ));
+    assert!(
+        matches!(decode(&bad_dual, DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains("duality flag is not 0 or 1"))
+    );
+    assert!(
+        matches!(decode(&bytes[..bytes.len() - 1], DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains("truncated input"))
+    );
     let mut trailing = bytes.clone();
     trailing.push(0);
-    assert!(matches!(
-        decode(&trailing, DecodeLimits::default(), &codec),
-        Err(DecodeError::InvalidFormat(_))
-    ));
+    assert!(
+        matches!(decode(&trailing, DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains("trailing bytes"))
+    );
 
     let limits = DecodeLimits {
         max_bytes: bytes.len() - 1,
@@ -991,10 +986,9 @@ fn malformed_tensor_tags_and_duplicate_or_missing_blocks_are_rejected() {
     for (offset, value) in [(10, 1), (11, 0), (11, 99), (header_end(&bytes), 99)] {
         let mut malformed = bytes.clone();
         malformed[offset] = value;
-        assert!(matches!(
-            decode(&malformed),
-            Err(DecodeError::InvalidFormat(_))
-        ));
+        assert!(
+            matches!(decode(&malformed), Err(DecodeError::InvalidFormat(m)) if m.contains(match offset { 10 => "wrong object kind", 11 => "wrong scalar kind", _ => "unknown tensor representation" }))
+        );
     }
 
     // Header + repr + ranks + one leg (dual, count, one-byte label, degeneracy).
@@ -1004,18 +998,16 @@ fn malformed_tensor_tags_and_duplicate_or_missing_blocks_are_rejected() {
 
     let mut missing = bytes[..first_block].to_vec();
     missing[block_count_offset..first_block].copy_from_slice(&0u64.to_le_bytes());
-    assert!(matches!(
-        decode(&missing),
-        Err(DecodeError::InvalidFormat(_))
-    ));
+    assert!(
+        matches!(decode(&missing), Err(DecodeError::InvalidFormat(m)) if m.contains("missing an admitted block"))
+    );
 
     let mut duplicate = bytes.clone();
     duplicate[block_count_offset..first_block].copy_from_slice(&2u64.to_le_bytes());
     duplicate.extend_from_slice(&bytes[first_block..]);
-    assert!(matches!(
-        decode(&duplicate),
-        Err(DecodeError::InvalidFormat(_))
-    ));
+    assert!(
+        matches!(decode(&duplicate), Err(DecodeError::InvalidFormat(m)) if m.contains("duplicate semantic block key"))
+    );
 
     for limits in [
         DecodeLimits {
@@ -1670,10 +1662,9 @@ fn every_scalar_mismatch_direction_is_typed_and_precedes_provider_resolution() {
     assert_eq!(missing.resolve_calls.load(Ordering::Relaxed), 0);
 
     // A tensor snapshot is never a graded space, whatever its scalar tag.
-    assert!(matches!(
-        GradedSpace::<U1FusionRule>::from_bytes_with(&f32_bytes, DecodeLimits::default(), &codec),
-        Err(DecodeError::InvalidFormat(_))
-    ));
+    assert!(
+        matches!(GradedSpace::<U1FusionRule>::from_bytes_with(&f32_bytes, DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains("wrong object kind"))
+    );
 }
 
 #[test]

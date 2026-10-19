@@ -4,6 +4,10 @@ mod support {
     use num_complex::{Complex32, Complex64};
     pub mod numerics;
 }
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use support::numerics;
 #[macro_use]
 #[allow(unused_macros)]
@@ -267,31 +271,42 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
     };
     let before = bits(&destination);
     let wrong_count = lhs.select(&[0]).unwrap();
-    assert!(matches!(
-        ContractPlan::new(&wrong_count, &rhs, &case.spec()),
-        Err(Error::InvalidArgument(_))
-    ));
+    assert!(ContractPlan::new(&wrong_count, &rhs, &case.spec())
+        .err()
+        .unwrap()
+        .report()
+        .contains("operand stacks have different member counts"));
     assert!(plan
         .execute_into(&wrong_count, &rhs, &mut destination, &mut workspace)
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("operand stacks have different member counts"));
     assert_eq!(bits(&destination), before);
     assert!(plan
         .execute_into(&lhs, &rhs, &mut destination, &mut foreign)
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("workspace belongs to another plan"));
     assert_eq!(bits(&destination), before);
     let wrong_destination = destination.select(&[0]).unwrap();
     let mut wrong_destination = wrong_destination;
     let wrong_before = bits(&wrong_destination);
     assert!(plan
         .execute_into(&lhs, &rhs, &mut wrong_destination, &mut workspace)
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("destination member count differs"));
     assert_eq!(bits(&wrong_destination), wrong_before);
     let v = u1(&[(0, 1)]);
     let wrong_member = TensorMap::<_, f64>::zeros(runtime, [&v], [&v]).unwrap();
     let wrong = StackedTensorMap::pack(&[wrong_member.clone(), wrong_member]).unwrap();
-    assert!(plan
-        .execute_into(&wrong, &rhs, &mut destination, &mut workspace)
-        .is_err());
+    assert!(matches!(
+        plan.execute_into(&wrong, &rhs, &mut destination, &mut workspace),
+        Err(symtn::typed::Error::BatchSignatureMismatch { member: None, .. })
+    ));
     assert_eq!(bits(&destination), before);
     plan.execute(&lhs, &rhs, &mut workspace).unwrap();
     plan.execute(&lhs, &rhs, &mut second).unwrap();
@@ -1030,7 +1045,9 @@ fn partitioned_output_uses_requested_codomain_rank() {
         codomain: &[0, 0],
         domain: &[2],
     };
-    assert!(ContractPlan::new(&lhs, &rhs, &malformed).is_err());
+    assert!(
+        matches!(ContractPlan::new(&lhs, &rhs, &malformed), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 3, .. }))
+    );
 }
 
 /// `case` with each member's operands rescaled: `lhs` by `lhs_scale`, `rhs`

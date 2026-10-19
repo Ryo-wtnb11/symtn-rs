@@ -126,10 +126,8 @@ macro_rules! check {
         // The current split is the unchanged device path.
         let current = hermitian.to_cuda().unwrap();
         assert!(current.svd_compact(&[0, 1], &[2, 3]).is_ok());
-        assert!(
-            current.svd_compact(&[0, 0], &[2, 3]).is_err(),
-            "malformed roles"
-        );
+        assert!(matches!(current.svd_compact(&[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. })),
+            "malformed roles");
     }};
 }
 

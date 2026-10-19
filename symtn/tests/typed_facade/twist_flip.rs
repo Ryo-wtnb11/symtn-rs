@@ -676,14 +676,13 @@ fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
     // per-sector scaling ever runs.
     let s: TensorMap<PlanarZ2, f64> = t.svd_compact(&[0], &[1]).unwrap().s;
     let compact_error = s.twist(&[0], Direction::Forward).unwrap_err();
-    assert!(
-        matches!(compact_error, symtn::typed::Error::InvalidArgument(_)),
-        "{compact_error:?}"
-    );
-    assert!(matches!(
-        s.twist(&[0], Direction::Inverse),
-        Err(symtn::typed::Error::InvalidArgument(_))
-    ));
+    assert!(compact_error.report().contains("carries non-unit sectors"));
+    assert!(s
+        .twist(&[0], Direction::Inverse)
+        .err()
+        .unwrap()
+        .report()
+        .contains("carries non-unit sectors"));
 }
 
 #[test]
@@ -728,10 +727,12 @@ fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
         flip_error.to_string().contains("no braiding"),
         "{flip_error}"
     );
-    assert!(matches!(
-        t.flip(&[0], Direction::Inverse),
-        Err(symtn::typed::Error::InvalidArgument(_))
-    ));
+    assert!(t
+        .flip(&[0], Direction::Inverse)
+        .err()
+        .unwrap()
+        .report()
+        .contains("fusion rule has no braiding"));
 
     let unflipped: TensorMap<PlanarZ2, f64> = t.flip(&[], Direction::Forward).unwrap();
     assert_eq!(

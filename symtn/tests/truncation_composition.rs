@@ -31,6 +31,10 @@
 //! charges and SU(2) spins, whose TensorKit order is the label order the hand
 //! selection breaks ties in, so the kept bond is part of the exact gate.
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
@@ -1093,10 +1097,11 @@ fn find_truncated_rejects_a_truncation_space_from_another_rule() {
     // A U(1) leg's `SectorId`s read as SU(2)'s would name unrelated spins and
     // truncate to nothing, so the mismatch must be a typed error.
     let result = leg.find_truncated(&spectra, &Truncation::space(foreign.truncspace()));
-    assert!(
-        matches!(result, Err(Error::Operation(_))),
-        "a foreign-rule profile must be a typed error, got {result:?}"
-    );
+    assert!(result
+        .err()
+        .unwrap()
+        .report()
+        .contains("truncation space profile was built for a different fusion rule"));
 }
 
 #[test]
@@ -1108,8 +1113,16 @@ fn a_selection_from_another_leg_is_rejected_by_both_appliers() {
     let tensor: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&leg], [&leg]).unwrap();
     assert!(tensor
         .restrict_leg(&[(0, &selection), (1, &selection)])
-        .is_err());
-    assert!(tensor.restrict_leg(&[(0, &selection)]).is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("axis 0 is not the leg"));
+    assert!(tensor
+        .restrict_leg(&[(0, &selection)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("axis 0 is not the leg"));
 }
 
 /// A caller generic over the payload can name every bound `find_truncated`

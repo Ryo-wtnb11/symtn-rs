@@ -194,8 +194,12 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
 
     // Rank mismatch in both directions: one domain leg against two codomain
     // legs, and two domain legs against one codomain leg.
-    assert!(endo.compose(&tall).is_err());
-    assert!(wide.compose(&endo).is_err());
+    assert!(
+        matches!(endo.compose(&tall), Err(symtn::typed::Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::ContractAxisCountMismatch { lhs: 1, .. }))
+    );
+    assert!(
+        matches!(wide.compose(&endo), Err(symtn::typed::Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::ContractAxisCountMismatch { lhs: 2, .. }))
+    );
 
     // Matching ranks, mismatched legs: the degeneracies differ, so the two do
     // not meet even though the shapes line up.

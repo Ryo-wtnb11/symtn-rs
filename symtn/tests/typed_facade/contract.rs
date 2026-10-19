@@ -221,7 +221,10 @@ fn contract_rejects_operands_with_distinct_rule_identities() {
                 domain: &[1]
             }
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("fusion rule mismatch"));
 }
 
 #[test]
@@ -254,7 +257,12 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
         &z3_dense_leg(&other_rule, 3),
         1.0,
     );
-    assert!(lhs.otimes(&other_rule).is_err());
+    assert!(lhs
+        .otimes(&other_rule)
+        .err()
+        .unwrap()
+        .report()
+        .contains("fusion rule mismatch"));
 }
 
 #[test]
@@ -306,7 +314,10 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
                 domain: &[1, 3]
             }
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("ordinary contraction requires symmetric"));
 
     let actual = lhs.otimes(&rhs).unwrap();
 

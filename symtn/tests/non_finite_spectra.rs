@@ -8,6 +8,8 @@
 //! NaN in the *second* sector so a fold that ignores NaN would still see a
 //! finite maximum from the first.
 
+use report::Report;
+
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
@@ -81,13 +83,13 @@ macro_rules! assert_nan_spectrum_is_rejected {
                     .and_then(|symtn::typed::Svd { s, .. }| {
                         s.domain()[0].find_truncated(&s.diagview()?, &policy)
                     });
-            assert!(svd.is_err(), "svd composition {policy:?}");
+            assert!(svd.err().unwrap().report().contains("svd input components must be finite"), "svd composition {policy:?}");
             let eigh = diagonal
                 .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
                 .and_then(|symtn::typed::Eigh { d, .. }| {
                     d.domain()[0].find_truncated(&d.diagview()?, &policy)
                 });
-            assert!(eigh.is_err(), "eigh composition {policy:?}");
+            assert!(eigh.err().unwrap().report().contains("eigh input components must be finite"), "eigh composition {policy:?}");
         }
     }};
 }

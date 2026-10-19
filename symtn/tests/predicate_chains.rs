@@ -11,6 +11,10 @@ mod numerics;
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use num_complex::{Complex32, Complex64};
 use numerics::Numeric;
 use std::sync::Arc;
@@ -134,8 +138,16 @@ macro_rules! check_family {
         ] {
             assert_eq!(is_posdef_compact!(t, tol, re), expected, "{name}");
         }
-        assert!(project_hermitian!(isometry).is_err());
-        assert!(project_antihermitian!(isometry).is_err());
+        assert!(project_hermitian!(isometry)
+            .err()
+            .unwrap()
+            .report()
+            .contains("tensors live on different spaces or block layouts"));
+        assert!(project_antihermitian!(isometry)
+            .err()
+            .unwrap()
+            .report()
+            .contains("tensors live on different spaces or block layouts"));
 
         assert_projection("hermitian", &h, &value, 1.0, tol);
         assert_projection("antihermitian", &a, &value, -1.0, tol);
@@ -241,7 +253,11 @@ fn checked_generic_su3_chains_decide_true_and_false_cases() {
     let tall: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&rt, [&leg, &leg], [&leg], |_, ij: &[usize]| fill(ij)).unwrap();
     let Qr { q: isometry, .. } = tall.qr_compact(&[0, 1], &[2]).unwrap();
-    assert!(project_hermitian!(isometry).is_err());
+    assert!(project_hermitian!(isometry)
+        .err()
+        .unwrap()
+        .report()
+        .contains("tensors live on different spaces or block layouts"));
 
     let tol = 1e-10;
     for (name, t, expected) in [
