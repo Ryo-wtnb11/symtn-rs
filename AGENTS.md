@@ -24,7 +24,12 @@ complete every applicable local and CI gate before merge. Do not edit or
 update a dependency without explicit user approval.
 
 State supported providers, scalars, storage, placement, errors, and resource
-costs precisely. Keep code, tests, rustdoc, examples, README, and feature
-claims consistent. Pin performance evidence to a revision, provider, build,
-thread count, workload, and raw result; report regressions and inconclusive
-measurements too.
+costs precisely. Keep code, tests, rustdoc, examples, README, `docs/`, and
+feature claims consistent in the same commit: before committing, search
+`docs/`, `README.md`, `examples/`, and rustdoc for every public name, error,
+option, and behavior the change touches, and update each stale statement.
+Reviewers treat a stale document as a finding.
+
+Pin performance evidence to a revision, provider, build, thread count,
+workload, and raw result; report regressions and inconclusive measurements
+too.
