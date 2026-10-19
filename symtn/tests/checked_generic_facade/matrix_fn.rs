@@ -369,12 +369,9 @@ fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
     )
     .unwrap();
     let before = rejected.dense_data().unwrap().to_vec();
-    assert!(matches!(
-        rejected.inv(&[0, 1], &[2]),
-        Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-            _
-        )))
-    ));
+    assert!(
+        matches!(rejected.inv(&[0, 1], &[2]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::SpaceMismatch { message } if message.contains("inv requires isomorphic")))
+    );
     assert_eq!(rejected.dense_data().unwrap(), before.as_slice());
 }
 
@@ -455,12 +452,9 @@ fn checked_generic_exp_rejects_nonendomorphism_before_provider_work() {
         TensorMap::from_subblock_fn(&runtime, [&wide], [&narrow], |_, _| 1.0).unwrap();
     let before = source.dense_data().unwrap().to_vec();
     reset_provider_queries(&provider);
-    assert!(matches!(
-        source.exp(&[0], &[1]),
-        Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-            _
-        )))
-    ));
+    assert!(
+        matches!(source.exp(&[0], &[1]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::SpaceMismatch { message } if message.contains("exp requires an endomorphism")))
+    );
     assert_no_provider_queries(&provider);
     assert_eq!(source.dense_data().unwrap(), before.as_slice());
 }
@@ -482,12 +476,9 @@ fn checked_generic_exp_rejects_early_and_late_nonfinite_sectors_without_publicat
             })
             .unwrap();
         let before = source.dense_data().unwrap().to_vec();
-        assert!(matches!(
-            source.exp(&[0], &[1]),
-            Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-                _
-            )))
-        ));
+        assert!(
+            matches!(source.exp(&[0], &[1]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::InvalidArgument { message } if message.contains("finite coupled-sector blocks")))
+        );
         assert_eq!(source.dense_data().unwrap().len(), before.len());
         assert!(source
             .dense_data()
@@ -650,7 +641,12 @@ fn checked_generic_inv_destination_admission_failure_is_typed_and_nonpublishing(
     provider.invalid_style.store(true, Ordering::Relaxed);
     assert!(matches!(
         source.inv(&[0], &[1]),
-        Err(GenericTensorError::Structure(_))
+        Err(GenericTensorError::Structure(
+            CheckedGenericStructureError::Core(symtn_core::CoreError::UnsupportedFusionStyle {
+                actual: symtn::sector::FusionStyleKind::Unique,
+                ..
+            })
+        ))
     ));
     assert_eq!(source.dense_data().unwrap(), before.as_slice());
 }
@@ -695,12 +691,9 @@ fn checked_generic_inv_accepts_unequal_isomorphic_spaces_and_rejects_nonisomorph
     let nonisomorphic: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&narrow], [&x], |_, _| 1.0).unwrap();
     let before = nonisomorphic.dense_data().unwrap().to_vec();
-    assert!(matches!(
-        nonisomorphic.inv(&[0], &[1]),
-        Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-            _
-        )))
-    ));
+    assert!(
+        matches!(nonisomorphic.inv(&[0], &[1]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::SpaceMismatch { message } if message.contains("inv requires isomorphic")))
+    );
     assert_eq!(nonisomorphic.dense_data().unwrap(), before.as_slice());
 }
 
@@ -725,12 +718,9 @@ fn checked_generic_inv_singular_early_and_late_sectors_preserve_source() {
             .collect::<Vec<_>>();
         assert_eq!(labels, [Label::Vacuum, Label::X]);
         let before = source.dense_data().unwrap().to_vec();
-        assert!(matches!(
-            source.inv(&[0], &[1]),
-            Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-                _
-            )))
-        ));
+        assert!(
+            matches!(source.inv(&[0], &[1]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::Dense(symtn_dense::DenseError::NumericalFailure { op: "solve_into", .. })))
+        );
         assert_eq!(source.dense_data().unwrap(), before.as_slice());
     }
 }
@@ -812,12 +802,9 @@ fn checked_generic_left_solve_preflight_failures_are_nonpublishing() {
     let rhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&x], [&x], |_, _| 1.0).unwrap();
     let before = lhs.dense_data().unwrap().to_vec();
-    assert!(matches!(
-        lhs.solve(&[0], &[1], &rhs, &[0], &[1]),
-        Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-            _
-        )))
-    ));
+    assert!(
+        matches!(lhs.solve(&[0], &[1], &rhs, &[0], &[1]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::SpaceMismatch { message } if message.contains("isomorphic divisor")))
+    );
     assert_eq!(lhs.dense_data().unwrap(), before.as_slice());
 
     let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -874,12 +861,9 @@ fn checked_generic_left_solve_singular_sectors_are_nonpublishing() {
             })
             .unwrap();
         let before = divisor.dense_data().unwrap().to_vec();
-        assert!(matches!(
-            divisor.solve(&[0], &[1], &rhs, &[0], &[1]),
-            Err(GenericTensorError::Facade(symtn::typed::Error::Operation(
-                _
-            )))
-        ));
+        assert!(
+            matches!(divisor.solve(&[0], &[1], &rhs, &[0], &[1]), Err(GenericTensorError::Facade(symtn::typed::Error::Operation(e))) if matches!(*e, symtn::typed::OperationError::Dense(symtn_dense::DenseError::NumericalFailure { op: "solve_into", .. })))
+        );
         assert_eq!(divisor.dense_data().unwrap(), before.as_slice());
     }
 }

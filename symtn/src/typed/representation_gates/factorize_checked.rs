@@ -660,13 +660,14 @@ fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
     duplicate[1].sector = duplicate[0].sector;
     let mut short = spectrum.clone();
     short[0].values.pop();
-    for malformed in [missing, duplicate, short] {
-        assert!(matches!(
-            admit(&malformed),
-            Err(CheckedGenericFactorPlanError::Operation(
-                OperationError::InvalidArgument { .. }
-            ))
-        ));
+    for (malformed, expected) in [
+        (missing, "sector count differs"),
+        (duplicate, "bond sector twice"),
+        (short, "length differs"),
+    ] {
+        assert!(
+            matches!(admit(&malformed), Err(CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains(expected))
+        );
     }
 }
 

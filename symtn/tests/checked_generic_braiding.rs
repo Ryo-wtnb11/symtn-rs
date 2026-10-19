@@ -1102,7 +1102,15 @@ fn assert_compose_any_braiding<D>(
     // Composition is not a contraction over mismatched spaces; a lazy
     // adjoint operand composes as its materialization does (TensorKit
     // `mul!` over `block(a, c)'`).
-    assert!(matches!(a.compose(&a), Err(GenericTensorError::Plan(_))));
+    assert!(matches!(
+        a.compose(&a),
+        Err(GenericTensorError::Plan(
+            CheckedGenericPlanError::Operation(OperationError::ContractAxisCountMismatch {
+                lhs: 1,
+                ..
+            })
+        ))
+    ));
     let adjoint = a.adjoint().unwrap();
     let got = adjoint.compose(&a).unwrap();
     assert_compose_oracle(&adjoint.materialize().unwrap(), &a, &got);

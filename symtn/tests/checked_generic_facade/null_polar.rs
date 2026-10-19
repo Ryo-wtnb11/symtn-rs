@@ -90,12 +90,9 @@ fn checked_generic_polar_direction_covers_rectangular_side_only_and_empty_inputs
         })
         .unwrap();
     assert!(source.left_polar(&[0], &[1]).is_ok());
-    assert!(matches!(
-        source.right_polar(&[0], &[1]),
-        Err(GenericTensorError::Plan(
-            symtn::typed::CheckedGenericPlanError::Operation(_)
-        ))
-    ));
+    assert!(
+        matches!(source.right_polar(&[0], &[1]), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("right_polar requires columns >= rows"))
+    );
     let codomain_only =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 1)]).unwrap();
     let domain_only = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1)]).unwrap();
@@ -103,7 +100,9 @@ fn checked_generic_polar_direction_covers_rectangular_side_only_and_empty_inputs
         TensorMap::from_subblock_fn(&runtime, [&codomain_only], [&domain_only], |_, _| 0.0)
             .unwrap();
     assert!(side_only.left_polar(&[0], &[1]).is_ok());
-    assert!(side_only.right_polar(&[0], &[1]).is_err());
+    assert!(
+        matches!(side_only.right_polar(&[0], &[1]), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("right_polar requires columns >= rows"))
+    );
     let empty = GradedSpace::try_new(Arc::clone(&provider), []).unwrap();
     let empty_map: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&empty], [&empty]).unwrap();
     assert!(empty_map

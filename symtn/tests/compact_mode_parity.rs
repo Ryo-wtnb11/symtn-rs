@@ -3148,7 +3148,7 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
         assert!(
             matches!(
                 cause::<symtn::typed::OperationError>(&wrong_error),
-                Some(symtn::typed::OperationError::SpaceMismatch { .. })
+                Some(symtn::typed::OperationError::SpaceMismatch { message }) if message.contains("destination")
             ),
             "{pass}: {wrong_error:?}"
         );

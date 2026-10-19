@@ -520,8 +520,8 @@ fn checked_only_contract_and_compose_keep_left_authority() {
         TensorMap::from_subblock_fn(&runtime, [&wrong_leg], [&wrong_leg], |_, _| 1.0).unwrap();
     left_provider.algebra_queries.store(0, Ordering::Relaxed);
     wrong_provider.algebra_queries.store(0, Ordering::Relaxed);
-    assert!(source
-        .contract(
+    assert!(matches!(
+        source.contract(
             &wrong_identity,
             &ContractSpec {
                 lhs: &[1],
@@ -529,8 +529,13 @@ fn checked_only_contract_and_compose_keep_left_authority() {
                 codomain: &[0],
                 domain: &[1]
             }
-        )
-        .is_err());
+        ),
+        Err(GenericTensorError::Plan(
+            symtn::typed::CheckedGenericPlanError::Core(
+                symtn_core::CoreError::FusionRuleMismatch { .. }
+            )
+        ))
+    ));
     assert_eq!(left_provider.algebra_queries.load(Ordering::Relaxed), 0);
     assert_eq!(wrong_provider.algebra_queries.load(Ordering::Relaxed), 0);
 
@@ -686,19 +691,26 @@ fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
 
     assert!(matches!(
         lhs.otimes(&wrong_runtime),
-        Err(GenericTensorError::Facade(_))
+        Err(GenericTensorError::Facade(
+            symtn::typed::Error::RuntimeMismatch
+        ))
     ));
     assert!(matches!(
         lhs.otimes(&wrong_identity),
         Err(GenericTensorError::TensorProduct(
-            CheckedGenericTensorProductError::Core(_)
+            CheckedGenericTensorProductError::Core(
+                symtn_core::CoreError::FusionRuleMismatch { .. }
+            )
         ))
     ));
     first.invalid_style.store(true, Ordering::Relaxed);
     assert!(matches!(
         lhs.otimes(&lhs),
         Err(GenericTensorError::TensorProduct(
-            CheckedGenericTensorProductError::Core(_)
+            CheckedGenericTensorProductError::Core(symtn_core::CoreError::UnsupportedFusionStyle {
+                actual: symtn::sector::FusionStyleKind::Unique,
+                ..
+            })
         ))
     ));
     assert_eq!(first.algebra_queries.load(Ordering::Relaxed), 0);
@@ -1030,12 +1042,9 @@ fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing(
             symtn::typed::Error::RuntimeMismatch
         ))
     ));
-    assert!(matches!(
-        lhs.cat(&bad_arguments, Side::Domain),
-        Err(GenericTensorError::Facade(
-            symtn::typed::Error::InvalidArgument(_)
-        ))
-    ));
+    assert!(
+        matches!(lhs.cat(&bad_arguments, Side::Domain), Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(message))) if message.contains("exactly one domain leg"))
+    );
     assert_eq!(provider.identity_queries.load(Ordering::Relaxed), 0);
     assert_eq!(provider.algebra_queries.load(Ordering::Relaxed), 0);
 

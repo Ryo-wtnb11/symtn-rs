@@ -135,7 +135,9 @@ fn single_precision_exp_admits_what_its_route_predicate_sends_to_eigh() {
             _ => 0.0,
         })
         .unwrap();
-    assert!(t.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).is_err());
+    assert!(
+        matches!(t.eigh_vals(&[0], &[1], HermitianTol::DEFAULT), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidArgument { message } if message.contains("Hermitian coupled-sector blocks")))
+    );
     let exp = t.exp(&[0], &[1]).unwrap();
     assert!(exp
         .materialize()

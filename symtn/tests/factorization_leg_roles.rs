@@ -22,6 +22,9 @@ use symtn::typed::{
     Eig, Eigh, Error, GradedSpace, LeftPolar, Lq, Qr, RightPolar, Runtime, Svd, TensorMap,
 };
 
+#[path = "support/report.rs"]
+mod report;
+
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
 
@@ -210,14 +213,16 @@ macro_rules! check_rectangular {
             assert_same!(w2, w, format!("{} left_polar w", $label));
             assert_same!(pos2, pos, format!("{} left_polar p", $label));
         } else {
-            assert!(t.left_polar(rows, cols).is_err());
+            let error = t.left_polar(rows, cols).unwrap_err();
+            assert!(matches!(report::cause::<OperationError>(&error), Some(OperationError::InvalidArgument { message }) if message.contains("left_polar requires")));
         }
         if let Ok(RightPolar { p: pos, wh }) = p.right_polar(ir, ic) {
             let RightPolar { p: pos2, wh: wh2 } = t.right_polar(rows, cols).unwrap();
             assert_same!(wh2, wh, format!("{} right_polar wh", $label));
             assert_same!(pos2, pos, format!("{} right_polar p", $label));
         } else {
-            assert!(t.right_polar(rows, cols).is_err());
+            let error = t.right_polar(rows, cols).unwrap_err();
+            assert!(matches!(report::cause::<OperationError>(&error), Some(OperationError::InvalidArgument { message }) if message.contains("right_polar requires")));
         }
     }};
 }
@@ -546,7 +551,7 @@ fn malformed_roles_are_rejected_before_the_operation() {
         assert_same!(s, expected.s, "zero-length s");
         assert_same!(vh, expected.vh, "zero-length vh");
         assert!(
-            t.exp(rows, cols).is_err(),
+            matches!(t.exp(rows, cols), Err(Error::Operation(e)) if matches!(*e, OperationError::SpaceMismatch { message } if message.contains("exp requires an endomorphism"))),
             "a vector view is not an endomorphism"
         );
     }
