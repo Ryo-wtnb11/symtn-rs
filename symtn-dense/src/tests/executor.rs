@@ -988,22 +988,6 @@ fn default_executor_advertises_native_owned_full_svd() {
     not(feature = "provider-inject")
 ))]
 #[test]
-fn default_executor_runs_native_owned_full_svd() {
-    let mut executor = DefaultDenseExecutor::new();
-    let outputs = executor
-        .svd_full_owned(DenseOwned::F64(vec![1.0, 3.0, 2.0, 4.0, 5.0, 6.0]), 2, 3)
-        .unwrap();
-
-    assert_eq!(outputs.len(), 3);
-    assert_eq!(outputs[0].shape(), [2, 2]);
-    assert_eq!(outputs[1].shape(), [2]);
-    assert_eq!(outputs[2].shape(), [3, 3]);
-}
-#[cfg(all(
-    any(feature = "cpu-faer", feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
-#[test]
 fn native_owned_full_svd_validates_overflow_length_then_zero_extent() {
     let mut executor = DefaultDenseExecutor::new();
     let inputs = crate::probe::record();

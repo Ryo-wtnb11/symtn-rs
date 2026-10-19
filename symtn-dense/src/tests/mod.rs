@@ -5,6 +5,11 @@ use num_complex::{Complex32, Complex64};
 
 mod dot;
 mod executor;
+#[cfg(all(
+    any(feature = "cpu-faer", feature = "cpu-blas-core"),
+    not(feature = "provider-inject")
+))]
+mod factor_properties;
 mod tensor;
 mod view;
 
