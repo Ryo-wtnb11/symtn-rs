@@ -10,7 +10,7 @@
 //! (`symtn/tests/typed_contract_host_oracle.rs`, `contract_cases::fermionic_general`).
 
 use super::*;
-use crate::contract::fusion_block::{BackendRank2Gemm, FusionBlockContractWorkspace};
+use crate::contract::fusion_block::FusionBlockContractWorkspace;
 use symtn_operations::ContractDestinationInit;
 
 /// Exactly representable payload in `{-2, -1, ±0, 1, 2}`.
