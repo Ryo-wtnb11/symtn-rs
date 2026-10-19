@@ -1165,7 +1165,7 @@ fn parallel_plan_compile_matches_serial_plan() {
 }
 
 #[test]
-fn all_codomain_invalid_operation_is_thread_count_invariant() {
+fn all_codomain_repeated_axis_is_an_invalid_permutation() {
     let keys = [1, 2].map(|sector| {
         FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(
@@ -1183,18 +1183,12 @@ fn all_codomain_invalid_operation_is_thread_count_invariant() {
     let structure =
         packed_fixture_structure(2, keys.into_iter().map(|key| (key, vec![1, 1]))).unwrap();
     let invalid_operation = TreeTransformOperation::braid([0, 0], [], [0, 1], []);
-    for threads in [1, 2, 4] {
-        let result = build_all_codomain_tree_transform_group_plan(
-            &SU2FusionRule,
-            invalid_operation.clone(),
-            &structure,
-        );
-
-        // What: invalid syntax is rejected before worker count can affect
-        // compilation or publish any cache entry.
-        assert!(result.is_err());
-        let _ = threads;
-    }
+    let result =
+        build_all_codomain_tree_transform_group_plan(&SU2FusionRule, invalid_operation, &structure);
+    assert!(matches!(
+        result,
+        Err(OperationError::InvalidPermutation { .. })
+    ));
 }
 
 #[test]

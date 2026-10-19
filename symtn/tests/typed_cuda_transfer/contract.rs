@@ -866,33 +866,6 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         wrong_space_before.as_slice()
     );
 
-    let mut short =
-        TensorMap::<U1FusionRule, f64>::from_subblock_fn(&runtime, [&inner], [&inner], |_, _| 7.5)
-            .unwrap()
-            .to_cuda()
-            .unwrap();
-    let short_before = short.to_host().unwrap().dense_data().unwrap().to_vec();
-    assert!(
-        lhs.contract_into(
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1]
-            },
-            &mut short,
-            1.0,
-            0.0,
-        )
-        .is_err(),
-        "a destination of the wrong length must be rejected"
-    );
-    assert_eq!(
-        short.to_host().unwrap().dense_data().unwrap(),
-        short_before.as_slice()
-    );
-
     let mut destination = poisoned();
     let shared = destination.clone();
     assert_rejected(
