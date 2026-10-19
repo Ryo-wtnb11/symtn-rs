@@ -35,7 +35,8 @@ fn main() -> Result<(), Error> {
     // The repeated j is contracted, leaving codomain i and domain k. Each
     // operand's `;` split is checked against its tensor. `contract!` is
     // `Network::new([["i", "j"], ["j", "k"]], [false, false], [1, 1],
-    // ["i", "k"], Some(1))?.contract(&[&a, &b])`, built once per call site.
+    // ["i", "k"], Some(1))` (whose label structure the macro checks at compile
+    // time) followed by `.contract(&[&a, &b])`, built once per call site.
     let c = contract!([i; k] := a[i; j] * b[j; k])?;
     assert_eq!((c.codomain_rank(), c.domain_rank()), (1, 1));
     // A tensor's inner product with itself is its squared norm.
