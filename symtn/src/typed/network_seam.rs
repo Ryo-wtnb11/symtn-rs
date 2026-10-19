@@ -250,14 +250,24 @@ where
         let source_space = source.logical_space().space();
         if destination_space.nout() != source_space.nout()
             || destination_space.nin() != source_space.nin()
-            || ranges.len() != destination_space.rank()
-            || !Arc::ptr_eq(
-                self.logical_space().provider_arc(),
-                source.logical_space().provider_arc(),
-            )
         {
             return Err(Error::InvalidArgument(
-                "network slice partial does not match accumulator rank/provider".to_string(),
+                format!("network slice partial has codomain/domain split ({}, {}) but the accumulator has ({}, {})", source_space.nout(), source_space.nin(), destination_space.nout(), destination_space.nin()),
+            ));
+        }
+        if ranges.len() != destination_space.rank() {
+            return Err(Error::InvalidArgument(format!(
+                "network slice partial has {} ranges for a rank-{} accumulator",
+                ranges.len(),
+                destination_space.rank()
+            )));
+        }
+        if !Arc::ptr_eq(
+            self.logical_space().provider_arc(),
+            source.logical_space().provider_arc(),
+        ) {
+            return Err(Error::InvalidArgument(
+                "network slice partial comes from a different sector provider".to_string(),
             ));
         }
         let destination_legs = destination_space

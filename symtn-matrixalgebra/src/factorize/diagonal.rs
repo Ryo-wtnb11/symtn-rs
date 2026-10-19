@@ -135,7 +135,10 @@ where
     }
     let structure = raw.structure();
     if structure.block_count() != spectrum.len() {
-        return Err(spectrum_mismatch().into());
+        return Err(spectrum_mismatch(
+            "compact diagonal spectrum sector count differs from the bond",
+        )
+        .into());
     }
     for index in 0..structure.block_count() {
         let block = structure
@@ -147,11 +150,16 @@ where
                 .ok()
         });
         let Some(entry) = entry.map(|index| &spectrum[index]) else {
-            return Err(spectrum_mismatch().into());
+            return Err(
+                spectrum_mismatch("compact diagonal spectrum is missing a bond sector").into(),
+            );
         };
         let length = entry.values.len();
         if block.shape() != [length, length] {
-            return Err(spectrum_mismatch().into());
+            return Err(spectrum_mismatch(
+                "compact diagonal spectrum length differs from the sector degeneracy",
+            )
+            .into());
         }
     }
     Ok(())
@@ -170,10 +178,8 @@ fn require_one_leg_endomorphism(space: &DynamicFusionMapSpace) -> Result<(), Ope
     Ok(())
 }
 
-fn spectrum_mismatch() -> OperationError {
-    OperationError::InvalidArgument {
-        message: "compact diagonal spectrum does not match its bond sectors and degeneracies",
-    }
+fn spectrum_mismatch(message: &'static str) -> OperationError {
+    OperationError::InvalidArgument { message }
 }
 
 /// The structural admission of a compact diagonal `spectrum` on `space`.
@@ -217,7 +223,7 @@ where
         }
     };
     let by_sector =
-        aligned_diagonal_spectrum_by_sector(&regions, spectrum).ok_or_else(spectrum_mismatch)?;
+        aligned_diagonal_spectrum_by_sector(&regions, spectrum).map_err(spectrum_mismatch)?;
     Ok(DiagonalBond {
         space,
         regions,

@@ -57,7 +57,7 @@ macro_rules! assert_nan_spectrum_is_rejected {
         ];
         for policy in policies() {
             assert!(
-                leg.find_truncated(&spectra, &policy).is_err(),
+                matches!(leg.find_truncated(&spectra, &policy), Err(Error::Operation(error)) if matches!(*error, OperationError::InvalidArgument { message } if message.contains("finite") && message.contains("non-negative"))),
                 "find_truncated accepted a NaN spectrum under {policy:?}"
             );
         }

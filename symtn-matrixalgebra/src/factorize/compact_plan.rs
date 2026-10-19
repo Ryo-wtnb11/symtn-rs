@@ -468,26 +468,28 @@ pub(super) fn sector_region_index_map(
 pub(super) fn aligned_diagonal_spectrum_by_sector<'a, D>(
     regions: &[CoupledSectorRegion],
     spectrum: &'a [SectorSpectrum<D>],
-) -> Option<FxHashMap<SectorId, &'a SectorSpectrum<D>>> {
+) -> Result<FxHashMap<SectorId, &'a SectorSpectrum<D>>, &'static str> {
     if spectrum.len() != regions.len() {
-        return None;
+        return Err("compact diagonal spectrum sector count differs from the bond");
     }
     let mut by_sector = FxHashMap::with_capacity_and_hasher(spectrum.len(), Default::default());
     for entry in spectrum {
         if by_sector.insert(entry.sector, entry).is_some() {
-            return None;
+            return Err("compact diagonal spectrum lists a bond sector twice");
         }
     }
     for region in regions {
-        let entry = by_sector.get(&region.coupled())?;
-        if !region.has_aligned_diagonal()
-            || region.rows() != region.cols()
-            || entry.values.len() != region.rows()
-        {
-            return None;
+        let entry = by_sector
+            .get(&region.coupled())
+            .ok_or("compact diagonal spectrum is missing a bond sector")?;
+        if !region.has_aligned_diagonal() || region.rows() != region.cols() {
+            return Err("compact diagonal spectrum bond region is not an aligned square diagonal");
+        }
+        if entry.values.len() != region.rows() {
+            return Err("compact diagonal spectrum length differs from the sector degeneracy");
         }
     }
-    Some(by_sector)
+    Ok(by_sector)
 }
 
 /// Sector -> region index lookup over one factor's region table.
