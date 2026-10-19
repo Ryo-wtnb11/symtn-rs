@@ -931,7 +931,9 @@ where
         .all(|(&actual, &expected)| {
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
-    assert!(lazy.trace_pairs(&[(0, 3)]).is_err());
+    assert!(
+        matches!(lazy.trace_pairs(&[(0, lazy.rank())]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
+    );
     assert!(
         matches!(lazy.trace_pairs(&[(0, 0)]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
     );
