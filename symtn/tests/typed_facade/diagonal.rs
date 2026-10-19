@@ -180,7 +180,16 @@ fn compose_declines_a_compact_arm_it_cannot_prove() {
         .unwrap()
         .report()
         .contains("leg degeneracy mismatch"));
-    assert!(narrow_s.compose(&wide).is_err());
+    let wide_vh = wide.svd_compact(&[0, 1], &[2]).unwrap().vh;
+    let result = narrow_s.compose(&wide_vh);
+    assert!(
+        matches!(result, Err(symtn::typed::Error::Operation(_)))
+            && result
+                .err()
+                .unwrap()
+                .report()
+                .contains("leg degeneracy mismatch")
+    );
 }
 
 // ---------------------------------------------------------------------------

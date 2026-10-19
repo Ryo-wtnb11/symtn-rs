@@ -1740,11 +1740,14 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
 
     for invalid in [vec![2, 1], vec![1, 1], vec![0, 5], vec![]] {
         let error = LegSelection::try_new(&leg, [(zero, invalid.clone())]).unwrap_err();
-        assert!(error.report().contains(match invalid.as_slice() {
-            [2, 1] | [1, 1] => "strictly increasing",
-            [0, 5] => "exceeds its",
-            [] => "at least one position",
-            _ => unreachable!(),
-        }));
+        assert!(
+            matches!(error, symtn::typed::Error::InvalidArgument(ref m) if m.contains(match invalid.as_slice() {
+                [2, 1] | [1, 1] => "strictly increasing",
+                [0, 5] => "exceeds its",
+                [] => "at least one position",
+                _ => unreachable!(),
+            })),
+            "{invalid:?}: {error:?}"
+        );
     }
 }

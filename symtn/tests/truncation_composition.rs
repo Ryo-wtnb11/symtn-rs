@@ -1097,6 +1097,10 @@ fn find_truncated_rejects_a_truncation_space_from_another_rule() {
     // A U(1) leg's `SectorId`s read as SU(2)'s would name unrelated spins and
     // truncate to nothing, so the mismatch must be a typed error.
     let result = leg.find_truncated(&spectra, &Truncation::space(foreign.truncspace()));
+    assert!(
+        matches!(result, Err(Error::Operation(_))),
+        "a foreign-rule profile must be a typed error, got {result:?}"
+    );
     assert!(result
         .err()
         .unwrap()

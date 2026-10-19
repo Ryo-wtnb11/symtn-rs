@@ -271,11 +271,9 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
     };
     let before = bits(&destination);
     let wrong_count = lhs.select(&[0]).unwrap();
-    assert!(ContractPlan::new(&wrong_count, &rhs, &case.spec())
-        .err()
-        .unwrap()
-        .report()
-        .contains("operand stacks have different member counts"));
+    assert!(
+        matches!(ContractPlan::new(&wrong_count, &rhs, &case.spec()), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts"))
+    );
     assert!(plan
         .execute_into(&wrong_count, &rhs, &mut destination, &mut workspace)
         .err()
