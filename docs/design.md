@@ -49,14 +49,6 @@ shapes, strides, and offsets. An owned dense tensor's reduced payload uses
 that checked layout; compact diagonal and lazy-adjoint representations retain
 their own structure instead of pretending to be dense storage.
 
-Compact-diagonal admission reports invalid arguments separately for sector
-count, missing or duplicate sectors, incompatible region geometry, and spectrum
-length versus bond degeneracy. Network scatter reports split, range-count, and
-sector-provider mismatches separately before validating individual legs or
-mutating the accumulator. Truncation conversion preserves the policy or
-spectrum reason in `OperationError::InvalidArgument`; a profile from a different
-fusion rule retains its own reason.
-
 Tree transforms compile source and destination identities, layout moves, and
 recoupling coefficients into `TreeTransformStructure`. The structure contains
 no tensor payload. Replay applies its Single moves, inactive destination fills,
