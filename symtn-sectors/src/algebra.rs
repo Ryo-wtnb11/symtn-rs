@@ -257,6 +257,13 @@ impl SectorOrderKey {
         left
     }
 
+    /// The flattened per-factor positions, for an order other than `isless`
+    /// over the same positions (TensorKit's `⊗` iteration of a product).
+    #[doc(hidden)]
+    pub fn positions(&self) -> &[u64] {
+        &self.0
+    }
+
     fn degree(&self) -> u128 {
         self.0.iter().map(|&position| u128::from(position)).sum()
     }

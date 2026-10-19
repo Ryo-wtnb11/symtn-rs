@@ -741,6 +741,19 @@ where
     Ok(())
 }
 
+/// One slot of a tree's TensorKit iteration key. Each slot position holds
+/// the same variant in every tree of one block side.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum TreeOrderSlot {
+    /// An uncoupled sector: `sectors(V)` walks its `SectorDict` in `isless`
+    /// order.
+    Uncoupled(symtn_core::SectorOrderKey),
+    /// An inner line: `c ⊗ dual(b)` order, the per-factor positions compared
+    /// last factor first.
+    Line(Vec<u64>),
+    Vertex(usize),
+}
+
 /// The matrix index ranges of `trees` (one side of a coupled block, in
 /// storage order) listed in TensorKit `fusiontrees` order.
 ///
@@ -748,11 +761,13 @@ where
 /// `_fusiontree_iterate`) varies the last uncoupled sector slowest, then the
 /// inner line feeding the top vertex, then that vertex, then recurses into
 /// the remaining tree; for two legs `(u₂, u₁, μ)`. Uncoupled sectors iterate
-/// as `sectors(V)`, which for a dual leg is `dual(s)` in `V`'s order; inner
-/// lines iterate as `c ⊗ dual(b)`, which is sector order for every simple
-/// TensorKitSectors type but not for every product or SU(N) (see
-/// `docs/sector_id_compatibility.md`). Within a tree, indices stay in storage order, which
-/// is TensorKit's column-major subblock order.
+/// as `sectors(V)`, which for a dual leg is `dual(s)` in `V`'s order. Inner
+/// lines iterate as `c ⊗ dual(b)`: for every simple TensorKitSectors type
+/// that is position order, and for a product (TensorKitSectors 0.3.9
+/// `src/product.jl` `⊗`, `Iterators.product`) the first factor varies
+/// fastest. SU(N) is the exception: SUNRepresentations iterates a `Dict`
+/// (see `docs/sector_id_compatibility.md`). Within a tree, indices stay in
+/// storage order, which is TensorKit's column-major subblock order.
 fn tensorkit_tree_order<E>(
     trees: &[CoupledTreeExtent],
     order_key: &mut impl FnMut(SectorId, bool) -> Result<symtn_core::SectorOrderKey, E>,
@@ -763,17 +778,20 @@ where
     let mut ranked = Vec::with_capacity(trees.len());
     for extent in trees {
         let tree = extent.tree();
-        let (uncoupled, lines, vertices) = (tree.uncoupled(), tree.innerlines(), tree.vertices());
-        let vertex = |k: usize| symtn_core::SectorOrderKey::position(vertices[k].get() as u64);
+        let (uncoupled, lines, dual) = (tree.uncoupled(), tree.innerlines(), tree.is_dual());
         let mut key = Vec::with_capacity(3 * uncoupled.len());
         for leg in (1..uncoupled.len()).rev() {
-            key.push(order_key(uncoupled[leg], tree.is_dual()[leg])?);
-            if leg >= 2 {
-                key.push(order_key(lines[leg - 2], false)?);
+            key.push(TreeOrderSlot::Uncoupled(order_key(
+                uncoupled[leg],
+                dual[leg],
+            )?));
+            key.push(if leg >= 2 {
+                let line = order_key(lines[leg - 2], false)?;
+                TreeOrderSlot::Line(line.positions().iter().rev().copied().collect())
             } else {
-                key.push(order_key(uncoupled[0], tree.is_dual()[0])?);
-            }
-            key.push(vertex(leg - 1));
+                TreeOrderSlot::Uncoupled(order_key(uncoupled[0], dual[0])?)
+            });
+            key.push(TreeOrderSlot::Vertex(tree.vertices()[leg - 1].get()));
         }
         let len = extent
             .extent()

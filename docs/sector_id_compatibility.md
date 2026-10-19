@@ -64,14 +64,15 @@ trees by their TensorKit position. `FusionTreeIterator`
 (`src/fusiontrees/iterator.jl`) varies the last uncoupled sector slowest,
 then the inner line into the top vertex, then that vertex, then the rest of
 the tree. A leg iterates `sectors(V)`, which for `V'` is `dual(s)` in `V`'s
-order. symtn writes the identity in that order, using `sector_order_key` for
-uncoupled sectors and inner lines (`write_identity_blocks_generic`). Inner
-lines iterate as `c ⊗ dual(b)`, which is sector order for every simple
-TensorKitSectors type and for a product with at most one factor that has
-several fusion channels. A product with two or more such factors iterates
-its first factor fastest, and SUNRepresentations iterates a `Dict`. In those
-cases, with three or more legs on a side, symtn's line order is sector order
-and can differ from TensorKit's.
+order. symtn writes the identity in that order (`write_identity_blocks_generic`):
+uncoupled sectors by `sector_order_key`, and inner lines in TensorKit's
+`c ⊗ dual(b)` iteration order. That is position order for every simple
+TensorKitSectors type, and for a product it varies the first factor fastest
+(TensorKitSectors 0.3.9 `src/product.jl` `⊗`, `Iterators.product`), so
+symtn compares a line's flattened factor positions last factor first rather
+than by product `isless`. SU(N) is the exception: SUNRepresentations 0.4.0
+`⊗` iterates a `Dict`, so with three or more legs on a side TensorKit's line
+order is hash order, and symtn uses sector order there.
 
 | Provider | TensorKit order (TensorKitSectors 0.3.9) | Key | `SectorId` monotone? |
 | --- | --- | --- | --- |

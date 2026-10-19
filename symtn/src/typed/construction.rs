@@ -315,7 +315,9 @@ where
     /// the fused codomain and domain to carry identical sector content. Since
     /// [`Self::block`] lists trees in storage order, a block between different
     /// spaces can read as a permuted identity there. Multiplicity-free and
-    /// checked-Generic providers alike.
+    /// checked-Generic providers alike. The one difference from TensorKit is
+    /// SU(N) with three or more legs on one side, where TensorKit's inner-line
+    /// order is SUNRepresentations' hash order and symtn uses sector order.
     ///
     /// # Errors
     ///
@@ -347,7 +349,10 @@ where
     /// order, so `t† ∘ t = isomorphism(domain, domain)`. Requires
     /// the domain to embed isometrically in the codomain (sectorwise
     /// `deg_domain <= deg_codomain` on the fused content). Multiplicity-free
-    /// and checked-Generic providers alike.
+    /// and checked-Generic providers alike. The one difference from TensorKit
+    /// is SU(N) with three or more legs on one side, where TensorKit's
+    /// inner-line order is SUNRepresentations' hash order and symtn uses
+    /// sector order.
     ///
     /// # Errors
     ///
