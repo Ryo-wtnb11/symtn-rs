@@ -259,10 +259,11 @@ fn loaded_order_for_another_network_is_rejected_when_used() {
     ));
 }
 
-// `chain` with labels a bare-label format cannot carry: a space, a tab and the
-// escape character, a line break followed by a `TOPO ` line, and a `TOPO `
-// prefix with a quote, a single quote and a combining mark (written `\u{301}`).
-const ODD: [&str; 4] = ["i j", "j\tk\\", "k\nTOPO x", "TOPO \"l\u{301}'"];
+// `chain` with labels a bare-label format cannot carry, all on legs that plan
+// text writes (`k` is contracted away): a space and a line break followed by a
+// `TOPO ` line, a tab and the escape character, and a `TOPO ` prefix with a
+// quote, a single quote and a combining mark (written `\u{301}`).
+const ODD: [&str; 4] = ["i j\nTOPO x", "j\tk\\", "k", "TOPO \"l\u{301}'"];
 
 fn odd_chain() -> Network {
     let [i, j, k, l] = ODD;
@@ -276,7 +277,7 @@ fn odd_chain() -> Network {
 /// `B_C_FIRST` for `odd_chain`, labels escaped by hand.
 fn odd_b_c_first() -> String {
     B_C_FIRST
-        .replace("\"i\"", r#""i j""#)
+        .replace("\"i\"", r#""i j\nTOPO x""#)
         .replace("\"j\"", r#""j\tk\\""#)
         .replace("\"l\"", r#""TOPO \"l\u{301}'""#)
 }
