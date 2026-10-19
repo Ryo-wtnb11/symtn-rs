@@ -182,6 +182,29 @@ fn load_plan_cache_drops_unparsable_entries_and_keeps_the_rest() {
 }
 
 #[test]
+fn load_plan_cache_resumes_at_the_next_topo_line_after_a_corrupt_entry() {
+    let header = file_header();
+    let expected = cache_blob(&[("a", B_C_FIRST), ("c", B_C_FIRST)]);
+    let entries = expected.strip_prefix(&header).unwrap();
+    let second = entries.find("TOPO c\n").unwrap();
+    let (first, last) = entries.split_at(second);
+    for corrupt in [
+        // No numeric count.
+        "TOPO b\nPLAN ?\ntensor_count 3\n",
+        // No PLAN line at all: the next line is already the next entry.
+        "TOPO b\n",
+        // A count larger than the plan: must not swallow the next entry.
+        "TOPO b\nPLAN 999\ntensor_count 3\n",
+    ] {
+        let blob = format!("{header}{first}{corrupt}{last}");
+        let runtime = Runtime::builder().build().unwrap();
+        assert_eq!(load_plan_cache(&runtime, &blob), 2, "{corrupt:?}");
+        assert_eq!(plan_cache_stats(&runtime).persisted_orders, 2);
+        assert_eq!(save_plan_cache(&runtime), expected, "{corrupt:?}");
+    }
+}
+
+#[test]
 fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
     // Record the searched order to learn this network's persisted key.
     let searched = Runtime::builder().build().unwrap();

@@ -970,8 +970,10 @@ pub fn save_plan_cache(runtime: &Runtime) -> String {
 /// A corrupt entry is skipped, not fatal: an entry whose `PLAN` line is
 /// missing or has no numeric count, whose plan has fewer lines than that
 /// count before the next `TOPO ` line, or whose plan text does not parse is
-/// dropped, and loading resumes at the next line starting with `TOPO `. Plan
-/// lines never start with `TOPO `, so later valid entries still load.
+/// dropped, and loading resumes at the next line starting with `TOPO `, so
+/// later valid entries still load. A plan line can only start with `TOPO `
+/// when a label contains whitespace or a line break, which plan text does not
+/// escape.
 ///
 /// The persisted store is bounded by `PlanCacheConfig::capacity` entries
 /// with least-recently-used eviction, the same bound as the compiled plans;
@@ -1002,8 +1004,10 @@ pub fn load_plan_cache(runtime: &Runtime, text: &str) -> usize {
         if cache.disk.cap() != capacity {
             cache.disk.resize(capacity);
         }
-        // Plan lines never start with "TOPO ", so the next such line is an
-        // unambiguous resynchronisation point after a corrupt entry.
+        // Plan lines start with the plan header, `tensor_count`, `output` or
+        // `step`, so the next "TOPO " line is a resynchronisation point after a
+        // corrupt entry. This holds only while labels contain no whitespace or
+        // line breaks: plan text writes labels unescaped.
         let mut lines = lines.peekable();
         let mut loaded = 0;
         while let Some(topo_line) = lines.next() {
