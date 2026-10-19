@@ -25,7 +25,9 @@ mod member_pins;
 /// routes whose source and output moves are all such tasks over a unit-alpha
 /// direct core. Direct
 /// composition is served by [`ComposePlan`]. The plan fixes structure and
-/// axes, but not member count.
+/// axes, but not member count. On CUDA the member axis is a dense stride of
+/// every submission, so the GEMMs, region moves and zero fills of a call do
+/// not depend on the member count.
 pub struct ContractPlan<R, D, S = Vec<D>> {
     pub(in crate::typed) runtime: Runtime,
     lhs: StructureSignature,

@@ -392,47 +392,16 @@ fn assert_checked_full_svd_builder_failure(fail_at: usize) {
     assert_eq!(dense.counts().qr, 2);
 }
 
-// Checked full-SVD provider sequence for `generic_factorization_input`: ten
-// calls of the two multiplicity-aware dimension preflights, then the single
-// U output-layout enumeration (calls 11-13), then the single Vh enumeration
-// (calls 14-16); the diagonal S space issues no provider query. Before the
-// one-sided owner enumerated its layout once, each output enumerated twice
-// (U 11-16, Vh 17-22) and these tests pinned calls 15, 19 and 22.
-const FULL_SVD_DIMENSION_PREFLIGHT_CALLS: usize = 10;
-
-const FULL_SVD_U_FIRST_CALL: usize = FULL_SVD_DIMENSION_PREFLIGHT_CALLS + 1;
-
-const FULL_SVD_U_LAST_CALL: usize = FULL_SVD_DIMENSION_PREFLIGHT_CALLS + 3;
-
-const FULL_SVD_VH_FIRST_CALL: usize = FULL_SVD_U_LAST_CALL + 1;
-
-const FULL_SVD_VH_LAST_CALL: usize = FULL_SVD_U_LAST_CALL + 3;
-
-#[test]
-fn checked_generic_full_svd_u_builder_failure_preserves_provider_context() {
-    // What: the first and last post-dense checked-provider calls of U-space
-    // construction propagate their exact provider error.
-    assert_checked_full_svd_builder_failure(FULL_SVD_U_FIRST_CALL);
-    assert_checked_full_svd_builder_failure(FULL_SVD_U_LAST_CALL);
-}
-
-#[test]
-fn checked_generic_full_svd_vh_builder_failure_preserves_provider_context() {
-    // What: Vh-space construction propagates its exact provider error without
-    // publishing U, from its first call to its last.
-    assert_checked_full_svd_builder_failure(FULL_SVD_VH_FIRST_CALL);
-    assert_checked_full_svd_builder_failure(FULL_SVD_VH_LAST_CALL);
-}
-
-#[test]
+/// The checked full-SVD provider calls of `generic_factorization_input`,
+/// each step counted on its own by a fresh probe: the two multiplicity-aware
+/// dimension preflights, one U output-layout enumeration and one Vh
+/// enumeration. Also returns the calls one full SVD makes, and those of an
+/// S enumeration.
 #[expect(
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
-fn checked_generic_full_svd_enumerates_each_output_layout_once() {
-    // What: the provider sees the dimension preflights plus exactly one
-    // layout enumeration per one-sided output; the diagonal S publication
-    // adds none: 16 calls (enumerating each output twice would be 22).
+fn full_svd_provider_steps() -> ([usize; 3], usize, usize) {
     let (source, data) = generic_factorization_input();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -444,7 +413,9 @@ fn checked_generic_full_svd_enumerates_each_output_layout_once() {
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     let output = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
-    assert_eq!(provider.calls.get(), FULL_SVD_VH_LAST_CALL);
+    let observed = provider.calls.get();
+    assert!(Arc::ptr_eq(output.u().space().provider_arc(), &provider));
+    assert!(Arc::ptr_eq(output.vh().space().provider_arc(), &provider));
 
     let probe_calls = |run: &dyn Fn(&LateGenericSpy)| {
         let probe = LateGenericSpy {
@@ -461,7 +432,6 @@ fn checked_generic_full_svd_enumerates_each_output_layout_once() {
         coupled_sector_block_dimensions_generic_checked(homspace.codomain(), probe).unwrap();
         coupled_sector_block_dimensions_generic_checked(homspace.domain(), probe).unwrap();
     });
-    assert_eq!(preflight, FULL_SVD_DIMENSION_PREFLIGHT_CALLS);
     let enumeration = |factor: &BoundDynFactor<LateGenericSpy, f64>| {
         let homspace = factor.space().space().homspace().clone();
         probe_calls(&|probe| {
@@ -470,17 +440,41 @@ fn checked_generic_full_svd_enumerates_each_output_layout_once() {
                 .unwrap();
         })
     };
-    assert_eq!(
-        enumeration(output.u()),
-        FULL_SVD_U_LAST_CALL - FULL_SVD_U_FIRST_CALL + 1
-    );
-    assert_eq!(
-        enumeration(output.vh()),
-        FULL_SVD_VH_LAST_CALL - FULL_SVD_VH_FIRST_CALL + 1
-    );
-    assert_eq!(enumeration(output.s()), 0);
-    assert!(Arc::ptr_eq(output.u().space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(output.vh().space().provider_arc(), &provider));
+    (
+        [preflight, enumeration(output.u()), enumeration(output.vh())],
+        observed,
+        enumeration(output.s()),
+    )
+}
+
+#[test]
+fn checked_generic_full_svd_u_builder_failure_preserves_provider_context() {
+    // What: the first and last post-dense checked-provider calls of U-space
+    // construction propagate their exact provider error.
+    let ([preflight, u, _], ..) = full_svd_provider_steps();
+    assert!(u > 0);
+    assert_checked_full_svd_builder_failure(preflight + 1);
+    assert_checked_full_svd_builder_failure(preflight + u);
+}
+
+#[test]
+fn checked_generic_full_svd_vh_builder_failure_preserves_provider_context() {
+    // What: Vh-space construction propagates its exact provider error without
+    // publishing U, from its first call to its last.
+    let ([preflight, u, vh], ..) = full_svd_provider_steps();
+    assert!(vh > 0);
+    assert_checked_full_svd_builder_failure(preflight + u + 1);
+    assert_checked_full_svd_builder_failure(preflight + u + vh);
+}
+
+#[test]
+fn checked_generic_full_svd_enumerates_each_output_layout_once() {
+    // What: the provider sees the dimension preflights plus exactly one
+    // layout enumeration per one-sided output; the diagonal S publication
+    // adds none.
+    let (steps, observed, s_enumeration) = full_svd_provider_steps();
+    assert_eq!(observed, steps.iter().sum::<usize>(), "{steps:?}");
+    assert_eq!(s_enumeration, 0);
 }
 
 #[test]
@@ -505,7 +499,8 @@ fn checked_native_full_svd_stages_before_unchanged_provider_admission() {
     let full = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
 
     assert_eq!(dense.counts().svd_full, 2);
-    assert_eq!(provider.calls.get(), FULL_SVD_VH_LAST_CALL);
+    let (steps, ..) = full_svd_provider_steps();
+    assert_eq!(provider.calls.get(), steps.iter().sum::<usize>());
     assert!(Arc::ptr_eq(full.u().space().provider_arc(), &provider));
     assert!(Arc::ptr_eq(full.s().space().provider_arc(), &provider));
     assert!(Arc::ptr_eq(full.vh().space().provider_arc(), &provider));
@@ -781,13 +776,37 @@ impl CheckedGenericRigidSymbols for FailSingleLegFold {
 fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
     // What: a provider error while laying out checked compact SVD's dense `S`
     // is returned unchanged as `Provider(e)`, after both dense SVDs and with
-    // the input untouched. U and Vh each enumerate their layout once and fold both
-    // one-leg bond sectors (U 1-2, Vh 3-4), so S's first fold is the fifth.
-    const FIRST_S_FOLD: usize = 5;
+    // the input untouched. U and Vh each enumerate their layout once before
+    // S, so S's first one-leg fold follows theirs, each counted on its own.
     let (source, data) = generic_factorization_input();
+    let first_s_fold = {
+        let provider = Arc::new(FailSingleLegFold {
+            rule: FactorGenericRule,
+            fail_at: usize::MAX,
+            single_leg_folds: Cell::new(0),
+            identity: RuleIdentity::new_unique::<FailSingleLegFold>(),
+        });
+        let checked = bind_to_spy(&source, &provider);
+        let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
+        let mut dense = ScriptedExecutor::<CountingDense>::default();
+        let Svd { u, vh, .. } = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+        let folds = |homspace: &FusionTreeHomSpace| {
+            let probe = FailSingleLegFold {
+                rule: FactorGenericRule,
+                fail_at: usize::MAX,
+                single_leg_folds: Cell::new(0),
+                identity: RuleIdentity::new_unique::<FailSingleLegFold>(),
+            };
+            homspace
+                .prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(&probe)
+                .unwrap();
+            probe.single_leg_folds.get()
+        };
+        folds(u.space().space().homspace()) + folds(vh.space().space().homspace()) + 1
+    };
     let failing_provider = Arc::new(FailSingleLegFold {
         rule: FactorGenericRule,
-        fail_at: FIRST_S_FOLD,
+        fail_at: first_s_fold,
         single_leg_folds: Cell::new(0),
         identity: RuleIdentity::new_unique::<FailSingleLegFold>(),
     });
@@ -800,9 +819,9 @@ fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
     assert!(matches!(
         result,
         Err(CheckedGenericFactorPlanError::Provider(LateGenericError(call)))
-            if call == FIRST_S_FOLD
+            if call == first_s_fold
     ));
-    assert_eq!(failing_provider.single_leg_folds.get(), FIRST_S_FOLD);
+    assert_eq!(failing_provider.single_leg_folds.get(), first_s_fold);
     assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 2);
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd_vals, 0);

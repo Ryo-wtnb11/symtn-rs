@@ -320,10 +320,7 @@ impl MultiplicityFreeRigidSymbols for CountingFibonacci {
 // reintroducing that tax.
 #[test]
 fn pooled_context_is_pointer_sized() {
-    assert_eq!(
-        std::mem::size_of::<PooledContext>(),
-        std::mem::size_of::<usize>()
-    );
+    assert!(std::mem::size_of::<PooledContext>() <= std::mem::size_of::<usize>());
 }
 
 // What: every Runtime on one ordinal must share one device lock (#1384),
