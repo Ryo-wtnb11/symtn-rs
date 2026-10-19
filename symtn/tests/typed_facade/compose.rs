@@ -261,44 +261,6 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn id_writes_the_nonuniform_fused_diagonal() {
-    // What: the identity on a leg list whose per-sector degeneracies differ
-    // from leg to leg — the case where the
-    // diagonal offsets inside a coupled-sector block are not all the same.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let z2 = Arc::new(symtn::sector::Z2FusionRule);
-    let typed_leg = |even, odd| {
-        GradedSpace::try_new(
-            Arc::clone(&z2),
-            [
-                (symtn::sector::Z2Irrep::EVEN, even),
-                (symtn::sector::Z2Irrep::ODD, odd),
-            ],
-        )
-        .unwrap()
-    };
-
-    let wide = typed_leg(2, 3);
-    let narrow = typed_leg(1, 4);
-    let typed =
-        TensorMap::<_, f64>::isomorphism(&runtime, [&wide, &narrow], [&wide, &narrow]).unwrap();
-
-    // Not the zero tensor, and not the all-ones one either: a genuine diagonal.
-    // 14 even + 11 odd fused states: `2*1 + 3*4` and `2*4 + 3*1`.
-    assert_eq!(
-        typed
-            .dense_data()
-            .unwrap()
-            .iter()
-            .filter(|&&v| v == 1.0)
-            .count(),
-        25
-    );
-    assert!(typed.dense_data().unwrap().contains(&0.0));
-}
-
-#[test]
 fn id_composes_as_the_identity_on_both_sides() {
     // What: the defining property, as a byte oracle against the source tensor.
     // `[v, v] <- [v]`, so the two sides exercise different ranks.

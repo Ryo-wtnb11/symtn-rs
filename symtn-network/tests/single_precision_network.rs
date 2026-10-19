@@ -183,7 +183,7 @@ macro_rules! network_suite {
             }
 
             #[test]
-            fn su2_recoupled_network_matches_the_widened_oracle() {
+            fn su2_two_tensor_network_matches_the_widened_oracle() {
                 let runtime = Runtime::builder().dense_threads(1).build().unwrap();
                 let leg = GradedSpace::try_new(
                     Arc::new(SU2FusionRule),

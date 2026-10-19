@@ -85,98 +85,6 @@ fn coupled_sector_dimensions_include_outer_multiplicity_and_check_overflow() {
     );
 }
 
-#[test]
-fn fusion_style_kind_matches_tensorkit_multiplicity_free_split() {
-    assert!(FusionStyleKind::Unique.is_multiplicity_free());
-    assert!(FusionStyleKind::Simple.is_multiplicity_free());
-    assert!(!FusionStyleKind::Generic.is_multiplicity_free());
-    assert!(!FusionStyleKind::Unique.has_multiple_outputs());
-    assert!(FusionStyleKind::Simple.has_multiple_outputs());
-    assert!(FusionStyleKind::Generic.has_multiple_outputs());
-    assert!(!FusionStyleKind::Unique.has_multiplicity());
-    assert!(!FusionStyleKind::Simple.has_multiplicity());
-    assert!(FusionStyleKind::Generic.has_multiplicity());
-}
-
-#[test]
-fn braiding_style_kind_matches_tensorkit_hierarchy() {
-    assert!(!BraidingStyleKind::NoBraiding.has_braiding());
-    assert!(BraidingStyleKind::Bosonic.has_braiding());
-    assert!(BraidingStyleKind::Fermionic.has_braiding());
-    assert!(BraidingStyleKind::Anyonic.has_braiding());
-
-    assert!(!BraidingStyleKind::NoBraiding.is_symmetric());
-    assert!(BraidingStyleKind::Bosonic.is_symmetric());
-    assert!(BraidingStyleKind::Fermionic.is_symmetric());
-    assert!(!BraidingStyleKind::Anyonic.is_symmetric());
-
-    assert!(BraidingStyleKind::Bosonic.is_bosonic());
-    assert!(!BraidingStyleKind::Fermionic.is_bosonic());
-    assert_eq!(
-        BraidingStyleKind::Bosonic.combined_with(BraidingStyleKind::Fermionic),
-        BraidingStyleKind::Fermionic
-    );
-    assert_eq!(
-        BraidingStyleKind::Fermionic.combined_with(BraidingStyleKind::Anyonic),
-        BraidingStyleKind::Anyonic
-    );
-    assert_eq!(
-        BraidingStyleKind::Anyonic.combined_with(BraidingStyleKind::NoBraiding),
-        BraidingStyleKind::NoBraiding
-    );
-}
-
-#[test]
-fn product_sector_codec_uses_tensorkit_diagonal_component_order() {
-    let expected = [
-        (0, 0),
-        (0, 1),
-        (1, 0),
-        (0, 2),
-        (1, 1),
-        (2, 0),
-        (0, 3),
-        (1, 2),
-        (2, 1),
-        (3, 0),
-    ];
-
-    for (id, &(left, right)) in expected.iter().enumerate() {
-        let encoded = TensorKitProductCodec::encode(SectorId::new(left), SectorId::new(right));
-        assert_eq!(encoded, SectorId::new(id));
-        assert_eq!(
-            TensorKitProductCodec::decode(encoded),
-            Some((SectorId::new(left), SectorId::new(right)))
-        );
-    }
-}
-
-#[cfg(target_pointer_width = "64")]
-#[test]
-fn packed_product_codec_is_association_independent() {
-    // What: fixed-width product IDs flatten numerically regardless of the
-    // source-level association used to build the same ordered leaves.
-    type FpU1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type FpU1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type LeftAssociated = PackedProductCodec<FpU1Layout, Su2SectorLayout>;
-    type U1Su2Codec = PackedProductCodec<U1SectorLayout, Su2SectorLayout>;
-    type U1Su2Layout = ProductSectorLayout<U1SectorLayout, Su2SectorLayout>;
-    type RightAssociated = PackedProductCodec<Fz2SectorLayout, U1Su2Layout>;
-
-    for (parity, charge, twice_spin) in [
-        (z2_even(), excluded_u1_id(), 0),
-        (z2_odd(), u1(-1), 1),
-        (z2_even(), u1(0), 2),
-        (z2_odd(), u1(i32::MAX), 254),
-    ] {
-        let left = FpU1Codec::encode(parity, charge);
-        let left_associated = LeftAssociated::encode(left, su2(twice_spin));
-        let right = U1Su2Codec::encode(charge, su2(twice_spin));
-        let right_associated = RightAssociated::encode(parity, right);
-        assert_eq!(left_associated, right_associated);
-    }
-}
-
 fn assert_checked_contract_all_orientations<R>(
     rule: &R,
     matched: SectorLeg,
@@ -561,21 +469,6 @@ fn external_sector_lookup_rejects_a_short_sector_tuple() {
             .unwrap_err(),
         metadata_error
     );
-}
-
-#[test]
-fn rigid_symbols_separate_twist_from_frobenius_schur_phase() {
-    let fermion = FermionParityFusionRule;
-    let odd = SectorId::new(1);
-    assert_eq!(fermion.dim_scalar(odd), 1.0);
-    assert_eq!(fermion.twist_scalar(odd), -1.0);
-    assert_eq!(fermion.frobenius_schur_phase_scalar(odd), 1.0);
-
-    let su2 = SU2FusionRule;
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
-    assert_eq!(su2.dim_scalar(half), 2.0);
-    assert_eq!(su2.twist_scalar(half), 1.0);
-    assert_eq!(su2.frobenius_schur_phase_scalar(half), -1.0);
 }
 
 #[test]

@@ -63,6 +63,7 @@ mod block_structure;
 mod block_view;
 mod checked_rank1_tree_admission;
 mod error;
+mod external_sector_lookup;
 mod fusion_space;
 mod fusion_tree;
 mod generic_symbol_shape_mismatch;

@@ -22,7 +22,7 @@ where
 
 #[test]
 #[ignore]
-fn builtin_and_simple_product_providers_share_one_transfer_path() {
+fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     let runtime = Runtime::builder().cuda(0).build().unwrap();
 
     let u1_rule = Arc::new(U1FusionRule);

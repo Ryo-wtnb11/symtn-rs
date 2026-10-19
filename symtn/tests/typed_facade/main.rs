@@ -441,25 +441,6 @@ fn runtime() -> Runtime {
 // `GradedSpace<R>`.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn graded_space_reports_labels_in_provider_sector_id_order() {
-    // What: `sectors()` decodes back to the caller's labels, ordered by the
-    // provider's sector id (not by label order), with degeneracies parallel.
-    let provider = Arc::new(ExternalZ3::new());
-    let space = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [(Z3Charge(2), 1), (Z3Charge(0), 2), (Z3Charge(1), 3)],
-    )
-    .unwrap();
-
-    assert_eq!(
-        space.sectors().unwrap(),
-        vec![Z3Charge(0), Z3Charge(1), Z3Charge(2)]
-    );
-    assert_eq!(space.degeneracies(), &[2, 3, 1]);
-    assert!(!space.is_dual());
-}
-
 /// The same value computed from the typed labels the facade hands the closure.
 fn typed_fill_value(
     sectors: &symtn::typed::BlockFusionTrees<symtn::sector::Z2Irrep>,

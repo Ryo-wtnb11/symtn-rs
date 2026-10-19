@@ -11,7 +11,7 @@
 //! 2. the lowering is gated here, by running the same public call on the Host
 //!    and on the device; the Host side carries its own TensorKit and
 //!    hand-computed oracles (`typed_facade.rs`, `semantic_suite.rs`,
-//!    `checked_generic_twist.rs`);
+//!    `checked_generic_braiding.rs`);
 //! 3. the transfer, allocation and rejection contracts are in
 //!    `typed_cuda_transform_contracts.rs`, which owns the process-wide
 //!    counters.

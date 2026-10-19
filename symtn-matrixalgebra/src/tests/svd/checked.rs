@@ -176,7 +176,7 @@ fn checked_generic_svd_compact_dense_failure_precedes_output_provider_admission(
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
-fn checked_generic_full_svd_preserves_provider_and_completes_unmatched_rows() {
+fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_sector() {
     let rule = FactorGenericRule;
     let x = SectorId::new(1);
     let vacuum = SectorId::new(0);

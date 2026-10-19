@@ -8,7 +8,7 @@ fn tensorcontract_block_spec_new_supports_complex_coefficients() {
 use std::sync::Arc;
 
 #[test]
-fn tensorcontract_structure_replays_custom_host_storage_without_vec_fixing() {
+fn tensorcontract_structure_replay_applies_alpha_and_beta() {
     let lhs_space = vec![2, 3];
     let rhs_space = vec![3, 2];
     let dst_space = vec![2, 2];
@@ -41,7 +41,7 @@ fn tensorcontract_structure_replays_custom_host_storage_without_vec_fixing() {
 }
 
 #[test]
-fn tensorcontract_default_host_api_accepts_custom_host_storage() {
+fn tensorcontract_default_host_api_applies_alpha_and_beta() {
     let lhs_space = vec![2, 3];
     let rhs_space = vec![3, 2];
     let dst_space = vec![2, 2];

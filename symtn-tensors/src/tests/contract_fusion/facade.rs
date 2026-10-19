@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn fusion_context_explicit_backend_arguments_remain_source_compatible() {
+fn fusion_context_accepts_explicit_backend_type_arguments() {
     let _: TensorContractFusionExecutionContext<
         f64,
         RuleIdentity,

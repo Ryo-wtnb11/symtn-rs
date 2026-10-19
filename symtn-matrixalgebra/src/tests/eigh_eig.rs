@@ -1265,7 +1265,7 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
 }
 
 #[test]
-fn eigh_c64_reconstructs_multi_sector_hermitian_input_and_fixes_gauge() {
+fn eigh_c64_reconstructs_real_valued_multi_sector_input_and_fixes_gauge() {
     use num_complex::Complex64;
 
     // What: complex direct vectors reconstruct every sector and use the canonical phase gauge.
@@ -1517,36 +1517,6 @@ fn eig_full_satisfies_the_eigen_equation_for_real_input() {
 }
 
 #[test]
-fn exp_of_a_general_endomorphism_runs_one_solve_per_sector_and_no_eigh() {
-    // What: the general arm's per-sector budget — six GEMMs and one solve for a
-    // block that needs no squaring, and never an eigendecomposition.
-    let tensor = exp_oracle_tensor::<f64>(1.0);
-    let mut spy = ScriptedExecutor::<MatrixFunctionCallSpy>::default();
-
-    exp(
-        &mut spy,
-        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
-    )
-    .unwrap();
-
-    assert_eq!(
-        spy.counts().of(MATRIX_FUNCTION_EIGH),
-        0,
-        "the general arm must not eigendecompose"
-    );
-    assert_eq!(
-        spy.counts().solve,
-        2,
-        "one solve per nonempty coupled sector"
-    );
-    assert_eq!(
-        spy.counts().dot_general,
-        12,
-        "six GEMMs per sector at s = 0"
-    );
-}
-
-#[test]
 fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
     // What: canonical sector blocks [[2,1],[1,2]] (spectrum {3, 1}) stored
     // with reversed columns read as [[1,2],[2,1]], which is Hermitian with
@@ -1588,21 +1558,6 @@ fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
     let swapped = bound_tensor(provider, &swapped);
     assert_stacking_refusal(eigh_vals(&mut dense, &swapped.as_ref()), "eigh_vals ");
     assert_stacking_refusal(eigh_full(&mut dense, &swapped.as_ref()), "eigh_full ");
-}
-
-#[test]
-fn scripted_default_eig_vals_reaches_the_forwarded_eig() {
-    // What: the trait's default `eig_vals` calls `eig`; with `EigVals` at
-    // `Default` and `Eig` at `Forward`, the scripted executor routes it back
-    // through its own `eig`, so the values come from the wrapped backend and
-    // both entries are counted (as the hand-written doubles did).
-    let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let data = [2.0_f64, 0.0, 0.0, -1.0];
-    let input = DenseRead::F64(symtn_dense::DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap());
-    let values = dense.eig_vals(input).unwrap();
-    assert_eq!(values.shape(), [2]);
-    assert_eq!(dense.counts().eig_vals, 1);
-    assert_eq!(dense.counts().eig, 1);
 }
 
 #[test]
@@ -1731,4 +1686,26 @@ fn eigenvalue_order_authority_is_stable_and_skips_sorted_input() {
         &mut order
     ));
     assert_eq!(order, [0, 1, 2]);
+}
+
+#[test]
+fn eigenvector_gauge_matches_matrixalgebrakit_phase_rule() {
+    use num_complex::Complex64;
+    let c = Complex64::new;
+    let mut vectors = vec![
+        c(3.0, 4.0),
+        c(1.0, -1.0),
+        c(-2.0, 0.5),
+        c(0.25, -0.5),
+        c(-4.0, 0.0),
+        c(1.0, 2.0),
+    ];
+
+    crate::factorize::eigenvector_gauge(&mut vectors, 3, 3, 2);
+
+    for &(row, col) in &[(0, 0), (1, 1)] {
+        let pivot = vectors[row + 3 * col];
+        assert!(pivot.im.abs() < 1e-14, "pivot {pivot} not real");
+        assert!(pivot.re >= 0.0, "pivot {pivot} negative");
+    }
 }

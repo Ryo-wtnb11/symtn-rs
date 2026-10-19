@@ -540,186 +540,6 @@ fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch(
     assert_eq!(provider.coefficient_queries.load(Ordering::Relaxed), 0);
 }
 
-/// QR/LQ/SVD and the value-only spectra of a facade-layout source (#1494),
-/// each against an oracle that does not share the factorization's layout:
-/// reconstruction, isometry against an explicit tree-basis identity, `S`
-/// against `svd_vals`, and `eigh_vals`/`eig_vals` of `A Aᴴ` against the
-/// squared singular values.
-#[cfg(feature = "cgc-gen")]
-macro_rules! assert_sun_compact_laws {
-    ($runtime:expr, $source:expr) => {{
-        let source = $source;
-        let assert_close = |actual: &TensorMap<_, _>, expected: &TensorMap<_, _>, what: &str| {
-            let error = actual
-                .axpby(1.0.into(), expected, (-1.0).into())
-                .unwrap()
-                .norm(2.0)
-                .unwrap();
-            assert!(
-                error < 1e-9 * (1.0 + expected.norm(2.0).unwrap()),
-                "{what}: {error}"
-            );
-        };
-        let owned_adjoint =
-            |tensor: &TensorMap<_, _>| tensor.adjoint().unwrap().materialize().unwrap();
-        let assert_identity = |gram: &TensorMap<_, _>, what: &str| {
-            let (codomain, domain) = (gram.codomain(), gram.domain());
-            let rank = codomain.iter().count();
-            let identity = TensorMap::from_subblock_fn(
-                $runtime,
-                codomain.iter(),
-                domain.iter(),
-                |trees, ij| {
-                    let same_tree = trees.codomain_uncoupled() == trees.domain_uncoupled()
-                        && trees.codomain_innerlines() == trees.domain_innerlines()
-                        && trees.codomain_vertices() == trees.domain_vertices();
-                    let (row, col) = ij.split_at(rank);
-                    if same_tree && row == col { 1.0 } else { 0.0 }.into()
-                },
-            )
-            .unwrap();
-            assert_close(gram, &identity, what);
-        };
-        let by_sector = |spectra: Vec<SectorSpectrum<_>>| {
-            spectra
-                .into_iter()
-                .filter(|spectrum| !spectrum.values.is_empty())
-                .map(|spectrum| {
-                    let mut values = spectrum.values;
-                    values.sort_by(|a, b| b.total_cmp(a));
-                    (spectrum.sector, values)
-                })
-                .collect::<Vec<_>>()
-        };
-        fn find<S: PartialEq>(spectra: &[(S, Vec<f64>)], sector: &S) -> Vec<f64> {
-            spectra
-                .iter()
-                .find(|(key, _)| key == sector)
-                .map_or_else(Vec::new, |(_, values)| values.clone())
-        }
-        let assert_values = |actual: &[f64], expected: &[f64], what: &str| {
-            let scale = 1.0 + expected.first().copied().unwrap_or(0.0).abs();
-            for (index, &actual) in actual.iter().enumerate() {
-                let expected = expected.get(index).copied().unwrap_or(0.0);
-                assert!((actual - expected).abs() < 1e-9 * scale, "{what}");
-            }
-        };
-
-        let Qr { q, r } = source
-            .qr_compact(&codomain_axes(&source), &domain_axes(&source))
-            .unwrap();
-        assert_close(&q.compose(&r).unwrap(), source, "A = QR");
-        assert_identity(&owned_adjoint(&q).compose(&q).unwrap(), "Qᴴ Q = 1");
-        let Lq { l, q } = source
-            .lq_compact(&codomain_axes(&source), &domain_axes(&source))
-            .unwrap();
-        assert_close(&l.compose(&q).unwrap(), source, "A = LQ");
-        assert_identity(&q.compose(&owned_adjoint(&q)).unwrap(), "Q Qᴴ = 1");
-        let Svd { u, s, vh } = source
-            .svd_compact(&codomain_axes(&source), &domain_axes(&source))
-            .unwrap();
-        assert_close(
-            &u.compose(&s).unwrap().compose(&vh).unwrap(),
-            source,
-            "A = U S Vh",
-        );
-        assert_identity(&owned_adjoint(&u).compose(&u).unwrap(), "Uᴴ U = 1");
-        assert_identity(&vh.compose(&owned_adjoint(&vh)).unwrap(), "Vh Vhᴴ = 1");
-
-        let singular = by_sector(
-            source
-                .svd_vals(&codomain_axes(&source), &domain_axes(&source))
-                .unwrap(),
-        );
-        let diagonal = by_sector(s.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap());
-        assert_eq!(singular.len(), diagonal.len());
-        for (sector, values) in &singular {
-            assert_eq!(find(&diagonal, sector).len(), values.len());
-            assert_values(&find(&diagonal, sector), values, "S = svd_vals");
-        }
-        let gram = source.compose(&owned_adjoint(source)).unwrap();
-        let squared = singular
-            .iter()
-            .map(|(sector, values)| (sector.clone(), values.iter().map(|v| v * v).collect()))
-            .collect::<Vec<_>>();
-        for (sector, values) in by_sector(
-            gram.eigh_vals(
-                &codomain_axes(&gram),
-                &domain_axes(&gram),
-                HermitianTol::DEFAULT,
-            )
-            .unwrap(),
-        ) {
-            assert_values(&values, &find(&squared, &sector), "eigh_vals(A Aᴴ) = s²");
-        }
-        for spectrum in gram
-            .eig_vals(&codomain_axes(&gram), &domain_axes(&gram))
-            .unwrap()
-        {
-            let mut values = spectrum.values.iter().map(|v| v.re).collect::<Vec<_>>();
-            assert!(spectrum
-                .values
-                .iter()
-                .all(|v| v.im.abs() < 1e-9 * (1.0 + v.norm())));
-            values.sort_by(|a, b| b.total_cmp(a));
-            assert_values(
-                &values,
-                &find(&squared, &spectrum.sector),
-                "eig_vals(A Aᴴ) = s²",
-            );
-        }
-    }};
-}
-
-#[cfg(feature = "cgc-gen")]
-#[test]
-fn sun_checked_generic_compact_factors_and_spectra_on_facade_layouts() {
-    use symtn::sector::SUNFusionRule;
-
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
-    let t =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2), (vec![0, 1], 1)]).unwrap();
-    let t_dual = t.try_dual().unwrap();
-    let value = |salt: u64| ((salt.wrapping_mul(2_654_435_761) % 1009) as f64) / 1009.0 - 0.5;
-    let cases: [(&[&GradedSpace<_>], &[&GradedSpace<_>]); 7] = [
-        (&[&leg, &leg], &[&leg]),
-        (&[&leg], &[&leg, &leg]),
-        (&[&leg, &leg], &[&leg, &leg]),
-        (&[&t, &t_dual], &[&t]),
-        (&[&t], &[&t, &t_dual]),
-        (&[&t_dual, &t_dual], &[&t_dual]),
-        (&[&t_dual, &t_dual, &t_dual], &[]),
-    ];
-    for (codomain, domain) in cases {
-        let mut salt = 0;
-        let real: TensorMap<_, f64> = TensorMap::from_subblock_fn(
-            &runtime,
-            codomain.iter().copied(),
-            domain.iter().copied(),
-            |_, _| {
-                salt += 1;
-                value(salt)
-            },
-        )
-        .unwrap();
-        assert_sun_compact_laws!(&runtime, &real);
-        let complex: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
-            &runtime,
-            codomain.iter().copied(),
-            domain.iter().copied(),
-            |_, _| {
-                salt += 2;
-                Complex64::new(value(salt), value(salt + 1))
-            },
-        )
-        .unwrap();
-        assert_sun_compact_laws!(&runtime, &complex);
-    }
-}
-
 #[test]
 fn checked_errors_stay_typed_and_callback_waits_for_all_decodes() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -928,4 +748,84 @@ fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
     check_generic_structural_constructors(&runtime, &leg, |ij| {
         0.5 - (ij[0] * 7 + ij[1] * 2 + ij[2]) as f64 * 0.125
     });
+}
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn sun_endomorphism_row_and_column_tree_stacking_is_identical() {
+    use std::collections::BTreeMap;
+
+    use symtn::sector::SUNFusionRule;
+    use symtn::typed::MultiplicityIndex;
+
+    type TreePlacement = (
+        Vec<Vec<i64>>,
+        Vec<Vec<i64>>,
+        Vec<MultiplicityIndex>,
+        usize,
+        Vec<usize>,
+    );
+
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
+        let source: TensorMap<_, f64> =
+            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, _| 0.0).unwrap();
+        let mut stacks = BTreeMap::<Vec<i64>, (Vec<TreePlacement>, Vec<TreePlacement>)>::new();
+        for index in 0..source.subblock_count() {
+            let block = source.subblock(index).unwrap();
+            let trees = source.subblock_fusion_trees(index).unwrap();
+            let entry = stacks.entry(trees.coupled().clone()).or_default();
+            let row_key = (
+                trees.codomain_uncoupled().to_vec(),
+                trees.codomain_innerlines().to_vec(),
+                trees.codomain_vertices().to_vec(),
+            );
+            if !entry.0.iter().any(|placed| {
+                placed.0 == row_key.0 && placed.1 == row_key.1 && placed.2 == row_key.2
+            }) {
+                let offset = entry
+                    .0
+                    .iter()
+                    .map(|placed| placed.4.iter().product::<usize>())
+                    .sum();
+                entry.0.push((
+                    row_key.0,
+                    row_key.1,
+                    row_key.2,
+                    offset,
+                    block.shape()[..2].to_vec(),
+                ));
+            }
+            let col_key = (
+                trees.domain_uncoupled().to_vec(),
+                trees.domain_innerlines().to_vec(),
+                trees.domain_vertices().to_vec(),
+            );
+            if !entry.1.iter().any(|placed| {
+                placed.0 == col_key.0 && placed.1 == col_key.1 && placed.2 == col_key.2
+            }) {
+                let offset = entry
+                    .1
+                    .iter()
+                    .map(|placed| placed.4.iter().product::<usize>())
+                    .sum();
+                entry.1.push((
+                    col_key.0,
+                    col_key.1,
+                    col_key.2,
+                    offset,
+                    block.shape()[2..].to_vec(),
+                ));
+            }
+        }
+        assert!(stacks.values().any(|(rows, _)| {
+            rows.iter()
+                .any(|row| row.2.iter().any(|vertex| vertex.get() > 1))
+        }));
+        for (sector, (rows, columns)) in stacks {
+            assert_eq!(rows, columns, "SU({n}) stacking mismatch in {sector:?}");
+        }
+    }
 }

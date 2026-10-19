@@ -382,7 +382,7 @@ fn cold_ordered_tree_pair_staging_stays_within_allocation_envelopes() {
 }
 
 #[test]
-fn rank_nine_same_split_groups_do_not_clone_prepared_spill_storage() {
+fn rank_nine_same_split_groups_stay_within_the_cold_resolution_allocation_budget() {
     let _serial = counting_alloc::serial();
     let vacuum = SU2FusionRule.vacuum();
     let leg =

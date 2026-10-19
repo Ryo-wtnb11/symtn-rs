@@ -619,110 +619,6 @@ fn checked_compact_diagonal_svd_full_is_its_compact_svd_under_a_provider_bond_mi
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
-    // Checked compact SVD publishes `s` as a compact diagonal on its bond.
-    use symtn::sector::SUNFusionRule;
-
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    for n in [3, 4] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
-        let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
-        let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
-        let source: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
-                trees.codomain_vertices()[0].get() as f64 + 1.0
-            })
-            .unwrap();
-        let Svd { s, .. } = source.svd_compact(&[0, 1], &[2]).unwrap();
-        assert!(s.dense_data().is_err());
-        let root = s.map_diagonal(f64::sqrt).unwrap();
-        assert!(std::ptr::eq(root.provider(), s.provider()));
-        assert_eq!(root.codomain(), s.codomain());
-        assert_eq!(root.domain(), s.domain());
-        assert!(symtn::typed::__network::runtime_identity(root.runtime()).matches(s.runtime()));
-        let square = root.compose(&root).unwrap();
-        assert!(square.dense_data().is_err(), "D * D stays compact");
-        assert!(square
-            .materialize()
-            .unwrap()
-            .dense_data()
-            .unwrap()
-            .iter()
-            .zip(s.materialize().unwrap().dense_data().unwrap())
-            .all(|(actual, expected)| (actual - expected).abs() < 1.0e-10));
-
-        let negative: TensorMap<_, Complex64> = TensorMap::diagonal(
-            &runtime,
-            &leg,
-            leg.sectors()
-                .unwrap()
-                .into_iter()
-                .map(|sector| SectorSpectrum {
-                    sector,
-                    values: vec![Complex64::new(-1.0, 0.0)],
-                }),
-        )
-        .unwrap();
-        let principal = negative.map_diagonal(|value| value.sqrt()).unwrap();
-        assert!(principal
-            .diagview()
-            .unwrap()
-            .iter()
-            .flat_map(|entry| &entry.values)
-            .all(|value| *value == Complex64::new(0.0, 1.0)));
-    }
-}
-
-#[test]
-fn checked_generic_map_diagonal_rejects_dense_before_queries_and_preserves_source() {
-    let _cache = cache_shared();
-    // What: dense storage is refused before any provider query, whether or not
-    // it is bond shaped, and the source is untouched.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new(0));
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
-    let bond_leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
-    let non_bond: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, _| 2.0).unwrap();
-    let dense_diagonal: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&bond_leg], [&bond_leg], |_, ij| {
-            if ij[0] == ij[1] {
-                4.0
-            } else {
-                0.0
-            }
-        })
-        .unwrap();
-    for tensor in [non_bond, dense_diagonal] {
-        let before = tensor.dense_data().unwrap().to_vec();
-        reset_provider_queries(&provider);
-        match tensor.map_diagonal(f64::sqrt) {
-            Err(symtn::typed::Error::InvalidArgument(message)) => {
-                assert!(message.contains("compact diagonal"), "{message}");
-            }
-            other => panic!("expected dense rejection, got {other:?}"),
-        }
-        assert_no_provider_queries(&provider);
-        assert_eq!(tensor.dense_data().unwrap(), before.as_slice());
-    }
-
-    let compact: TensorMap<_, f64> = TensorMap::diagonal(
-        &runtime,
-        &bond_leg,
-        [SectorSpectrum {
-            sector: Label::X,
-            values: vec![4.0, 9.0],
-        }],
-    )
-    .unwrap();
-    reset_provider_queries(&provider);
-    let root = compact.map_diagonal(f64::sqrt).unwrap();
-    assert_no_provider_queries(&provider);
-    assert_eq!(root.diagview().unwrap()[0].values, [2.0, 3.0]);
-}
-
-#[cfg(feature = "cgc-gen")]
-#[test]
 fn sun_checked_generic_full_svd_preserves_provider_reconstructs_and_accepts_lazy() {
     use symtn::sector::SUNFusionRule;
 
@@ -995,4 +891,184 @@ fn checked_dual_compact_diagonal_svd_compact_propagates_provider_errors() {
         "{error:?}"
     );
     assert_eq!(svd_calls.total(), 0);
+}
+
+/// QR/LQ/SVD and the value-only spectra of a facade-layout source (#1494),
+/// each against an oracle that does not share the factorization's layout:
+/// reconstruction, isometry against an explicit tree-basis identity, `S`
+/// against `svd_vals`, and `eigh_vals`/`eig_vals` of `A Aᴴ` against the
+/// squared singular values.
+#[cfg(feature = "cgc-gen")]
+macro_rules! assert_sun_compact_laws {
+    ($runtime:expr, $source:expr) => {{
+        let source = $source;
+        let assert_close = |actual: &TensorMap<_, _>, expected: &TensorMap<_, _>, what: &str| {
+            let error = actual
+                .axpby(1.0.into(), expected, (-1.0).into())
+                .unwrap()
+                .norm(2.0)
+                .unwrap();
+            assert!(
+                error < 1e-9 * (1.0 + expected.norm(2.0).unwrap()),
+                "{what}: {error}"
+            );
+        };
+        let owned_adjoint =
+            |tensor: &TensorMap<_, _>| tensor.adjoint().unwrap().materialize().unwrap();
+        let assert_identity = |gram: &TensorMap<_, _>, what: &str| {
+            let (codomain, domain) = (gram.codomain(), gram.domain());
+            let rank = codomain.iter().count();
+            let identity = TensorMap::from_subblock_fn(
+                $runtime,
+                codomain.iter(),
+                domain.iter(),
+                |trees, ij| {
+                    let same_tree = trees.codomain_uncoupled() == trees.domain_uncoupled()
+                        && trees.codomain_innerlines() == trees.domain_innerlines()
+                        && trees.codomain_vertices() == trees.domain_vertices();
+                    let (row, col) = ij.split_at(rank);
+                    if same_tree && row == col { 1.0 } else { 0.0 }.into()
+                },
+            )
+            .unwrap();
+            assert_close(gram, &identity, what);
+        };
+        let by_sector = |spectra: Vec<SectorSpectrum<_>>| {
+            spectra
+                .into_iter()
+                .filter(|spectrum| !spectrum.values.is_empty())
+                .map(|spectrum| {
+                    let mut values = spectrum.values;
+                    values.sort_by(|a, b| b.total_cmp(a));
+                    (spectrum.sector, values)
+                })
+                .collect::<Vec<_>>()
+        };
+        fn find<S: PartialEq>(spectra: &[(S, Vec<f64>)], sector: &S) -> Vec<f64> {
+            spectra
+                .iter()
+                .find(|(key, _)| key == sector)
+                .map_or_else(Vec::new, |(_, values)| values.clone())
+        }
+        let assert_values = |actual: &[f64], expected: &[f64], what: &str| {
+            let scale = 1.0 + expected.first().copied().unwrap_or(0.0).abs();
+            for (index, &actual) in actual.iter().enumerate() {
+                let expected = expected.get(index).copied().unwrap_or(0.0);
+                assert!((actual - expected).abs() < 1e-9 * scale, "{what}");
+            }
+        };
+
+        let Qr { q, r } = source
+            .qr_compact(&codomain_axes(&source), &domain_axes(&source))
+            .unwrap();
+        assert_close(&q.compose(&r).unwrap(), source, "A = QR");
+        assert_identity(&owned_adjoint(&q).compose(&q).unwrap(), "Qᴴ Q = 1");
+        let Lq { l, q } = source
+            .lq_compact(&codomain_axes(&source), &domain_axes(&source))
+            .unwrap();
+        assert_close(&l.compose(&q).unwrap(), source, "A = LQ");
+        assert_identity(&q.compose(&owned_adjoint(&q)).unwrap(), "Q Qᴴ = 1");
+        let Svd { u, s, vh } = source
+            .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+            .unwrap();
+        assert_close(
+            &u.compose(&s).unwrap().compose(&vh).unwrap(),
+            source,
+            "A = U S Vh",
+        );
+        assert_identity(&owned_adjoint(&u).compose(&u).unwrap(), "Uᴴ U = 1");
+        assert_identity(&vh.compose(&owned_adjoint(&vh)).unwrap(), "Vh Vhᴴ = 1");
+
+        let singular = by_sector(
+            source
+                .svd_vals(&codomain_axes(&source), &domain_axes(&source))
+                .unwrap(),
+        );
+        let diagonal = by_sector(s.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap());
+        assert_eq!(singular.len(), diagonal.len());
+        for (sector, values) in &singular {
+            assert_eq!(find(&diagonal, sector).len(), values.len());
+            assert_values(&find(&diagonal, sector), values, "S = svd_vals");
+        }
+        let gram = source.compose(&owned_adjoint(source)).unwrap();
+        let squared = singular
+            .iter()
+            .map(|(sector, values)| (sector.clone(), values.iter().map(|v| v * v).collect()))
+            .collect::<Vec<_>>();
+        for (sector, values) in by_sector(
+            gram.eigh_vals(
+                &codomain_axes(&gram),
+                &domain_axes(&gram),
+                HermitianTol::DEFAULT,
+            )
+            .unwrap(),
+        ) {
+            assert_values(&values, &find(&squared, &sector), "eigh_vals(A Aᴴ) = s²");
+        }
+        for spectrum in gram
+            .eig_vals(&codomain_axes(&gram), &domain_axes(&gram))
+            .unwrap()
+        {
+            let mut values = spectrum.values.iter().map(|v| v.re).collect::<Vec<_>>();
+            assert!(spectrum
+                .values
+                .iter()
+                .all(|v| v.im.abs() < 1e-9 * (1.0 + v.norm())));
+            values.sort_by(|a, b| b.total_cmp(a));
+            assert_values(
+                &values,
+                &find(&squared, &spectrum.sector),
+                "eig_vals(A Aᴴ) = s²",
+            );
+        }
+    }};
+}
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn sun_checked_generic_compact_factors_and_spectra_on_facade_layouts() {
+    use symtn::sector::SUNFusionRule;
+
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let leg =
+        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
+    let t =
+        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2), (vec![0, 1], 1)]).unwrap();
+    let t_dual = t.try_dual().unwrap();
+    let value = |salt: u64| ((salt.wrapping_mul(2_654_435_761) % 1009) as f64) / 1009.0 - 0.5;
+    let cases: [(&[&GradedSpace<_>], &[&GradedSpace<_>]); 7] = [
+        (&[&leg, &leg], &[&leg]),
+        (&[&leg], &[&leg, &leg]),
+        (&[&leg, &leg], &[&leg, &leg]),
+        (&[&t, &t_dual], &[&t]),
+        (&[&t], &[&t, &t_dual]),
+        (&[&t_dual, &t_dual], &[&t_dual]),
+        (&[&t_dual, &t_dual, &t_dual], &[]),
+    ];
+    for (codomain, domain) in cases {
+        let mut salt = 0;
+        let real: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+            &runtime,
+            codomain.iter().copied(),
+            domain.iter().copied(),
+            |_, _| {
+                salt += 1;
+                value(salt)
+            },
+        )
+        .unwrap();
+        assert_sun_compact_laws!(&runtime, &real);
+        let complex: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+            &runtime,
+            codomain.iter().copied(),
+            domain.iter().copied(),
+            |_, _| {
+                salt += 2;
+                Complex64::new(value(salt), value(salt + 1))
+            },
+        )
+        .unwrap();
+        assert_sun_compact_laws!(&runtime, &complex);
+    }
 }

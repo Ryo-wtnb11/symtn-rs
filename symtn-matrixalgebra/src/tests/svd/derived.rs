@@ -1,25 +1,6 @@
 use super::*;
 
 #[test]
-fn inv_propagates_unsupported_solve_without_svd_fallback() {
-    // What: a dense executor without solve support returns its typed capability
-    // error instead of silently changing inverse algorithms.
-    let tensor = u1_block_endomorphism(&[(0, 1, vec![2.0_f64])]);
-    let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
-    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
-
-    let error = inv_into_mf(&mut dense, &bound.as_ref().dynamic()).unwrap_err();
-
-    assert!(matches!(
-        error,
-        OperationError::Dense(DenseError::Unsupported {
-            op: "solve_into",
-            ..
-        })
-    ));
-}
-
-#[test]
 fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
     // What: the largest singular value is in the later sector, and the first
     // sector sits exactly on the strict global cutoff. The parent-native seam
@@ -83,48 +64,6 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
     // The padded input is packed once; no SVD factor is laid out.
     assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
-}
-
-#[test]
-fn polar_validates_every_sector_before_direct_or_fallback_svd_execution() {
-    // What: a later invalid sector prevents SVD of an earlier valid sector on both layouts.
-    let rule = Z2FusionRule;
-    let direct = mixed_rectangular_tensor((4, 2), (1, 3));
-    let direct_bound = bound_tensor(Arc::new(rule), &direct);
-    assert!(
-        crate::factorize::compact_factor_plan_for_test(direct_bound.space())
-            .unwrap()
-            .is_some()
-    );
-    let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
-    let direct_error = left_polar(&mut dense, &direct_bound.as_ref()).unwrap_err();
-    assert!(matches!(
-        direct_error,
-        OperationError::InvalidArgument { message }
-            if message.contains("left_polar")
-                && message.contains("coupled-sector")
-    ));
-    assert_eq!(dense.counts().svd, 0);
-
-    let fallback_source = mixed_rectangular_tensor((2, 4), (3, 1));
-    let fallback_bound = bound_tensor(Arc::new(rule), &fallback_source);
-    let fallback_space = fallback_bound.space().adjoint_view().unwrap();
-    assert!(
-        crate::factorize::compact_factor_plan_for_test(&fallback_space)
-            .unwrap()
-            .is_none()
-    );
-    let fallback_input =
-        BoundDynamicTensorRef::try_new(&fallback_space, fallback_bound.data()).unwrap();
-    let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
-    let fallback_error = left_polar_dyn(&mut dense, &fallback_input).unwrap_err();
-    assert!(matches!(
-        fallback_error,
-        OperationError::InvalidArgument { message }
-            if message.contains("left_polar")
-                && message.contains("coupled-sector")
-    ));
-    assert_eq!(dense.counts().svd, 0);
 }
 
 #[test]

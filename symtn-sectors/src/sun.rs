@@ -642,7 +642,7 @@ mod tests {
     /// by Dynkin reversal, and the twist as a constant; fusion-symbols 0.3.0 owns all
     /// three. The fusion-symbols APIs must reproduce those derivations bit for bit.
     #[test]
-    fn racah_rigid_data_matches_f_symbol_and_dynkin_derivations() {
+    fn rigid_data_matches_f_symbol_and_dynkin_derivations() {
         for (n, max_total) in [(2, 6), (3, 3), (4, 2)] {
             let rule = SUNFusionRule::new(n).unwrap();
             let unit = fusion_symbols::sun::Irrep::trivial(n).unwrap();
@@ -863,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    fn su3_generic_structure_uses_racah() {
+    fn su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities() {
         let rule = SUNFusionRule::new(3).unwrap();
         let eight = rule.encode_dynkin(&[1, 1]).unwrap();
         assert_eq!(rule.fusion_style(), FusionStyleKind::Generic);

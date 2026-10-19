@@ -139,7 +139,7 @@ fn generic_beta_zero_wipes_nan_in_inactive_destinations() {
 }
 
 #[test]
-fn overwrite_single_does_not_read_nan_destinations_in_any_driver() {
+fn overwrite_single_does_not_read_nan_destinations_on_any_replay_route() {
     // The one-block fixture never reaches the threaded driver; threaded
     // overwrite is covered by threaded.rs's multi-block recoupling oracle.
     let (mut dst, src, structure) = fixture();

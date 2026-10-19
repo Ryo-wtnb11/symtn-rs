@@ -145,7 +145,7 @@ fn complex_scalar_braid_tree_expands_multichannel_loop() {
 }
 
 #[test]
-fn fibonacci_multi_fmove_low_ranks_keep_their_existing_contracts() {
+fn fibonacci_low_rank_multi_fmoves_query_no_f_except_one_admissible_inverse_step() {
     let rule = FibonacciFAdmissibilityProbe::new();
     let vacuum = SectorId::new(0);
     let tau = SectorId::new(1);
@@ -159,8 +159,8 @@ fn fibonacci_multi_fmove_low_ranks_keep_their_existing_contracts() {
         [MultiplicityIndex::ONE],
     );
 
-    // What: forward rank 0/1/2 and inverse rank 0/1 retain their prior
-    // results and do not enter an F-symbol provider.
+    // What: forward rank 0/1/2 and inverse rank 0/1 match the plain table
+    // rule and do not enter an F-symbol provider.
     assert_eq!(
         SimpleK(&rule).multi_fmove(&empty),
         SimpleK(&TableRule::fibonacci()).multi_fmove(&empty)

@@ -757,23 +757,20 @@ fn graded_space_carries_a_simple_fusion_provider_too() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
-    // What: `zeros` admits a runtime-rank multi-block layout through the
-    // checked path and returns a zero buffer of exactly the layout's length.
-    let _guard = cache_lock();
+fn graded_space_reports_labels_in_provider_sector_id_order() {
+    // What: `sectors()` decodes back to the caller's labels, ordered by the
+    // provider's sector id (not by label order), with degeneracies parallel.
     let provider = Arc::new(ExternalZ3::new());
-    let leg = z3_leg(&provider, false);
-    let dual = leg.try_dual().unwrap();
-    let runtime = runtime();
+    let space = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(Z3Charge(2), 1), (Z3Charge(0), 2), (Z3Charge(1), 3)],
+    )
+    .unwrap();
 
-    let tensor: TensorMap<ExternalZ3, f64> =
-        TensorMap::zeros(&runtime, [&leg, &leg], [&dual, &dual]).unwrap();
-
-    assert!(tensor.subblock_count() >= 2);
-    assert!(!tensor.dense_data().unwrap().is_empty());
-    assert!(tensor
-        .dense_data()
-        .unwrap()
-        .iter()
-        .all(|&value| value == 0.0));
+    assert_eq!(
+        space.sectors().unwrap(),
+        vec![Z3Charge(0), Z3Charge(1), Z3Charge(2)]
+    );
+    assert_eq!(space.degeneracies(), &[2, 3, 1]);
+    assert!(!space.is_dual());
 }

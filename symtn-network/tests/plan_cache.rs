@@ -93,7 +93,7 @@ fn parked_host_workspace_releases_provider_and_rebinds_exact_current_arc() {
 }
 
 #[test]
-fn dimension_drift_replans_without_put_before_residency_recheck() {
+fn dimension_drift_replans_into_the_same_cache_entry() {
     let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,

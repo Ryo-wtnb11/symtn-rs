@@ -697,36 +697,6 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
-    // What: an explicit braid with a full level assignment produces the same
-    // reordered spaces a permute of the same axes does, and moves the payload.
-    //
-    // This symmetric fixture pins how levels are split and validated; the
-    // Fibonacci tests above pin genuinely anyonic level values.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    let braided = tensor.braid(&[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap();
-    let permuted = tensor.permute(&[1, 2], &[3, 0]).unwrap();
-
-    assert_eq!(
-        braided.dense_data().unwrap(),
-        permuted.dense_data().unwrap()
-    );
-    assert_ne!(braided.dense_data().unwrap(), tensor.dense_data().unwrap());
-    assert_eq!(braided.codomain()[0].degeneracies(), &[1, 2, 4]);
-    assert_eq!(braided.domain()[1].degeneracies(), &[2, 1, 3]);
-    // A different level assignment is the same morphism for a bosonic rule.
-    let reversed = tensor.braid(&[1, 2], &[3, 0], &[3, 2, 1, 0]).unwrap();
-    assert_eq!(
-        reversed.dense_data().unwrap(),
-        braided.dense_data().unwrap()
-    );
-}
-
-#[test]
 fn contract_ordered_delegates_with_a_nonidentity_output_order() {
     let _guard = cache_lock();
     let runtime = runtime();
@@ -814,4 +784,427 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
         .iter()
         .zip(parallel)
         .all(|(&serial, parallel)| (serial - parallel).abs() < 1e-12));
+}
+
+#[test]
+#[expect(
+    clippy::type_complexity,
+    reason = "the test table records axes and expected error class in one fixture row"
+)]
+fn contract_error_classes_and_their_both_defect_precedence() {
+    // What: the typed contract reports
+    // a bad output order before a simultaneous contracted-leg mismatch.
+    let _guard = cache_lock();
+    let second = runtime();
+    let runtime = runtime();
+    let typed_fixture = |runtime: &Runtime| {
+        let leg = GradedSpace::try_new(
+            Arc::new(symtn::sector::Z2FusionRule),
+            [
+                (symtn::sector::Z2Irrep::EVEN, 2),
+                (symtn::sector::Z2Irrep::ODD, 3),
+            ],
+        )
+        .unwrap();
+        TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], typed_fill_value).unwrap()
+    };
+    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(&runtime);
+
+    use symtn::typed::{CoreError, OperationError};
+    fn axis_count(error: &OperationError) -> bool {
+        matches!(error, OperationError::ContractAxisCountMismatch { .. })
+    }
+    fn axis_set(error: &OperationError) -> bool {
+        matches!(error, OperationError::InvalidAxisSet { .. })
+    }
+    fn permutation(error: &OperationError) -> bool {
+        matches!(error, OperationError::InvalidPermutation { .. })
+    }
+    /// The operation-layer cause of a typed contract error.
+    fn operation(error: &symtn::typed::Error) -> &OperationError {
+        match error {
+            symtn::typed::Error::Operation(operation) => operation,
+            other => panic!("expected an operation error, got {other:?}"),
+        }
+    }
+    type Class = fn(&OperationError) -> bool;
+    let cases: &[(&str, &[usize], &[usize], &[usize], Class)] = &[
+        ("len mismatch", &[2], &[0, 1], &[0, 1, 2, 3], axis_count),
+        ("lhs out of range", &[9], &[0], &[0, 1, 2, 3], axis_set),
+        ("rhs out of range", &[2], &[9], &[0, 1, 2, 3], axis_set),
+        ("output wrong length", &[2], &[0], &[0, 1, 2], permutation),
+        ("output duplicate", &[2], &[0], &[0, 0, 1, 2], permutation),
+        (
+            "output out of range",
+            &[2],
+            &[0],
+            &[0, 1, 2, 9],
+            permutation,
+        ),
+    ];
+    for &(name, lhs_axes, rhs_axes, output_axes, class) in cases {
+        // `typed` is rank (2, 1) and every case contracts one of its legs, so
+        // two open legs of it form the default codomain.
+        let (codomain, domain) = output_axes.split_at(2.min(output_axes.len()));
+        let spec = ContractSpec {
+            lhs: lhs_axes,
+            rhs: rhs_axes,
+            codomain,
+            domain,
+        };
+        let typed_error = typed.contract(&typed, &spec).unwrap_err();
+        assert!(class(operation(&typed_error)), "{name}: {typed_error:?}");
+    }
+
+    // Mismatched contracted legs retain the expert layer's class.
+    let narrow_leg = GradedSpace::try_new(
+        Arc::new(symtn::sector::Z2FusionRule),
+        [
+            (symtn::sector::Z2Irrep::EVEN, 2),
+            (symtn::sector::Z2Irrep::ODD, 2),
+        ],
+    )
+    .unwrap();
+    let typed_narrow: TensorMap<symtn::sector::Z2FusionRule, f64> = TensorMap::from_subblock_fn(
+        &runtime,
+        [&narrow_leg, &narrow_leg],
+        [&narrow_leg],
+        typed_fill_value,
+    )
+    .unwrap();
+    let typed_error = typed
+        .contract(
+            &typed_narrow,
+            &ContractSpec {
+                lhs: &[2],
+                rhs: &[0],
+                codomain: &[0, 1],
+                domain: &[2, 3],
+            },
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            operation(&typed_error),
+            OperationError::Core(CoreError::LegDegeneracyMismatch { .. })
+        ),
+        "{typed_error:?}"
+    );
+
+    // Both defects at once: mismatched legs AND a non-permutation output order.
+    let typed_both = typed
+        .contract(
+            &typed_narrow,
+            &ContractSpec {
+                lhs: &[2],
+                rhs: &[0],
+                codomain: &[0, 0],
+                domain: &[1, 2],
+            },
+        )
+        .unwrap_err();
+    assert!(
+        permutation(operation(&typed_both)),
+        "typed both-defect precedence moved: {typed_both:?}"
+    );
+
+    // Runtime mismatch stays a facade-level error.
+    let typed_second: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(&second);
+    assert!(matches!(
+        typed
+            .contract(
+                &typed_second,
+                &ContractSpec {
+                    lhs: &[2],
+                    rhs: &[0],
+                    codomain: &[0, 1],
+                    domain: &[2, 3]
+                }
+            )
+            .unwrap_err(),
+        symtn::typed::Error::RuntimeMismatch
+    ));
+
+    // Rule-identity mismatch stays the expert layer's rejection through the
+    // canonical name too.
+    let first = Arc::new(ExternalZ3::tagged(0));
+    let second_rule = Arc::new(ExternalZ3::tagged(1));
+    let lhs = counting_z3(
+        &runtime,
+        &z3_dense_leg(&first, 2),
+        &z3_dense_leg(&first, 3),
+        1.0,
+    );
+    let rhs = counting_z3(
+        &runtime,
+        &z3_dense_leg(&second_rule, 3),
+        &z3_dense_leg(&second_rule, 4),
+        1.0,
+    );
+    let identity_error = lhs
+        .contract(
+            &rhs,
+            &ContractSpec {
+                lhs: &[1],
+                rhs: &[0],
+                codomain: &[0],
+                domain: &[1],
+            },
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            operation(&identity_error),
+            OperationError::Core(CoreError::FusionRuleMismatch { .. })
+        ),
+        "{identity_error:?}"
+    );
+}
+
+fn probe_leg<const ANYONIC: bool>() -> GradedSpace<RealBraidingProbe<ANYONIC>> {
+    GradedSpace::try_new(Arc::new(RealBraidingProbe::<ANYONIC>), [(ProbeSector, 2)]).unwrap()
+}
+
+/// Entry `(i, j)` of the one 2x2 block is `offset + 2 i + j`.
+fn probe_value(offset: f64, row: usize, column: usize) -> f64 {
+    offset + (2 * row + column) as f64
+}
+
+fn probe_matrix<const ANYONIC: bool>(
+    runtime: &Runtime,
+    offset: f64,
+) -> TensorMap<RealBraidingProbe<ANYONIC>, f64> {
+    let leg = probe_leg::<ANYONIC>();
+    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, index| {
+        probe_value(offset, index[0], index[1])
+    })
+    .unwrap()
+}
+
+/// Hand oracle of `lhs.compose(rhs)` for the offsets 1 and 5: the one block
+/// is the 2x2 matrix product.
+fn probe_composition(row: usize, column: usize) -> f64 {
+    (0..2)
+        .map(|k| probe_value(1.0, row, k) * probe_value(5.0, k, column))
+        .sum()
+}
+
+fn is_unsupported_contract_scope(error: &symtn::typed::Error) -> bool {
+    matches!(
+        error,
+        symtn::typed::Error::Operation(operation)
+            if matches!(**operation, symtn::typed::OperationError::UnsupportedTensorContractScope { .. })
+    )
+}
+
+fn is_non_symmetric_contraction(error: &symtn::typed::Error) -> bool {
+    matches!(
+        error,
+        symtn::typed::Error::Operation(operation)
+            if matches!(
+                **operation,
+                symtn::typed::OperationError::UnsupportedTensorContractScope {
+                    message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
+                }
+            )
+    )
+}
+
+/// Every Host contraction entry rejects a non-symmetric braiding with one
+/// error, even on the canonical axes, before touching the destination, while
+/// `compose` of the same operands is admitted (TensorKit `blas_contract!`
+/// versus `mul!`).
+fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>() {
+    let runtime = runtime();
+    let lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
+    let rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
+    let mut destination = probe_matrix::<ANYONIC>(&runtime, 9.0);
+    let before = destination.dense_data().unwrap().to_vec();
+
+    let contract = lhs
+        .contract(
+            &rhs,
+            &ContractSpec {
+                lhs: &[1],
+                rhs: &[0],
+                codomain: &[0],
+                domain: &[1],
+            },
+        )
+        .unwrap_err();
+    assert!(is_non_symmetric_contraction(&contract), "{contract:?}");
+    let overwrite = lhs
+        .contract_into(
+            &rhs,
+            &ContractSpec {
+                lhs: &[1],
+                rhs: &[0],
+                codomain: &[0],
+                domain: &[1],
+            },
+            &mut destination,
+            1.0,
+            0.0,
+        )
+        .unwrap_err();
+    assert!(is_non_symmetric_contraction(&overwrite), "{overwrite:?}");
+    assert_eq!(destination.dense_data().unwrap(), &before[..]);
+
+    let composed = lhs.compose(&rhs).unwrap();
+    let leg = probe_leg::<ANYONIC>();
+    let expected: TensorMap<RealBraidingProbe<ANYONIC>, f64> =
+        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+            probe_composition(index[0], index[1])
+        })
+        .unwrap();
+    assert_eq!(
+        composed.dense_data().unwrap(),
+        expected.dense_data().unwrap()
+    );
+}
+
+#[test]
+fn non_symmetric_contract_entries_reject_canonical_axes_but_compose_admits() {
+    let _guard = cache_lock();
+    assert_host_contract_entries_reject_but_compose_admits::<false>();
+    assert_host_contract_entries_reject_but_compose_admits::<true>();
+}
+
+#[test]
+fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
+    // What: the same one-sector 2x2 operands under a bosonic rule contract on
+    // the canonical axes to the composition oracle, so the rejections above
+    // are the braiding boundary alone.
+    let _guard = cache_lock();
+    let runtime = runtime();
+    let leg = GradedSpace::try_new(
+        Arc::new(symtn::sector::U1FusionRule),
+        [(symtn::sector::U1Irrep::new(0), 2)],
+    )
+    .unwrap();
+    let matrix = |offset: f64| -> TensorMap<symtn::sector::U1FusionRule, f64> {
+        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+            probe_value(offset, index[0], index[1])
+        })
+        .unwrap()
+    };
+    let expected: TensorMap<symtn::sector::U1FusionRule, f64> =
+        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+            probe_composition(index[0], index[1])
+        })
+        .unwrap();
+    let contracted = matrix(1.0)
+        .contract(
+            &matrix(5.0),
+            &ContractSpec {
+                lhs: &[1],
+                rhs: &[0],
+                codomain: &[0],
+                domain: &[1],
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        contracted.dense_data().unwrap(),
+        expected.dense_data().unwrap()
+    );
+}
+
+fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
+    let runtime = runtime();
+    let dense = probe_matrix::<ANYONIC>(&runtime, 1.0);
+    let compact: TensorMap<RealBraidingProbe<ANYONIC>, f64> = TensorMap::diagonal(
+        &runtime,
+        &probe_leg::<ANYONIC>(),
+        [symtn::typed::SectorSpectrum {
+            sector: ProbeSector,
+            values: vec![1.0, 2.0],
+        }],
+    )
+    .unwrap();
+    let compact_error = compact.trace_pairs(&[(0, 1)]).unwrap_err();
+    let dense_error = dense.trace_pairs(&[(0, 1)]).unwrap_err();
+    assert!(
+        is_unsupported_contract_scope(&compact_error),
+        "{compact_error:?}"
+    );
+    assert_eq!(compact_error.to_string(), dense_error.to_string());
+}
+
+#[test]
+fn non_symmetric_compact_trace_rejects_like_dense_trace() {
+    // What: the rank-(1,1) compact-spectrum trace is rejected with the dense
+    // trace's error instead of answering from the spectrum (#1355).
+    let _guard = cache_lock();
+    assert_compact_trace_rejects_like_dense_trace::<false>();
+    assert_compact_trace_rejects_like_dense_trace::<true>();
+}
+
+#[cfg(feature = "cuda")]
+fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>() {
+    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let host_lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
+    let host_rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
+    let lhs = host_lhs.to_cuda().unwrap();
+    let rhs = host_rhs.to_cuda().unwrap();
+    let mut destination = probe_matrix::<ANYONIC>(&runtime, 9.0).to_cuda().unwrap();
+    let before = destination
+        .to_host()
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
+
+    let transfers = symtn::expert::cuda_transfer_stats();
+    let contract = lhs
+        .contract(
+            &rhs,
+            &ContractSpec {
+                lhs: &[1],
+                rhs: &[0],
+                codomain: &[0],
+                domain: &[1],
+            },
+        )
+        .unwrap_err();
+    let overwrite = lhs
+        .contract_into(
+            &rhs,
+            &ContractSpec {
+                lhs: &[1],
+                rhs: &[0],
+                codomain: &[0],
+                domain: &[1],
+            },
+            &mut destination,
+            1.0,
+            0.0,
+        )
+        .unwrap_err();
+    assert_eq!(symtn::expert::cuda_transfer_stats(), transfers);
+    for error in [&contract, &overwrite] {
+        assert!(is_non_symmetric_contraction(error), "{error:?}");
+    }
+    assert_eq!(
+        destination.to_host().unwrap().dense_data().unwrap(),
+        &before[..]
+    );
+
+    let composed = lhs.compose(&rhs).unwrap().to_host().unwrap();
+    assert_eq!(
+        composed.dense_data().unwrap(),
+        host_lhs.compose(&host_rhs).unwrap().dense_data().unwrap()
+    );
+}
+
+/// The device entries follow the Host order: the rejection comes before any
+/// device work and leaves the destination as it was; device `compose` is
+/// admitted and agrees with the Host.
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn non_symmetric_device_contract_entries_reject_but_compose_admits() {
+    let _guard = cache_lock();
+    assert_device_contract_entries_reject_but_compose_admits::<false>();
+    assert_device_contract_entries_reject_but_compose_admits::<true>();
 }

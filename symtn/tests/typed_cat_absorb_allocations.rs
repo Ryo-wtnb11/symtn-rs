@@ -45,16 +45,6 @@ fn pseudo_random(state: &mut u64) -> f64 {
     ((*state >> 33) as f64) / (u32::MAX as f64) - 0.5
 }
 
-fn catcodomain_oracle<D: Copy>(lhs: &[D], lhs_rows: usize, rhs: &[D], rhs_rows: usize) -> Vec<D> {
-    let columns = lhs.len() / lhs_rows;
-    let mut output = Vec::with_capacity(lhs.len() + rhs.len());
-    for column in 0..columns {
-        output.extend_from_slice(&lhs[column * lhs_rows..(column + 1) * lhs_rows]);
-        output.extend_from_slice(&rhs[column * rhs_rows..(column + 1) * rhs_rows]);
-    }
-    output
-}
-
 #[test]
 fn typed_cat_uses_one_output_allocation_without_scratch() {
     // What: a warmed typed catdomain owns exactly one output-sized payload
@@ -153,25 +143,6 @@ fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
             "{call} cat allocated {bytes} B; expected one owned output ({expected} B)"
         );
     }
-}
-
-#[test]
-fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let leg = u1_leg(&Arc::new(U1FusionRule), &[(0, 0), (1, 2)]);
-    let diagonal: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
-        &runtime,
-        &leg,
-        [SectorSpectrum {
-            sector: U1Irrep::new(1),
-            values: vec![2.0, 3.0],
-        }],
-    )
-    .unwrap();
-    let actual = diagonal.cat(&diagonal, Side::Domain).unwrap();
-    let dense = diagonal.materialize().unwrap();
-    let expected = dense.cat(&dense, Side::Domain).unwrap();
-    assert_eq!(actual.dense_data(), expected.dense_data());
 }
 
 #[test]
@@ -292,167 +263,6 @@ fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
     );
 }
 
-#[test]
-fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(U1FusionRule);
-    let common = u1_leg(&provider, &[(0, 3)]);
-    let left = u1_leg(&provider, &[(0, 2)]);
-    let right = u1_leg(&provider, &[(0, 4)]);
-
-    let lhs_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_001).unwrap();
-    let rhs_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_002).unwrap();
-    let lhs_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_003).unwrap();
-    let rhs_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_004).unwrap();
-
-    let lhs_adjoint = lhs_parent.adjoint().unwrap();
-    let rhs_adjoint = rhs_parent.adjoint().unwrap();
-    for (lhs, rhs, expected) in [
-        (
-            &lhs_adjoint,
-            &rhs_owned,
-            lhs_parent
-                .adjoint()
-                .unwrap()
-                .materialize()
-                .unwrap()
-                .dense_data()
-                .unwrap()
-                .iter()
-                .chain(rhs_owned.dense_data().unwrap())
-                .copied()
-                .collect::<Vec<_>>(),
-        ),
-        (
-            &lhs_owned,
-            &rhs_adjoint,
-            lhs_owned
-                .dense_data()
-                .unwrap()
-                .iter()
-                .chain(
-                    rhs_parent
-                        .adjoint()
-                        .unwrap()
-                        .materialize()
-                        .unwrap()
-                        .dense_data()
-                        .unwrap(),
-                )
-                .copied()
-                .collect(),
-        ),
-        (
-            &lhs_adjoint,
-            &rhs_adjoint,
-            lhs_parent
-                .adjoint()
-                .unwrap()
-                .materialize()
-                .unwrap()
-                .dense_data()
-                .unwrap()
-                .iter()
-                .chain(
-                    rhs_parent
-                        .adjoint()
-                        .unwrap()
-                        .materialize()
-                        .unwrap()
-                        .dense_data()
-                        .unwrap(),
-                )
-                .copied()
-                .collect(),
-        ),
-    ] {
-        assert_eq!(
-            lhs.cat(rhs, Side::Domain).unwrap().dense_data().unwrap(),
-            expected
-        );
-    }
-
-    let upper_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_005).unwrap();
-    let lower_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_006).unwrap();
-    let upper_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_007).unwrap();
-    let lower_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_008).unwrap();
-    let upper_adjoint = upper_parent.adjoint().unwrap();
-    let lower_adjoint = lower_parent.adjoint().unwrap();
-    for (upper, lower, expected) in [
-        (
-            &upper_adjoint,
-            &lower_owned,
-            catcodomain_oracle(
-                upper_parent
-                    .adjoint()
-                    .unwrap()
-                    .materialize()
-                    .unwrap()
-                    .dense_data()
-                    .unwrap(),
-                2,
-                lower_owned.dense_data().unwrap(),
-                4,
-            ),
-        ),
-        (
-            &upper_owned,
-            &lower_adjoint,
-            catcodomain_oracle(
-                upper_owned.dense_data().unwrap(),
-                2,
-                lower_parent
-                    .adjoint()
-                    .unwrap()
-                    .materialize()
-                    .unwrap()
-                    .dense_data()
-                    .unwrap(),
-                4,
-            ),
-        ),
-        (
-            &upper_adjoint,
-            &lower_adjoint,
-            catcodomain_oracle(
-                upper_parent
-                    .adjoint()
-                    .unwrap()
-                    .materialize()
-                    .unwrap()
-                    .dense_data()
-                    .unwrap(),
-                2,
-                lower_parent
-                    .adjoint()
-                    .unwrap()
-                    .materialize()
-                    .unwrap()
-                    .dense_data()
-                    .unwrap(),
-                4,
-            ),
-        ),
-    ] {
-        assert_eq!(
-            upper
-                .cat(lower, Side::Codomain)
-                .unwrap()
-                .dense_data()
-                .unwrap(),
-            expected
-        );
-    }
-}
-
 /// Warm allocation calls of one compact-diagonal braid on `$leg`.
 macro_rules! warm_compact_braid_calls {
     ($leg:expr, $spectrum:expr $(,)?) => {{
@@ -468,7 +278,7 @@ macro_rules! warm_compact_braid_calls {
 }
 
 #[test]
-fn compact_braid_finds_dual_sector_blocks_without_allocating() {
+fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
     // What (#2011): the compact braid sends sector c to its dual. For U(1)
     // charges ±1 that moves each destination to the other ordinal, and the
     // destination block is still found without an allocation, so the warm

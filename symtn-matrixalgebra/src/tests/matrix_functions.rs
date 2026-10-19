@@ -255,7 +255,7 @@ fn solve_left_preserves_complex_values_without_adjointing() {
 }
 
 #[test]
-fn solve_left_discards_an_output_when_a_later_sector_fails() {
+fn solve_left_returns_the_backend_error_when_a_later_sector_fails() {
     // What: an earlier successful sector cannot publish a partial solution.
     let divisor = u1_block_endomorphism(&[(0, 1, vec![2.0_f64]), (1, 1, vec![3.0])]);
     let rhs = u1_block_map(&[(0, 1, 1, vec![4.0_f64]), (1, 1, 1, vec![9.0_f64])]);
@@ -961,7 +961,7 @@ fn inv_rejects_a_genuinely_singular_sector_without_an_output() {
 }
 
 #[test]
-fn inv_discards_unpublished_output_when_a_later_sector_fails() {
+fn inv_returns_the_backend_error_when_a_later_sector_fails() {
     // What: success in an earlier sector cannot publish a partial inverse when
     // a later backend solve fails.
     let tensor = u1_block_endomorphism(&[(0, 1, vec![2.0_f64]), (1, 1, vec![3.0])]);
@@ -2587,4 +2587,53 @@ fn mf_pinv_exp_and_polar_publish_no_factor_layout() {
             SU2Irrep::from_twice_spin(1).sector_id(),
         ],
     );
+}
+
+#[test]
+fn exp_of_a_general_endomorphism_runs_one_solve_per_sector_and_no_eigh() {
+    // What: the general arm's per-sector budget — six GEMMs and one solve for a
+    // block that needs no squaring, and never an eigendecomposition.
+    let tensor = exp_oracle_tensor::<f64>(1.0);
+    let mut spy = ScriptedExecutor::<MatrixFunctionCallSpy>::default();
+
+    exp(
+        &mut spy,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+    )
+    .unwrap();
+
+    assert_eq!(
+        spy.counts().of(MATRIX_FUNCTION_EIGH),
+        0,
+        "the general arm must not eigendecompose"
+    );
+    assert_eq!(
+        spy.counts().solve,
+        2,
+        "one solve per nonempty coupled sector"
+    );
+    assert_eq!(
+        spy.counts().dot_general,
+        12,
+        "six GEMMs per sector at s = 0"
+    );
+}
+
+#[test]
+fn inv_propagates_unsupported_solve_without_svd_fallback() {
+    // What: a dense executor without solve support returns its typed capability
+    // error instead of silently changing inverse algorithms.
+    let tensor = u1_block_endomorphism(&[(0, 1, vec![2.0_f64])]);
+    let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
+    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
+
+    let error = inv_into_mf(&mut dense, &bound.as_ref().dynamic()).unwrap_err();
+
+    assert!(matches!(
+        error,
+        OperationError::Dense(DenseError::Unsupported {
+            op: "solve_into",
+            ..
+        })
+    ));
 }

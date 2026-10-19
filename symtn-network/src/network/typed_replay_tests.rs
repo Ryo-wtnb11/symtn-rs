@@ -1219,8 +1219,6 @@ fn device_operand_admission_decides_each_class_from_metadata() {
     }
 }
 
-/// The trace pre-step's decisions come from labels and ranks alone, so
-/// the device can take all of them — and reject — before any trace runs.
 #[test]
 fn host_diagonal_operands_classify_as_compact_for_device_admission() {
     // Why: the device preflight reads only `network_reuse_class`; this
@@ -1319,7 +1317,7 @@ fn assert_asymmetric_cuda_plan_parity<R>(
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn cuda_rejections_happen_before_the_first_network_contract() {
+fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
     let u1_rule = Arc::new(U1FusionRule);
     let u1_x0 = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(2), 2)]).unwrap();

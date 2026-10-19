@@ -1739,7 +1739,7 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
 }
 
 #[test]
-fn lazy_cat_reads_parent_storage_without_publishing_adjoint_caches() {
+fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
     // What: `cat` of lazy adjoints on either side equals `cat` of the eager
     // adjoints, over two coupled sectors, without materializing an adjoint.
     let runtime = Runtime::builder().build().unwrap();
