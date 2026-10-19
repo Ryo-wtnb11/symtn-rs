@@ -964,8 +964,8 @@ fn compact_diagonal_on_an_expert_bond_layout_is_normalized_not_refused() {
     assert!(matches!(
         admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(&expert, &missing),
         Err(CheckedGenericFactorPlanError::Operation(
-            OperationError::InvalidArgument { .. }
-        ))
+            OperationError::InvalidArgument { message }
+        )) if message.contains("sector count")
     ));
 }
 
@@ -1064,10 +1064,7 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
         let ((), allocs) = counting_alloc::measure(|| admit().unwrap());
         report.push((name, allocs.calls, allocs.bytes, 0));
         assert!(
-            admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(
-                space, &short
-            )
-            .is_err()
+            matches!(admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(space, &short), Err(OperationError::InvalidArgument { message }) if message.contains("length"))
         );
     }
     for (name, space) in [
@@ -1083,8 +1080,8 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
         assert!(matches!(
             admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(space, &short),
             Err(CheckedGenericFactorPlanError::Operation(
-                OperationError::InvalidArgument { .. }
-            ))
+                OperationError::InvalidArgument { message }
+            )) if message.contains("length")
         ));
     }
     eprintln!("admission (calls, bytes, provider queries): {report:?}");
@@ -1181,10 +1178,14 @@ fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admis
     short[0].values.pop();
     let mut duplicate = unsorted.to_vec();
     duplicate[1].sector = duplicate[0].sector;
-    for malformed in [&short[..], &duplicate[..], &unsorted[..1]] {
+    for (malformed, reason) in [
+        (&short[..], "length"),
+        (&duplicate[..], "twice"),
+        (&unsorted[..1], "sector count"),
+    ] {
         assert!(matches!(
             admit_compact_diagonal::<Mf, _, _>(&reversed, malformed),
-            Err(OperationError::InvalidArgument { .. })
+            Err(OperationError::InvalidArgument { message }) if message.contains(reason)
         ));
     }
 }

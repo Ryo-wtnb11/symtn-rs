@@ -75,7 +75,11 @@ fn aligned_diagonal_spectrum_admission_is_exact_and_order_independent() {
     let admitted = aligned_diagonal_spectrum_by_sector(&regions, &reordered).unwrap();
     assert_eq!(admitted[&even].values, [1.0, 2.0]);
     assert_eq!(admitted[&odd].values, [3.0]);
-    assert!(aligned_diagonal_spectrum_by_sector(&regions, &reordered[..1]).is_none());
+    assert!(
+        aligned_diagonal_spectrum_by_sector(&regions, &reordered[..1])
+            .unwrap_err()
+            .contains("sector count")
+    );
     let missing = [
         SectorSpectrum {
             sector: SectorId::new(9),
@@ -86,7 +90,9 @@ fn aligned_diagonal_spectrum_admission_is_exact_and_order_independent() {
             values: vec![1.0, 2.0],
         },
     ];
-    assert!(aligned_diagonal_spectrum_by_sector(&regions, &missing).is_none());
+    assert!(aligned_diagonal_spectrum_by_sector(&regions, &missing)
+        .unwrap_err()
+        .contains("missing"));
     let duplicate = [
         SectorSpectrum {
             sector: even,
@@ -97,7 +103,9 @@ fn aligned_diagonal_spectrum_admission_is_exact_and_order_independent() {
             values: vec![3.0, 4.0],
         },
     ];
-    assert!(aligned_diagonal_spectrum_by_sector(&regions, &duplicate).is_none());
+    assert!(aligned_diagonal_spectrum_by_sector(&regions, &duplicate)
+        .unwrap_err()
+        .contains("twice"));
     let wrong_length = [
         SectorSpectrum {
             sector: odd,
@@ -108,7 +116,31 @@ fn aligned_diagonal_spectrum_admission_is_exact_and_order_independent() {
             values: vec![1.0],
         },
     ];
-    assert!(aligned_diagonal_spectrum_by_sector(&regions, &wrong_length).is_none());
+    assert!(aligned_diagonal_spectrum_by_sector(&regions, &wrong_length)
+        .unwrap_err()
+        .contains("length"));
+
+    let rectangular = BlockStructure::from_blocks_with_rank(
+        4,
+        vec![BlockSpec::with_key(
+            z2_pair([0, 0], [0, 0], 0).into(),
+            vec![2, 1, 1, 1],
+            vec![1, 2, 2, 2],
+            0,
+        )
+        .unwrap()],
+    )
+    .unwrap();
+    let rectangular_regions = checked_sector_regions(&rectangular, 2).unwrap().unwrap();
+    let rectangular_spectrum = [SectorSpectrum {
+        sector: even,
+        values: vec![1.0, 2.0],
+    }];
+    assert!(
+        aligned_diagonal_spectrum_by_sector(&rectangular_regions, &rectangular_spectrum)
+            .unwrap_err()
+            .contains("aligned square")
+    );
 
     let trees = [z2_pair([1, 1], [1, 1], 0), z2_pair([0, 0], [0, 0], 0)];
     let mut blocks = Vec::new();
@@ -136,7 +168,7 @@ fn aligned_diagonal_spectrum_admission_is_exact_and_order_independent() {
         sector: even,
         values: vec![1.0, 2.0],
     }];
-    assert!(aligned_diagonal_spectrum_by_sector(&noncanonical, &spectrum).is_some());
+    assert!(aligned_diagonal_spectrum_by_sector(&noncanonical, &spectrum).is_ok());
 }
 
 #[test]

@@ -184,15 +184,13 @@ impl std::error::Error for TruncationError {}
 impl From<TruncationError> for symtn_tensors::OperationError {
     fn from(error: TruncationError) -> Self {
         Self::InvalidArgument {
-            // `OperationError` carries a `&'static str`, so the policy/spectrum
-            // detail cannot travel; the rule mismatch gets its own message
-            // because it is the one a caller can actually act on (they passed
-            // a profile built from the wrong space).
+            // Policy and spectrum details already have the required static lifetime.
             message: match error {
                 TruncationError::RuleMismatch => {
                     "truncation space profile was built for a different fusion rule"
                 }
-                _ => "invalid truncation input",
+                TruncationError::InvalidPolicy { message }
+                | TruncationError::InvalidSpectrum { message } => message,
             },
         }
     }
@@ -1305,6 +1303,29 @@ mod tests {
         let decision = select(&spectra, &Truncation::Full).unwrap();
         assert_eq!(counts(&decision.kept), vec![2, 1]);
         assert_eq!(decision.error, 0.0);
+    }
+
+    #[test]
+    fn operation_error_preserves_truncation_reasons() {
+        for (error, reason) in [
+            (
+                TruncationError::InvalidPolicy {
+                    message: "tolerance must be finite",
+                },
+                "tolerance",
+            ),
+            (
+                TruncationError::InvalidSpectrum {
+                    message: "spectrum values must be finite and non-negative",
+                },
+                "spectrum values",
+            ),
+            (TruncationError::RuleMismatch, "different fusion rule"),
+        ] {
+            assert!(
+                matches!(symtn_tensors::OperationError::from(error), symtn_tensors::OperationError::InvalidArgument { message } if message.contains(reason))
+            );
+        }
     }
 
     #[test]

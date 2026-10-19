@@ -214,15 +214,17 @@ fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
     let other_provider = Arc::new(U1FusionRule);
     let other = GradedSpace::try_new(other_provider, [(zero, 2)]).unwrap();
     let wrong_authority = TensorMap::<_, f64>::zeros(&runtime, [&other], [&other]).unwrap();
-    assert!(destination
-        .network_scatter_add_assign(&wrong_authority, &[None, None])
-        .is_err());
+    assert!(matches!(destination
+        .network_scatter_add_assign(&wrong_authority, &[None, None]), Err(Error::InvalidArgument(message)) if message.contains("different sector provider")));
     assert_eq!(destination.dense_data().unwrap(), before);
 
+    assert!(
+        matches!(destination.network_scatter_add_assign(&destination.clone(), &[None]), Err(Error::InvalidArgument(message)) if message.contains("1 ranges") && message.contains("rank-2"))
+    );
+
     let wrong_split = TensorMap::<_, f64>::zeros(&runtime, [&full, &full], []).unwrap();
-    assert!(destination
-        .network_scatter_add_assign(&wrong_split, &[None, None])
-        .is_err());
+    assert!(matches!(destination
+        .network_scatter_add_assign(&wrong_split, &[None, None]), Err(Error::InvalidArgument(message)) if message.contains("codomain/domain split (2, 0)") && message.contains("(1, 1)")));
     assert_eq!(destination.dense_data().unwrap(), before);
 
     // A non-vacuum rank-one map has no admissible blocks, so only logical
@@ -236,17 +238,15 @@ fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
     empty_destination
         .network_scatter_add_assign(&empty_piece, &[Some(1..2)])
         .unwrap();
-    assert!(empty_destination
-        .network_scatter_add_assign(&empty_piece, &[Some(2..3)])
-        .is_err());
+    assert!(matches!(empty_destination
+        .network_scatter_add_assign(&empty_piece, &[Some(2..3)]), Err(Error::InvalidArgument(message)) if message.contains("destination range")));
 
     let two_sectors =
         GradedSpace::try_new(provider, [(U1Irrep::new(1), 1), (U1Irrep::new(2), 1)]).unwrap();
     let empty_two = TensorMap::<_, f64>::zeros(&runtime, [&two_sectors], []).unwrap();
     assert_eq!(empty_two.subblock_count(), 0);
-    assert!(empty_destination
-        .network_scatter_add_assign(&empty_two, &[Some(0..1)])
-        .is_err());
+    assert!(matches!(empty_destination
+        .network_scatter_add_assign(&empty_two, &[Some(0..1)]), Err(Error::InvalidArgument(message)) if message.contains("destination range")));
 }
 
 #[test]

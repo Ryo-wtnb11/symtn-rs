@@ -1071,7 +1071,7 @@ fn find_truncated_rejects_a_malformed_input_spectrum() {
     for values in [&[f64::NAN, 2.0, 1.0][..], &[f64::INFINITY, 2.0, 1.0][..]] {
         let bad = [spectrum(0, values), spectrum(1, &[2.0, 1.0])];
         assert!(
-            leg.find_truncated(&bad, &full).is_err(),
+            matches!(leg.find_truncated(&bad, &full), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::InvalidArgument { message } if message.contains("finite") && message.contains("non-negative"))),
             "NaN and infinite spectra must be rejected: {values:?}"
         );
     }

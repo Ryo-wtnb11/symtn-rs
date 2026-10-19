@@ -58,13 +58,19 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
     };
     let mut missing = stored.to_vec();
     missing.pop();
-    assert!(values_of(&missing).is_err());
+    assert!(
+        matches!(values_of(&missing), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("sector count"))
+    );
     let mut duplicate = stored.to_vec();
     duplicate[1].sector = duplicate[0].sector;
-    assert!(values_of(&duplicate).is_err());
+    assert!(
+        matches!(values_of(&duplicate), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("twice"))
+    );
     let mut short = stored.to_vec();
     short[0].values.pop();
-    assert!(values_of(&short).is_err());
+    assert!(
+        matches!(values_of(&short), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("length"))
+    );
 
     let complex: TensorMap<_, Complex64> = TensorMap::diagonal(
         &runtime,

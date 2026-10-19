@@ -190,13 +190,19 @@ fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() 
     let mut reversed = spectrum.to_vec();
     reversed.reverse();
     assert!(admit(&reversed).is_ok());
-    assert!(admit(&spectrum[..1]).is_err());
+    assert!(
+        matches!(admit(&spectrum[..1]), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("sector count"))
+    );
     let mut duplicate = spectrum.to_vec();
     duplicate[1].sector = duplicate[0].sector;
-    assert!(admit(&duplicate).is_err());
+    assert!(
+        matches!(admit(&duplicate), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("twice"))
+    );
     let mut wrong_size = spectrum.to_vec();
     wrong_size[0].values.push(0.0);
-    assert!(admit(&wrong_size).is_err());
+    assert!(
+        matches!(admit(&wrong_size), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("length"))
+    );
 }
 
 #[cfg(feature = "cgc-gen")]
@@ -587,13 +593,19 @@ fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
     let mut reversed = spectrum.to_vec();
     reversed.reverse();
     assert!(admit(&reversed).is_ok());
-    assert!(admit(&spectrum[..1]).is_err());
+    assert!(
+        matches!(admit(&spectrum[..1]), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("sector count"))
+    );
     let mut duplicate = spectrum.to_vec();
     duplicate[1].sector = duplicate[0].sector;
-    assert!(admit(&duplicate).is_err());
+    assert!(
+        matches!(admit(&duplicate), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("twice"))
+    );
     let mut wrong_size = spectrum.to_vec();
     wrong_size[0].values.push(Complex64::new(0.0, 0.0));
-    assert!(admit(&wrong_size).is_err());
+    assert!(
+        matches!(admit(&wrong_size), Err(symtn_matrixalgebra::seam::CheckedGenericFactorPlanError::Operation(OperationError::InvalidArgument { message })) if message.contains("length"))
+    );
 }
 
 #[cfg(feature = "cgc-gen")]
