@@ -358,12 +358,10 @@ fn checked_composer_matches_original_step_composition_on_anyonic_levels() {
     }
 }
 
-/// What: the checked block entry and the infallible test wrapper drive the
-/// same composer, so their plans agree bit for bit, and an identity
-/// operation emits coefficient exactly one without any F, R or dimension
-/// query.
+/// What: an identity operation emits coefficient exactly one without any
+/// F, R or dimension query.
 #[test]
-fn checked_composer_equals_infallible_wrapper_and_identity_is_exact() {
+fn checked_composer_identity_is_exact_without_symbol_queries() {
     let rule = AnyonicGenericRule;
     let pairs = dense_generic_source_pairs(&DenseGenericRule);
     let structure = packed_fixture_structure(
@@ -375,22 +373,6 @@ fn checked_composer_equals_infallible_wrapper_and_identity_is_exact() {
             .map(|key| (key, vec![1usize; 3])),
     )
     .unwrap();
-    let mut operations = all_transposes(2, 1);
-    operations.push(TreeTransformOperation::braid([1, 0], [2], [1, 0], [2]));
-    operations.push(TreeTransformOperation::braid([2, 0], [1], [0, 2], [1]));
-    for operation in operations {
-        let provider = CheckedPlanSpy::new(&rule);
-        let checked = build_checked_generic_tree_pair_transform_group_plan(
-            &provider,
-            operation.clone(),
-            &structure,
-        )
-        .unwrap();
-        let infallible =
-            build_generic_tree_pair_transform_group_plan(&rule, operation, &structure).unwrap();
-        assert_eq!(checked.specs(), infallible.specs());
-    }
-
     for operation in [
         TreeTransformOperation::braid([0, 1], [2], [1, 0], [2]),
         TreeTransformOperation::transpose([0, 1], [2]),

@@ -907,17 +907,19 @@ fn transform_invalid_axis_error_is_reported_exactly() {
 }
 
 #[test]
-fn fz2_lowered_transform_contract_and_mixed_plan_match_encoded_oracle() {
-    // What: the closed fZ2 algebra produces the exact encoded structure for
-    // transform and contract, and mixed strategy planning is operand-order safe.
+fn fz2_lowered_transform_and_contract_build_hand_keys_and_mixed_plans_agree() {
+    // What: the closed fZ2 algebra builds the hand-written transform and
+    // contract layouts, and a contraction plan does not depend on whether
+    // the rhs operand was bound through the lowered or the encoded strategy.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
     let provider = Arc::new(FermionParityFusionRule);
+    let even = Z2Irrep::EVEN.sector_id();
     let odd = Z2Irrep::ODD.sector_id();
-    let leg = || FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]);
+    let leg = || FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 3)], false)]);
     let homspace = FusionTreeHomSpace::new(leg(), leg());
     let lowered = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
@@ -948,18 +950,48 @@ fn fz2_lowered_transform_contract_and_mixed_plan_match_encoded_oracle() {
         homspace,
     )
     .unwrap();
-    let operation = TreeTransformOperation::permute([1], [0]);
-    let lowered_transform = lowered.transformed_multiplicity_free(&operation).unwrap();
-    let encoded_transform = encoded.transformed_multiplicity_free(&operation).unwrap();
-    assert_eq!(lowered_transform.space(), encoded_transform.space());
+    // Rank-1 trees carry no inner line or vertex; each parity couples to
+    // itself with a (degeneracy x degeneracy) block.
+    let blocks = |space: &DynamicFusionMapSpace| {
+        let mut blocks = layout_snapshot(space)
+            .into_iter()
+            .map(|(key, shape, _, _)| (key, shape))
+            .collect::<Vec<_>>();
+        blocks.sort();
+        blocks
+    };
+    let expected = |dual: bool| {
+        let mut blocks = [(even, 2), (odd, 3)]
+            .map(|(sector, degeneracy)| {
+                let key = FusionTreePairKey::try_pair_from_sector_ids(
+                    [sector.id()],
+                    [sector.id()],
+                    sector.id(),
+                    [dual],
+                    [dual],
+                    [],
+                    [],
+                    [],
+                    [],
+                )
+                .unwrap();
+                (BlockKey::FusionTree(key), vec![degeneracy, degeneracy])
+            })
+            .to_vec();
+        blocks.sort();
+        blocks
+    };
+    // Moving a leg across the codomain/domain split dualizes it (TensorKit
+    // `permute`), so both legs of the swapped map are dual.
+    let lowered_transform = lowered
+        .transformed_multiplicity_free(&TreeTransformOperation::permute([1], [0]))
+        .unwrap();
+    assert_eq!(blocks(lowered_transform.space()), expected(true));
 
     let lowered_dst =
         BoundDynamicFusionMapSpace::contracted_multiplicity_free(&lowered, &lowered, &[1], &[0])
             .unwrap();
-    let encoded_dst =
-        BoundDynamicFusionMapSpace::contracted_multiplicity_free(&encoded, &encoded, &[1], &[0])
-            .unwrap();
-    assert_eq!(lowered_dst.space(), encoded_dst.space());
+    assert_eq!(blocks(lowered_dst.space()), expected(false));
     let output = (0..lowered_dst.space().rank()).collect::<Vec<_>>();
     let plan = |rhs: &BoundDynamicFusionMapSpace<_>| {
         crate::prepare_tensorcontract_fusion_plan_dyn(

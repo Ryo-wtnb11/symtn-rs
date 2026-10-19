@@ -291,7 +291,7 @@ mod tests {
         );
     }
 
-    fn assert_baked_copy_matches_recomputed(shape: &[usize], strides: &[isize]) {
+    fn assert_copy_matches_index_reference(shape: &[usize], strides: &[isize]) {
         let backing_len = shape
             .iter()
             .zip(strides)
@@ -301,25 +301,10 @@ mod tests {
         let src = (0..backing_len)
             .map(|index| index as f64 + 0.25)
             .collect::<Vec<_>>();
+        let scaled_src = src.iter().map(|value| 2.0 * value).collect::<Vec<_>>();
         let mut expected = vec![-1.0; backing_len];
-        let mut actual = expected.clone();
-        let mut adapter = StridedHostKernelAdapter::default();
+        reference_copy(&mut expected, &scaled_src, shape, strides, strides);
 
-        adapter
-            .copy_scale_strided_baked(
-                &mut expected,
-                &src,
-                shape,
-                strides,
-                strides,
-                0,
-                0,
-                false,
-                2.0,
-                None,
-                None,
-            )
-            .unwrap();
         let normalized = layout(shape, strides, strides);
         let baked = BakedFusedLayout::try_from_normalized_slices(
             normalized.dims(),
@@ -327,28 +312,33 @@ mod tests {
             normalized.src_strides(),
         )
         .unwrap();
-        adapter
-            .copy_scale_strided_baked(
-                &mut actual,
-                &src,
-                shape,
-                strides,
-                strides,
-                0,
-                0,
-                false,
-                2.0,
-                Some(baked),
-                None,
-            )
-            .unwrap();
-
-        assert_eq!(actual, expected);
+        let mut adapter = StridedHostKernelAdapter::default();
+        for baked in [None, Some(baked)] {
+            let mut actual = vec![-1.0; backing_len];
+            adapter
+                .copy_scale_strided_baked(
+                    &mut actual,
+                    &src,
+                    shape,
+                    strides,
+                    strides,
+                    0,
+                    0,
+                    false,
+                    2.0,
+                    baked,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
-    fn baked_fused_layout_matches_eager_for_dynamic_rank() {
-        assert_baked_copy_matches_recomputed(
+    fn baked_and_eager_copies_match_the_index_reference_for_dynamic_rank() {
+        // What: a rank-9 strided copy-scale writes alpha * src exactly at the
+        // strided positions and nothing else, with and without a baked layout.
+        assert_copy_matches_index_reference(
             &[2, 2, 2, 2, 2, 2, 2, 2, 2],
             &[1, 3, 9, 27, 81, 243, 729, 2187, 6561],
         );

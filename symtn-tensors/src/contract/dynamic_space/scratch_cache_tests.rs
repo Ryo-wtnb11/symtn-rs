@@ -898,22 +898,24 @@ fn bound_layout_strategy_propagates_without_heap_ownership() {
 
 #[test]
 fn root_constructor_builds_from_checked_keys() {
-    // What: the lowered root accepts its lowered key set directly and
-    // produces the same complete storage grid as the encoded oracle.
+    // What: the lowered root builds the complete key set of a non-abelian
+    // space, here spin-1/2 x spin-1/2 coupling to spin 0 and spin 1 on both
+    // sides with one tree each, and rejects a sector its codec cannot name.
     let provider = Arc::new(symtn_core::SU2FusionRule);
     let half = symtn_core::SU2Irrep::from_twice_spin(1).sector_id();
-    let leg = || FusionProductSpace::new([SectorLeg::new([(half, 1)], false)]);
-    let hom = FusionTreeHomSpace::new(leg(), leg());
-    let lowered_keys = hom
-        .prepare_fusion_tree_layout_checked(provider.as_ref())
-        .unwrap()
-        .commit();
+    let side = || {
+        FusionProductSpace::new([
+            SectorLeg::new([(half, 1)], false),
+            SectorLeg::new([(half, 1)], false),
+        ])
+    };
+    let hom = FusionTreeHomSpace::new(side(), side());
     let bound = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
-        hom.clone(),
+        hom,
     )
     .unwrap();
-    let actual = (0..bound.space().structure().block_count())
+    let mut actual = (0..bound.space().structure().block_count())
         .map(|index| {
             bound
                 .space()
@@ -924,11 +926,29 @@ fn root_constructor_builds_from_checked_keys() {
                 .clone()
         })
         .collect::<Vec<_>>();
-    let expected = lowered_keys
-        .iter()
-        .cloned()
-        .map(BlockKey::FusionTree)
-        .collect::<Vec<_>>();
+    actual.sort();
+    // A rank-2 tree has one vertex (label 1, multiplicity free) and no
+    // inner line.
+    let mut expected = [0, 2]
+        .map(|twice_spin| {
+            let coupled = symtn_core::SU2Irrep::from_twice_spin(twice_spin).sector_id();
+            BlockKey::FusionTree(
+                FusionTreePairKey::try_pair_from_sector_ids(
+                    [half.id(), half.id()],
+                    [half.id(), half.id()],
+                    coupled.id(),
+                    [false, false],
+                    [false, false],
+                    [],
+                    [],
+                    [1],
+                    [1],
+                )
+                .unwrap(),
+            )
+        })
+        .to_vec();
+    expected.sort();
     assert_eq!(actual, expected);
 
     let malformed = FusionTreeHomSpace::new(
