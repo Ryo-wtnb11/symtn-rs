@@ -393,7 +393,9 @@ fn wrong_input_codomain_split_is_rejected() {
         TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&space], [&space], 162).unwrap();
     let result =
         net(&[op(&["i", "j"], &[]), op(&["j"], &["k"])], &["i"], &["k"]).contract(&[&lhs, &rhs]);
-    assert!(matches!(result, Err(Error::InvalidArgument(_))));
+    assert!(
+        matches!(result, Err(Error::InvalidArgument(message)) if message.contains("operand 0 puts"))
+    );
 }
 
 /// Operands of two Runtimes are refused with the typed `RuntimeMismatch`

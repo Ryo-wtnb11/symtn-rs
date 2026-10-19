@@ -455,12 +455,22 @@ mod tests {
     fn views_reject_overlap_and_out_of_bounds_members() {
         let storage = vec![0.0_f64; 10];
         assert!(StackedStorageView::new::<f64>(&storage, 3, 3, 3).is_ok());
-        assert!(StackedStorageView::new::<f64>(&storage, 3, 3, 4).is_err());
-        assert!(StackedStorageView::new::<f64>(&storage, 3, 2, 2).is_err());
-        assert!(StackedStorageView::new::<f64>(&storage, 3, 0, 3).is_err());
+        assert!(matches!(
+            StackedStorageView::new::<f64>(&storage, 3, 3, 4),
+            Err(OperationError::ElementCountMismatch { actual: 10, .. })
+        ));
+        assert!(
+            matches!(StackedStorageView::new::<f64>(&storage, 3, 2, 2), Err(OperationError::InvalidArgument { message }) if message.contains("overlap"))
+        );
+        assert!(
+            matches!(StackedStorageView::new::<f64>(&storage, 3, 0, 3), Err(OperationError::InvalidArgument { message }) if message.contains("at least one member"))
+        );
         let view = StackedStorageView::new::<f64>(&storage, 3, 2, 7).unwrap();
         assert_eq!(TensorStorage::<f64>::len(&view), 3);
         let mut storage = storage;
-        assert!(StackedStorageViewMut::new::<f64>(&mut storage, 4, 3, 4).is_err());
+        assert!(matches!(
+            StackedStorageViewMut::new::<f64>(&mut storage, 4, 3, 4),
+            Err(OperationError::ElementCountMismatch { actual: 10, .. })
+        ));
     }
 }

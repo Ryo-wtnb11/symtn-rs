@@ -206,8 +206,8 @@ fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_s
             },
         ),
         Err(CheckedGenericFactorPlanError::Operation(
-            OperationError::SpaceMismatch { .. }
-        ))
+            OperationError::SpaceMismatch { message }
+        )) if message.contains("one-leg endomorphism")
     ));
     assert_eq!(checked_provider.calls.get(), 0);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();

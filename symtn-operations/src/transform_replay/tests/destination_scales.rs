@@ -157,7 +157,9 @@ fn unsorted_destination_scales_are_rejected_before_any_write() {
             &bad,
         )
         .unwrap_err();
-        assert!(matches!(error, OperationError::InvalidArgument { .. }));
+        assert!(
+            matches!(error, OperationError::InvalidArgument { message } if message.contains("strictly increasing"))
+        );
         assert!(out.iter().all(|&value| value == 7.0));
     }
 }

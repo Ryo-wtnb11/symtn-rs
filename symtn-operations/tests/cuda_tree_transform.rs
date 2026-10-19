@@ -2432,7 +2432,10 @@ fn unsorted_or_vanishing_destination_scales_are_rejected_before_any_device_work(
     let src = CudaStorage::<f64>::upload(&ctx, &fixture.source::<f64>()).unwrap();
     let vanishing = vec![(alternating_scales(&fixture)[0].0, 0.0)];
     let before = cuda_transfer_stats();
-    for scales in [&scales, &vanishing] {
+    for (scales, expected) in [
+        (&scales, "strictly increasing"),
+        (&vanishing, "must not vanish"),
+    ] {
         let error = executor
             .replay_with_destination_scales(
                 &mut ctx,
@@ -2447,7 +2450,7 @@ fn unsorted_or_vanishing_destination_scales_are_rejected_before_any_device_work(
             )
             .unwrap_err();
         assert!(
-            matches!(error, OperationError::InvalidArgument { .. }),
+            matches!(error, OperationError::InvalidArgument { message } if message.contains(expected)),
             "{error:?}"
         );
     }

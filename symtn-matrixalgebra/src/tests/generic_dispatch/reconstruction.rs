@@ -685,21 +685,26 @@ fn ordinary_factorizations_and_composition_inherit_lowered_layout_strategy() {
     let input = BoundDynamicTensorRef::try_new(&bound, tensor.data()).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
+    let rejects_invalid_sector = |result| {
+        assert!(matches!(result, Err(OperationError::FusionAlgebra(e))
+            if matches!(*e, symtn_core::FusionAlgebraError::InvalidSector { sector }
+                if sector == SectorId::new(99))));
+    };
     let svd = svd_compact_dyn(&mut dense, &input).unwrap();
     for factor in [svd.u(), svd.s(), svd.vh()] {
-        assert!(factor.space().prime_derived_homspace(&malformed).is_err());
+        rejects_invalid_sector(factor.space().prime_derived_homspace(&malformed));
     }
     let Qr { q, r } = qr_compact_dyn(&mut dense, &input).unwrap();
-    assert!(q.space().prime_derived_homspace(&malformed).is_err());
-    assert!(r.space().prime_derived_homspace(&malformed).is_err());
+    rejects_invalid_sector(q.space().prime_derived_homspace(&malformed));
+    rejects_invalid_sector(r.space().prime_derived_homspace(&malformed));
     let eigh = eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
-    assert!(eigh.v().space().prime_derived_homspace(&malformed).is_err());
+    rejects_invalid_sector(eigh.v().space().prime_derived_homspace(&malformed));
 
     let adjoint = crate::factorize::adjoint_bound_factor(svd.u()).unwrap();
-    assert!(adjoint.space().prime_derived_homspace(&malformed).is_err());
+    rejects_invalid_sector(adjoint.space().prime_derived_homspace(&malformed));
     let mut context = default_context();
     let composed = crate::compose::compose_bound_dyn(&mut context, svd.u(), svd.s()).unwrap();
-    assert!(composed.space().prime_derived_homspace(&malformed).is_err());
+    rejects_invalid_sector(composed.space().prime_derived_homspace(&malformed));
 }
 
 #[test]

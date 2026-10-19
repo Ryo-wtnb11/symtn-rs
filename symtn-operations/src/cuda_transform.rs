@@ -1773,6 +1773,9 @@ mod zero_region_tests {
                     if message == "device contraction cannot zero a negatively strided destination block"
             ));
         }
-        assert!(CudaMemberZeroRegions::prepare(&[layout(&[4], &[1], 6)], 8, 2).is_err());
+        assert!(matches!(
+            CudaMemberZeroRegions::prepare(&[layout(&[4], &[1], 6)], 8, 2),
+            Err(OperationError::Dense(symtn_dense::DenseError::OutOfBounds))
+        ));
     }
 }

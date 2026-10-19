@@ -35,7 +35,7 @@ fn pinv_adjoint_parent_rejects_invalid_rcond_before_svd() {
         let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
         assert!(matches!(
             pinv_adjoint_parent_into_mf(&mut dense, &bound.as_ref().dynamic(), rcond,),
-            Err(OperationError::InvalidArgument { .. })
+            Err(OperationError::InvalidArgument { message }) if message.contains("rcond")
         ));
     }
 }

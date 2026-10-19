@@ -706,7 +706,9 @@ fn eigh_rejects_a_nonreal_complex_diagonal_before_dense_execution() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, OperationError::InvalidArgument { .. }));
+    assert!(
+        matches!(error, OperationError::InvalidArgument { message } if message.contains("Hermitian"))
+    );
     assert_eq!(dense.counts().of(EIGH_ENTRIES), 0);
 }
 
@@ -721,7 +723,9 @@ fn eigh_rejects_nonfinite_input_before_dense_execution() {
             &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
         )
         .unwrap_err();
-        assert!(matches!(error, OperationError::InvalidArgument { .. }));
+        assert!(
+            matches!(error, OperationError::InvalidArgument { message } if message.contains("input components must be finite"))
+        );
         assert_eq!(dense.counts().of(EIGH_ENTRIES), 0);
     }
 }
