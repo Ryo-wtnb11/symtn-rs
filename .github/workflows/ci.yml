@@ -584,6 +584,9 @@ jobs:
     name: coverage
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    # The main-push badge step pushes to the `badges` branch.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -634,3 +637,35 @@ jobs:
         working-directory: symtn
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      # Badge reporting reuses the instrumented runs above; a reporting outage
+      # must not turn the floors gate red, hence step-level continue-on-error.
+      - name: Generate Codecov report
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        run: cargo llvm-cov report --codecov --output-path codecov.json
+        working-directory: symtn
+      - uses: codecov/codecov-action@v5
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        with:
+          working-directory: symtn
+          files: codecov.json
+          fail_ci_if_error: false
+      - name: Publish badge JSON to badges branch
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          pct=$(jq -r '.data[0].totals.lines.percent' coverage.json)
+          msg=$(printf '%.1f%%' "$pct")
+          color=$(awk -v p="$pct" 'BEGIN{print (p<60)?"red":(p<80)?"yellow":"brightgreen"}')
+          jq -n --arg m "$msg" --arg c "$color" \
+            '{schemaVersion:1,label:"coverage",message:$m,color:$c}' > badge.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Single-file branch built from plumbing; history is disposable, force-push.
+          blob=$(git hash-object -w badge.json)
+          tree=$(printf '100644 blob %s\tbadge.json\n' "$blob" | git mktree)
+          commit=$(git commit-tree "$tree" -m "coverage badge: $msg ($GITHUB_SHA)")
+          git push -f origin "$commit:refs/heads/badges"
+        working-directory: symtn
