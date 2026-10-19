@@ -1,9 +1,9 @@
-//! #1557 removed `is_hermitian`, `is_antihermitian`, `is_isometric`,
-//! `is_unitary`, `is_posdef`, `project_hermitian` and `project_antihermitian`:
-//! each was a short chain of public operations. These tests pin the chains in
-//! `common/predicate_chains.rs` to the answers the removed methods gave at
-//! 388d24a9: every truth-table entry below and every projection bit pattern
-//! was first asserted equal to the removed method's output on these fixtures.
+//! TensorKit's `ishermitian`, `isantihermitian`, `isisometric`, `isunitary`,
+//! `isposdef`, `project_hermitian` and `project_antihermitian` are short
+//! chains of public operations in symtn (`common/predicate_chains.rs`). Each
+//! predicate is checked on tensors constructed to have (or lack) the
+//! property, and each projection against `(x ± x†) / 2` evaluated entrywise
+//! from the fill.
 
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
@@ -19,136 +19,38 @@ use symtn::typed::HermitianTol;
 use symtn::typed::{Eigh, LeftPolar, Qr};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-/// Projection payloads `(re, im)` as `f64` bits, captured from the removed
-/// `project_hermitian` / `project_antihermitian` at 388d24a9 on these fixtures.
-const U1_F64_HERMITIAN: [(u64, u64); 13] = [
-    (0xbfe39456ffecc09d, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0x3feb36c6dc1d7445, 0x0000000000000000),
-    (0xbfe39456ffecc09d, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0x3fe4d07c1c0eaa1f, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0x3feb36c6dc1d7445, 0x0000000000000000),
-    (0x3fd602011470c412, 0x0000000000000000),
-    (0x3fe4d07c1c0eaa1f, 0x0000000000000000),
-    (0x3fd602011470c412, 0x0000000000000000),
-    (0xbfef63d460731b8d, 0x0000000000000000),
-];
-const U1_F64_ANTIHERMITIAN: [(u64, u64); 13] = [
-    (0x0000000000000000, 0x0000000000000000),
-    (0xbfd04e7680b44646, 0x0000000000000000),
-    (0x3fd04e7680b44646, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-    (0xbfd04e7680b44646, 0x0000000000000000),
-    (0xbfd5b0ad08344aba, 0x0000000000000000),
-    (0x3fd04e7680b44646, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-    (0x3fd46c1569ec7ff4, 0x0000000000000000),
-    (0x3fd5b0ad08344aba, 0x0000000000000000),
-    (0xbfd46c1569ec7ff4, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-];
-const U1_C64_HERMITIAN: [(u64, u64); 13] = [
-    (0xbfe39456ffecc09d, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0xbfd13ea14428ef84),
-    (0xbfe41e07726001b8, 0x3fd13ea14428ef84),
-    (0x3feb36c6dc1d7445, 0x0000000000000000),
-    (0xbfe39456ffecc09d, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0xbfd13ea14428ef84),
-    (0x3fe4d07c1c0eaa1f, 0x3fdedddccae6ad6d),
-    (0xbfe41e07726001b8, 0x3fd13ea14428ef84),
-    (0x3feb36c6dc1d7445, 0x0000000000000000),
-    (0x3fd602011470c412, 0x3fc6c6806e3a6972),
-    (0x3fe4d07c1c0eaa1f, 0xbfdedddccae6ad6d),
-    (0x3fd602011470c412, 0xbfc6c6806e3a6972),
-    (0xbfef63d460731b8d, 0x0000000000000000),
-];
-const U1_C64_ANTIHERMITIAN: [(u64, u64); 13] = [
-    (0x0000000000000000, 0xbfec4542b2ba24db),
-    (0xbfd04e7680b44646, 0x3fe297763a08fc83),
-    (0x3fd04e7680b44646, 0x3fe297763a08fc83),
-    (0x0000000000000000, 0x3fe5370b3f2ea203),
-    (0x0000000000000000, 0xbfec4542b2ba24db),
-    (0xbfd04e7680b44646, 0x3fe297763a08fc83),
-    (0xbfd5b0ad08344aba, 0x3fe039e43ab578c6),
-    (0x3fd04e7680b44646, 0x3fe297763a08fc83),
-    (0x0000000000000000, 0x3fe5370b3f2ea203),
-    (0x3fd46c1569ec7ff4, 0xbfe9b23444e48130),
-    (0x3fd5b0ad08344aba, 0x3fe039e43ab578c6),
-    (0xbfd46c1569ec7ff4, 0xbfe9b23444e48130),
-    (0x0000000000000000, 0xbfd6ed3a82eb4f98),
-];
-const SU2_F64_HERMITIAN: [(u64, u64); 13] = [
-    (0xbfe39456ffecc09d, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0x3fe4d07c1c0eaa1f, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0x3feb36c6dc1d7445, 0x0000000000000000),
-    (0x3fd602011470c412, 0x0000000000000000),
-    (0x3fe4d07c1c0eaa1f, 0x0000000000000000),
-    (0x3fd602011470c412, 0x0000000000000000),
-    (0xbfef63d460731b8d, 0x0000000000000000),
-    (0xbfe39456ffecc09d, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0xbfe41e07726001b8, 0x0000000000000000),
-    (0x3feb36c6dc1d7445, 0x0000000000000000),
-];
-const SU2_F64_ANTIHERMITIAN: [(u64, u64); 13] = [
-    (0x0000000000000000, 0x0000000000000000),
-    (0xbfd04e7680b44646, 0x0000000000000000),
-    (0xbfd5b0ad08344aba, 0x0000000000000000),
-    (0x3fd04e7680b44646, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-    (0x3fd46c1569ec7ff4, 0x0000000000000000),
-    (0x3fd5b0ad08344aba, 0x0000000000000000),
-    (0xbfd46c1569ec7ff4, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-    (0xbfd04e7680b44646, 0x0000000000000000),
-    (0x3fd04e7680b44646, 0x0000000000000000),
-    (0x0000000000000000, 0x0000000000000000),
-];
-const SU2_C32_HERMITIAN: [(u64, u64); 13] = [
-    (0xbfe3945700000000, 0x0000000000000000),
-    (0xbfe41e0780000000, 0xbfd13ea140000000),
-    (0x3fe4d07c20000000, 0x3fdedddcc0000000),
-    (0xbfe41e0780000000, 0x3fd13ea140000000),
-    (0x3feb36c6e0000000, 0x0000000000000000),
-    (0x3fd6020120000000, 0x3fc6c68080000000),
-    (0x3fe4d07c20000000, 0xbfdedddcc0000000),
-    (0x3fd6020120000000, 0xbfc6c68080000000),
-    (0xbfef63d460000000, 0x0000000000000000),
-    (0xbfe3945700000000, 0x0000000000000000),
-    (0xbfe41e0780000000, 0xbfd13ea140000000),
-    (0xbfe41e0780000000, 0x3fd13ea140000000),
-    (0x3feb36c6e0000000, 0x0000000000000000),
-];
-const SU2_C32_ANTIHERMITIAN: [(u64, u64); 13] = [
-    (0x0000000000000000, 0xbfec4542c0000000),
-    (0xbfd04e7680000000, 0x3fe2977640000000),
-    (0xbfd5b0ad00000000, 0x3fe039e440000000),
-    (0x3fd04e7680000000, 0x3fe2977640000000),
-    (0x0000000000000000, 0x3fe5370b40000000),
-    (0x3fd46c1560000000, 0xbfe9b23440000000),
-    (0x3fd5b0ad00000000, 0x3fe039e440000000),
-    (0xbfd46c1560000000, 0xbfe9b23440000000),
-    (0x0000000000000000, 0xbfd6ed3a80000000),
-    (0x0000000000000000, 0xbfec4542c0000000),
-    (0xbfd04e7680000000, 0x3fe2977640000000),
-    (0x3fd04e7680000000, 0x3fe2977640000000),
-    (0x0000000000000000, 0x3fe5370b40000000),
-];
-
-fn bits<D: Numeric>(data: &[D]) -> Vec<(u64, u64)> {
-    data.iter()
-        .map(|value| {
-            let wide = value.wide();
-            (wide.re.to_bits(), wide.im.to_bits())
-        })
-        .collect()
+/// Every coupled block of the projection `p` of the single-leg
+/// endomorphism `x` (block entry `(i, j)` is `value([i, j])`) equals
+/// `(x + sign · x†) / 2` entrywise: `(value(i, j) + sign · conj(value(j, i))) / 2`.
+fn assert_projection<R, D>(
+    what: &str,
+    p: &TensorMap<R, D>,
+    value: impl Fn(&[usize]) -> D,
+    sign: f64,
+    tol: f64,
+) where
+    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+        + symtn::sector::CheckedFusionAlgebra
+        + symtn::sector::SectorCodec,
+    R::Sector: std::fmt::Debug,
+    D: Numeric + symtn::typed::TensorScalar,
+{
+    let mut entries = 0;
+    for (sector, block) in p.blocks().unwrap() {
+        assert_eq!(block.rows(), block.cols(), "{what} {sector:?}");
+        for i in 0..block.rows() {
+            for j in 0..block.cols() {
+                let want = (value(&[i, j]).wide() + sign * value(&[j, i]).wide().conj()) * 0.5;
+                let found = block.get(i, j).unwrap().wide();
+                assert!(
+                    (found - want).norm() <= tol * (1.0 + want.norm()),
+                    "{what} {sector:?} [{i}, {j}]: {found} vs {want}"
+                );
+                entries += 1;
+            }
+        }
+    }
+    assert_eq!(entries, p.dense_data().unwrap().len(), "{what}");
 }
 
 fn fill(ij: &[usize]) -> f64 {
@@ -160,10 +62,11 @@ fn fill(ij: &[usize]) -> f64 {
     (key as f64 * 0.7 + 0.3).sin()
 }
 
-/// One multiplicity-free family: the truth table of every predicate, old
-/// against chain, and the projection payloads, returned as bits.
-macro_rules! pin_family {
-    ($rt:expr, $leg:expr, $d:ty, $tol:expr, $value:expr, $hermitian:expr, $antihermitian:expr) => {{
+/// One multiplicity-free family: the truth table of every predicate chain on
+/// tensors built to be (or not be) each property, and both projections
+/// against their defining formula.
+macro_rules! check_family {
+    ($rt:expr, $leg:expr, $d:ty, $tol:expr, $value:expr) => {{
         let rt: &Runtime = $rt;
         let leg = $leg;
         let value = $value;
@@ -234,8 +137,8 @@ macro_rules! pin_family {
         assert!(project_hermitian!(isometry).is_err());
         assert!(project_antihermitian!(isometry).is_err());
 
-        assert_eq!(bits(h.dense_data().unwrap()), $hermitian);
-        assert_eq!(bits(a.dense_data().unwrap()), $antihermitian);
+        assert_projection("hermitian", &h, &value, 1.0, tol);
+        assert_projection("antihermitian", &a, &value, -1.0, tol);
     }};
 }
 
@@ -259,49 +162,21 @@ fn su2_leg() -> GradedSpace<SU2FusionRule> {
 }
 
 #[test]
-fn u1_chains_match_the_removed_methods() {
+fn u1_chains_decide_constructed_cases_and_project_by_formula() {
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
-    pin_family!(
-        &rt,
-        u1_leg(),
-        f64,
-        1e-10,
-        fill,
-        U1_F64_HERMITIAN,
-        U1_F64_ANTIHERMITIAN
-    );
-    pin_family!(
-        &rt,
-        u1_leg(),
-        Complex64,
-        1e-10,
-        |ij: &[usize]| Complex64::new(fill(ij), fill(&[ij[0] + 1, ij[1]])),
-        U1_C64_HERMITIAN,
-        U1_C64_ANTIHERMITIAN
-    );
+    check_family!(&rt, u1_leg(), f64, 1e-10, fill);
+    check_family!(&rt, u1_leg(), Complex64, 1e-10, |ij: &[usize]| {
+        Complex64::new(fill(ij), fill(&[ij[0] + 1, ij[1]]))
+    });
 }
 
 #[test]
-fn su2_chains_match_the_removed_methods() {
+fn su2_chains_decide_constructed_cases_and_project_by_formula() {
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
-    pin_family!(
-        &rt,
-        su2_leg(),
-        f64,
-        1e-10,
-        fill,
-        SU2_F64_HERMITIAN,
-        SU2_F64_ANTIHERMITIAN
-    );
-    pin_family!(
-        &rt,
-        su2_leg(),
-        Complex32,
-        1e-4,
-        |ij: &[usize]| Complex32::new(fill(ij) as f32, fill(&[ij[0] + 1, ij[1]]) as f32),
-        SU2_C32_HERMITIAN,
-        SU2_C32_ANTIHERMITIAN
-    );
+    check_family!(&rt, su2_leg(), f64, 1e-10, fill);
+    check_family!(&rt, su2_leg(), Complex32, 1e-4, |ij: &[usize]| {
+        Complex32::new(fill(ij) as f32, fill(&[ij[0] + 1, ij[1]]) as f32)
+    });
 }
 
 /// Checked-Generic providers never had the removed methods; the chains are

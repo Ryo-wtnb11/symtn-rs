@@ -345,7 +345,9 @@ fn lowering_error_precedes_later_group_admission_and_recoupling() {
 /// composition: each source permuted alone by the checked per-pair permute
 /// (TensorKit's pair path), split at the open ranks, kept where the traced
 /// trees agree, scaled by `dim(c)/dim(first)·Π twist(non-dual)`, summed per
-/// (destination block, source block, destination key).
+/// (destination block, source block, destination key). The compile here is
+/// cold (it publishes nothing); a warm compile gives its bits
+/// (`warm_compile_asks_only_the_preflight`).
 #[test]
 fn checked_trace_terms_match_eager_per_source_composition() {
     let fixture = fixture();
@@ -489,48 +491,6 @@ fn group_admission_validates_each_member_once_in_block_order() {
     assert_ne!(calls[after..after + per_member[0].len()], per_member[0][..]);
 }
 
-/// What: a cold checked compile makes exactly the pinned provider queries
-/// and produces the term sequence of a04e59c2, a revision without the
-/// composed-coefficient cache: routing through cache 4 changes nothing on a
-/// miss. Each lowering split admits its input once (#2150), 1519 queries in
-/// all. A group is lowered whole right after composing it (#2149), so the
-/// queries come in group order (`ledger`); `sorted` pins their multiset
-/// independently of order. Each trace channel factor asks for `Dim(c)`,
-/// `Dim(first)` (#2075): 192/128/32 SqrtDim/InvSqrtDim/Dim queries over 16
-/// factors; the 0–3 ulp difference from the `SqrtDim` form is below
-/// `portable`'s `f32` rounding. The ledger is exact; term values
-/// go through `portable` (fusion-symbols SU(3) coefficients round their last bits
-/// differently on Linux and macOS).
-#[test]
-fn cold_compile_ledger_and_term_bits_match_pinned_revision() {
-    let fixture = fixture();
-    fixture.provider.reset(Vec::new());
-    let structure = compile(&fixture).unwrap();
-    let calls = fixture.provider.calls.borrow();
-    let ledger = super::trace_cache4::fingerprint(format!("{:?}", *calls).bytes().map(u64::from));
-    let multiset = super::trace_cache4::fingerprint(
-        format!("{:?}", sorted(calls.clone()))
-            .bytes()
-            .map(u64::from),
-    );
-    let terms = super::trace_cache4::fingerprint(structure.terms().iter().flat_map(|term| {
-        [
-            term.dst_block() as u64,
-            term.src_block() as u64,
-            super::trace_cache4::portable(*term.coefficient()),
-        ]
-    }));
-    assert_eq!(
-        (calls.len(), multiset, ledger, terms),
-        (
-            1519,
-            4_651_798_264_327_362_414,
-            8_649_410_880_240_935_342,
-            14_775_106_432_576_145_088
-        )
-    );
-}
-
 /// What (#2150): a checked split asks the provider exactly one admission of
 /// its input tree, in order (the codomain half of admitting the pair
 /// `(tree, tree)`), at every split position; its outputs are structural
@@ -575,11 +535,6 @@ fn publishing_compile(
 fn trace_activity() -> (usize, usize, usize) {
     let activity = crate::probe::take_trace_column_activity();
     (activity.hits, activity.misses, activity.publications)
-}
-
-fn sorted(mut calls: Vec<Call>) -> Vec<Call> {
-    calls.sort_by_key(|call| format!("{call:?}"));
-    calls
 }
 
 /// What (#2072, #2149): a warm checked compile hits every fusion group and

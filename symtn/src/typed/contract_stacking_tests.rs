@@ -146,6 +146,20 @@ fn entries<R>(tensor: &TensorMap<R, f64>) -> BTreeMap<(BlockKey, Vec<usize>), f6
     entries
 }
 
+/// Each subblock's fusion-tree key, offset and strides, in storage order.
+fn layout<R>(tensor: &TensorMap<R, f64>) -> Vec<(BlockKey, usize, Vec<usize>)> {
+    (0..tensor.subblock_count())
+        .map(|index| {
+            let block = tensor.subblock(index).unwrap();
+            (
+                block.key().clone(),
+                block.offset(),
+                block.strides().to_vec(),
+            )
+        })
+        .collect()
+}
+
 fn assert_same_operator<R>(actual: &TensorMap<R, f64>, expected: &TensorMap<R, f64>, what: &str) {
     let actual = entries(actual);
     let expected = entries(expected);
@@ -288,10 +302,15 @@ where
         }
         for (other_stacking, other) in &tilings {
             let what = |op: &str| format!("{stacking:?}·{other_stacking:?} {op}");
-            assert_entries_close(
-                &entries(&tensor.compose(other).unwrap()),
-                &square,
-                &what("compose"),
+            let product = tensor.compose(other).unwrap();
+            assert_entries_close(&entries(&product), &square, &what("compose"));
+            // Eager composition returns a fresh tensor in the ordinary
+            // layout, whatever the operand tilings.
+            assert_eq!(
+                layout(&product),
+                layout(&good),
+                "{}",
+                what("compose layout")
             );
             // Full contraction, identity and swapped output order: the
             // sorted and swapped operand candidates.
@@ -694,86 +713,4 @@ fn compose_plan_rejects_a_non_direct_plan_at_new() {
         ),
         "{error:?}"
     );
-}
-
-/// #2131 characterization pin, recorded on the base `65cf0057` before eager
-/// compose moved onto `plan_compose`: the bits of every composition of two
-/// tilings (the irregular Host core for any non-canonical one), canonical
-/// included. Entries are dyadic and every sum exact, so the digest does not
-/// depend on the dense kernel's summation order.
-#[test]
-fn eager_compose_of_every_tiling_pair_is_bit_pinned() {
-    fn digests<R>(rule: R, sectors: &[(SectorId, usize)], out: &mut Vec<u64>)
-    where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>
-            + CheckedFusionAlgebra
-            + SectorCodec
-            + Clone
-            + 'static,
-    {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let tilings = [
-            Stacking::Canonical,
-            Stacking::Sorted,
-            Stacking::ColumnsReversed,
-            Stacking::BothReversed,
-        ]
-        .map(|stacking| endomorphism(&runtime, rule.clone(), sectors, stacking));
-        for lhs in &tilings {
-            for rhs in &tilings {
-                let product = lhs.compose(rhs).unwrap();
-                let mut state = 0xcbf2_9ce4_8422_2325u64;
-                for value in product.dense_data().unwrap() {
-                    let bits = if *value == 0.0 { 0 } else { value.to_bits() };
-                    for byte in bits.to_le_bytes() {
-                        state ^= u64::from(byte);
-                        state = state.wrapping_mul(0x0000_0100_0000_01b3);
-                    }
-                }
-                out.push(state);
-            }
-        }
-    }
-    let mut actual = Vec::new();
-    digests(
-        Z2FusionRule,
-        &[
-            (Z2Irrep::new(0).sector_id(), 2),
-            (Z2Irrep::new(1).sector_id(), 1),
-        ],
-        &mut actual,
-    );
-    digests(
-        FermionParityFusionRule,
-        &[(SectorId::new(0), 2), (SectorId::new(1), 1)],
-        &mut actual,
-    );
-    digests(
-        U1FusionRule,
-        &[
-            (U1Irrep::new(-1).sector_id(), 1),
-            (U1Irrep::new(0).sector_id(), 2),
-            (U1Irrep::new(1).sector_id(), 1),
-        ],
-        &mut actual,
-    );
-    digests(
-        SU2FusionRule,
-        &[
-            (SU2Irrep::from_twice_spin(0).sector_id(), 2),
-            (SU2Irrep::from_twice_spin(1).sector_id(), 1),
-        ],
-        &mut actual,
-    );
-    // Z2 and fermion parity share one digest: composition has no twist.
-    // Every pair of one rule lands in the canonical destination layout.
-    let expected = [
-        0xa61f03188423b93b_u64,
-        0xa61f03188423b93b,
-        0x3c825ee653fc5a3b,
-        0x715a530497d92fe9,
-    ]
-    .map(|digest| [digest; 16])
-    .concat();
-    assert_eq!(actual, expected);
 }

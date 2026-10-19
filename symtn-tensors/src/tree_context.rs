@@ -1084,39 +1084,4 @@ where
             beta,
         )
     }
-
-    /// Overwrite replay; the move writing destination block `b` is scaled by
-    /// `θ_b` from `destination_scales` (see
-    /// [`TreeTransformBackend::tree_transform_structure_overwrite_into_raw`]).
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn tree_transform_structure_overwrite_into_raw(
-        &mut self,
-        structure: &TreeTransformStructure<C>,
-        dst_structure: &Arc<BlockStructure>,
-        src_structure: &Arc<BlockStructure>,
-        dst_data: &mut [D],
-        src_data: &[D],
-        alpha: D,
-        destination_scales: &[(usize, C)],
-    ) -> Result<(), OperationError>
-    where
-        D: RecouplingCoefficientAction<C>,
-    {
-        let Self {
-            backend, workspace, ..
-        } = self;
-        replay_structure_overwrite(
-            backend,
-            workspace,
-            structure,
-            dst_structure,
-            src_structure,
-            dst_data,
-            src_data,
-            alpha,
-            destination_scales,
-            None,
-        )
-    }
 }
