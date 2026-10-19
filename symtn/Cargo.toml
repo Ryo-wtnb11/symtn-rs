@@ -31,6 +31,10 @@ krylov = ["dep:krylov"]
 name = "cuda_contract_batch_timing"
 required-features = ["cuda"]
 
+[[example]]
+name = "cuda_transfer"
+required-features = ["cuda"]
+
 [dependencies]
 krylov = { version = "0.2", optional = true, default-features = false }
 num-complex = "0.4"

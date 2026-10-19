@@ -1,7 +1,6 @@
 //! Physics smoke test: iTEBD ground-state search for the spin-1/2 AFM
-//! Heisenberg chain with U(1) (Sz) symmetry, user-layer API only. A compact
-//! version of `examples/itebd_heisenberg.rs`; see that file for the physics
-//! and charge-convention notes. Exact energy per bond: `1/4 - ln 2`.
+//! Heisenberg chain with U(1) (Sz) symmetry, user-layer API only.
+//! Charges label twice Sz: -1 and +1. Exact energy per bond: `1/4 - ln 2`.
 
 use std::sync::Arc;
 
@@ -230,7 +229,7 @@ fn neel_product_state_contracts_with_the_full_gate() {
 
 /// Tiny chi and few steps, loose tolerance.
 #[test]
-fn itebd_heisenberg_reaches_the_ground_state_energy_coarsely() {
+fn ground_state_energy_converges_coarsely() {
     let energy = run_itebd(8, &[(0.1, 100), (0.05, 100)]);
     assert!(
         (energy - E_EXACT).abs() < 5e-2,

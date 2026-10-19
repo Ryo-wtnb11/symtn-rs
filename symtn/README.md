@@ -6,7 +6,7 @@ Ordinary applications import `Runtime`, `RuntimeBuilder`, `GradedSpace`,
 built-in symmetries such as `U1FusionRule` from `symtn::sector`. Every public
 item has exactly one path.
 
-Start with the [crate tutorial](src/tutorial.md#quick-start). The main
+Start with the primitive examples below. The main
 `TensorMap` operations are:
 
 | Task | Methods |
@@ -18,7 +18,7 @@ Start with the [crate tutorial](src/tutorial.md#quick-start). The main
 | Factorize | `qr_compact`, `svd_compact`, `eigh_full` |
 
 For index notation and network planning, add `symtn-network` and run its
-[quickstart](../symtn-network/examples/quickstart.rs). Mathematical conventions
+[contract example](../symtn-network/examples/contract.rs). Mathematical conventions
 are in [tensor-map mathematics](src/mathematics.md).
 
 The default host provider is Tenferro's resolved compiled default: BLAS when
@@ -36,3 +36,15 @@ closures as linear maps (`svdsolve` takes a user type implementing
 records the TensorKit and QSpace counterparts. krylov needs a LAPACK provider
 in the final binary: enable a `blas-*` feature or link one yourself (the
 default `cpu-faer` links none).
+
+## Primitive examples
+
+- [spaces_and_tensors](examples/spaces_and_tensors.rs): U(1) and SU(2) spaces, dual legs, construction, and blocks.
+- [permute_braid_twist](examples/permute_braid_twist.rs): fermionic exchange and twist signs.
+- [factorize_and_truncate](examples/factorize_and_truncate.rs): SVD reconstruction and spectrum-based bond restriction.
+- [eigh_and_matrix_functions](examples/eigh_and_matrix_functions.rs): Hermitian eigendecomposition, exponential, and a spectral square root.
+- [trace_inner_norm](examples/trace_inner_norm.rs): trace, inner product, and norm.
+- [dense_roundtrip](examples/dense_roundtrip.rs): physical dense expansion and projection.
+- [cuda_transfer](examples/cuda_transfer.rs): explicit Host/CUDA roundtrip (requires `cuda` and a device).
+
+Run a Host example with `cargo run -p symtn --example NAME`.

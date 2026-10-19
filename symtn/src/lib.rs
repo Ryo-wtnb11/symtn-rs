@@ -33,10 +33,10 @@
 //! state mutex, so Host work is not blocked by device work; device operations
 //! of every Runtime on one device serialize their enqueue on that device lock,
 //! which is what lets one Runtime safely read a fresh device output returned
-//! by another (#1384). A host sync under a lease (`to_host`, scalar and
+//! by another. A host sync under a lease (`to_host`, scalar and
 //! spectrum downloads) therefore stalls
 //! every Runtime on that device. Opening a device also pins CubeCL to one
-//! stream per device for the whole process (#1391), so every device write,
+//! stream per device for the whole process, so every device write,
 //! including `*_into` destinations and reused scratch, is ordered
 //! before every later read or write from any thread; building a device
 //! Runtime fails if CubeCL was already configured with more streams. GPU work
@@ -78,7 +78,24 @@
 //! }
 //! ```
 //!
-#![doc = include_str!("tutorial.md")]
+//! # Primitive examples
+//!
+//! symtn supplies composable operations on symmetric tensors. A
+//! [`typed::GradedSpace`] describes a leg; [`typed::TensorMap`] stores a map
+//! `codomain <- domain` as reduced blocks. A shared [`typed::Runtime`] owns
+//! execution resources. Host is the default; CUDA transfers are explicit.
+//!
+//! Run a Host example with `cargo run -p symtn --example NAME`.
+//! The contraction example belongs to `symtn-network`.
+//!
+//! - [spaces_and_tensors](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/spaces_and_tensors.rs): U(1) and SU(2) spaces, dual legs, construction, and blocks.
+//! - [permute_braid_twist](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/permute_braid_twist.rs): fermionic exchange and twist signs.
+//! - [factorize_and_truncate](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/factorize_and_truncate.rs): SVD reconstruction and spectrum-based bond restriction.
+//! - [eigh_and_matrix_functions](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/eigh_and_matrix_functions.rs): Hermitian eigendecomposition, exponential, and a spectral square root.
+//! - [trace_inner_norm](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/trace_inner_norm.rs): trace, inner product, and norm.
+//! - [dense_roundtrip](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/dense_roundtrip.rs): physical dense expansion and projection.
+//! - [cuda_transfer](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn/examples/cuda_transfer.rs): explicit Host/CUDA roundtrip (requires `cuda` and a device).
+//! - [contract](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn-network/examples/contract.rs): index notation and explicit labeled networks.
 
 pub mod cache;
 // Compiles the repository README quickstart as a doctest (never part of the

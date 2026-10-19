@@ -63,10 +63,10 @@ fn main() -> Result<(), Error> {
 ## Documentation
 
 - [symtn crate guide](symtn/README.md): the main `TensorMap` operations and
-  the [tutorial](symtn/src/tutorial.md).
-- [`symtn-network/examples/quickstart.rs`](symtn-network/examples/quickstart.rs):
+  the [primitive examples](symtn/README.md#primitive-examples).
+- [`symtn-network/examples/contract.rs`](symtn-network/examples/contract.rs):
   a labeled contraction with `contract!`
-  (`cargo run -p symtn-network --example quickstart`).
+  (`cargo run -p symtn-network --example contract`).
 - [Tensor-map mathematics](symtn/src/mathematics.md): conventions and current
   scope.
 - [Differences from TensorKit](docs/tensorkit-differences.md).

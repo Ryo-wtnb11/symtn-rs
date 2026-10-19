@@ -1,0 +1,19 @@
+//! Exchange two odd fermionic legs and twist one leg: each gives a minus sign.
+
+use std::sync::Arc;
+use symtn::sector::{FermionParityFusionRule, Z2Irrep};
+use symtn::typed::{Direction, Error, GradedSpace, Runtime, TensorMap};
+
+fn main() -> Result<(), Error> {
+    let rt = Runtime::builder().build()?;
+    let v = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 1)])?;
+    let a = TensorMap::<_, f64>::from_subblock_fn(&rt, [&v, &v], [], |_, _| 1.0)?;
+    let permuted = a.permute(&[1, 0], &[])?;
+    let braided = a.braid(&[1, 0], &[], &[0, 1])?;
+    let twisted = a.twist(&[0], Direction::Forward)?;
+    for result in [permuted, braided, twisted] {
+        assert!((result.dense_data()?[0] + 1.0).abs() < 1e-12);
+    }
+    println!("permute_braid_twist: assertions passed");
+    Ok(())
+}
