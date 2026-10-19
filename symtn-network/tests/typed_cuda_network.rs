@@ -1048,7 +1048,9 @@ fn warm_cuda_chain_uploads_nothing_for_its_reused_destinations() {
             after.d2h_calls - before.d2h_calls,
             after.gemm_calls - before.gemm_calls,
         ),
-        (1, 1, 0, 0, 6),
+        // One GEMM per coupled sector (charges 0 and 1) of each of the
+        // three steps.
+        (1, 1, 0, 0, 3 * 2),
         "(h2d, device_allocs, d2d_copies, d2h, gemm) for the warm 4-tensor chain"
     );
     drop(warm);

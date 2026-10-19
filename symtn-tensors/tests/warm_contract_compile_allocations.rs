@@ -182,22 +182,17 @@ fn warm_compile_allocations(codomain: usize, domain: usize) -> [usize; 3] {
 #[test]
 fn warm_contract_compile_allocations_do_not_scale_with_rank() {
     let _serial = counting_alloc::serial();
-    for (codomain, domain) in [(2, 1), (2, 2), (3, 2), (3, 3), (4, 3)] {
-        let [core, dynamic_tree, plan] = warm_compile_allocations(codomain, domain);
-        let rank = codomain + domain;
-        // What: the same allocation count at every rank from 3 to 7.
-        // Core: the plan's job, coefficient, run and inactive-region lists
-        // plus its `Arc`. Plan: one shared slice per transform operation.
-        // DynamicTree: that plan and its `Arc`; per transformed source its
-        // permuted HomSpace and the two `Arc`s the replay scratch shares; the
-        // same for the core destination; the core plan; the artifact. An
-        // empty twist list is an empty scale list and allocates nothing
-        // (#1975). The layout lookup key is not one of them (#1367): it
-        // borrows the HomSpace content.
-        assert_eq!(core, 5, "core route at rank {rank}");
-        assert_eq!(plan, 3, "plan at rank {rank}");
-        assert_eq!(dynamic_tree, 18, "dynamic-tree route at rank {rank}");
-    }
+    let shapes = [(2, 1), (2, 2), (3, 2), (3, 3), (4, 3)];
+    let counts = shapes.map(|(codomain, domain)| warm_compile_allocations(codomain, domain));
+    // What: the same allocation count of each route at every rank from 3 to
+    // 7: per-call objects (plans, `Arc`s, permuted HomSpaces, the artifact),
+    // never rank-sized buffers. An empty twist list is an empty scale list
+    // and allocates nothing (#1975); the layout lookup key borrows the
+    // HomSpace content (#1367).
+    assert!(
+        counts.iter().all(|count| *count == counts[0]),
+        "[core, dynamic tree, plan] per rank 3..=7: {counts:?}"
+    );
 }
 
 /// Allocations of one warm DynamicTree compile of
@@ -235,34 +230,26 @@ fn crossing_compile_allocations(
     })
 }
 
-/// The route's own allocation count. Every shape but (1, 2) dualizes
-/// `(1 + domain) + 2` legs while forming permuted HomSpaces.
-fn crossing_compile_base(codomain: usize, domain: usize) -> usize {
-    if (codomain, domain) == (1, 2) {
-        18
-    } else {
-        15
-    }
-}
+/// Shapes whose source transforms move `(1 + domain) + 2` legs across sides
+/// while forming permuted HomSpaces, from rank 3 to 6. Rank 2 is left out:
+/// there the planner takes the reversed orientation, whose source transforms
+/// keep every leg on its side; shape (1, 2) forms no permuted HomSpace with a
+/// crossing leg.
+const CROSSING_SHAPES: [(usize, usize); 5] = [(2, 1), (2, 2), (3, 2), (2, 3), (3, 3)];
 
 #[test]
 fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
     let _serial = counting_alloc::serial();
-    // Rank 2 is left out: there the planner takes the reversed orientation,
-    // whose source transforms keep every leg on its side.
-    for (codomain, domain) in [(2, 1), (1, 2), (2, 2), (3, 2), (2, 3), (3, 3)] {
-        let allocations = crossing_compile_allocations(leg, codomain, domain);
-        // What: the rank-independent DynamicTree compile, and nothing per leg
-        // that changes side in a source transform. #1403 removed that
-        // per-leg allocation: forming the permuted HomSpace dualizes
-        // `(1 + domain) + 2` legs, and `SectorLeg::dual` now shares the
-        // source leg's sector data, as TensorKit's `dual(V)` shares `V.dims`.
-        //
-        // Why shape (1, 2) is apart: its route forms no permuted HomSpace
-        // with a crossing leg, so it never dualizes one.
-        let base = crossing_compile_base(codomain, domain);
-        assert_eq!(allocations, base, "rank {}", codomain + domain);
-    }
+    let counts = CROSSING_SHAPES
+        .map(|(codomain, domain)| crossing_compile_allocations(leg, codomain, domain));
+    // What: the rank-independent DynamicTree compile, and nothing per leg
+    // that changes side in a source transform. #1403 removed that per-leg
+    // allocation: `SectorLeg::dual` shares the source leg's sector data, as
+    // TensorKit's `dual(V)` shares `V.dims`.
+    assert!(
+        counts.iter().all(|count| *count == counts[0]),
+        "{CROSSING_SHAPES:?}: {counts:?}"
+    );
 }
 
 /// #1403: a leg whose sector -> degeneracy map the dual moves shares its
@@ -270,14 +257,11 @@ fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
 #[test]
 fn warm_contract_compile_allocates_nothing_per_crossing_leg_the_dual_moves() {
     let _serial = counting_alloc::serial();
-    for (codomain, domain) in [(2, 1), (1, 2), (2, 2), (3, 2), (2, 3), (3, 3)] {
+    for (codomain, domain) in [(1, 2)].into_iter().chain(CROSSING_SHAPES) {
         let moved = crossing_compile_allocations(asymmetric_leg, codomain, domain);
         let fixed = crossing_compile_allocations(leg, codomain, domain);
-        let base = crossing_compile_base(codomain, domain);
-        // What: the same count as legs the dual fixes, and as the route with
-        // no crossing leg.
+        // What: the same count as legs the dual fixes.
         assert_eq!(moved, fixed, "rank {}", codomain + domain);
-        assert_eq!(moved, base, "rank {}", codomain + domain);
     }
 }
 

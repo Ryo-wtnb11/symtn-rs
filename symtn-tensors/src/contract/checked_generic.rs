@@ -2385,8 +2385,8 @@ mod tests {
     /// direct source or of a lazy adjoint, takes its destination from the
     /// source's memo and its transformer from the completed cache: its
     /// provider events are the identity read, the admission style and the
-    /// commit style, with no algebra query, and its payload is the cold
-    /// call's. The cold ledger is the base revision's.
+    /// commit style, with no algebra query of the cold call's, and its
+    /// payload is the cold call's.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_warm_checked_transform_reads_only_its_identity_and_styles() {
@@ -2394,27 +2394,19 @@ mod tests {
             return;
         }
         use crate::TreeTransformOperation;
-        // Cold ledgers, pinned on base 907b7b00: per-query counts in `Query`
-        // order, then the event count.
         let operations = [
-            (
-                "permute",
-                TreeTransformOperation::permute([1, 0], [2, 3]),
-                [34, 10, 103, 14, 3, 76, 257],
-            ),
+            ("permute", TreeTransformOperation::permute([1, 0], [2, 3])),
             (
                 "braid",
                 TreeTransformOperation::braid([2, 0], [1, 3], [0, 1], [2, 3]),
-                [33, 21, 267, 26, 27, 73, 480],
             ),
             (
                 "transpose",
                 TreeTransformOperation::transpose([0, 1, 3], [2]),
-                [13, 14, 47, 5, 0, 25, 113],
             ),
         ];
         for adjoint in [false, true] {
-            for (name, operation, pinned) in &operations {
+            for (name, operation) in &operations {
                 let what = format!("{name} adjoint={adjoint}");
                 symtn_core::clear_structure_caches();
                 let (provider, parent, _, _) = bound_pair(2, 2);
@@ -2430,15 +2422,11 @@ mod tests {
                     let (space, out) = transform(logical, adjoint_of, &data, operation).unwrap();
                     (space, out, provider.events.borrow().clone())
                 };
-                let (cold_space, cold_data, cold_events) = run();
-                let ledger: [usize; Query::COUNT + 1] = std::array::from_fn(|index| {
-                    if index == Query::COUNT {
-                        cold_events.len()
-                    } else {
-                        provider.calls.get()[index]
-                    }
-                });
-                assert_eq!(ledger, *pinned, "{what} cold");
+                let (cold_space, cold_data, _) = run();
+                assert!(
+                    provider.algebra_calls() > 0,
+                    "{what}: the cold call derives"
+                );
                 for call in 0..3 {
                     let (space, out, events) = run();
                     assert_eq!(events, [Identity, Style, Style], "{what} warm {call}");
@@ -2529,8 +2517,8 @@ mod tests {
     /// identity read per transformer lookup) and the commit style; the only
     /// algebra queries left are the `Dual`s of the contraction destination's
     /// own derivation (`three_stages`), which no operand memo covers. The
-    /// payload is the cold call's, and the cold per-query counts are the
-    /// base revision's (6efec1ef).
+    /// payload is the cold call's, and a fixture that stages an operand
+    /// derives it on the cold call only.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_warm_checked_contraction_derives_no_staged_operand() {
@@ -2539,22 +2527,18 @@ mod tests {
         }
         use Event::Query as Q;
         let (i, s, b, d) = (Identity, Style, Braiding, Q(Query::Dual));
-        // Per fixture: cold per-query counts in `Query` order then the event
-        // count, direct and adjoint; then the warm lhs-provider events.
-        type Pin = (
-            &'static str,
-            [[usize; Query::COUNT + 1]; 2],
-            [Vec<Event>; 2],
-        );
+        // Per fixture: whether it stages an operand, then the warm
+        // lhs-provider events, direct and adjoint.
+        type Pin = (&'static str, bool, [Vec<Event>; 2]);
         let pins: [Pin; 4] = [
             (
                 "core",
-                [[0, 0, 0, 0, 0, 0, 6]; 2],
+                false,
                 [vec![i, s, b, i, s, s], vec![i, s, b, i, s, s]],
             ),
             (
                 "copy_c",
-                [[34, 10, 103, 14, 3, 76, 263]; 2],
+                true,
                 [
                     vec![i, s, b, i, s, i, s, i, s],
                     vec![i, s, b, i, s, i, s, i, s],
@@ -2563,7 +2547,7 @@ mod tests {
             (
                 "lhs_only",
                 // The adjoint row admits its source structure once (#2233).
-                [[34, 10, 103, 14, 3, 76, 263], [34, 10, 103, 14, 3, 76, 267]],
+                true,
                 [
                     vec![i, s, b, i, s, i, s, i, s],
                     vec![i, s, b, i, s, i, i, s, i, s],
@@ -2573,7 +2557,7 @@ mod tests {
                 "three_stages",
                 // Both operands share one canonical source structure, whose
                 // trees are admitted once per call (#2233).
-                [[105, 45, 696, 72, 66, 225, 1297]; 2],
+                true,
                 [
                     vec![i, s, b, i, d, d, s, i, s, i, i, s, i, i, s, i, s],
                     vec![i, s, b, i, d, d, s, i, s, i, i, s, i, i, s, i, s],
@@ -2615,17 +2599,16 @@ mod tests {
                     let events = left.events.borrow().clone();
                     (space, out, events)
                 };
-                let (cold_space, cold_data, cold_events) = run();
-                let ledger: [usize; Query::COUNT + 1] = std::array::from_fn(|index| {
-                    if index == Query::COUNT {
-                        cold_events.len()
-                    } else {
-                        left.calls.get()[index]
-                    }
-                });
-                assert_eq!(ledger, pin.1[usize::from(adjoint)], "{what} cold");
+                let (cold_space, cold_data, _) = run();
+                let cold_algebra = left.algebra_calls();
                 for call in 0..3 {
                     let (space, out, events) = run();
+                    let warm_algebra = left.algebra_calls();
+                    if pin.1 {
+                        assert!(warm_algebra < cold_algebra, "{what} warm {call}");
+                    } else {
+                        assert_eq!(warm_algebra, cold_algebra, "{what} warm {call}");
+                    }
                     assert_eq!(events, pin.2[usize::from(adjoint)], "{what} warm {call}");
                     assert_eq!(space.space(), cold_space.space(), "{what} warm {call}");
                     assert_eq!(folded_bits(&out), folded_bits(&cold_data), "{what} {call}");

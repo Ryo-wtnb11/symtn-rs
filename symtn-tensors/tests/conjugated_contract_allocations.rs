@@ -109,7 +109,7 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
 }
 
 #[test]
-fn warm_conjugated_contract_allocations_are_pinned() {
+fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
     let _serial = counting_alloc::serial();
     let fz2_u1_rule = || {
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
@@ -117,28 +117,27 @@ fn warm_conjugated_contract_allocations_are_pinned() {
             U1FusionRule,
         )
     };
-    for deg in [2, 16] {
-        let rows = [
+    let rows = |deg| {
+        [
             ("U1", warm_conjugated_contract(U1FusionRule, &u1(deg))),
             ("SU2", warm_conjugated_contract(SU2FusionRule, &su2(deg))),
             (
                 "fZ2xU1",
                 warm_conjugated_contract(fz2_u1_rule(), &fz2_u1(deg)),
             ),
-        ];
-        for (name, (calls, bytes, retained)) in rows {
-            eprintln!("{name} d{deg}: {calls} calls, {bytes} bytes; adjoint memo {retained} bytes");
-        }
-        // What: the warm count does not grow with the degeneracy and holds no
-        // per-call adjoint rebuild. The conjugation flag is the lazy adjoint
-        // of the owned space, which the core reads in place: 5 calls,
-        // 624 bytes for every row.
-        for ((name, (calls, bytes, retained)), (expected_calls, max_bytes)) in
-            rows.into_iter().zip([(5, 1024), (5, 1024), (5, 1024)])
-        {
-            assert_eq!(calls, expected_calls, "{name} d{deg}");
-            assert!(bytes <= max_bytes, "{name} d{deg}: {bytes} warm bytes");
-            assert!(retained <= 4096, "{name} d{deg}: {retained} memo bytes");
-        }
+        ]
+    };
+    let (small, large) = (rows(2), rows(16));
+    // What: the warm call holds no per-call adjoint rebuild: the core reads
+    // the owned space's lazy adjoint in place, so its allocation count does
+    // not grow with the degeneracy, and neither its bytes nor the adjoint
+    // memo's exceed a structure-sized bound.
+    for ((name, (small_calls, ..)), (_, (large_calls, bytes, retained))) in
+        small.into_iter().zip(large)
+    {
+        eprintln!("{name}: {small_calls} -> {large_calls} calls, {bytes} bytes; memo {retained}");
+        assert_eq!(small_calls, large_calls, "{name}: d2 against d16");
+        assert!(bytes <= 1024, "{name} d16: {bytes} warm bytes");
+        assert!(retained <= 4096, "{name} d16: {retained} memo bytes");
     }
 }

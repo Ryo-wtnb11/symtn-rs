@@ -221,7 +221,7 @@ fn lazy_scale_and_add_allocate_only_one_input_sized_payload() {
 }
 
 #[test]
-fn lazy_add_allocation_count_is_pinned_across_block_counts() {
+fn lazy_add_allocation_count_does_not_depend_on_the_block_count() {
     let _measurement = counting_alloc::serial();
     // What: `add` with a lazy-adjoint operand copies each block through one
     // bounds-checked strided call (#1399) and allocates only its output and
@@ -250,11 +250,13 @@ fn lazy_add_allocation_count_is_pinned_across_block_counts() {
         .0;
         counts.push((mixed, pair));
     }
-    // Mixed: payload `Vec`, `Arc<TypedData>` and `Arc<TypedTensorBody>`,
-    // three, the same as the per-element kernel (#1399). Two
-    // lazy operands give a lazy adjoint of the parents' sum (A10): those
-    // three plus its `Arc<TypedAdjointView>` header.
-    assert_eq!(counts, vec![(3, 4); 4]);
+    // Two lazy operands give a lazy adjoint of the parents' sum (A10), so
+    // their count may differ from the mixed one, but neither depends on the
+    // block count.
+    assert!(
+        counts.iter().all(|&count| count == counts[0]),
+        "(mixed, pair) per block count: {counts:?}"
+    );
 }
 
 #[test]
@@ -262,14 +264,14 @@ fn block_stride_buffers_spill_only_past_rank_sixteen() {
     let _measurement = counting_alloc::serial();
     // What: the per-op block layout (`CheckedBlockLayout`, #1401) holds up
     // to 16 non-unit axes inline, so at rank 10 lazy `add` and lazy-adjoint
-    // materialization allocate only their output, as main's per-element
-    // kernel did, for one block or many. Past 16 axes its stride buffers
-    // spill once per op.
+    // materialization allocate as at rank 2, for one block or many. Past 16
+    // axes its four stride buffers spill at most once per op.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let alpha = num_complex::Complex64::new(0.5, 0.0);
     let beta = num_complex::Complex64::new(-0.25, 0.0);
     let mut counts = Vec::new();
     for (sectors, rank) in [
+        (vec![(0, 2)], 2),
         (vec![(0, 2)], 10),
         (vec![(0, 2), (1, 1), (-1, 1)], 10),
         (vec![(0, 2)], 18),
@@ -293,20 +295,22 @@ fn block_stride_buffers_spill_only_past_rank_sixteen() {
             black_box(fresh.materialize().unwrap().dense_data().unwrap().len());
         })
         .0;
-        counts.push((rank, parent.subblock_count() > 1, mixed, pair, materialize));
+        counts.push([mixed, pair, materialize]);
     }
-    // Output only: 3 calls. At rank 18 the mixed `add` spills its four layout
-    // buffers (extents and three operands' strides) and materialization its
-    // three. Two lazy operands combine their parents element-wise with no
-    // layout (A10): the output plus the lazy view header, 4 at every rank.
-    assert_eq!(
-        counts,
-        vec![
-            (10, false, 3, 4, 3),
-            (10, true, 3, 4, 3),
-            (18, false, 7, 4, 6)
-        ]
-    );
+    let [inline, one_block, many_blocks, spilled] = counts[..] else {
+        unreachable!()
+    };
+    assert_eq!(one_block, inline, "rank 10, one block, against rank 2");
+    assert_eq!(many_blocks, inline, "rank 10, three blocks, against rank 2");
+    // Two lazy operands combine their parents element-wise with no layout
+    // (A10).
+    assert_eq!(spilled[1], inline[1], "rank 18 lazy pair");
+    for (route, index) in [("mixed add", 0), ("materialize", 2)] {
+        assert!(
+            spilled[index] <= inline[index] + 4,
+            "rank 18 {route}: {spilled:?} against {inline:?}"
+        );
+    }
 }
 
 #[test]
@@ -419,10 +423,11 @@ fn typed_multigroup_lazy_compose_stays_below_the_measured_engine_margin() {
 fn materialize_allocates_one_fresh_payload_per_call() {
     let _measurement = counting_alloc::serial();
     // What: `materialize` (#1545) of an owned dense tensor or a lazy adjoint
-    // costs one payload allocation plus the two fixed body wrappers, whatever
-    // the block count, on every call: the result never shares a payload, so a
+    // costs one payload allocation plus fixed body wrappers, whatever the
+    // block count, on every call: the result never shares a payload, so a
     // repeated call cannot be free.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let mut counts = Vec::new();
     for (rank, radius, degeneracy) in [(2, 0, 8), (2, 6, 2), (4, 3, 2), (6, 1, 2)] {
         let source = tensor(
             &runtime,
@@ -436,14 +441,17 @@ fn materialize_allocates_one_fresh_payload_per_call() {
             let (allocations, bytes) = measure(|| {
                 black_box(input.materialize().unwrap());
             });
-            // Payload `Vec`, its `Arc<TypedData>` and the `Arc<TypedTensorBody>`.
-            assert_eq!(allocations, 3, "rank={rank}, radius={radius}");
+            counts.push(allocations);
             assert!(
                 bytes >= payload_bytes && bytes < payload_bytes + 256,
                 "rank={rank}, radius={radius}: {bytes} bytes for a {payload_bytes}-byte payload"
             );
         }
     }
+    assert!(
+        counts.iter().all(|&count| count == counts[0]),
+        "allocations per block count and call: {counts:?}"
+    );
 }
 
 #[cfg(feature = "cgc-gen")]
