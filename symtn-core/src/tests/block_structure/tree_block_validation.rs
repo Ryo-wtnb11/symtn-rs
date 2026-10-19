@@ -281,7 +281,7 @@ fn checked_tree_normalizes_structure_before_provider_calls() {
         let needle = if tree.uncoupled().len() == 2 {
             "duality flags"
         } else {
-            "rank-1"
+            "must equal its uncoupled sector"
         };
         assert!(matches!(
             tree.validate_for_rule_checked(&rule),
