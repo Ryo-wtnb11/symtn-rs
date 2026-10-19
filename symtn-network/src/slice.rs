@@ -22,9 +22,11 @@ use crate::cost::DenseCostModel;
 use crate::error::{ContractError, Result, SliceError, SliceResult};
 use crate::ir::NetworkIR;
 use crate::labels::{TemporaryLabel, TensorAxis};
-use crate::plan::ContractionPlan;
+use crate::plan::{parse_labels, push_label, ContractionPlan};
 
-const SLICE_PLAN_HEADER: &str = "symtn-slice-plan-v1";
+/// v2 writes each label as a quoted, escaped string (v1 wrote it bare), so no
+/// label can split a slice line or forge a [`SlicedPlan`] section marker.
+const SLICE_PLAN_HEADER: &str = "symtn-slice-plan-v2";
 
 /// Which labels greedy slicing may choose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,7 +581,7 @@ impl SlicePlan {
             text.push_str("slice ");
             text.push_str(kind.as_str());
             text.push(' ');
-            text.push_str(label.as_str());
+            push_label(&mut text, label.as_str());
             text.push('\n');
         }
         text
@@ -626,12 +628,14 @@ impl SlicePlan {
             if line.trim().is_empty() {
                 continue;
             }
-            let parts = line.split_whitespace().collect::<Vec<_>>();
-            if parts.len() != 3 || parts[0] != "slice" {
-                return Err(invalid_serialized_slice("invalid slice line"));
-            }
-            kinds.push(SliceKind::parse(parts[1])?);
-            sliced.push(TemporaryLabel::from(parts[2]));
+            let (kind, label) = line
+                .strip_prefix("slice ")
+                .and_then(|rest| rest.find(' ').map(|space| rest.split_at(space)))
+                .ok_or_else(|| invalid_serialized_slice("invalid slice line"))?;
+            let [label] = <[TemporaryLabel; 1]>::try_from(parse_labels(label)?)
+                .map_err(|_| invalid_serialized_slice("slice line needs exactly one label"))?;
+            kinds.push(SliceKind::parse(kind)?);
+            sliced.push(label);
         }
 
         Ok(Self {

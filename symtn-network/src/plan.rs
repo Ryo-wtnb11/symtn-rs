@@ -22,7 +22,7 @@ pub(crate) fn push_label(text: &mut String, label: &str) {
 }
 
 /// Parse a sequence of ` <label>` written by [`push_label`].
-fn parse_labels(mut rest: &str) -> Result<Vec<TemporaryLabel>> {
+pub(crate) fn parse_labels(mut rest: &str) -> Result<Vec<TemporaryLabel>> {
     let mut labels = Vec::new();
     while !rest.is_empty() {
         let quoted = rest
