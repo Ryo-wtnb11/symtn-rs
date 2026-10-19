@@ -9,9 +9,11 @@
 //!
 //! - U(1), mixed-side contracted legs (both operands bend): the physical
 //!   dense expansion, with `Array(t') = conj(Array(t))ᵀ` taken as the matrix
-//!   conjugate transpose of the parent's expansion (TensorKit
-//!   `convert(Array, ·)` is a linear-map matrix, codomain rows by domain
-//!   columns), then an index sum over the contracted legs.
+//!   conjugate transpose of the parent's expansion, then an index sum over
+//!   the contracted legs. TensorKit 0.17.1
+//!   `src/tensors/adjoint.jl:subblock(::AdjointTensorMap)` is
+//!   `permutedims(conj(subblock(parent, (f2, f1))), (domainind..., codomainind...))`,
+//!   and `convert(Array, ·)` multiplies each subblock by a unit U(1) tree.
 //! - SU(3) (no physical basis is provided): the coupled-block identity
 //!   `block(X ∘ Y, c) = block(X, c) · block(Y, c)` (TensorKit `mul!`), with
 //!   each adjoint block written as the conjugate transpose of the parent's
