@@ -449,6 +449,21 @@ fn checked_generic_block_indexed_permute_admits_sources_in_order() {
     assert_rigid_provider_error(permute(&failing, &[0, out_of_range]), RigidSpyError::N);
     assert_eq!(failing.symbol_calls.get(), 0);
 
+    // ... an admissible first source is not recoupled before a later bad
+    // index is seen ...
+    let probe = SunProbe::new();
+    let error = permute(&probe, &[0, out_of_range]);
+    assert!(
+        matches!(
+            error,
+            CheckedGenericSymbolError::Core(CoreError::BlockIndexOutOfBounds { index, count: 8 })
+                if index == out_of_range
+        ),
+        "{error:?}"
+    );
+    assert!(probe.n_calls.get() > 0, "source 0 is admitted first");
+    assert_eq!(probe.symbol_calls.get(), 0);
+
     // ... and an earlier bad index wins over a later source's failure, with
     // no recoupling symbol evaluated before every source is admitted.
     let failing = SunProbe {
