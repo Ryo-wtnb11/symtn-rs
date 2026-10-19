@@ -1423,7 +1423,7 @@ fn a_scale_list_that_varies_within_one_multi_block_is_an_internal_error() {
                 let error = super::dynamic::validate_uniform_multi_scales(structure, &tampered)
                     .unwrap_err();
                 assert!(
-                    matches!(error, crate::OperationError::InvalidArgument { .. }),
+                    matches!(error, crate::OperationError::InvalidArgument { message } if message.contains("not uniform")),
                     "{error:?}"
                 );
                 checked = true;
