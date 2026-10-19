@@ -1,4 +1,5 @@
 use super::*;
+use crate::ContractError;
 
 struct LoweredTypedNetwork<R> {
     ir: NetworkIR,
@@ -34,13 +35,23 @@ impl Network {
     /// [`TemporaryLabel`], such as `&str`, `char` or `TemporaryLabel`.
     /// Label structure (each label open-once or contracted-twice, output
     /// labels present and unique) is validated here.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContractError::MarkerCountMismatch`] for inconsistent operand
+    /// marker counts, or [`ContractError::OutputCodomainRankOutOfRange`] when
+    /// the output split exceeds its rank. Label validation returns
+    /// [`ContractError::EmptyInput`], [`ContractError::DuplicateOutputLabel`],
+    /// [`ContractError::UnknownOutputLabel`], [`ContractError::UnsupportedDiagonal`],
+    /// [`ContractError::UnsupportedHyperedge`], [`ContractError::UnsupportedBatchLabel`],
+    /// or [`ContractError::UnsupportedReduction`] unchanged.
     pub fn new<I, L>(
         inputs: I,
         conj: impl IntoIterator<Item = bool>,
         codomain_splits: impl IntoIterator<Item = usize>,
         output: impl IntoIterator<Item = L>,
         output_codomain_rank: Option<usize>,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, ContractError>
     where
         I: IntoIterator,
         I::Item: IntoIterator<Item = L>,
@@ -54,20 +65,24 @@ impl Network {
         let codomain_splits: Vec<usize> = codomain_splits.into_iter().collect();
         let output: Vec<TemporaryLabel> = output.into_iter().map(Into::into).collect();
         if conj.len() != inputs.len() || codomain_splits.len() != inputs.len() {
-            return Err(invalid("operand marker lists must match operand count"));
+            return Err(ContractError::MarkerCountMismatch {
+                operands: inputs.len(),
+                conj: conj.len(),
+                codomain_splits: codomain_splits.len(),
+            });
         }
         if let Some(k) = output_codomain_rank {
             if k > output.len() {
-                return Err(invalid(format!(
-                    "output codomain rank {k} exceeds output rank {}",
-                    output.len()
-                )));
+                return Err(ContractError::OutputCodomainRankOutOfRange {
+                    codomain_rank: k,
+                    output_rank: output.len(),
+                });
             }
         }
         // Validates hyperedge structure (diagonal / hyperedge / batch /
         // reduction rejection) on the WRITTEN labels; conj rotation is a
         // cyclic per-operand relabeling that does not change the structure.
-        NetworkIR::from_labels(inputs.clone(), output.clone()).map_err(invalid)?;
+        NetworkIR::from_labels(inputs.clone(), output.clone())?;
         let mut first = HashMap::new();
         let contracted = inputs
             .iter()

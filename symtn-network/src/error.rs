@@ -86,6 +86,15 @@ pub enum SymmetricSliceExecutionError<E> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ContractError {
+    MarkerCountMismatch {
+        operands: usize,
+        conj: usize,
+        codomain_splits: usize,
+    },
+    OutputCodomainRankOutOfRange {
+        codomain_rank: usize,
+        output_rank: usize,
+    },
     EmptyInput,
     DuplicateOutputLabel(String),
     UnknownOutputLabel(String),
@@ -151,6 +160,21 @@ pub type Result<T> = std::result::Result<T, ContractError>;
 impl Display for ContractError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            ContractError::MarkerCountMismatch {
+                operands,
+                conj,
+                codomain_splits,
+            } => write!(
+                f,
+                "operand marker lists must match operand count {operands}: got {conj} conj markers and {codomain_splits} codomain splits"
+            ),
+            ContractError::OutputCodomainRankOutOfRange {
+                codomain_rank,
+                output_rank,
+            } => write!(
+                f,
+                "output codomain rank {codomain_rank} exceeds output rank {output_rank}"
+            ),
             ContractError::EmptyInput => write!(f, "contraction equation has an empty input"),
             ContractError::DuplicateOutputLabel(label) => {
                 write!(f, "duplicate output label `{label}`")

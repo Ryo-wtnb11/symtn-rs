@@ -91,7 +91,8 @@ fn bond_update(
         vec![1, 2, 1, 2, 1, 2],
         vec!["l", "pa", "pb", "r"],
         Some(2),
-    )?
+    )
+    .expect("fixed network labels are valid")
     .contract(&[l_out, g1, l_mid, g2, l_out, gate])?;
     // Truncated SVD: factorize, decide the kept bond from the spectrum, then
     // restrict every factor to it.
@@ -109,7 +110,8 @@ fn bond_update(
         vec![1, 2],
         vec!["l", "pa", "m"],
         Some(2),
-    )?
+    )
+    .expect("fixed network labels are valid")
     .contract(&[&l_out_inv, &u])?;
     let g2_new = Network::new(
         vec![vec!["m", "pb", "x"], vec!["x", "r"]],
@@ -117,7 +119,8 @@ fn bond_update(
         vec![1, 1],
         vec!["m", "pb", "r"],
         Some(2),
-    )?
+    )
+    .expect("fixed network labels are valid")
     .contract(&[&vh, &l_out_inv])?;
     Ok((g1_new, l_new, g2_new, found.error))
 }
@@ -137,7 +140,8 @@ fn bond_energy(h: &Map, l_out: &Map, g1: &Map, l_mid: &Map, g2: &Map) -> Result<
         vec![1, 2, 1, 2, 1],
         vec!["l", "pa", "pb", "r"],
         Some(3),
-    )?
+    )
+    .expect("fixed network labels are valid")
     .contract(&[l_out, g1, l_mid, g2, l_out])?;
     let num = Network::new(
         vec![
@@ -149,7 +153,8 @@ fn bond_energy(h: &Map, l_out: &Map, g1: &Map, l_mid: &Map, g2: &Map) -> Result<
         vec![3, 2, 3],
         vec![],
         Some(0),
-    )?
+    )
+    .expect("fixed network labels are valid")
     .contract(&[&theta, h, &theta])?
     .scalar()?;
     Ok(num / theta.inner(&theta)?)

@@ -5,7 +5,6 @@
 //! present and unique. Each row below breaks one of those rules (numpy-einsum
 //! notation in the comment) and names the variant it must produce.
 
-use symtn::typed::Error;
 use symtn_network::{ContractError, Network, NetworkIR, TemporaryLabel};
 
 type Case = (
@@ -92,34 +91,52 @@ fn network_new_reports_the_same_structural_rejection() {
             None,
         )
         .err();
-        match result {
-            Some(Error::InvalidArgument(message)) => {
-                assert_eq!(message, expected.to_string(), "{case}")
-            }
-            other => panic!("{case}: expected InvalidArgument, got {other:?}"),
-        }
+        assert_eq!(result, Some(expected), "{case}");
     }
 }
 
 #[test]
-fn network_new_rejects_mismatched_markers_and_oversized_output_codomain() {
-    let inputs = [["i", "j"], ["j", "k"]];
-    let marker_cases = [
-        ("conj too short", vec![false], vec![1, 1]),
-        ("splits too long", vec![false, false], vec![1, 1, 1]),
-    ];
-    for (case, conj, splits) in marker_cases {
-        let result = Network::new(inputs, conj, splits, ["i", "k"], None).err();
-        assert!(
-            matches!(&result, Some(Error::InvalidArgument(m)) if m.contains("marker")),
-            "{case}: {result:?}"
-        );
-    }
+fn network_new_rejects_short_conj_list() {
+    let result = Network::new([["i", "j"], ["j", "k"]], [false], [1, 1], ["i", "k"], None);
+    assert_eq!(
+        result.err(),
+        Some(ContractError::MarkerCountMismatch {
+            operands: 2,
+            conj: 1,
+            codomain_splits: 2,
+        })
+    );
+}
 
-    let result = Network::new(inputs, [false; 2], [1; 2], ["i", "k"], Some(3)).err();
-    assert!(
-        matches!(&result, Some(Error::InvalidArgument(m)) if m.contains("exceeds output rank")),
-        "{result:?}"
+#[test]
+fn network_new_rejects_long_codomain_splits_list() {
+    let result = Network::new(
+        [["i", "j"], ["j", "k"]],
+        [false, false],
+        [1, 1, 1],
+        ["i", "k"],
+        None,
+    );
+    assert_eq!(
+        result.err(),
+        Some(ContractError::MarkerCountMismatch {
+            operands: 2,
+            conj: 2,
+            codomain_splits: 3,
+        })
+    );
+}
+
+#[test]
+fn network_new_rejects_oversized_output_codomain() {
+    let inputs = [["i", "j"], ["j", "k"]];
+    let result = Network::new(inputs, [false; 2], [1; 2], ["i", "k"], Some(3));
+    assert_eq!(
+        result.err(),
+        Some(ContractError::OutputCodomainRankOutOfRange {
+            codomain_rank: 3,
+            output_rank: 2,
+        })
     );
     // The boundary itself (all-codomain output written as `ik;`) is valid.
     assert!(Network::new(inputs, [false; 2], [1; 2], ["i", "k"], Some(2)).is_ok());
