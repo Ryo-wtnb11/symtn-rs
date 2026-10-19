@@ -218,26 +218,36 @@ fn overwrite_multi_does_not_read_nan_active_or_inactive_destinations() {
 #[test]
 fn overwrite_multi_c64_does_not_read_nan_destinations() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();
-    for threads in [1, 4] {
+    let fused_rank = structure.layouts().max_fused_rank();
+    // Two pack columns: two workers is the most the threaded driver can use.
+    for threads in [1, 2] {
         let nan = num_complex::Complex64::new(f64::NAN, f64::NAN);
         let mut dst = vec![nan; 3];
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &structure,
-            &dst_structure,
-            &src_structure,
-            &mut dst,
-            &[
-                num_complex::Complex64::new(3.0, 1.0),
-                num_complex::Complex64::new(4.0, -1.0),
-            ],
-            num_complex::Complex64::new(2.0, 0.0),
-            &[],
-            threads,
-        )
+        let mut workspace = TreeTransformWorkspace::default();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut workspace,
+                &structure,
+                &dst_structure,
+                &src_structure,
+                &mut dst,
+                &[
+                    num_complex::Complex64::new(3.0, 1.0),
+                    num_complex::Complex64::new(4.0, -1.0),
+                ],
+                num_complex::Complex64::new(2.0, 0.0),
+                &[],
+                threads,
+            )
+        })
         .unwrap();
+        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
         assert_eq!(
             dst,
             [
@@ -271,22 +281,33 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
     let src = [3.0, 4.0, 5.0, 6.0];
     let expected = [6.0, -4.0, 5.0, 6.0, 0.0];
 
-    for threads in [1, 4] {
+    let fused_rank = structure.layouts().max_fused_rank();
+    // Two runnable Singles and two pack columns: two workers is the most the
+    // threaded driver can use.
+    for threads in [1, 2] {
         let mut dst = [f64::NAN; 5];
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &structure,
-            &dst_structure,
-            &src_structure,
-            &mut dst,
-            &src,
-            1.0,
-            &[],
-            threads,
-        )
+        let mut workspace = TreeTransformWorkspace::default();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut workspace,
+                &structure,
+                &dst_structure,
+                &src_structure,
+                &mut dst,
+                &src,
+                1.0,
+                &[],
+                threads,
+            )
+        })
         .unwrap();
+        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
         assert_eq!(dst, expected);
     }
 }
