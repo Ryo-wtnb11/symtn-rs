@@ -806,48 +806,36 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     };
     let typed: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(&runtime);
 
-    let cases: &[(&str, &[usize], &[usize], &[usize], &str)] = &[
-        (
-            "len mismatch",
-            &[2],
-            &[0, 1],
-            &[0, 1, 2, 3],
-            "ContractAxisCountMismatch",
-        ),
-        (
-            "lhs out of range",
-            &[9],
-            &[0],
-            &[0, 1, 2, 3],
-            "InvalidAxisSet",
-        ),
-        (
-            "rhs out of range",
-            &[2],
-            &[9],
-            &[0, 1, 2, 3],
-            "InvalidAxisSet",
-        ),
-        (
-            "output wrong length",
-            &[2],
-            &[0],
-            &[0, 1, 2],
-            "InvalidPermutation",
-        ),
-        (
-            "output duplicate",
-            &[2],
-            &[0],
-            &[0, 0, 1, 2],
-            "InvalidPermutation",
-        ),
+    use symtn::typed::{CoreError, OperationError};
+    fn axis_count(error: &OperationError) -> bool {
+        matches!(error, OperationError::ContractAxisCountMismatch { .. })
+    }
+    fn axis_set(error: &OperationError) -> bool {
+        matches!(error, OperationError::InvalidAxisSet { .. })
+    }
+    fn permutation(error: &OperationError) -> bool {
+        matches!(error, OperationError::InvalidPermutation { .. })
+    }
+    /// The operation-layer cause of a typed contract error.
+    fn operation(error: &symtn::typed::Error) -> &OperationError {
+        match error {
+            symtn::typed::Error::Operation(operation) => operation,
+            other => panic!("expected an operation error, got {other:?}"),
+        }
+    }
+    type Class = fn(&OperationError) -> bool;
+    let cases: &[(&str, &[usize], &[usize], &[usize], Class)] = &[
+        ("len mismatch", &[2], &[0, 1], &[0, 1, 2, 3], axis_count),
+        ("lhs out of range", &[9], &[0], &[0, 1, 2, 3], axis_set),
+        ("rhs out of range", &[2], &[9], &[0, 1, 2, 3], axis_set),
+        ("output wrong length", &[2], &[0], &[0, 1, 2], permutation),
+        ("output duplicate", &[2], &[0], &[0, 0, 1, 2], permutation),
         (
             "output out of range",
             &[2],
             &[0],
             &[0, 1, 2, 9],
-            "InvalidPermutation",
+            permutation,
         ),
     ];
     for &(name, lhs_axes, rhs_axes, output_axes, class) in cases {
@@ -861,14 +849,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
             domain,
         };
         let typed_error = typed.contract(&typed, &spec).unwrap_err();
-        assert!(
-            matches!(typed_error, symtn::typed::Error::Operation(_)),
-            "{name}: {typed_error:?}"
-        );
-        assert!(
-            format!("{typed_error:?}").contains(class),
-            "{name}: {typed_error:?} does not carry {class}"
-        );
+        assert!(class(operation(&typed_error)), "{name}: {typed_error:?}");
     }
 
     // Mismatched contracted legs retain the expert layer's class.
@@ -899,7 +880,10 @@ fn contract_error_classes_and_their_both_defect_precedence() {
         )
         .unwrap_err();
     assert!(
-        format!("{typed_error:?}").contains("LegDegeneracyMismatch"),
+        matches!(
+            operation(&typed_error),
+            OperationError::Core(CoreError::LegDegeneracyMismatch { .. })
+        ),
         "{typed_error:?}"
     );
 
@@ -916,7 +900,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
         )
         .unwrap_err();
     assert!(
-        format!("{typed_both:?}").contains("InvalidPermutation"),
+        permutation(operation(&typed_both)),
         "typed both-defect precedence moved: {typed_both:?}"
     );
 
@@ -965,7 +949,10 @@ fn contract_error_classes_and_their_both_defect_precedence() {
         )
         .unwrap_err();
     assert!(
-        format!("{identity_error:?}").contains("FusionRuleMismatch"),
+        matches!(
+            operation(&identity_error),
+            OperationError::Core(CoreError::FusionRuleMismatch { .. })
+        ),
         "{identity_error:?}"
     );
 }

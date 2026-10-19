@@ -34,6 +34,16 @@ fn root_cause(error: &(dyn std::error::Error + 'static)) -> String {
         .map_or_else(String::new, ToString::to_string)
 }
 
+/// Whether `error` is `family`'s documented finite-input refusal, the
+/// operation-layer `InvalidArgument` both fusion modes carry.
+fn is_finite_input_refusal(error: &(dyn std::error::Error + 'static), family: &str) -> bool {
+    matches!(
+        cause::<symtn_tensors::OperationError>(error),
+        Some(symtn_tensors::OperationError::InvalidArgument { message })
+            if *message == format!("{family} input components must be finite")
+    )
+}
+
 impl<T: ScalarOps> ChainCoefficient for T {
     fn real(value: f64) -> Self {
         T::from_real(value)

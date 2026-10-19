@@ -600,12 +600,7 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
             assert_eq!(values, [f64::INFINITY, 0.0]);
         } else {
             let error = result.unwrap_err();
-            assert!(
-                error
-                    .report()
-                    .contains("svd input components must be finite"),
-                "{error}"
-            );
+            assert!(is_finite_input_refusal(&error, "svd"), "{error:?}");
         }
     }
 }

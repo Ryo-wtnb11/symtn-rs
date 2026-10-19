@@ -465,7 +465,11 @@ fn complex_device_payloads_are_unsupported() {
     let stack = StackedTensorMap::pack(&complex).unwrap().to_cuda().unwrap();
     assert!(matches!(
         EighFullPlan::new(&stack, &codomain_axes(&complex[0]), &domain_axes(&complex[0]), HermitianTol::DEFAULT),
-        Err(Error::Operation(error)) if format!("{error:?}").contains("real payloads")
+        Err(Error::Operation(error)) if matches!(
+            *error,
+            symtn::typed::OperationError::UnsupportedTensorContractScope { message }
+                if message.contains("real payloads")
+        )
     ));
 }
 

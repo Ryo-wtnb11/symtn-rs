@@ -403,7 +403,7 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
             .map(drop)
             .unwrap_err();
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-        assert!(report(&actual).contains("eigh input components must be finite"));
+        assert!(is_finite_input_refusal(&actual, "eigh"), "{actual:?}");
     }
     let extreme: TensorMap<_, f32> = TensorMap::diagonal(
         &runtime,
@@ -1519,7 +1519,7 @@ fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
     let error = nonfinite
         .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
         .unwrap_err();
-    assert!(report(&error).contains("eigh input components must be finite"));
+    assert!(is_finite_input_refusal(&error, "eigh"), "{error:?}");
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), 0);
 }

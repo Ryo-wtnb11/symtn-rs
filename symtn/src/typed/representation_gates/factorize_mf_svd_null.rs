@@ -306,10 +306,7 @@ fn compact_diagonal_null_refuses_nonfinite_input() {
         nonfinite.left_null(&[0], &[1]).unwrap_err(),
         nonfinite.right_null(&[0], &[1]).unwrap_err(),
     ] {
-        assert!(
-            report(&error).contains("null input components must be finite"),
-            "{error}"
-        );
+        assert!(is_finite_input_refusal(&error, "null"), "{error:?}");
     }
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
@@ -435,10 +432,7 @@ fn compact_diagonal_svd_full_subnormal_phase_and_nonfinite_refusal() {
                     assert_eq!(singular, f64::INFINITY);
                 } else {
                     let error = result.map(drop).unwrap_err();
-                    assert!(
-                        report(&error).contains("svd input components must be finite"),
-                        "{error}"
-                    );
+                    assert!(is_finite_input_refusal(&error, "svd"), "{error:?}");
                 }
             }
         }};
@@ -662,10 +656,7 @@ fn compact_diagonal_svd_vals_refuses_nonfinite_and_overflows_at_range_edges() {
             assert_eq!(result.unwrap()[0].values[0], f64::INFINITY);
         } else {
             let error = result.unwrap_err();
-            assert!(
-                report(&error).contains("svd input components must be finite"),
-                "{error}"
-            );
+            assert!(is_finite_input_refusal(&error, "svd"), "{error:?}");
         }
     }
 }

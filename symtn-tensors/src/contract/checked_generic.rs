@@ -2500,9 +2500,19 @@ mod tests {
                 (Err(derived), Err(memo)) => {
                     assert_eq!(braiding, BraidingStyleKind::Anyonic);
                     assert_eq!(dropped, 0);
-                    let derived = format!("{derived:?}");
-                    assert!(derived.contains("UnsupportedBraidingStyle"), "{derived}");
-                    assert_eq!(derived, format!("{memo:?}"));
+                    assert!(
+                        matches!(
+                            &derived,
+                            CheckedGenericPlanError::Operation(
+                                OperationError::UnsupportedBraidingStyle {
+                                    style: BraidingStyleKind::Anyonic,
+                                    ..
+                                }
+                            )
+                        ),
+                        "{derived:?}"
+                    );
+                    assert_eq!(format!("{derived:?}"), format!("{memo:?}"));
                 }
                 (derived, memo) => panic!("{braiding:?}: {derived:?} vs {memo:?}"),
             }
