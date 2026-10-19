@@ -314,7 +314,8 @@ fn contract_orders_round_trip_through_save_and_load() {
     let actual = chain().contract(&[&a, &b, &c]).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     // The second runtime keeps exactly the loaded order under the same
-    // topology text. (Greedy search is deterministic, so this does not by
-    // itself show the order was read back rather than searched again.)
+    // topology text. Greedy search is deterministic, so replay of a loaded
+    // order over a fresh search is shown by
+    // `plan_text_input.rs::loaded_non_greedy_order_is_replayed_instead_of_searched`.
     assert_eq!(save_plan_cache(&second), saved);
 }
