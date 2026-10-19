@@ -426,8 +426,12 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
         assert!(u1_f64.braid(&[0, 1], &[2], &[0, 0]).is_err());
     });
     assert_eq!(calls, 0);
-    assert!(u1_f64.permute(&[0, 1], &[2, 3]).is_err());
-    assert!(u1_f64.transpose(&[0, 1], &[2, 3]).is_err());
+    assert!(
+        matches!(u1_f64.permute(&[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+    );
+    assert!(
+        matches!(u1_f64.transpose(&[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+    );
     assert!(u1_f64.repartition(4).is_err());
 
     // Negative control: the counter observes a real transform.
@@ -1076,13 +1080,19 @@ fn compact_absorb_handles_strided_prefixes_and_interleaved_sectors() {
     assert_eq!(values, [42.0, 7.0, 42.0, 0.0, 42.0, 42.0, 0.0, 42.0, 9.0]);
 
     let duplicate = [spectrum[1].clone(), spectrum[1].clone()];
-    assert!(absorb_compact_source(&destination, &mut values, &source, &duplicate).is_err());
-    assert!(absorb_compact_source(&destination, &mut values, &source, &[]).is_err());
+    assert!(
+        matches!(absorb_compact_source(&destination, &mut values, &source, &duplicate), Err(Error::InvalidArgument(message)) if message.contains("duplicate spectrum sectors"))
+    );
+    assert!(
+        matches!(absorb_compact_source(&destination, &mut values, &source, &[]), Err(Error::InvalidArgument(message)) if message.contains("spectrum sector is absent"))
+    );
     let wrong_shape = [symtn_matrixalgebra::SectorSpectrum {
         sector: SectorId::new(1),
         values: vec![7.0],
     }];
-    assert!(absorb_compact_source(&destination, &mut values, &source, &wrong_shape).is_err());
+    assert!(
+        matches!(absorb_compact_source(&destination, &mut values, &source, &wrong_shape), Err(Error::InvalidArgument(message)) if message.contains("spectrum shape disagrees"))
+    );
 }
 
 #[test]

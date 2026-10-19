@@ -931,8 +931,12 @@ where
         .all(|(&actual, &expected)| {
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
-    assert!(lazy.trace_pairs(&[(0, 3)]).is_err());
-    assert!(lazy.trace_pairs(&[(0, 0)]).is_err());
+    assert!(
+        matches!(lazy.trace_pairs(&[(0, lazy.rank())]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
+    );
+    assert!(
+        matches!(lazy.trace_pairs(&[(0, 0)]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
+    );
 }
 
 #[test]
@@ -1118,7 +1122,7 @@ where
                 (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
             }));
     }
-    assert!(lazy
+    assert!(matches!(lazy
         .contract(
             &eager,
             &ContractSpec {
@@ -1127,8 +1131,7 @@ where
                 codomain: &[0],
                 domain: &[1]
             }
-        )
-        .is_err());
+        ), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "lhs", .. })));
 }
 
 #[test]
@@ -1634,9 +1637,15 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
         assert!(Arc::ptr_eq(view, output_view));
     }
     assert!(adjoint.braid(&[0], &[1, 2], &[]).is_err());
-    assert!(adjoint.permute(&[0, 0], &[1]).is_err());
-    assert!(adjoint.braid(&[0, 0], &[1], &[0, 1, 2]).is_err());
-    assert!(adjoint.transpose(&[0, 0], &[1]).is_err());
+    assert!(
+        matches!(adjoint.permute(&[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+    );
+    assert!(
+        matches!(adjoint.braid(&[0, 0], &[1], &[0, 1, 2]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+    );
+    assert!(
+        matches!(adjoint.transpose(&[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+    );
     assert!(adjoint.repartition(4).is_err());
 
     let scalar = fixture().trace_pairs(&[(0, 1)]).unwrap();

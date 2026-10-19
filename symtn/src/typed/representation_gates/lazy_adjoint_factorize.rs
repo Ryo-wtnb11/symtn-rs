@@ -958,12 +958,11 @@ fn rejected_truncation_does_not_materialize_the_adjoint() {
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 1)]).unwrap();
     let lazy = source.adjoint().unwrap();
     let Svd { s, .. } = lazy.svd_compact(&[0], &[1, 2]).unwrap();
-    assert!(s.domain()[0]
+    assert!(matches!(s.domain()[0]
         .find_truncated(
             &s.diagview().unwrap(),
             &Truncation::space(foreign.truncspace())
-        )
-        .is_err());
+        ), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidArgument { message } if message.contains("different fusion rule"))));
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
         unreachable!()
     };

@@ -707,7 +707,17 @@ mod su3 {
         assert!(compose_case(what, &a, &wide), "{what}: empty factor block");
         adjoint_view_case(what, &b, &b.adjoint().unwrap());
         // Only a label the provider cannot encode is an error.
-        assert!(a.block(&vec![1i64]).is_err(), "{what}: foreign label");
+        assert!(
+            matches!(
+                a.block(&vec![1i64]),
+                Err(symtn::typed::GenericTensorError::Structure(
+                    symtn::typed::CheckedGenericStructureError::Provider(
+                        symtn::sector::SUNFusionRuleError::LabelLength { found: 1, .. }
+                    )
+                ))
+            ),
+            "{what}: foreign label"
+        );
 
         let values = |n: usize| (0..n).map(|i| D::make(i as u64 + 11)).collect::<Vec<_>>();
         let d = TensorMap::<_, D>::diagonal(

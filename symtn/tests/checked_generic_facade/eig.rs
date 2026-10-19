@@ -509,18 +509,16 @@ fn checked_generic_eigh_rejects_invalid_inputs_before_publication() {
     let narrow = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let nonendomorphism: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&wide], [&narrow], |_, _| 1.0).unwrap();
-    assert!(nonendomorphism
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
-        .is_err());
+    assert!(matches!(nonendomorphism
+        .eigh_full(&[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::SpaceMismatch { message }))) if message.contains("endomorphism")));
 
     let nonhermitian: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&wide], [&wide], |_, index| {
             [[0.0, 1.0], [0.0, 0.0]][index[0]][index[1]]
         })
         .unwrap();
-    assert!(nonhermitian
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
-        .is_err());
+    assert!(matches!(nonhermitian
+        .eigh_full(&[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("Hermitian coupled-sector blocks")));
     let nonfinite: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&wide], [&wide], |_, index| {
             if index[0] == index[1] {
@@ -530,9 +528,8 @@ fn checked_generic_eigh_rejects_invalid_inputs_before_publication() {
             }
         })
         .unwrap();
-    assert!(nonfinite
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
-        .is_err());
+    assert!(matches!(nonfinite
+        .eigh_full(&[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("input components must be finite")));
 }
 
 /// Owned EIGH entries; the destination form is refused, so a checked
@@ -605,9 +602,8 @@ fn checked_generic_eigh_preflights_all_sectors_and_runs_once_per_sector() {
             }
         })
         .unwrap();
-    assert!(nonhermitian
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
-        .is_err());
+    assert!(matches!(nonhermitian
+        .eigh_full(&[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("Hermitian coupled-sector blocks")));
     assert_eq!(calls.of(EIGH_OWNED), 0);
     assert_eq!(calls.total(), 0);
 }

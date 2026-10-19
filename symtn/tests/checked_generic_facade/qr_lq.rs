@@ -693,8 +693,12 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
         real_spectra(u1_sectors, [&[f64::NAN, 1.0], &[2.0, 3.0, 4.0]]),
     )
     .unwrap();
-    assert!(nonfinite.qr_compact(&[0], &[1]).is_err());
-    assert!(nonfinite.lq_full(&[0], &[1]).is_err());
+    assert!(
+        matches!(nonfinite.qr_compact(&[0], &[1]), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("qr input components must be finite"))
+    );
+    assert!(
+        matches!(nonfinite.lq_full(&[0], &[1]), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("lq input components must be finite"))
+    );
     assert_eq!(calls.of(Kernel::QR), 0);
 
     // A materialized dual payload keeps the dense route and its fresh nondual

@@ -189,10 +189,9 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
     let bad_duality: TensorMap<_, f64> =
         TensorMap::zeros(&runtime, [&dual_leg, &dual_leg, &dual_leg], []).unwrap();
 
-    assert!(matches!(
-        destination.absorb(&bad_rank),
-        Err(Error::InvalidArgument(_))
-    ));
+    assert!(
+        matches!(destination.absorb(&bad_rank), Err(Error::InvalidArgument(message)) if message.contains("equal codomain/domain ranks"))
+    );
     assert!(matches!(
         destination.absorb(&bad_identity),
         Err(Error::RuleMismatch)
@@ -201,9 +200,8 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
         destination.absorb(&bad_runtime),
         Err(Error::RuntimeMismatch)
     ));
-    assert!(matches!(
-        destination.absorb(&bad_duality),
-        Err(Error::InvalidArgument(_))
-    ));
+    assert!(
+        matches!(destination.absorb(&bad_duality), Err(Error::InvalidArgument(message)) if message.contains("equal duality"))
+    );
     assert_eq!(destination.dense_data().unwrap(), before);
 }

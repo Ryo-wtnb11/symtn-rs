@@ -241,7 +241,12 @@ fn checked_generic_diagonal_rejects_before_layout_and_preserves_error_precedence
                 },
             ],
         ),
-        Err(GenericTensorError::Structure(_))
+        Err(GenericTensorError::Structure(
+            CheckedGenericStructureError::Core(symtn_core::CoreError::UnsupportedFusionStyle {
+                actual: symtn::sector::FusionStyleKind::Unique,
+                ..
+            })
+        ))
     ));
 }
 
@@ -576,7 +581,10 @@ fn identity_mismatch_precedes_algebra_queries_and_both_dtypes_fill() {
     let left = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 1)]).unwrap();
     let right = GradedSpace::try_new(Arc::clone(&other), [(Label::X, 1)]).unwrap();
     let error = TensorMap::<_, f64>::zeros(&runtime, [&left], [&right]).unwrap_err();
-    assert!(matches!(error, GenericTensorError::Facade(_)));
+    assert!(matches!(
+        error,
+        GenericTensorError::Facade(symtn::typed::Error::RuleMismatch)
+    ));
     assert_eq!(first.algebra_queries.load(Ordering::Relaxed), 0);
     assert_eq!(other.algebra_queries.load(Ordering::Relaxed), 0);
 
