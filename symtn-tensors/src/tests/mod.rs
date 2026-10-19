@@ -1909,6 +1909,8 @@ impl DenseExecutor for PanicDenseExecutor {
 
 mod adjoint_memo;
 
+mod adjoint_view;
+
 mod alternating_bicharacter;
 
 mod contract_dense;

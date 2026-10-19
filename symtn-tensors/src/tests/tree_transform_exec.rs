@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn tree_transform_structure_replays_custom_host_storage_without_vec_fixing() {
+fn tree_transform_structure_replay_applies_alpha_and_beta() {
     let space = vec![2, 2];
     let structure = BlockStructure::packed_column_major(2, [vec![2, 2]]).unwrap();
     let src = TestTensor::from_vec_with_structure(
@@ -35,7 +35,7 @@ fn tree_transform_structure_replays_custom_host_storage_without_vec_fixing() {
 }
 
 #[test]
-fn tree_transform_overwrite_execute_ignores_custom_host_destination_bits() {
+fn tree_transform_overwrite_replay_ignores_nan_destination_bits() {
     let space = vec![2, 2];
     let structure = BlockStructure::packed_column_major(2, [vec![2, 2]]).unwrap();
     let src = TestTensor::from_vec_with_structure(

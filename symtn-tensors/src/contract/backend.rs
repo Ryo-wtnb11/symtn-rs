@@ -679,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn dense_tree_transform_operations_keeps_contract_backend_names() {
+    fn dense_tree_transform_operations_implements_both_contract_backend_traits() {
         assert_tensor_contract_backend::<DenseTreeTransformOperations, f64, f64>();
         assert_host_tensor_contract_backend::<DenseTreeTransformOperations, f64, f64>();
     }

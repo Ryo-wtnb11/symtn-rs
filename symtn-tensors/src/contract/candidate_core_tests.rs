@@ -390,7 +390,7 @@ fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
 /// the Host core carries it as per-job GEMM alpha and copies nothing (#1858).
 /// Values against TensorKit's steps: `symtn/tests/typed_contract_host_oracle.rs`.
 #[test]
-fn a_uniform_fermionic_twist_rides_the_sorted_candidate_core_as_gemm_alpha() {
+fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_core() {
     let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
     let (v, v_dual) = (fermion_u1_leg(&rule, false), fermion_u1_leg(&rule, true));
     let lhs = square(&rule, &v, &v_dual);
