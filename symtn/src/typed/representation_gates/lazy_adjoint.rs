@@ -1740,38 +1740,62 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
 
 #[test]
 fn lazy_cat_reads_parent_storage_without_publishing_adjoint_caches() {
+    // What: `cat` of lazy adjoints on either side equals `cat` of the eager
+    // adjoints, over two coupled sectors, without materializing an adjoint.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = |degeneracy| {
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
+    let leg = |degeneracies: [usize; 2]| {
+        GradedSpace::try_new(
+            Arc::clone(&provider),
+            [
+                (U1Irrep::new(0), degeneracies[0]),
+                (U1Irrep::new(1), degeneracies[1]),
+            ],
+        )
+        .unwrap()
     };
-    let common = leg(3);
-    let left = leg(2);
-    let right = leg(4);
-    let lhs: TensorMap<U1FusionRule, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_101)
+    let common = leg([3, 2]);
+    let left = leg([2, 1]);
+    let right = leg([4, 2]);
+    let parent =
+        |codomain: &GradedSpace<U1FusionRule>, domain: &GradedSpace<U1FusionRule>, seed| {
+            TensorMap::<U1FusionRule, num_complex::Complex64>::rand_with_seed(
+                &runtime,
+                [codomain],
+                [domain],
+                seed,
+            )
             .unwrap()
-            .adjoint()
-            .unwrap();
-    let rhs: TensorMap<U1FusionRule, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_102)
-            .unwrap()
-            .adjoint()
-            .unwrap();
+        };
 
-    let _ = lhs.cat(&rhs, Side::Domain).unwrap();
+    for (lhs, rhs, side) in [
+        (
+            parent(&left, &common, 773_101),
+            parent(&right, &common, 773_102),
+            Side::Domain,
+        ),
+        (
+            parent(&common, &left, 773_103),
+            parent(&common, &right, 773_104),
+            Side::Codomain,
+        ),
+    ] {
+        let expected = eager_adjoint_oracle(&lhs)
+            .cat(&eager_adjoint_oracle(&rhs), side)
+            .unwrap();
+        let lazy_lhs = lhs.adjoint().unwrap();
+        let lazy_rhs = rhs.adjoint().unwrap();
+        let adjoint = probe::record();
 
-    let upper: TensorMap<U1FusionRule, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_103)
-            .unwrap()
-            .adjoint()
-            .unwrap();
-    let lower: TensorMap<U1FusionRule, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_104)
-            .unwrap()
-            .adjoint()
-            .unwrap();
-    upper.cat(&lower, Side::Codomain).unwrap();
+        let actual = lazy_lhs.cat(&lazy_rhs, side).unwrap();
+
+        assert_eq!(adjoint.get(Event::AdjointMaterialization), 0);
+        assert_eq!(
+            actual.logical_space().space(),
+            expected.logical_space().space()
+        );
+        assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
+    }
 }
 
 #[cfg(feature = "cgc-gen")]

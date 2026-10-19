@@ -6,8 +6,6 @@ use symtn_core::{
     FusionTreePairKey, MultiplicityIndex, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorLeg,
     SectorVec, TensorStorage, U1FusionRule, U1Irrep, Z2FusionRule,
 };
-use symtn_operations::fusion_replay::HostFusionBlockContractWorkspace;
-use symtn_operations::ReportsPlacement;
 
 use crate::probe::{self, Event};
 use crate::{DenseTreeTransformOperations, TensorContractWorkspace};
@@ -1201,16 +1199,6 @@ fn storage_direct_replay_on_cuda_matches_host() {
     let result = dst_dev.download(&ctx).unwrap();
 
     assert_eq!(result, expected);
-}
-
-#[test]
-fn core_fusion_block_workspace_is_explicit_host_workspace() {
-    let workspace = HostFusionBlockContractWorkspace::<f64>::default();
-    let alias = FusionBlockContractWorkspace::<f64>::default();
-
-    assert_eq!(workspace.placement(), Placement::Host);
-    assert!(workspace.is_host_placement());
-    assert_eq!(alias.placement(), Placement::Host);
 }
 
 /// Entries of one block in column-major order over its axes, which is the

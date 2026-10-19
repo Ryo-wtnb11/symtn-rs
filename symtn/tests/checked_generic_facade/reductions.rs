@@ -11,21 +11,31 @@ fn checked_generic_reductions_cover_real_complex_dense_payloads() {
             (indices.iter().sum::<usize>() + 1) as f64
         })
         .unwrap();
-    let inner = source.inner(&source).unwrap();
-    assert!(inner.is_finite());
-    assert!((source.norm(2.0).unwrap() * source.norm(2.0).unwrap() - inner).abs() < 1e-12);
-    assert!(source.tr().unwrap().is_finite());
     let complex = source.convert::<Complex64>();
-    assert!(complex.inner(&complex).unwrap().re.is_finite());
-    assert!(complex.norm(2.0).unwrap().is_finite());
-    assert!(complex.tr().unwrap().re.is_finite());
-    assert!(provider.coefficient_queries.load(Ordering::Relaxed) > 0);
-    // Every TensorKit exponent (`linalg.jl:_norm`): the 2x2 block of `X`
-    // holds `1, 2, 2, 3`, weighted by `dim(X) = 1 + sqrt(2)`; `Inf` is not
-    // weighted. Only an exponent outside TensorKit's domain is rejected.
+    // The 2x2 block of `X` holds `1, 2, 2, 3`, weighted by
+    // `dim(X) = 1 + sqrt(2)` (TensorKit `linalg.jl:dot`, `tr`, `_norm`):
+    // inner = dim(X) * (1 + 4 + 4 + 9), tr = dim(X) * (1 + 3).
     let dim_x = 1.0 + 2.0_f64.sqrt();
+    numerics::assert_close("inner", source.inner(&source).unwrap(), dim_x * 18.0, 4);
+    numerics::assert_close("tr", source.tr().unwrap(), dim_x * 4.0, 2);
+    numerics::assert_close(
+        "c64 inner",
+        complex.inner(&complex).unwrap(),
+        Complex64::new(dim_x * 18.0, 0.0),
+        4,
+    );
+    numerics::assert_close(
+        "c64 tr",
+        complex.tr().unwrap(),
+        Complex64::new(dim_x * 4.0, 0.0),
+        2,
+    );
+    assert!(provider.coefficient_queries.load(Ordering::Relaxed) > 0);
+    // Every TensorKit exponent (`linalg.jl:_norm`); `Inf` is not weighted.
+    // Only an exponent outside TensorKit's domain is rejected.
     for (p, want) in [
         (1.0, dim_x * 8.0),
+        (2.0, (dim_x * 18.0).sqrt()),
         (3.0, (dim_x * 44.0_f64).cbrt()),
         (f64::INFINITY, 3.0),
     ] {

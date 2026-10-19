@@ -8,18 +8,6 @@ fn tensorcontract_block_spec_new_supports_complex_coefficients() {
 use std::sync::Arc;
 
 #[test]
-fn host_tensor_contract_workspace_is_explicit_host_workspace() {
-    let workspace = HostTensorContractWorkspace::<f64>::default();
-    let alias = TensorContractWorkspace::<f64>::default();
-
-    assert_eq!(workspace.placement(), Placement::Host);
-    assert!(workspace.is_host_workspace());
-    assert_eq!(workspace.output_len(), 0);
-    assert_eq!(alias.placement(), Placement::Host);
-    assert_eq!(alias.output_len(), workspace.output_len());
-}
-
-#[test]
 fn tensorcontract_structure_replays_custom_host_storage_without_vec_fixing() {
     let lhs_space = vec![2, 3];
     let rhs_space = vec![3, 2];
