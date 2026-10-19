@@ -189,45 +189,6 @@ fn assert_blocks_close_by_key<R, D: FactorScalar>(
 }
 
 #[test]
-fn polar_decompositions_reconstruct_with_isometric_factors() {
-    let rule = SU2FusionRule;
-    let tensor = tsvd_test_tensor(
-        &rule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
-    );
-    let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
-    let mut context = default_context();
-
-    let LeftPolar {
-        w: isometry,
-        p: positive,
-    } = left_polar(
-        &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
-    )
-    .unwrap();
-    let reconstructed = crate::compose::compose(&mut context, &rule, &isometry, &positive).unwrap();
-    assert_svd_blocks_match(&tensor, &reconstructed);
-    let wh = adjoint(&rule, &isometry).unwrap();
-    let unit = crate::compose::compose(&mut context, &rule, &wh, &isometry).unwrap();
-    assert_identity_matrices(&dense_sector_matrices(2, &unit));
-
-    let RightPolar {
-        p: positive,
-        wh: isometry,
-    } = right_polar(
-        &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
-    )
-    .unwrap();
-    let reconstructed = crate::compose::compose(&mut context, &rule, &positive, &isometry).unwrap();
-    assert_svd_blocks_match(&tensor, &reconstructed);
-}
-
-#[test]
 fn polar_rejects_wrong_rectangular_direction_before_dense_execution() {
     // What: invalid left/right directions are rejected before any sector SVD starts.
     let rule = Z2FusionRule;
@@ -480,29 +441,30 @@ fn polar_valid_direct_and_fallback_layouts_agree() {
     }
 }
 
-/// An SU(2) map with spins {0, 1/2} (degeneracy 2) on every leg: `tall`
-/// fuses two codomain legs into one domain leg, so every coupled-sector
-/// matrix has at least as many rows as columns (spin 1 is codomain-only);
-/// otherwise the legs are swapped. Spin 0 and 1/2 each stack two row trees.
+/// An SU(2) map with two legs of spins {0, 1/2} on each side, degeneracy 2
+/// on the long side and 1 on the short side: `tall` has the long side as
+/// codomain, so every coupled-sector matrix has at least as many rows as
+/// columns; otherwise the sides are swapped. Spins 0 and 1/2 each stack two
+/// trees on both sides, so `P` has several trees per sector too.
 fn su2_polar_input<D: FactorScalar>(
     tall: bool,
     value: fn(f64, f64) -> D,
 ) -> BoundTensorMap<SU2FusionRule, D> {
     let rule = SU2FusionRule;
-    let leg = || {
-        SectorLeg::new(
-            [0, 1].map(|twice| (SU2Irrep::from_twice_spin(twice).sector_id(), 2)),
-            false,
-        )
+    let side = |degeneracy| {
+        let leg = || {
+            SectorLeg::new(
+                [0, 1].map(|twice| (SU2Irrep::from_twice_spin(twice).sector_id(), degeneracy)),
+                false,
+            )
+        };
+        FusionProductSpace::new([leg(), leg()])
     };
-    let (two, one) = (
-        FusionProductSpace::new([leg(), leg()]),
-        FusionProductSpace::new([leg()]),
-    );
+    let (long, short) = (side(2), side(1));
     let homspace = if tall {
-        FusionTreeHomSpace::new(two, one)
+        FusionTreeHomSpace::new(long, short)
     } else {
-        FusionTreeHomSpace::new(one, two)
+        FusionTreeHomSpace::new(short, long)
     };
     let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let data = (0..space.required_len().unwrap())
@@ -681,13 +643,13 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
         left_polar_from_source::<Mf, _, _, _, _>(&mut dense, source(&tall)).unwrap();
     assert_eq!(
         assert_polar_laws(&tall, &dense_factor(w), &dense_factor(p), true),
-        2
+        3
     );
     let RightPolar { p, wh } =
         right_polar_from_source::<Mf, _, _, _, _>(&mut dense, source(&wide)).unwrap();
     assert_eq!(
         assert_polar_laws(&wide, &dense_factor(wh), &dense_factor(p), false),
-        2
+        3
     );
 
     // The lazy-adjoint seams factor the dense parent in the opposite
@@ -695,10 +657,10 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
     // parent's right polar, and `tallᴴ`'s right polar is the parent's left.
     let RightPolar { p, wh } =
         left_polar_adjoint_from_parent::<Mf, _, _, _, _>(&mut dense, &parent(&wide)).unwrap();
-    assert_eq!(assert_polar_laws(&wide, &wh, &p, false), 2);
+    assert_eq!(assert_polar_laws(&wide, &wh, &p, false), 3);
     let LeftPolar { w, p } =
         right_polar_adjoint_from_parent::<Mf, _, _, _, _>(&mut dense, &parent(&tall)).unwrap();
-    assert_eq!(assert_polar_laws(&tall, &w, &p, true), 2);
+    assert_eq!(assert_polar_laws(&tall, &w, &p, true), 3);
 
     // A view whose shape forbids the requested direction is refused under
     // the view's operation name, not the parent's.
@@ -721,8 +683,8 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
 
 #[test]
 fn polar_factors_are_isometric_and_hermitian_positive_on_both_sides() {
-    // What: on non-Abelian SU(2) with multi-tree sectors and a side-only
-    // sector, both polar directions and both lazy-adjoint seams return
+    // What: on non-Abelian SU(2) with multi-tree sectors on both sides,
+    // both polar directions and both lazy-adjoint seams return
     // `A = W P` / `A = P Wh` with an isometric `W` and a Hermitian positive
     // definite `P`, for real and complex data.
     check_polar_laws_on_su2::<f64>(|re, _| re);
