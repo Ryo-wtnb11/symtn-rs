@@ -1,6 +1,8 @@
 # symtn
 
 [![CI](https://github.com/Ryo-wtnb11/symtn-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Ryo-wtnb11/symtn-rs/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Ryo-wtnb11/symtn-rs/badges/badge.json)](https://github.com/Ryo-wtnb11/symtn-rs/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Ryo-wtnb11/symtn-rs/graph/badge.svg)](https://codecov.io/gh/Ryo-wtnb11/symtn-rs)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 Symmetric tensors in Rust, inspired by TensorKit.jl.
