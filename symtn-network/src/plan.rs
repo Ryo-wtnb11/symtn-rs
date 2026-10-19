@@ -10,7 +10,58 @@ use crate::optimizer::{
 use crate::stepflow::{declared_step_labels, pair_result_labels};
 use crate::tree::ContractionTree;
 
-const PLAN_HEADER: &str = "symtn-contract-plan-v1";
+/// v2 writes each label as a quoted, escaped string (v1 wrote it bare).
+const PLAN_HEADER: &str = "symtn-contract-plan-v2";
+
+/// Append `label` as a quoted, escaped string (`{:?}`). `Network` labels are
+/// arbitrary strings, so a bare label holding whitespace or a line break would
+/// change the line structure of the plan text and of the plan-cache key.
+pub(crate) fn push_label(text: &mut String, label: &str) {
+    use std::fmt::Write;
+    let _ = write!(text, "{label:?}");
+}
+
+/// Parse a sequence of ` <label>` written by [`push_label`].
+fn parse_labels(mut rest: &str) -> Result<Vec<TemporaryLabel>> {
+    let mut labels = Vec::new();
+    while !rest.is_empty() {
+        let quoted = rest
+            .strip_prefix(" \"")
+            .ok_or_else(|| invalid_serialized_plan("label is not a quoted string"))?;
+        let (label, after) = parse_escaped_label(quoted)
+            .ok_or_else(|| invalid_serialized_plan("invalid quoted label"))?;
+        labels.push(TemporaryLabel::from(label.as_str()));
+        rest = after;
+    }
+    Ok(labels)
+}
+
+/// Inverse of `str`'s `Debug` escaping, from just after the opening quote up
+/// to and including the closing quote; returns the label and the remainder.
+fn parse_escaped_label(text: &str) -> Option<(String, &str)> {
+    let mut label = String::new();
+    let mut chars = text.char_indices();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '"' => return Some((label, &text[i + 1..])),
+            '\\' => label.push(match chars.next()?.1 {
+                't' => '\t',
+                'r' => '\r',
+                'n' => '\n',
+                '0' => '\0',
+                c @ ('\\' | '"' | '\'') => c,
+                'u' => {
+                    let start = chars.next().filter(|&(_, c)| c == '{')?.0 + 1;
+                    let end = chars.find(|&(_, c)| c == '}')?.0;
+                    char::from_u32(u32::from_str_radix(&text[start..end], 16).ok()?)?
+                }
+                _ => return None,
+            }),
+            c => label.push(c),
+        }
+    }
+    None
+}
 
 /// A contraction step expressed as positions in the current active tensor list.
 ///
@@ -212,7 +263,7 @@ impl ContractionPlan {
         text.push_str("output");
         for label in &self.output_labels {
             text.push(' ');
-            text.push_str(label.as_str());
+            push_label(&mut text, label.as_str());
         }
         text.push('\n');
         for step in &self.steps {
@@ -226,7 +277,7 @@ impl ContractionPlan {
             text.push_str(&step.cost().to_string());
             for label in step.result_labels() {
                 text.push(' ');
-                text.push_str(label.as_str());
+                push_label(&mut text, label.as_str());
             }
             text.push('\n');
         }
@@ -575,28 +626,26 @@ fn parse_tensor_count(line: &str) -> Result<usize> {
 }
 
 fn parse_output_labels(line: &str) -> Result<Vec<TemporaryLabel>> {
-    let mut parts = line.split_whitespace();
-    if parts.next() != Some("output") {
-        return Err(invalid_serialized_plan("invalid output line"));
+    match line.strip_prefix("output") {
+        Some(rest) if rest.is_empty() || rest.starts_with(' ') => parse_labels(rest),
+        _ => Err(invalid_serialized_plan("invalid output line")),
     }
-    Ok(parts.map(TemporaryLabel::from).collect())
 }
 
 fn parse_step(line: &str) -> Result<ContractionStep> {
-    let parts = line.split_whitespace().collect::<Vec<_>>();
+    // Labels may contain spaces, so only the fixed fields are split off.
+    let parts = line.splitn(5, ' ').collect::<Vec<_>>();
     if parts.len() < 5 || parts[0] != "step" {
         return Err(invalid_serialized_plan("invalid step line"));
     }
     let lhs = parse_tensor_id(parts[1], "lhs")?;
     let rhs = parse_tensor_id(parts[2], "rhs")?;
     let result = parse_tensor_id(parts[3], "result")?;
-    let cost = parts[4]
+    let (cost, labels) = parts[4].split_at(parts[4].find(' ').unwrap_or(parts[4].len()));
+    let cost = cost
         .parse::<usize>()
         .map_err(|_| invalid_serialized_plan("invalid step cost"))?;
-    let result_labels = parts[5..]
-        .iter()
-        .map(|label| TemporaryLabel::from(*label))
-        .collect();
+    let result_labels = parse_labels(labels)?;
     Ok(ContractionStep::new(lhs, rhs, result, cost, result_labels))
 }
 

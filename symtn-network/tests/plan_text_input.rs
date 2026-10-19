@@ -23,12 +23,12 @@ mod numerics;
 
 // `[i; l] = A[i; j] B[j; k] C[k; l]` contracted as `A (B C)`: B and C first
 // (result 3, open legs `j l`), then A with 3 (result 4, open legs `i l`).
-const B_C_FIRST: &str = "symtn-contract-plan-v1
+const B_C_FIRST: &str = r#"symtn-contract-plan-v2
 tensor_count 3
-output i l
-step 1 2 3 32 j l
-step 0 3 4 32 i l
-";
+output "i" "l"
+step 1 2 3 32 "j" "l"
+step 0 3 4 32 "i" "l"
+"#;
 
 fn chain() -> Network {
     net(
@@ -83,12 +83,12 @@ fn from_text_rejects_malformed_text_with_a_contract_error() {
         ("empty text", String::new(), "missing header"),
         (
             "foreign header",
-            replace("symtn-contract-plan-v1", "symtn-contract-plan-v0"),
+            replace("symtn-contract-plan-v2", "symtn-contract-plan-v1"),
             "unsupported plan header",
         ),
         (
             "header only",
-            "symtn-contract-plan-v1\n".to_string(),
+            "symtn-contract-plan-v2\n".to_string(),
             "missing tensor_count line",
         ),
         (
@@ -103,17 +103,17 @@ fn from_text_rejects_malformed_text_with_a_contract_error() {
         ),
         (
             "no output line",
-            "symtn-contract-plan-v1\ntensor_count 3\n".to_string(),
+            "symtn-contract-plan-v2\ntensor_count 3\n".to_string(),
             "missing output line",
         ),
         (
             "output keyword",
-            replace("output i l", "outputs i l"),
+            replace("output \"i\"", "outputs \"i\""),
             "invalid output line",
         ),
         (
             "short step line",
-            replace("step 1 2 3 32 j l", "step 1 2 3"),
+            replace("step 1 2 3 32 \"j\" \"l\"", "step 1 2 3"),
             "invalid step line",
         ),
         (
@@ -123,12 +123,12 @@ fn from_text_rejects_malformed_text_with_a_contract_error() {
         ),
         (
             "step cost",
-            replace("3 32 j l", "3 -1 j l"),
+            replace("3 32 \"j\"", "3 -1 \"j\""),
             "invalid step cost",
         ),
         (
             "missing step",
-            replace("step 0 3 4 32 i l\n", ""),
+            replace("step 0 3 4 32 \"i\" \"l\"\n", ""),
             "needs 2 steps, got 1",
         ),
         (
@@ -138,7 +138,7 @@ fn from_text_rejects_malformed_text_with_a_contract_error() {
         ),
         (
             "final labels differ from output",
-            replace("output i l", "output l i"),
+            replace("output \"i\" \"l\"", "output \"l\" \"i\""),
             "final step labels do not match plan output labels",
         ),
     ];
@@ -246,7 +246,7 @@ fn loaded_order_for_another_network_is_rejected_when_used() {
 
     // Parses, but its first step claims labels the chain never produces:
     // B C contracted over `k` leaves `j l`, not `k l`.
-    let wrong_labels = B_C_FIRST.replacen("3 32 j l", "3 32 k l", 1);
+    let wrong_labels = B_C_FIRST.replacen("3 32 \"j\"", "3 32 \"k\"", 1);
     let runtime = Runtime::builder().build().unwrap();
     assert_eq!(
         load_plan_cache(&runtime, &cache_blob(&[(topology, &wrong_labels)])),
@@ -257,4 +257,101 @@ fn loaded_order_for_another_network_is_rejected_when_used() {
         chain().contract(&tensors.each_ref()),
         Err(Error::InvalidArgument(_))
     ));
+}
+
+// `chain` with labels a bare-label format cannot carry: a space, a tab and the
+// escape character, a line break followed by a `TOPO ` line, and a `TOPO `
+// prefix with a quote, a single quote and a combining mark (written `\u{301}`).
+const ODD: [&str; 4] = ["i j", "j\tk\\", "k\nTOPO x", "TOPO \"l\u{301}'"];
+
+fn odd_chain() -> Network {
+    let [i, j, k, l] = ODD;
+    net(
+        &[op(&[i], &[j]), op(&[j], &[k]), op(&[k], &[l])],
+        &[i],
+        &[l],
+    )
+}
+
+/// `B_C_FIRST` for `odd_chain`, labels escaped by hand.
+fn odd_b_c_first() -> String {
+    B_C_FIRST
+        .replace("\"i\"", r#""i j""#)
+        .replace("\"j\"", r#""j\tk\\""#)
+        .replace("\"l\"", r#""TOPO \"l\u{301}'""#)
+}
+
+#[test]
+fn plan_text_round_trips_labels_with_whitespace_line_breaks_and_escapes() {
+    let text = odd_b_c_first();
+    let plan = ContractionPlan::from_text(&text).unwrap();
+    let [i, j, _, l] = ODD;
+    let labels = |step: usize| {
+        plan.steps()[step]
+            .result_labels()
+            .iter()
+            .map(|label| label.as_str())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(labels(0), [j, l]);
+    assert_eq!(labels(1), [i, l]);
+    assert_eq!(plan.to_text(), text);
+    assert_eq!(ContractionPlan::from_text(&plan.to_text()), Ok(plan));
+    // Every label stays on its own line, whatever it contains.
+    assert_eq!(text.lines().count(), 5);
+
+    for (case, text, reason) in [
+        (
+            "bare label",
+            B_C_FIRST.replacen(r#""i" "l""#, "i l", 1),
+            "label is not a quoted string",
+        ),
+        (
+            "unknown escape",
+            B_C_FIRST.replacen(r#""j""#, r#""j\q""#, 1),
+            "invalid quoted label",
+        ),
+        (
+            "unterminated label",
+            B_C_FIRST.replacen(r#""j" "l""#, r#""j"#, 1),
+            "invalid quoted label",
+        ),
+    ] {
+        match ContractionPlan::from_text(&text) {
+            Err(ContractError::InvalidContractionPlan(message)) => {
+                assert!(message.contains(reason), "{case}: {message}");
+            }
+            other => panic!("{case}: expected InvalidContractionPlan, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn plan_cache_persists_and_replays_an_order_for_labels_needing_escapes() {
+    // A searched entry saves and reloads byte-identically.
+    let searched = Runtime::builder().build().unwrap();
+    assert_eq!(load_plan_cache(&searched, ""), 0);
+    let tensors = chain_tensors(&searched);
+    let expected = odd_chain().contract(&tensors.each_ref()).unwrap();
+    let saved = save_plan_cache(&searched);
+    assert_eq!(saved.lines().filter(|l| l.starts_with("TOPO ")).count(), 1);
+    let reloaded = Runtime::builder().build().unwrap();
+    assert_eq!(load_plan_cache(&reloaded, &saved), 1);
+    assert_eq!(save_plan_cache(&reloaded), saved);
+
+    // A non-searched order under that key is replayed, not re-searched.
+    let topology = saved.lines().nth(1).unwrap().strip_prefix("TOPO ").unwrap();
+    let blob = cache_blob(&[(topology, &odd_b_c_first())]);
+    assert_ne!(saved, blob);
+    let replayed = Runtime::builder().build().unwrap();
+    assert_eq!(load_plan_cache(&replayed, &blob), 1);
+    let tensors = chain_tensors(&replayed);
+    let actual = odd_chain().contract(&tensors.each_ref()).unwrap();
+    assert_eq!(save_plan_cache(&replayed), blob);
+    numerics::assert_slices_close(
+        "A (B C) against the searched order",
+        actual.dense_data().unwrap(),
+        expected.dense_data().unwrap(),
+        4,
+    );
 }
