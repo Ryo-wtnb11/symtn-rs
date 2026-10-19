@@ -189,45 +189,6 @@ fn assert_blocks_close_by_key<R, D: FactorScalar>(
 }
 
 #[test]
-fn polar_decompositions_reconstruct_with_isometric_factors() {
-    let rule = SU2FusionRule;
-    let tensor = tsvd_test_tensor(
-        &rule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
-    );
-    let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
-    let mut context = default_context();
-
-    let LeftPolar {
-        w: isometry,
-        p: positive,
-    } = left_polar(
-        &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
-    )
-    .unwrap();
-    let reconstructed = crate::compose::compose(&mut context, &rule, &isometry, &positive).unwrap();
-    assert_svd_blocks_match(&tensor, &reconstructed);
-    let wh = adjoint(&rule, &isometry).unwrap();
-    let unit = crate::compose::compose(&mut context, &rule, &wh, &isometry).unwrap();
-    assert_identity_matrices(&dense_sector_matrices(2, &unit));
-
-    let RightPolar {
-        p: positive,
-        wh: isometry,
-    } = right_polar(
-        &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
-    )
-    .unwrap();
-    let reconstructed = crate::compose::compose(&mut context, &rule, &positive, &isometry).unwrap();
-    assert_svd_blocks_match(&tensor, &reconstructed);
-}
-
-#[test]
 fn polar_rejects_wrong_rectangular_direction_before_dense_execution() {
     // What: invalid left/right directions are rejected before any sector SVD starts.
     let rule = Z2FusionRule;
@@ -478,4 +439,254 @@ fn polar_valid_direct_and_fallback_layouts_agree() {
         assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
         assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
     }
+}
+
+/// An SU(2) map with two legs of spins {0, 1/2} on each side, degeneracy 2
+/// on the long side and 1 on the short side: `tall` has the long side as
+/// codomain, so every coupled-sector matrix has at least as many rows as
+/// columns; otherwise the sides are swapped. Spins 0 and 1/2 each stack two
+/// trees on both sides, so `P` has several trees per sector too.
+fn su2_polar_input<D: FactorScalar>(
+    tall: bool,
+    value: fn(f64, f64) -> D,
+) -> BoundTensorMap<SU2FusionRule, D> {
+    let rule = SU2FusionRule;
+    let side = |degeneracy| {
+        let leg = || {
+            SectorLeg::new(
+                [0, 1].map(|twice| (SU2Irrep::from_twice_spin(twice).sector_id(), degeneracy)),
+                false,
+            )
+        };
+        FusionProductSpace::new([leg(), leg()])
+    };
+    let (long, short) = (side(2), side(1));
+    let homspace = if tall {
+        FusionTreeHomSpace::new(long, short)
+    } else {
+        FusionTreeHomSpace::new(short, long)
+    };
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
+    let data = (0..space.required_len().unwrap())
+        .map(|index| {
+            value(
+                ((index * 11 + 5) % 29) as f64 * 0.25 - 3.0,
+                ((index * 7 + 3) % 17) as f64 * 0.25 - 2.0,
+            )
+        })
+        .collect();
+    let tensor = TestTensor::<D>::from_vec_with_fusion_space(data, space).unwrap();
+    bound_tensor(Arc::new(rule), &tensor)
+}
+
+/// Column-major dense matrix of one coupled sector, widened to `Complex64`.
+struct SectorMatrix {
+    rows: usize,
+    cols: usize,
+    data: Vec<Complex64>,
+}
+
+impl SectorMatrix {
+    fn identity(n: usize) -> Self {
+        let mut data = vec![Complex64::zero(); n * n];
+        (0..n).for_each(|i| data[i + n * i] = Complex64::new(1.0, 0.0));
+        Self {
+            rows: n,
+            cols: n,
+            data,
+        }
+    }
+
+    fn adjoint(&self) -> Self {
+        let mut data = vec![Complex64::zero(); self.data.len()];
+        for col in 0..self.cols {
+            for row in 0..self.rows {
+                data[col + self.cols * row] = self.data[row + self.rows * col].conj();
+            }
+        }
+        Self {
+            rows: self.cols,
+            cols: self.rows,
+            data,
+        }
+    }
+
+    fn mul(&self, rhs: &Self) -> Self {
+        assert_eq!(self.cols, rhs.rows);
+        let mut data = vec![Complex64::zero(); self.rows * rhs.cols];
+        for col in 0..rhs.cols {
+            for k in 0..self.cols {
+                for row in 0..self.rows {
+                    data[row + self.rows * col] +=
+                        self.data[row + self.rows * k] * rhs.data[k + rhs.rows * col];
+                }
+            }
+        }
+        Self {
+            rows: self.rows,
+            cols: rhs.cols,
+            data,
+        }
+    }
+
+    fn assert_close(&self, expected: &Self, what: &str) {
+        assert_eq!(
+            (self.rows, self.cols),
+            (expected.rows, expected.cols),
+            "{what}"
+        );
+        for (index, (x, y)) in self.data.iter().zip(&expected.data).enumerate() {
+            assert!((x - y).norm() < 1e-10, "{what} [{index}]: {x} vs {y}");
+        }
+    }
+
+    /// Positive definite iff every pivot of the Hermitian `L D Lᴴ`
+    /// elimination is positive (a singular `P` would give a zero pivot).
+    fn assert_positive_definite(&self, what: &str) {
+        let n = self.rows;
+        let mut m = self.data.clone();
+        for k in 0..n {
+            let pivot = m[k + n * k];
+            assert!(
+                pivot.re > 1e-8 && pivot.im.abs() < 1e-10,
+                "{what}: pivot {k} = {pivot}"
+            );
+            for col in k + 1..n {
+                for row in k + 1..n {
+                    let update = m[row + n * k] * m[k + n * col] / pivot;
+                    m[row + n * col] -= update;
+                }
+            }
+        }
+    }
+}
+
+/// Every stored coupled-sector matrix of `(space, data)`.
+fn sector_matrices<R, D: FactorScalar>(
+    space: &BoundDynamicFusionMapSpace<R>,
+    data: &[D],
+) -> Vec<(SectorId, SectorMatrix)> {
+    let space = space.space();
+    let regions = space
+        .structure()
+        .coupled_sector_regions(space.nout())
+        .unwrap()
+        .expect("fresh layouts are coupled-sector tilings");
+    regions
+        .iter()
+        .map(|region| {
+            let data = data[region.range()]
+                .iter()
+                .map(|value| value.widen_complex())
+                .collect();
+            let (rows, cols) = (region.rows(), region.cols());
+            (region.coupled(), SectorMatrix { rows, cols, data })
+        })
+        .collect()
+}
+
+/// Checks the polar laws sector by sector against `source`: a left polar
+/// `A = W P` with `Wᴴ W = 1`, or a right polar `A = P Wh` with
+/// `Wh Whᴴ = 1`; in both `P` is Hermitian positive definite (the inputs
+/// have full rank). Returns how many sectors were checked.
+fn assert_polar_laws<D: FactorScalar>(
+    source: &BoundTensorMap<SU2FusionRule, D>,
+    w: &BoundDynFactor<SU2FusionRule, D>,
+    p: &BoundDynFactor<SU2FusionRule, D>,
+    left: bool,
+) -> usize {
+    let a = sector_matrices(source.space(), source.data());
+    let p = sector_matrices(p.space(), p.data());
+    let mut checked = 0;
+    for (sector, w) in sector_matrices(w.space(), w.data()) {
+        let find = |matrices: &[(SectorId, SectorMatrix)]| {
+            matrices.iter().position(|(other, _)| *other == sector)
+        };
+        let a = &a[find(&a).expect("every W sector is stored in A")].1;
+        let p = &p[find(&p).expect("every W sector has a P block")].1;
+        let what = format!("{sector:?}");
+        if left {
+            w.mul(p).assert_close(a, &format!("W P = A in {what}"));
+            w.adjoint()
+                .mul(&w)
+                .assert_close(&SectorMatrix::identity(w.cols), &format!("Wᴴ W in {what}"));
+        } else {
+            p.mul(&w).assert_close(a, &format!("P Wh = A in {what}"));
+            w.mul(&w.adjoint()).assert_close(
+                &SectorMatrix::identity(w.rows),
+                &format!("Wh Whᴴ in {what}"),
+            );
+        }
+        p.assert_close(&p.adjoint(), &format!("P = Pᴴ in {what}"));
+        p.assert_positive_definite(&format!("P in {what}"));
+        checked += 1;
+    }
+    checked
+}
+
+fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
+    type Mf = symtn_core::MultiplicityFreeAdmissionMode;
+    let dense_factor = |output| match output {
+        FactorOutput::Dense(factor) => factor,
+        FactorOutput::Diagonal { .. } => panic!("a dense source has dense polar factors"),
+    };
+    fn parent<D>(
+        bound: &BoundTensorMap<SU2FusionRule, D>,
+    ) -> BoundDynamicTensorRef<'_, SU2FusionRule, D> {
+        BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap()
+    }
+    let source = |bound| FactorSource::Dense(parent(bound));
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+    let (tall, wide) = (su2_polar_input(true, value), su2_polar_input(false, value));
+
+    let LeftPolar { w, p } =
+        left_polar_from_source::<Mf, _, _, _, _>(&mut dense, source(&tall)).unwrap();
+    assert_eq!(
+        assert_polar_laws(&tall, &dense_factor(w), &dense_factor(p), true),
+        3
+    );
+    let RightPolar { p, wh } =
+        right_polar_from_source::<Mf, _, _, _, _>(&mut dense, source(&wide)).unwrap();
+    assert_eq!(
+        assert_polar_laws(&wide, &dense_factor(wh), &dense_factor(p), false),
+        3
+    );
+
+    // The lazy-adjoint seams factor the dense parent in the opposite
+    // direction: the view `wideᴴ` is tall, so its left polar is the
+    // parent's right polar, and `tallᴴ`'s right polar is the parent's left.
+    let RightPolar { p, wh } =
+        left_polar_adjoint_from_parent::<Mf, _, _, _, _>(&mut dense, &parent(&wide)).unwrap();
+    assert_eq!(assert_polar_laws(&wide, &wh, &p, false), 3);
+    let LeftPolar { w, p } =
+        right_polar_adjoint_from_parent::<Mf, _, _, _, _>(&mut dense, &parent(&tall)).unwrap();
+    assert_eq!(assert_polar_laws(&tall, &w, &p, true), 3);
+
+    // A view whose shape forbids the requested direction is refused under
+    // the view's operation name, not the parent's.
+    for (left, parent_bound) in [(true, &tall), (false, &wide)] {
+        let error = if left {
+            left_polar_adjoint_from_parent::<Mf, _, _, _, _>(&mut dense, &parent(parent_bound))
+                .map(drop)
+        } else {
+            right_polar_adjoint_from_parent::<Mf, _, _, _, _>(&mut dense, &parent(parent_bound))
+                .map(drop)
+        }
+        .unwrap_err();
+        let operation = if left { "left_polar" } else { "right_polar" };
+        assert!(matches!(
+            error,
+            OperationError::InvalidArgument { message } if message.starts_with(operation)
+        ));
+    }
+}
+
+#[test]
+fn polar_factors_are_isometric_and_hermitian_positive_on_both_sides() {
+    // What: on non-Abelian SU(2) with multi-tree sectors on both sides,
+    // both polar directions and both lazy-adjoint seams return
+    // `A = W P` / `A = P Wh` with an isometric `W` and a Hermitian positive
+    // definite `P`, for real and complex data.
+    check_polar_laws_on_su2::<f64>(|re, _| re);
+    check_polar_laws_on_su2(Complex64::new);
 }
