@@ -140,25 +140,25 @@ fn generic_beta_zero_wipes_nan_in_inactive_destinations() {
 
 #[test]
 fn overwrite_single_does_not_read_nan_destinations_in_any_driver() {
-    for threads in [1, 2] {
-        let (mut dst, src, structure) = fixture();
-        dst.data_mut().fill(f64::NAN);
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &structure,
-            &Arc::clone(dst.structure()),
-            &Arc::clone(src.structure()),
-            dst.data_mut(),
-            src.data(),
-            1.0,
-            &[],
-            threads,
-        )
-        .unwrap();
-        assert_eq!(dst.data(), &[6.0, 0.0]);
-    }
+    // The one-block fixture never reaches the threaded driver; threaded
+    // overwrite is covered by threaded.rs's multi-block recoupling oracle.
+    let (mut dst, src, structure) = fixture();
+    dst.data_mut().fill(f64::NAN);
+    tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        &mut StridedHostKernelAdapter::default(),
+        &mut DefaultDenseExecutor::new(),
+        &mut TreeTransformWorkspace::default(),
+        &structure,
+        &Arc::clone(dst.structure()),
+        &Arc::clone(src.structure()),
+        dst.data_mut(),
+        src.data(),
+        1.0,
+        &[],
+        1,
+    )
+    .unwrap();
+    assert_eq!(dst.data(), &[6.0, 0.0]);
 
     let (mut dst, src, structure) = fixture();
     dst.data_mut().fill(f64::NAN);
@@ -449,29 +449,6 @@ fn structural_serial_replay_scales_inactive_destinations() {
             1.0,
             beta,
             1,
-        )
-        .unwrap();
-        assert_eq!(dst.data(), &expected(beta));
-    }
-}
-
-#[test]
-fn structural_threaded_replay_scales_inactive_destinations() {
-    for beta in [0.0, 0.5, 1.0] {
-        let (mut dst, src, structure) = fixture();
-        let dst_structure = Arc::clone(dst.structure());
-        tree_transform_structure_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &structure,
-            &dst_structure,
-            src.structure(),
-            dst.data_mut(),
-            src.data(),
-            1.0,
-            beta,
-            2,
         )
         .unwrap();
         assert_eq!(dst.data(), &expected(beta));
