@@ -482,9 +482,12 @@ fn checked_only_compact_diagonal_polar_is_direct_and_refuses_nonfinite_values() 
         svd_calls.reset();
         if bad_value.re.is_nan() {
             let error = bad.left_polar(&[0], &[1]).map(drop).unwrap_err();
-            assert!(
-                report(&error).contains("polar input components must be finite"),
-                "{error}"
+            assert_eq!(
+                crate::report::cause::<symtn::typed::OperationError>(&error),
+                Some(&symtn::typed::OperationError::InvalidArgument {
+                    message: "polar input components must be finite"
+                }),
+                "{error:?}"
             );
             assert_eq!(svd_calls.total(), 0);
             continue;

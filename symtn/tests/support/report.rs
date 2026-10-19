@@ -21,3 +21,14 @@ impl<E: std::error::Error + 'static> Report for E {
         report(self)
     }
 }
+
+/// The first error of type `T` on `error`'s `source()` chain, `error`
+/// included. Both fusion modes' facade errors reach the same lower-layer
+/// cause there, so one typed `matches!` covers both modes.
+#[allow(dead_code)]
+pub fn cause<'a, T: std::error::Error + 'static>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    std::iter::successors(Some(error), |&error| error.source())
+        .find_map(|error| error.downcast_ref::<T>())
+}

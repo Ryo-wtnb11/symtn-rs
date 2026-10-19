@@ -203,10 +203,19 @@ fn a_selection_of_another_rule_instance_is_a_rule_mismatch() {
     let expected = member.restrict_leg(&[(0, &foreign)]).err().unwrap();
     let actual = stack.restrict_leg(&[(0, &foreign)]).err().unwrap();
     assert!(
-        format!("{expected:?}").contains("RuleMismatch"),
+        matches!(
+            expected,
+            symtn::typed::GenericTensorError::Facade(symtn::typed::Error::RuleMismatch)
+        ),
         "{expected:?}"
     );
-    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+    assert!(
+        matches!(
+            actual,
+            symtn::typed::GenericTensorError::Facade(symtn::typed::Error::RuleMismatch)
+        ),
+        "{actual:?}"
+    );
 }
 
 #[test]

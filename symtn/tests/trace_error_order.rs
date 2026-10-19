@@ -11,23 +11,28 @@
 //! select(space(tsrc), p)` comes before it. The device variants run with
 //! `--features cuda -- --ignored`.
 
-use std::fmt::Debug;
+#[path = "support/report.rs"]
+mod report;
+
 use std::sync::Arc;
 
+use report::cause;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
-use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
+use symtn::typed::{Complex64, GradedSpace, OperationError, Runtime, TensorMap};
 
-/// The misuse class an error reports.
-fn class(error: impl Debug) -> &'static str {
-    let text = format!("{error:?}");
-    if text.contains(r#"InvalidAxisSet { tensor: "trace pairs""#) {
-        "pair list"
-    } else if text.contains(r#"StructureMismatch { tensor: "trace axes" }"#) {
-        "non-dual pair"
-    } else if text.contains("SpaceMismatch {") {
-        "destination space"
-    } else {
-        panic!("unclassified trace error: {text}")
+/// The misuse class an error reports, read from its typed operation cause
+/// (both fusion modes' facade errors carry the same one).
+fn class(error: impl std::error::Error + 'static) -> &'static str {
+    match cause::<OperationError>(&error) {
+        Some(OperationError::InvalidAxisSet {
+            tensor: "trace pairs",
+            ..
+        }) => "pair list",
+        Some(OperationError::StructureMismatch {
+            tensor: "trace axes",
+        }) => "non-dual pair",
+        Some(OperationError::SpaceMismatch { .. }) => "destination space",
+        _ => panic!("unclassified trace error: {error:?}"),
     }
 }
 

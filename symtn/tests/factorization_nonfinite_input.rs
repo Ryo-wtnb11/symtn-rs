@@ -8,7 +8,9 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap, TensorScalar};
+use symtn::typed::{
+    Error, GradedSpace, OperationError, Runtime, SectorSpectrum, TensorMap, TensorScalar,
+};
 
 #[macro_use]
 #[path = "support/nonfinite_factor_input.rs"]
@@ -115,32 +117,43 @@ fn structural_admission_precedes_the_finite_input_stage() {
     let col = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let wide: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&row], [&col], |_, _| f64::NAN).unwrap();
-    for error in [
-        format!(
-            "{:?}",
+    let operation = |error: Error| match error {
+        Error::Operation(operation) => *operation,
+        other => panic!("expected an operation error, got {other:?}"),
+    };
+    let space_mismatch = |message| OperationError::SpaceMismatch { message };
+    for (error, family) in [
+        (
             wide.eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
-                .unwrap_err()
+                .unwrap_err(),
+            "eigh",
         ),
-        format!(
-            "{:?}",
+        (
             wide.eigh_full(&[0], &[1], HermitianTol::DEFAULT)
-                .unwrap_err()
+                .unwrap_err(),
+            "eigh",
         ),
-        format!("{:?}", wide.eig_vals(&[0], &[1]).unwrap_err()),
-        format!("{:?}", wide.eig_full(&[0], &[1]).unwrap_err()),
+        (wide.eig_vals(&[0], &[1]).unwrap_err(), "eig"),
+        (wide.eig_full(&[0], &[1]).unwrap_err(), "eig"),
     ] {
-        assert!(error.contains("requires an endomorphism"), "{error}");
+        let expected = match family {
+            "eigh" => space_mismatch("eigh requires an endomorphism (codomain == domain)"),
+            _ => space_mismatch("eig requires an endomorphism (codomain == domain)"),
+        };
+        assert_eq!(operation(error), expected);
     }
-    let error = format!("{:?}", wide.left_polar(&[0], &[1]).unwrap_err());
-    assert!(
-        error.contains("left_polar requires rows >= columns"),
-        "{error}"
+    assert_eq!(
+        operation(wide.left_polar(&[0], &[1]).unwrap_err()),
+        OperationError::InvalidArgument {
+            message: "left_polar requires rows >= columns in every coupled-sector matrix"
+        }
     );
     // Families with no structural admission refuse the values.
-    let error = format!("{:?}", wide.svd_vals(&[0], &[1]).unwrap_err());
-    assert!(
-        error.contains("svd input components must be finite"),
-        "{error}"
+    assert_eq!(
+        operation(wide.svd_vals(&[0], &[1]).unwrap_err()),
+        OperationError::InvalidArgument {
+            message: "svd input components must be finite"
+        }
     );
 }
 
@@ -169,10 +182,10 @@ fn finite_extreme_input_passes_the_finite_input_stage() {
         ];
         for outcome in outcomes {
             if let Err(error) = outcome {
-                let error = format!("{error:?}");
+                let (message, text) = nonfinite_factor_input::refusal(&error);
                 assert!(
-                    !error.contains("input components must be finite"),
-                    "{error}"
+                    !message.is_some_and(|message| message.ends_with("input components must be finite")),
+                    "{text}"
                 );
             }
         }

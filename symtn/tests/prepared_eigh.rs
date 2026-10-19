@@ -384,7 +384,11 @@ fn complex_payloads_and_other_signatures_are_typed_errors() {
     let stack = StackedTensorMap::pack(&complex).unwrap();
     assert!(matches!(
         EighFullPlan::new(&stack, &[0], &[1], HermitianTol::DEFAULT),
-        Err(Error::Operation(error)) if format!("{error:?}").contains("real payloads")
+        Err(Error::Operation(error)) if matches!(
+            *error,
+            OperationError::UnsupportedTensorContractScope { message }
+                if message.contains("real payloads")
+        )
     ));
 
     let inputs = hermitian_members(&runtime, &[&v], 2, 1);

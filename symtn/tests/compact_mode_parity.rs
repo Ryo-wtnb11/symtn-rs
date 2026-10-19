@@ -36,7 +36,7 @@
 
 #[path = "support/report.rs"]
 mod report;
-use report::report;
+use report::{cause, report};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -828,8 +828,13 @@ where
                 }
                 (Ok(got), Err(rejection)) => {
                     assert!(
-                        report(&rejection).contains("requires Bosonic braiding"),
-                        "{what}: only the U15 boundary may separate the storages: {rejection}"
+                        matches!(
+                            cause::<symtn::typed::OperationError>(&rejection),
+                            Some(symtn::typed::OperationError::UnsupportedTensorContractScope {
+                                message
+                            }) if message.ends_with("requires Bosonic braiding")
+                        ),
+                        "{what}: only the U15 boundary may separate the storages: {rejection:?}"
                     );
                     assert_eq!(got.dense_data().is_err(), *compact, "{what}: storage form");
                     Some(image(&got))
@@ -3137,16 +3142,18 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
                 .trace_pairs_into(&[(0, 2)], &mut right, 1.0, 0.5)
                 .unwrap_err(),
         );
-        let wrong_error = report(
-            &source
-                .trace_pairs_into(&[(0, 2)], &mut wrong, 1.0, 0.5)
-                .unwrap_err(),
-        );
-        assert_eq!(right_error, eager, "{pass}");
+        let wrong_error = source
+            .trace_pairs_into(&[(0, 2)], &mut wrong, 1.0, 0.5)
+            .unwrap_err();
         assert!(
-            wrong_error.contains("does not match"),
-            "{pass}: {wrong_error}"
+            matches!(
+                cause::<symtn::typed::OperationError>(&wrong_error),
+                Some(symtn::typed::OperationError::SpaceMismatch { .. })
+            ),
+            "{pass}: {wrong_error:?}"
         );
+        let wrong_error = report(&wrong_error);
+        assert_eq!(right_error, eager, "{pass}");
         seen.push((right_error, wrong_error));
         // Warms the source's trace structures on a valid pair.
         drop(black_box(source.trace_pairs(&[(1, 3)]).unwrap()));

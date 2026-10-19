@@ -938,8 +938,8 @@ fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
     let selection = LegSelection::try_new(&foreign, [(three.irrep(0), 0..1)]).unwrap();
     let error = source.restrict_leg(&[(0, &selection)]).unwrap_err();
     assert!(
-        format!("{error}").contains("rule"),
-        "expected a rule mismatch, got {error}"
+        matches!(error, symtn::typed::Error::RuleMismatch),
+        "expected a rule mismatch, got {error:?}"
     );
     assert!(source.embed_leg(0, &selection).is_err());
 }

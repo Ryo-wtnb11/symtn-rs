@@ -23,6 +23,8 @@ use single_precision_oracle::{fermion_su2_leg, runtime, u1_leg, u1_leg_with};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "support/report.rs"]
+mod report;
 
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
@@ -852,8 +854,11 @@ fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
     // fixture's NaN and infinities (#1986).
     complex.dense_data().unwrap();
     let error = complex.qr_compact(&[0, 1], &[2, 3]).unwrap_err();
-    assert!(
-        format!("{error:?}").contains("qr input components must be finite"),
+    assert_eq!(
+        report::cause::<symtn::typed::OperationError>(&error),
+        Some(&symtn::typed::OperationError::InvalidArgument {
+            message: "qr input components must be finite"
+        }),
         "{error:?}"
     );
 }

@@ -59,8 +59,7 @@ fn assert_sun_checked_generic_eigh<D>(
         .unwrap();
     assert!(std::ptr::eq(d.provider(), provider.as_ref()));
     assert!(std::ptr::eq(v.provider(), provider.as_ref()));
-    let dense_len = d.materialize().unwrap().dense_data().unwrap().len();
-    assert!(!format!("{d:?}").contains(&format!("elements: {dense_len}")));
+    assert!(symtn::expert::diagonal_spectrum(&d).unwrap().is_some());
     assert_eq!(v.codomain(), source.codomain());
     assert_eq!(v.domain(), d.codomain());
     for (actual, expected) in source
@@ -216,8 +215,7 @@ where
     let Eig { d, v } = source.eig_full(&[0, 1], &[2, 3]).unwrap();
     assert!(std::ptr::eq(d.provider(), provider.as_ref()));
     assert!(std::ptr::eq(v.provider(), provider.as_ref()));
-    let dense_len = d.materialize().unwrap().dense_data().unwrap().len();
-    assert!(!format!("{d:?}").contains(&format!("elements: {dense_len}")));
+    assert!(symtn::expert::diagonal_spectrum(&d).unwrap().is_some());
     let complex_source = D::to_complex(&source);
     for (sector, a) in complex_source.blocks().unwrap() {
         let (v, d) = (v.block(&sector).unwrap(), d.block(&sector).unwrap());
@@ -376,7 +374,8 @@ fn assert_checked_generic_eigh_factors<D>(
     assert_eq!(v.codomain(), source.codomain());
     assert_eq!(d.codomain(), d.domain());
     assert_eq!(v.domain(), d.codomain());
-    assert!(format!("{d:?}").contains("elements: 3"));
+    let spectrum = symtn::expert::diagonal_spectrum(&d).unwrap().unwrap();
+    assert_eq!(spectrum.iter().map(|s| s.values.len()).sum::<usize>(), 3);
     assert_eq!(d.materialize().unwrap().dense_data().unwrap().len(), 9);
 
     for (actual, expected) in source
@@ -1406,11 +1405,17 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
                     assert!(!faer_only, "faer is expected to overflow on this block");
                 }
                 Err(error) => {
-                    let message = format!("{error:?}");
                     assert!(
-                        message.contains("NumericalFailure")
-                            && message.contains("eig eigenvector check"),
-                        "{message}"
+                        matches!(
+                            crate::report::cause::<symtn::typed::OperationError>(&error),
+                            Some(symtn::typed::OperationError::Dense(
+                                symtn::expert::DenseError::NumericalFailure {
+                                    op: "eig eigenvector check",
+                                    ..
+                                }
+                            ))
+                        ),
+                        "{error:?}"
                     );
                 }
             }
@@ -1451,7 +1456,13 @@ fn checked_generic_eig_rejects_nonfinite_input() {
         })
         .unwrap();
     let error = nonfinite.eig_full(&[0], &[1]).unwrap_err();
-    assert!(format!("{error:?}").contains("eig input components must be finite"));
+    assert_eq!(
+        crate::report::cause::<symtn::typed::OperationError>(&error),
+        Some(&symtn::typed::OperationError::InvalidArgument {
+            message: "eig input components must be finite"
+        }),
+        "{error:?}"
+    );
 }
 
 #[test]
