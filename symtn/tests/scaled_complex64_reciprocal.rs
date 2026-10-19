@@ -20,6 +20,10 @@
 //! correct reciprocal satisfies: `inv(2^k z) = 2^-k inv(z)`,
 //! `inv(conj z) = conj(inv z)`, and `z * inv(z) ≈ 1`.
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::f64::consts::{E, FRAC_1_SQRT_2, LN_2, PI, SQRT_2};
 use std::sync::Arc;
 
@@ -304,5 +308,10 @@ fn compact_reciprocal_32_at_range_edges() {
 /// `NaN + NaN*im`, not an error).
 #[test]
 fn zero_entry_is_still_reported_as_a_singular_diagonal() {
-    assert!(diagonal(c(0.0, 0.0)).inv(&[0], &[1]).is_err());
+    assert!(diagonal(c(0.0, 0.0))
+        .inv(&[0], &[1])
+        .err()
+        .unwrap()
+        .report()
+        .contains("inv of a singular diagonal"));
 }

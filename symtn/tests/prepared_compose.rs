@@ -320,10 +320,8 @@ fn mismatched_stacks_are_typed_errors_before_any_work() {
             field: SignatureField::Runtime
         })
     );
-    assert!(matches!(
-        plan.execute(&lhs, &short, &mut ws),
-        Err(Error::InvalidArgument(_))
-    ));
+    assert!(matches!(plan
+        .execute(&lhs, &short, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts")));
     assert_eq!(ws.retained_bytes(), 0, "a rejected call allocates nothing");
 
     let mut wrong_dst =
@@ -334,10 +332,8 @@ fn mismatched_stacks_are_typed_errors_before_any_work() {
     ));
     let mut short_dst =
         StackedTensorMap::pack(&filled::<_, f64>(&runtime, &[&v, &v], &[&v], 2, 1.0)).unwrap();
-    assert!(matches!(
-        plan.execute_into(&lhs, &rhs, &mut short_dst, &mut ws),
-        Err(Error::InvalidArgument(_))
-    ));
+    assert!(matches!(plan
+        .execute_into(&lhs, &rhs, &mut short_dst, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("destination member count differs")));
     assert_eq!(
         short_dst.member(0).unwrap().dense_data().unwrap()[0],
         1.0,

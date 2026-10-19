@@ -12,6 +12,10 @@
 //!   twist to every dual contracted right-hand axis, so it would test a
 //!   different map on odd sectors.
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::ops::Range;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
@@ -633,7 +637,11 @@ fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
 
     // Leg-level validation still rejects malformed ranges there, because no
     // block would ever reach the kernel.
-    assert!(LegSelection::try_new(&charged, [(U1Irrep::new(1), 2..4)]).is_err());
+    assert!(LegSelection::try_new(&charged, [(U1Irrep::new(1), 2..4)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("exceeds its"));
 }
 
 #[test]
@@ -644,29 +652,74 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
     let other = u1(&provider, &[(0, 2)]);
 
     assert!(LegSelection::try_new(&leg, std::iter::empty::<(U1Irrep, Range<usize>)>()).is_err());
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 1..1)]).is_err());
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), Range { start: 2, end: 1 })]).is_err());
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..3)]).is_err());
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(5), 0..1)]).is_err());
+    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 1..1)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("must name at least one position"));
+    assert!(
+        LegSelection::try_new(&leg, [(U1Irrep::new(0), Range { start: 2, end: 1 })])
+            .err()
+            .unwrap()
+            .report()
+            .contains("must name at least one position")
+    );
+    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..3)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("exceeds its"));
+    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(5), 0..1)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("absent from the selected leg"));
     assert!(LegSelection::try_new(
         &leg,
         [(U1Irrep::new(0), 0..1), (U1Irrep::new(0), 1..2)].into_iter()
     )
-    .is_err());
+    .err()
+    .unwrap()
+    .report()
+    .contains("selected more than once"));
     // A dual leg's own labels are the dualised ones; the non-dual label is
     // simply absent.
     let dual = leg.try_dual().unwrap();
-    assert!(LegSelection::try_new(&dual, [(U1Irrep::new(1), 0..1)]).is_err());
+    assert!(LegSelection::try_new(&dual, [(U1Irrep::new(1), 0..1)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("absent from the selected leg"));
     assert!(LegSelection::try_new(&dual, [(U1Irrep::new(-1), 0..1)]).is_ok());
 
     let selection = LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..1)]).unwrap();
     let source = TensorMap::<_, f64>::zeros(&runtime, [&leg], [&other]).unwrap();
-    assert!(source.restrict_leg(&[(2, &selection)]).is_err());
-    assert!(source.restrict_leg(&[(1, &selection)]).is_err());
+    assert!(source
+        .restrict_leg(&[(2, &selection)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("axis 2 is out of range"));
+    assert!(source
+        .restrict_leg(&[(1, &selection)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("axis 1 is not the leg"));
     // `embed_leg` wants the subspace, not the parent.
-    assert!(source.embed_leg(0, &selection).is_err());
+    assert!(source
+        .embed_leg(0, &selection)
+        .err()
+        .unwrap()
+        .report()
+        .contains("axis 0 is not the leg"));
     let small = source.restrict_leg(&[(0, &selection)]).unwrap();
-    assert!(small.restrict_leg(&[(0, &selection)]).is_err());
+    assert!(small
+        .restrict_leg(&[(0, &selection)])
+        .err()
+        .unwrap()
+        .report()
+        .contains("axis 0 is not the leg"));
     assert!(small.embed_leg(0, &selection).is_ok());
 }
 
@@ -942,7 +995,10 @@ fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
         matches!(error, symtn::typed::Error::RuleMismatch),
         "expected a rule mismatch, got {error:?}"
     );
-    assert!(source.embed_leg(0, &selection).is_err());
+    assert!(matches!(
+        source.embed_leg(0, &selection),
+        Err(symtn::typed::Error::RuleMismatch)
+    ));
 }
 
 #[test]
@@ -1685,7 +1741,12 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
     for invalid in [vec![2, 1], vec![1, 1], vec![0, 5], vec![]] {
         let error = LegSelection::try_new(&leg, [(zero, invalid.clone())]).unwrap_err();
         assert!(
-            matches!(error, symtn::typed::Error::InvalidArgument(_)),
+            matches!(error, symtn::typed::Error::InvalidArgument(ref m) if m.contains(match invalid.as_slice() {
+                [2, 1] | [1, 1] => "strictly increasing",
+                [0, 5] => "exceeds its",
+                [] => "at least one position",
+                _ => unreachable!(),
+            })),
             "{invalid:?}: {error:?}"
         );
     }

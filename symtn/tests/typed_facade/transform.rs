@@ -106,9 +106,15 @@ fn permute_rejects_malformed_axes_without_panicking() {
     let provider = Arc::new(ExternalZ3::new());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    assert!(tensor.permute(&[0, 9], &[2, 3]).is_err());
-    assert!(tensor.permute(&[0, 0], &[2, 3]).is_err());
-    assert!(tensor.permute(&[0], &[2, 3]).is_err());
+    assert!(
+        matches!(tensor.permute(&[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
+    assert!(
+        matches!(tensor.permute(&[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
+    assert!(
+        matches!(tensor.permute(&[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
 }
 
 #[test]
@@ -126,7 +132,9 @@ fn braid_rejects_a_wrong_length_levels_list() {
     assert!(message.contains("expected 4"), "{message}");
     assert!(tensor.braid(&[1, 2], &[3, 0], &[0; 5]).is_err());
     // Malformed axes still come back from the expert layer, not from here.
-    assert!(tensor.braid(&[0, 0], &[2, 3], &[0, 1, 2, 3]).is_err());
+    assert!(
+        matches!(tensor.braid(&[0, 0], &[2, 3], &[0, 1, 2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
 }
 
 #[test]
@@ -164,9 +172,15 @@ fn transpose_rejects_malformed_axes_without_panicking() {
     let provider = Arc::new(ExternalZ3::new());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    assert!(tensor.transpose(&[0, 9], &[2, 3]).is_err());
-    assert!(tensor.transpose(&[0], &[2, 3]).is_err());
-    assert!(tensor.transpose(&[1, 2], &[3, 0]).is_err());
+    assert!(
+        matches!(tensor.transpose(&[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
+    assert!(
+        matches!(tensor.transpose(&[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
+    assert!(
+        matches!(tensor.transpose(&[1, 2], &[3, 0]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+    );
 }
 
 // ---------------------------------------------------------------------------

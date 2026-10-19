@@ -41,6 +41,10 @@
 //! - Checked Generic and complex-coefficient rules have no CUDA methods
 //!   (compile-time absent).
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::sync::Arc;
 
 use num_complex::Complex64;
@@ -342,7 +346,8 @@ macro_rules! storage_rows {
             inner_oracle(&real_diag, &real_diag),
         ));
         // `a` is not Hermitian; malformed axes are the permute's error.
-        assert!(matches!(a.eigh_full(&[0], &[1], tol), Err(Error::Operation(_))));
+        let result = a.eigh_full(&[0], &[1], tol);
+        assert!(matches!(result, Err(Error::Operation(_))) && result.err().unwrap().report().contains("eigh requires Hermitian coupled-sector blocks"));
         assert!(matches!(
             h.eigh_full(&[0], &[0], tol),
             Err(Error::Operation(op)) if matches!(*op, OperationError::InvalidPermutation { .. })
@@ -1102,10 +1107,7 @@ macro_rules! transform_rows {
                 if message == "braid levels must list one level per source axis (expected 3, got 1)"
         ));
         let mut alias = a.clone();
-        assert!(matches!(
-            a.permute_into(PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta),
-            Err(Error::InvalidArgument(_))
-        ));
+        assert!(matches!(a.permute_into(PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta), Err(Error::InvalidArgument(m)) if m.contains("must not alias an input")));
         let mut mismatched = b.clone().materialize().unwrap();
         assert!(matches!(
             a.permute_into(PERMUTE.0, PERMUTE.1, &mut mismatched, alpha, beta),

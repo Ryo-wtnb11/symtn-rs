@@ -812,7 +812,10 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
                 &domain_axes(&complex_symmetric),
                 HermitianTol::DEFAULT
             )
-            .is_err(),
+            .err()
+            .unwrap()
+            .report()
+            .contains("eigh requires Hermitian coupled-sector blocks"),
         "the Host oracle rejects a complex-symmetric non-Hermitian input"
     );
     let device_error = complex_symmetric
@@ -885,5 +888,8 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
             &domain_axes(&hand_symmetric),
             HermitianTol::DEFAULT
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("eigh requires Hermitian coupled-sector blocks"));
 }

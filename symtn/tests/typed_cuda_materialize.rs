@@ -12,6 +12,10 @@
 
 #![cfg(feature = "cuda")]
 
+#[path = "support/report.rs"]
+mod report;
+use report::Report;
+
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
@@ -223,7 +227,10 @@ where
     let mut alias = device.clone();
     assert!(device
         .permute_into(&codomain, &domain, &mut alias, D::two(), D::from_real(0.0))
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("must not alias an input"));
 }
 
 fn fixtures<R, D>(runtime: &Runtime, leg: &GradedSpace<R>, what: &str)

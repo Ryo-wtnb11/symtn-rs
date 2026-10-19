@@ -164,13 +164,32 @@ fn compose_declines_a_compact_arm_it_cannot_prove() {
         "the fixture's two bond spaces must differ for this to test anything"
     );
     assert!(
-        wide_s.compose(&narrow_s).is_err(),
+        wide_s
+            .compose(&narrow_s)
+            .err()
+            .unwrap()
+            .report()
+            .contains("leg degeneracy mismatch"),
         "composing spectra on mismatched bond spaces must be refused"
     );
     // And the same for a dense operand whose contracted leg does not match the
     // spectrum's bond.
-    assert!(wide.compose(&narrow_s).is_err());
-    assert!(narrow_s.compose(&wide).is_err());
+    assert!(wide
+        .compose(&narrow_s)
+        .err()
+        .unwrap()
+        .report()
+        .contains("leg degeneracy mismatch"));
+    let wide_vh = wide.svd_compact(&[0, 1], &[2]).unwrap().vh;
+    let result = narrow_s.compose(&wide_vh);
+    assert!(
+        matches!(result, Err(symtn::typed::Error::Operation(_)))
+            && result
+                .err()
+                .unwrap()
+                .report()
+                .contains("leg degeneracy mismatch")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -639,7 +658,10 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 domain: &[1]
             }
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("contracted fusion leg duality flags do not match"));
     // The mirror direction needs its own case, because it is the `t · D` arm's
     // own leg comparison that has to reject it: `leg <- dual` contracted on its
     // domain axis against `s`, whose bond leg is non-dual by construction, so
@@ -656,7 +678,10 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 domain: &[1]
             }
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("contracted fusion leg duality flags do not match"));
     // A degeneracy mismatch on an otherwise well-oriented pair is the other way
     // the comparison earns its keep: nothing about the axis pattern is wrong, so
     // only the legs themselves say this is not a contraction.
@@ -684,7 +709,10 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 domain: &[1]
             }
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("leg degeneracy mismatch"));
     assert!(narrow_bond
         .contract(
             &wide,
@@ -695,12 +723,15 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 domain: &[1]
             }
         )
-        .is_err());
+        .err()
+        .unwrap()
+        .report()
+        .contains("leg degeneracy mismatch"));
     // And a wrong-length axis list or a non-permutation output order is still
     // the expert layer's error rather than a fast-path answer. `[0, 2]` is the
     // out-of-range case, which the arm has to reject *before* indexing its own
     // source order with it.
-    assert!(typed
+    assert!(matches!(typed
         .contract(
             &s,
             &ContractSpec {
@@ -709,9 +740,8 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 codomain: &[0],
                 domain: &[]
             }
-        )
-        .is_err());
-    assert!(typed
+        ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 2, .. })));
+    assert!(matches!(typed
         .contract(
             &s,
             &ContractSpec {
@@ -720,9 +750,8 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 codomain: &[1],
                 domain: &[1]
             }
-        )
-        .is_err());
-    assert!(wide
+        ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 2, .. })));
+    assert!(matches!(wide
         .contract(
             &s,
             &ContractSpec {
@@ -731,9 +760,8 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 codomain: &[0],
                 domain: &[2]
             }
-        )
-        .is_err());
-    assert!(typed
+        ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 2, .. })));
+    assert!(matches!(typed
         .contract(
             &s,
             &ContractSpec {
@@ -742,8 +770,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
                 codomain: &[0],
                 domain: &[1]
             }
-        )
-        .is_err());
+        ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidAxisSet { tensor: "lhs", .. })));
 }
 
 /// The codomain/domain split plus every leg's sectors, degeneracies and dual

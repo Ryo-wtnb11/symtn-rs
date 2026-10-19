@@ -612,8 +612,18 @@ fn eigh_reports_a_non_hermitian_input_rather_than_a_wrong_answer() {
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
-    assert!(typed.eigh_full(&[0], &[1], HermitianTol::DEFAULT).is_err());
-    assert!(typed.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).is_err());
+    assert!(typed
+        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        .err()
+        .unwrap()
+        .report()
+        .contains("eigh requires Hermitian coupled-sector blocks"));
+    assert!(typed
+        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .err()
+        .unwrap()
+        .report()
+        .contains("eigh requires Hermitian coupled-sector blocks"));
 }
 
 // ---------------------------------------------------------------------------
@@ -889,8 +899,16 @@ fn a_non_endomorphism_is_never_hermitian_and_never_errors() {
     assert!(!is_hermitian!(typed, 1e-9));
     assert!(!is_antihermitian!(typed, 1e-9));
     assert!(!is_posdef!(typed, 1e-9));
-    assert!(project_hermitian!(typed).is_err());
-    assert!(project_antihermitian!(typed).is_err());
+    assert!(project_hermitian!(typed)
+        .err()
+        .unwrap()
+        .report()
+        .contains("tensors live on different spaces or block layouts"));
+    assert!(project_antihermitian!(typed)
+        .err()
+        .unwrap()
+        .report()
+        .contains("tensors live on different spaces or block layouts"));
 }
 
 #[test]
