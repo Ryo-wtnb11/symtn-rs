@@ -217,6 +217,10 @@ macro_rules! contract_rows {
             .contract(a, &spec(&[2], &[0], &[0, 1], &[2, 3])));
         row!("a·a", |a| a
             .contract(a, &spec(&[1], &[0], &[0, 1], &[2, 3])));
+        // Both operands conjugate and bend: each `a` contracts its codomain
+        // leg against the other's domain leg.
+        row!("a·a mixed legs", |a| a
+            .contract(a, &spec(&[0, 1], &[1, 0], &[1], &[0])));
         row!("a·t reversed contracted order", |a| a
             .contract(t, &spec(&[2, 1], &[1, 0], &[0], &[1])));
         row!("a·t permuted output", |a| a
