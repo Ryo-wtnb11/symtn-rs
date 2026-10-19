@@ -118,17 +118,16 @@ fn grouped_multi_fmove_matches_stepwise_order_and_reuses_stage_symbols() {
         let stepwise = multiplicity_free_multi_fmove_tree_stepwise_oracle(&rule, &tree).unwrap();
         let stepwise_calls = rule.take_calls();
         if grouped_calls.len() < stepwise_calls.len() {
-            fixture = Some((tree, grouped, grouped_calls, stepwise, stepwise_calls));
+            fixture = Some((tree, grouped, grouped_calls, stepwise));
             break;
         }
     }
-    let (tree, grouped, grouped_calls, stepwise, stepwise_calls) =
+    let (tree, grouped, grouped_calls, stepwise) =
         fixture.expect("rank-six Fibonacci must repeat stage-local F arguments");
 
     // What: grouped forward execution preserves the ungrouped oracle's candidate order
     // and coefficients while evaluating one complete F sextuple per stage.
     assert_eq!(grouped, stepwise);
-    assert!(grouped_calls.len() < stepwise_calls.len());
     assert_fibonacci_f_calls_are_admissible(&grouped_calls);
     assert!(grouped
         .iter()

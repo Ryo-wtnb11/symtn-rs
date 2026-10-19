@@ -102,9 +102,10 @@ fn filled_destination<R: DeviceRule, D: DevicePayload>(
 /// bit-equal to the Host call, within the documented costs: a warm
 /// `contract` uploads only its zeroed output (#740), one allocation of
 /// `required_len * size_of::<D>()` bytes, and downloads nothing; a warm
-/// `contract_into` transfers and allocates nothing, and at `beta = 1` skips
-/// the moves that write `beta * destination` into coupled sectors no GEMM
-/// reaches.
+/// `contract_into` transfers and allocates nothing, and its submissions do
+/// not depend on alpha or on beta, except that at `beta = 1` a core route
+/// skips the region moves that write `beta * destination` into the coupled
+/// sectors no GEMM reaches ([`UNREACHED_CORE_SECTORS`]).
 fn eager<R: DeviceRule, D: DevicePayload>(runtime: &Runtime, case: &Case<R, D>, family: &str) {
     let name = format!("eager {family} {} {}", case.name, D::NAME);
     let spec = case.spec();
@@ -181,11 +182,24 @@ fn eager<R: DeviceRule, D: DevicePayload>(runtime: &Runtime, case: &Case<R, D>, 
         "{name}: beta = 2 against beta = 0"
     );
     assert_eq!(at("0", "0 poisoned"), overwrite, "{name}: alpha = 0");
-    assert!(
-        at("1", "1") <= overwrite,
-        "{name}: beta = 1 submits more than beta = 0"
-    );
+    let [gemm, copy] = [0, 1].map(|index| (at("1", "1")[index], overwrite[index]));
+    assert_eq!(copy.0, copy.1, "{name}: beta = 1 copy_calls");
+    if UNREACHED_CORE_SECTORS.contains(&case.name) {
+        assert!(gemm.0 < gemm.1, "{name}: beta = 1 skips no move: {gemm:?}");
+    } else {
+        assert_eq!(gemm.0, gemm.1, "{name}: beta = 1 gemm_calls");
+    }
 }
+
+/// Fixtures whose core writes the output directly and has coupled sectors
+/// no GEMM reaches. Every other fixture's core reaches all of its sectors,
+/// or an output transform rewrites the whole destination at every beta.
+const UNREACHED_CORE_SECTORS: &[&str] = &[
+    "U(1) core route, inactive block",
+    "U(1) transformed lhs, identity output, inactive block",
+    "fA",
+    "fB",
+];
 
 fn eager_routes<D: DevicePayload>() {
     let runtime = Runtime::builder().cuda(0).build().unwrap();
