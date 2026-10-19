@@ -48,6 +48,7 @@ use crate::network::{
     FacadeError, Network, NetworkExecutionWorkspace, NetworkModeDispatch, PlannedNetwork,
 };
 use crate::optimizer::GreedyDenseOptimizer;
+use crate::plan::push_label;
 use symtn::typed::__network::{self, NetworkPayloadStorage};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -721,14 +722,16 @@ impl PlanCache {
 /// Serialized-plan-cache format version. Bumped whenever the cost model or an
 /// optimizer's order search changes so that a stale on-disk file (which would
 /// otherwise replay a now-suboptimal order and silently drift truncation) is
-/// rejected on load rather than trusted.
-const PLAN_CACHE_FILE_VERSION: &str = "SYMTN_PLANCACHE 3";
+/// rejected on load rather than trusted, and whenever the entry or plan text
+/// format changes (4: plan text writes labels escaped, plan header v2).
+const PLAN_CACHE_FILE_VERSION: &str = "SYMTN_PLANCACHE 4";
 
 /// Stable one-line text key for a network topology: optimizer, output split
 /// and labels, then each operand's conj / codomain rank / written split /
-/// labels. Each label is written as a quoted, escaped string (`{:?}`), so a
-/// label holding a separator or a line break cannot make two topologies
-/// share one key: `Network` labels are arbitrary strings, not identifiers.
+/// labels. Each label is written as a quoted, escaped string (`push_label`,
+/// shared with the plan text), so a label holding a separator or a line break
+/// cannot make two topologies share one key: `Network` labels are arbitrary
+/// strings, not identifiers.
 fn topology_text(topology: &NetworkTopology) -> String {
     let mut text = format!("{:?}|", topology.optimizer);
     match topology.output_codomain_rank {
@@ -740,7 +743,7 @@ fn topology_text(topology: &NetworkTopology) -> String {
         if i > 0 {
             text.push(',');
         }
-        text.push_str(&format!("{:?}", label.as_str()));
+        push_label(&mut text, label.as_str());
     }
     for operand in &topology.operands {
         text.push('|');
@@ -754,7 +757,7 @@ fn topology_text(topology: &NetworkTopology) -> String {
             if i > 0 {
                 text.push(',');
             }
-            text.push_str(&format!("{:?}", label.as_str()));
+            push_label(&mut text, label.as_str());
         }
     }
     text
@@ -971,9 +974,8 @@ pub fn save_plan_cache(runtime: &Runtime) -> String {
 /// missing or has no numeric count, whose plan has fewer lines than that
 /// count before the next `TOPO ` line, or whose plan text does not parse is
 /// dropped, and loading resumes at the next line starting with `TOPO `, so
-/// later valid entries still load. A plan line can only start with `TOPO `
-/// when a label contains whitespace or a line break, which plan text does not
-/// escape.
+/// later valid entries still load. No plan line starts with `TOPO `, whatever
+/// the labels: plan text writes every label quoted and escaped.
 ///
 /// The persisted store is bounded by `PlanCacheConfig::capacity` entries
 /// with least-recently-used eviction, the same bound as the compiled plans;
@@ -1005,9 +1007,8 @@ pub fn load_plan_cache(runtime: &Runtime, text: &str) -> usize {
             cache.disk.resize(capacity);
         }
         // Plan lines start with the plan header, `tensor_count`, `output` or
-        // `step`, so the next "TOPO " line is a resynchronisation point after a
-        // corrupt entry. This holds only while labels contain no whitespace or
-        // line breaks: plan text writes labels unescaped.
+        // `step` (escaped labels hold no line break), so the next "TOPO " line
+        // is a resynchronisation point after a corrupt entry.
         let mut lines = lines.peekable();
         let mut loaded = 0;
         while let Some(topo_line) = lines.next() {
