@@ -49,6 +49,7 @@ fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let canonical_values = svd_vals_dyn_checked_generic(&mut dense, &canonical).unwrap();
+    assert!(!canonical_values.is_empty());
     let padded_values = svd_vals_dyn_checked_generic(&mut dense, &padded).unwrap();
     assert_real_spectra_close(&padded_values, &canonical_values);
 

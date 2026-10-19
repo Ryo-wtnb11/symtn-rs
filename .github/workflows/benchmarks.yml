@@ -40,11 +40,12 @@ jobs:
         run: cargo bench --locked -p symtn-operations --bench permute_u1_many
         working-directory: symtn
 
-  # Measurement-only tests reach private phases or a counting global
-  # allocator, so they live beside the suites they measure instead of in a
-  # bench target. Why not PR CI: they print numbers and assert no contract,
-  # so they are tagged `#[ignore = "benchmark: run via benchmarks.yml"]` and
-  # run here in release, one thread so their samples do not contend.
+  # Measurements that reach private phases or a counting global allocator
+  # run here in release: the Host contract-batch timing example, and
+  # measurement-only tests that live beside the suites they measure, tagged
+  # `#[ignore = "benchmark: run via benchmarks.yml"]` and run one thread so
+  # their samples do not contend. Why not PR CI: they print numbers and
+  # assert no contract.
   ignored-measurements:
     name: Ignored measurement tests
     runs-on: ubuntu-latest

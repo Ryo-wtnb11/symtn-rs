@@ -133,16 +133,13 @@ fn disabled_cache_keeps_entries_and_counters_empty() {
     );
     let space = space(Arc::new(U1FusionRule), 2);
     let (a, b) = pair(&runtime, &space, 60);
-    drop(
-        net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
-            .unwrap(),
-    );
-    drop(
-        net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
-            .unwrap(),
-    );
+    let first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
+        .contract(&[&a, &b])
+        .unwrap();
+    let second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
+        .contract(&[&a, &b])
+        .unwrap();
+    assert_eq!(first.dense_data().unwrap(), second.dense_data().unwrap());
     assert_eq!(plan_cache_stats(&runtime), Default::default());
 }
 
