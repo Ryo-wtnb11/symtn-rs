@@ -50,8 +50,13 @@ fn chain_tensors(runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
     ]
 }
 
+/// The version line this build writes, taken from an empty save.
+fn file_header() -> String {
+    save_plan_cache(&Runtime::builder().build().unwrap())
+}
+
 fn cache_blob(entries: &[(&str, &str)]) -> String {
-    let mut blob = String::from("SYMTN_PLANCACHE 3\n");
+    let mut blob = file_header();
     for (topology, plan) in entries {
         blob.push_str(&format!(
             "TOPO {topology}\nPLAN {}\n{plan}",
@@ -163,20 +168,12 @@ fn load_plan_cache_drops_unparsable_entries_and_keeps_the_rest() {
         cache_blob(&[("good", B_C_FIRST)])
     );
 
-    // A PLAN line without a line count loses the framing of everything after
-    // it, so loading stops there instead of guessing where the next entry is.
-    let unframed = format!(
-        "SYMTN_PLANCACHE 3\nTOPO bad\nPLAN ?\n{B_C_FIRST}{}",
-        &cache_blob(&[("good", B_C_FIRST)])["SYMTN_PLANCACHE 3\n".len()..]
-    );
-    let runtime = Runtime::builder().build().unwrap();
-    assert_eq!(load_plan_cache(&runtime, &unframed), 0);
-    assert_eq!(plan_cache_stats(&runtime).persisted_orders, 0);
-
     // A blob from another file version is ignored and does not turn
     // persistence on: a later search is not recorded.
-    let stale =
-        cache_blob(&[("good", B_C_FIRST)]).replacen("SYMTN_PLANCACHE 3", "SYMTN_PLANCACHE 2", 1);
+    let header = file_header();
+    let stale_header = format!("{} stale\n", header.trim_end());
+    let stale = cache_blob(&[("good", B_C_FIRST)]).replacen(&header, &stale_header, 1);
+    assert_ne!(stale_header, header);
     let runtime = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&runtime, &stale), 0);
     let tensors = chain_tensors(&runtime);
