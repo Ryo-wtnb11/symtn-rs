@@ -63,7 +63,7 @@ jobs:
           key: benchmarks-ignored-measurements
       - name: typed contract batch measurements
         if: ${{ !cancelled() }}
-        run: cargo test --locked --release -p symtn --test typed_contract_batch -- --ignored --test-threads=1 --nocapture
+        run: cargo run --locked --release -p symtn --example contract_batch_timing
         working-directory: symtn
       - name: transform-replay member batch measurement
         if: ${{ !cancelled() }}

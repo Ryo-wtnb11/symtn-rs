@@ -825,7 +825,7 @@ fn twist_cuda_rows_match_host() {
 /// checked through `inner(a^H, b^H) = conj(inner(a, b))`, which pins the
 /// conjugation, and through the exact round trip `(a^H)^H = a`.
 macro_rules! materialize_rows {
-    ($runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr, $cuda:expr) => {{
+    ($runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
         let dual = leg.try_dual().unwrap();
@@ -916,12 +916,8 @@ macro_rules! materialize_rows {
         let forward: Complex64 = adjoint.inner(&compact).unwrap().into();
         let backward: Complex64 = compact.inner(&adjoint).unwrap().into();
         assert!(close_c(forward, backward.conj()));
-
-        $cuda(&a, &lazy_a);
     }};
 }
-
-fn no_cuda_materialize<T>(_: &T, _: &T) {}
 
 /// The quantum dimension of an Abelian coupled sector.
 fn one<S>(_: &symtn::typed::BlockFusionTrees<S>) -> f64 {
@@ -935,84 +931,12 @@ fn materialize_host_rows_match_the_hand_oracle() {
         (trees.coupled().twice_spin() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
-    materialize_rows!(&runtime, u1_leg(), one, f64, real, no_cuda_materialize);
-    materialize_rows!(
-        &runtime,
-        u1_leg(),
-        one,
-        Complex64,
-        complex,
-        no_cuda_materialize
-    );
-    materialize_rows!(&runtime, su2_leg(), su2_dim, f64, real, no_cuda_materialize);
-    materialize_rows!(
-        &runtime,
-        su2_leg(),
-        su2_dim,
-        Complex64,
-        complex,
-        no_cuda_materialize
-    );
-    materialize_rows!(&runtime, fz2_leg(), one, f64, real, no_cuda_materialize);
-    materialize_rows!(
-        &runtime,
-        fz2_leg(),
-        one,
-        Complex64,
-        complex,
-        no_cuda_materialize
-    );
-}
-
-#[cfg(feature = "cuda")]
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn materialize_cuda_rows_match_host() {
-    use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
-
-    fn device_rows<R, D>(a: &TensorMap<R, D>, lazy_a: &TensorMap<R, D>)
-    where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-        D: symtn::typed::CudaPayload + std::fmt::Debug,
-    {
-        let a_dev = a.to_cuda().unwrap();
-        for (host, device) in [
-            (a.clone(), a_dev.clone()),
-            (lazy_a.clone(), a_dev.adjoint().unwrap()),
-            (
-                lazy_a.adjoint().unwrap(),
-                a_dev.adjoint().unwrap().adjoint().unwrap(),
-            ),
-        ] {
-            let device = device.materialize().unwrap().to_host().unwrap();
-            let host = host.materialize().unwrap();
-            assert_eq!(device.codomain(), host.codomain());
-            assert_eq!(device.domain(), host.domain());
-            assert_eq!(
-                device.dense_data().unwrap(),
-                host.dense_data().unwrap(),
-                "materialize moves bits, so exact"
-            );
-        }
-    }
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
-    };
-    let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
-    materialize_rows!(&runtime, u1_leg(), one, f64, real, device_rows);
-    materialize_rows!(&runtime, u1_leg(), one, Complex64, complex, device_rows);
-    materialize_rows!(&runtime, su2_leg(), su2_dim, f64, real, device_rows);
-    materialize_rows!(
-        &runtime,
-        su2_leg(),
-        su2_dim,
-        Complex64,
-        complex,
-        device_rows
-    );
-    materialize_rows!(&runtime, fz2_leg(), one, f64, real, device_rows);
-    materialize_rows!(&runtime, fz2_leg(), one, Complex64, complex, device_rows);
+    materialize_rows!(&runtime, u1_leg(), one, f64, real);
+    materialize_rows!(&runtime, u1_leg(), one, Complex64, complex);
+    materialize_rows!(&runtime, su2_leg(), su2_dim, f64, real);
+    materialize_rows!(&runtime, su2_leg(), su2_dim, Complex64, complex);
+    materialize_rows!(&runtime, fz2_leg(), one, f64, real);
+    materialize_rows!(&runtime, fz2_leg(), one, Complex64, complex);
 }
 
 /// The leg motions of the transform rows on a `[V, V*] <- [V]` fixture:

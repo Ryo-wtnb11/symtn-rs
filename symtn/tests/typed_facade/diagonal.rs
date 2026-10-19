@@ -25,6 +25,9 @@ fn compact_reductions_carry_the_su2_dimension_weight() {
         dense.inner(&dense).unwrap(),
         terms,
     );
+    // `<s, s>` is the squared norm: the identity that pins the weighting.
+    let norm = typed.norm(2.0).unwrap();
+    assert!((typed.inner(&typed).unwrap() - norm * norm).abs() < 1e-9 * norm * norm);
     // The unweighted sum, for contrast: a dropped `dim(c)` would make `tr` this.
     let unweighted: f64 = typed
         .materialize()

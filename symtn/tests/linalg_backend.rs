@@ -68,66 +68,60 @@ fn contraction_norm(rt: &Runtime) -> f64 {
 }
 
 #[test]
-fn faer_backend_builds_and_computes() {
-    // The explicit Faer provider must build and produce a
-    // sane spectrum (descending, all non-negative singular values).
-    let rt = Runtime::builder()
-        .linalg_backend(LinalgBackend::Faer)
-        .build()
-        .unwrap();
-    let s = spectra(&rt);
-    assert!(!s.is_empty());
-    assert!(s.iter().all(|&x| x >= 0.0));
-    for pair in s.windows(2) {
-        assert!(pair[0] >= pair[1] - 1e-12);
+fn every_backend_selection_builds_and_computes() {
+    // The factorization and contraction-GEMM providers are selected
+    // independently and compose with an explicit thread count; every
+    // combination builds and yields a sane descending non-negative spectrum
+    // and a nonzero contraction.
+    let runtimes = [
+        (
+            "linalg",
+            Runtime::builder()
+                .linalg_backend(LinalgBackend::Faer)
+                .build()
+                .unwrap(),
+        ),
+        (
+            "linalg + threads",
+            Runtime::builder()
+                .linalg_backend(LinalgBackend::Faer)
+                .dense_threads(1)
+                .build()
+                .unwrap(),
+        ),
+        (
+            "gemm",
+            Runtime::builder()
+                .gemm_backend(LinalgBackend::Faer)
+                .build()
+                .unwrap(),
+        ),
+        (
+            "gemm + threads",
+            Runtime::builder()
+                .gemm_backend(LinalgBackend::Faer)
+                .dense_threads(1)
+                .build()
+                .unwrap(),
+        ),
+        (
+            "linalg + gemm",
+            Runtime::builder()
+                .linalg_backend(LinalgBackend::Faer)
+                .gemm_backend(LinalgBackend::Faer)
+                .build()
+                .unwrap(),
+        ),
+    ];
+    for (name, rt) in runtimes {
+        let s = spectra(&rt);
+        assert!(!s.is_empty(), "{name}");
+        assert!(s.iter().all(|&x| x >= 0.0), "{name}");
+        for pair in s.windows(2) {
+            assert!(pair[0] >= pair[1] - 1e-12, "{name}");
+        }
+        assert!(contraction_norm(&rt) > 0.0, "{name}");
     }
-}
-
-#[test]
-fn linalg_backend_composes_with_dense_threads() {
-    // Selecting a provider together with an explicit thread count routes through
-    // the threads-and-kind constructor.
-    let rt = Runtime::builder()
-        .linalg_backend(LinalgBackend::Faer)
-        .dense_threads(1)
-        .build()
-        .unwrap();
-    assert!(!spectra(&rt).is_empty());
-}
-
-#[test]
-fn gemm_backend_builds_and_contracts() {
-    // The contraction-GEMM provider is selected independently of the
-    // factorization provider; Faer requested explicitly.
-    let rt = Runtime::builder()
-        .gemm_backend(LinalgBackend::Faer)
-        .build()
-        .unwrap();
-    assert!(contraction_norm(&rt) > 0.0);
-}
-
-#[test]
-fn gemm_backend_composes_with_dense_threads() {
-    let rt = Runtime::builder()
-        .gemm_backend(LinalgBackend::Faer)
-        .dense_threads(1)
-        .build()
-        .unwrap();
-    assert!(contraction_norm(&rt) > 0.0);
-}
-
-#[test]
-fn linalg_and_gemm_backends_are_independent() {
-    // Factorization on one provider, contraction GEMM on another — the two
-    // seams are wired separately and must not collide. (Both faer here, but the
-    // call sets each independently.)
-    let rt = Runtime::builder()
-        .linalg_backend(LinalgBackend::Faer)
-        .gemm_backend(LinalgBackend::Faer)
-        .build()
-        .unwrap();
-    assert!(!spectra(&rt).is_empty());
-    assert!(contraction_norm(&rt) > 0.0);
 }
 
 #[test]

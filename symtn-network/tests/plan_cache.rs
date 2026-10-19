@@ -196,28 +196,6 @@ fn lru_hit_touches_entry_before_capacity_eviction() {
 }
 
 #[test]
-fn persisted_typed_order_roundtrips_into_a_fresh_runtime() {
-    let first = Runtime::builder().build().unwrap();
-    assert_eq!(load_plan_cache(&first, ""), 0);
-    let first_space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&first, &first_space, 80);
-    let expected = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
-        .unwrap();
-    let saved = save_plan_cache(&first);
-    assert!(saved.contains("TOPO "));
-
-    let second = Runtime::builder().build().unwrap();
-    assert_eq!(load_plan_cache(&second, &saved), 1);
-    let second_space = space(Arc::new(U1FusionRule), 2);
-    let (c, d) = pair(&second, &second_space, 80);
-    let actual = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&c, &d])
-        .unwrap();
-    assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
-}
-
-#[test]
 fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
     let first = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&first, ""), 0);

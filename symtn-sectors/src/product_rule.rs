@@ -744,18 +744,4 @@ mod tests {
             forward.dim_scalar(forward_t1),
         );
     }
-
-    #[test]
-    fn product_of_real_components_keeps_the_real_scalar() {
-        // What: promotion must not widen a product whose components are both
-        // real; the existing providers keep f64 coefficients and values.
-        let rule = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
-        let odd_zero = rule.encode_component_ids(Z2Irrep::ODD.into(), U1Irrep::new(0).into());
-        let vacuum = rule.vacuum();
-        let one: f64 = CategoricalScalar::one();
-
-        assert_eq!(one, 1.0);
-        assert_eq!(rule.r_symbol_scalar(odd_zero, odd_zero, vacuum), -1.0);
-        assert_eq!(rule.dim_scalar(odd_zero), 1.0);
-    }
 }

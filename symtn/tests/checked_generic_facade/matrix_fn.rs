@@ -147,6 +147,9 @@ where
     let terms = endomorphism_terms(source.dense_data().unwrap().len());
     let inverse = source.inv(&[0, 1], &[2, 3]).unwrap();
     assert!(std::ptr::eq(inverse.provider(), provider.as_ref()));
+    assert!(symtn::typed::__network::runtime_identity(source.runtime()).matches(inverse.runtime()));
+    assert_eq!(inverse.codomain(), source.domain());
+    assert_eq!(inverse.domain(), source.codomain());
     for product in [
         source.compose(&inverse).unwrap(),
         inverse.compose(&source).unwrap(),
@@ -167,74 +170,6 @@ fn checked_generic_inv_sun_outer_multiplicity_satisfies_inverse_laws() {
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_inverse_outer_multiplicity::<f64>(n, adjoint.clone());
         assert_sun_checked_generic_inverse_outer_multiplicity::<Complex64>(n, adjoint);
-    }
-}
-
-#[cfg(feature = "cgc-gen")]
-fn assert_sun_checked_generic_inv<D>(n: usize, label: Vec<i64>)
-where
-    D: symtn::typed::AdvancedLinalgScalar + fmt::Debug + PartialEq + numerics::Numeric,
-{
-    use symtn::sector::SUNFusionRule;
-
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
-    let source: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
-            let row = indices[0] + 2 * indices[1];
-            let col = indices[2] + 2 * indices[3];
-            D::from_real(
-                if trees.codomain_vertices() == trees.domain_vertices() && row == col {
-                    2.0
-                } else {
-                    0.0
-                },
-            )
-        })
-        .unwrap();
-    assert!((0..source.subblock_count()).any(|index| {
-        source
-            .subblock_fusion_trees(index)
-            .unwrap()
-            .codomain_vertices()
-            .iter()
-            .chain(
-                source
-                    .subblock_fusion_trees(index)
-                    .unwrap()
-                    .domain_vertices(),
-            )
-            .any(|vertex| vertex.get() > 1)
-    }));
-    let inverse = source.inv(&[0, 1], &[2, 3]).unwrap();
-    assert!(std::ptr::eq(inverse.provider(), provider.as_ref()));
-    assert!(symtn::typed::__network::runtime_identity(source.runtime()).matches(inverse.runtime()));
-    assert_eq!(inverse.codomain(), source.domain());
-    assert_eq!(inverse.domain(), source.codomain());
-    // Hand oracle: `source` is `2·1` on its tree diagonal, so both products
-    // with the inverse are `1` there, i.e. `source / 2`.
-    let expected = source.scale(D::from_real(0.5)).unwrap();
-    let terms = endomorphism_terms(source.dense_data().unwrap().len());
-    for identity in [
-        source.compose(&inverse).unwrap(),
-        inverse.compose(&source).unwrap(),
-    ] {
-        numerics::assert_slices_close(
-            "inverse product against the identity",
-            identity.dense_data().unwrap(),
-            expected.dense_data().unwrap(),
-            terms,
-        );
-    }
-}
-
-#[cfg(feature = "cgc-gen")]
-#[test]
-fn sun_checked_generic_inv_preserves_provider_outer_multiplicity_and_inverse_laws() {
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        assert_sun_checked_generic_inv::<f64>(n, label.clone());
-        assert_sun_checked_generic_inv::<Complex64>(n, label);
     }
 }
 

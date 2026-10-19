@@ -83,44 +83,27 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
         })
         .unwrap();
 
+    let spec = ContractSpec {
+        lhs: &[1, 2],
+        rhs: &[0, 1],
+        codomain: &[0],
+        domain: &[1],
+    };
+    let composed = typed_a.compose(&typed_b).unwrap();
     assert_eq!(
-        typed_a.compose(&typed_b).unwrap().dense_data().unwrap(),
+        composed.dense_data().unwrap(),
         typed_a
-            .contract(
-                &twisted_b,
-                &ContractSpec {
-                    lhs: &[1, 2],
-                    rhs: &[0, 1],
-                    codomain: &[0],
-                    domain: &[1]
-                }
-            )
+            .contract(&twisted_b, &spec)
             .unwrap()
             .dense_data()
             .unwrap()
     );
-}
-
-#[test]
-fn fermionic_compose_and_contract_disagree() {
-    // What: the sign is real. If `compose` were routed through the ordinary
-    // contraction the two would coincide and this assertion would fail.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let (typed_a, typed_b) = fermionic_compose_pair(&runtime);
-
+    // The twist is not vacuous on this fixture: the ordinary contraction of
+    // the untwisted operand differs.
     assert_ne!(
-        typed_a.compose(&typed_b).unwrap().dense_data().unwrap(),
+        composed.dense_data().unwrap(),
         typed_a
-            .contract(
-                &typed_b,
-                &ContractSpec {
-                    lhs: &[1, 2],
-                    rhs: &[0, 1],
-                    codomain: &[0],
-                    domain: &[1]
-                }
-            )
+            .contract(&typed_b, &spec)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -356,62 +339,4 @@ fn id_composes_as_the_identity_for_a_fermionic_provider() {
         typed_a.compose(&right).unwrap().dense_data().unwrap(),
         typed_a.dense_data().unwrap()
     );
-}
-
-#[test]
-fn id_needs_at_least_one_leg() {
-    // The provider is inferred from the legs, exactly as for `zeros`.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let legs: [&GradedSpace<symtn::sector::Z2FusionRule>; 0] = [];
-
-    assert!(matches!(
-        TensorMap::<_, f64>::isomorphism(&runtime, legs, legs).unwrap_err(),
-        symtn::typed::Error::InvalidArgument(message)
-            if message.contains("at least one leg")
-    ));
-}
-
-// ---------------------------------------------------------------------------
-// Compact diagonal storage and the operations
-// that consume it.
-//
-// Storage claims are measured in `tests/typed_diagonal_allocations.rs`; the
-// value gates here compare compact routes with independent dense or pointwise
-// oracles.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn compact_reductions_match_the_forced_dense_route() {
-    // What: `norm`, `norm(Inf)`, `tr` and `inner` read the stored spectrum
-    // instead of its materialization, and land on the same numbers.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let typed = z2_bond(&runtime);
-    let dense = forced_dense(&typed);
-
-    // Two reductions of the same singular values that may sum in different
-    // orders: agreement within the tolerance rule over the dense payload is
-    // the contract. A maximum is order-independent, so `norm(Inf)` is exact.
-    let terms = dense.dense_data().unwrap().len();
-    numerics::assert_close(
-        "norm",
-        typed.norm(2.0).unwrap(),
-        dense.norm(2.0).unwrap(),
-        terms,
-    );
-    assert_eq!(
-        typed.norm(f64::INFINITY).unwrap(),
-        dense.norm(f64::INFINITY).unwrap()
-    );
-    numerics::assert_close("tr", typed.tr().unwrap(), dense.tr().unwrap(), terms);
-    numerics::assert_close(
-        "inner",
-        typed.inner(&typed).unwrap(),
-        dense.inner(&dense).unwrap(),
-        terms,
-    );
-    // `<s, s>` is the squared norm: the identity that pins the weighting.
-    let norm = typed.norm(2.0).unwrap();
-    assert!((typed.inner(&typed).unwrap() - norm * norm).abs() < 1e-9 * norm * norm);
 }

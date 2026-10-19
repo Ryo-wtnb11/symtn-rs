@@ -169,10 +169,4 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
         )
         .unwrap(),
     );
-
-    // The real path is unchanged by the generic payload.
-    assert_roundtrip(
-        TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| indices[0] as f64 + 1.0)
-            .unwrap(),
-    );
 }

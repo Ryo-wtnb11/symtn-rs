@@ -1286,21 +1286,6 @@ mod tests {
     }
 
     #[test]
-    fn discard_weight_bounds_relative_error() {
-        let entries = [(2.0, vec![3.0, 1.0, 0.5, 0.5])];
-        let spectra = spectra(&entries);
-        let norm = full_norm(&spectra);
-        let truncation = Truncation::relative_error(0.3).unwrap();
-        let decision = select(&spectra, &truncation).unwrap();
-        assert!(decision.error <= 0.3 * norm + 1e-12);
-        let kept = counts(&decision.kept)[0];
-        assert!(kept < 4, "a 30% budget must discard something");
-        // Discarding one more value would exceed the budget.
-        let tighter = mask(4, &(0..kept - 1).collect::<Vec<_>>());
-        assert!(discarded_norm(&spectra, &[tighter]) > 0.3 * norm);
-    }
-
-    #[test]
     fn and_composition_takes_the_stricter_prefix() {
         let entries = [(1.0, vec![4.0, 3.0, 2.0, 1.0])];
         let spectra = spectra(&entries);

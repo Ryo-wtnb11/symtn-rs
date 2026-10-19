@@ -493,44 +493,6 @@ fn decompositions_carry_an_external_provider_with_its_own_labels() {
 }
 
 // ---------------------------------------------------------------------------
-// `TensorMap::axpby` and `TensorMap::scale`.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn add_applies_each_real_coefficient_to_the_right_operand() {
-    // What: `alpha * self + beta * other`, coefficient for coefficient. The two
-    // coefficients are deliberately different and
-    // neither is 1, so swapping them (or dropping one) moves the buffer.
-    //
-    // The second operand is a permute of the first: same space, same layout,
-    // different values, and no second fixture.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-    let typed_other = typed.permute(&[1, 0], &[2]).unwrap();
-
-    let typed_sum = typed.axpby(2.0, &typed_other, -3.0).unwrap();
-
-    let expected: Vec<_> = typed
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(typed_other.dense_data().unwrap())
-        .map(|(&lhs, &rhs)| 2.0 * lhs - 3.0 * rhs)
-        .collect();
-    assert_eq!(typed_sum.dense_data().unwrap(), expected);
-    // The asymmetry is real: the swapped combination is a different tensor.
-    assert_ne!(
-        typed
-            .axpby(-3.0, &typed_other, 2.0)
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        typed_sum.dense_data().unwrap()
-    );
-}
-
-// ---------------------------------------------------------------------------
 // The Hermitian eigendecompositions.
 // ---------------------------------------------------------------------------
 

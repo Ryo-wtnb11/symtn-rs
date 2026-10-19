@@ -117,6 +117,13 @@ macro_rules! check_rule {
                 cached,
                 "{what}: a sector change must compose its new groups"
             );
+            if !cached {
+                assert_eq!(
+                    groups().entries(),
+                    0,
+                    "{what}: Unique fusion must not publish a composed-coefficient group"
+                );
+            }
         }
     }};
 }

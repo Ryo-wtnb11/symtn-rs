@@ -6,11 +6,9 @@
 //! applies a plain `truncrank` inside that block, so the decision is a fixed
 //! per-sector prefix count and nothing about the spectrum's magnitudes enters.
 //!
-//! What that has to buy a caller is *reproducibility*: unlike a rank or
-//! tolerance budget, the same profile must produce the same bond space on
-//! every sweep regardless of how the singular values happen to fall. That is
-//! what the repeated-sweep tests below assert, by comparing the resulting bond
-//! space to the target space itself rather than counting values.
+//! The exact kept set of `Space` and `Space & Rank` is checked against the
+//! hand selection in every `truncation_composition` sweep; this file keeps the
+//! clamping and dual-flag boundaries.
 
 use std::sync::Arc;
 
@@ -79,45 +77,6 @@ fn typed_u1_leg(entries: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
 }
 
 #[test]
-fn typed_truncspace_produces_exactly_the_target_bond_space_on_every_sweep() {
-    let target = typed_leg(&[(0, 3), (2, 1)]);
-    let truncation = Truncation::space(target.truncspace());
-    let expected = target.sectors().unwrap();
-
-    for seed in 0..4u64 {
-        let (u, _) = truncated_svd(&typed_source(0x5eed_3000 + seed), &truncation).unwrap();
-        let bond = u.domain()[0].clone();
-        assert_eq!(
-            bond.sectors().unwrap(),
-            expected,
-            "sweep {seed}: bond sectors are not the requested profile"
-        );
-        assert_eq!(
-            bond.degeneracies(),
-            target.degeneracies(),
-            "sweep {seed}: bond degeneracies are not the requested prefix counts"
-        );
-    }
-}
-
-#[test]
-fn typed_truncspace_composes_with_a_magnitude_policy() {
-    // What: `and` keeps the per-sector minimum, so intersecting a profile with
-    // a rank budget stays inside prefix-land — the profile is an upper bound
-    // the tighter policy may cut further.
-    let target = typed_leg(&[(0, 4), (1, 4), (2, 4)]);
-    let combined = Truncation::space(target.truncspace()).and(Truncation::rank(2));
-    let (u, _) = truncated_svd(&typed_source(0x5eed_4000), &combined).unwrap();
-    let bond = u.domain()[0].clone();
-
-    let kept: usize = bond.degeneracies().iter().sum();
-    assert!(
-        kept > 0 && kept <= 2,
-        "the rank-2 budget did not tighten the profile: kept {kept}"
-    );
-}
-
-#[test]
 fn typed_truncspace_clamps_a_request_longer_than_the_spectrum() {
     let source = typed_source(0x5eed_1000);
     let greedy = typed_leg(&[(0, 99), (1, 99), (2, 99)]);
@@ -135,29 +94,6 @@ fn typed_truncspace_clamps_a_request_longer_than_the_spectrum() {
     assert_eq!(clamped_error, 0.0);
 }
 
-#[test]
-fn typed_truncspace_from_another_rule_is_a_typed_error() {
-    // What: the typed facade reaches `select_truncation` through its own call
-    // site, so the guard needs its own gate here. A U(1) leg's `SectorId`s
-    // read as SU(2)'s would name unrelated spins and truncate to nothing.
-    let foreign = GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
-    )
-    .unwrap();
-    let result = truncated_svd(
-        &typed_source(0x5eed_5000),
-        &Truncation::space(foreign.truncspace()),
-    );
-    assert!(
-        matches!(result, Err(Error::Operation(_))),
-        "a foreign-rule profile must be a typed error, got {result:?}"
-    );
-}
-
-/// A truncation target names sector *content*, not orientation. On a
-/// non-self-dual rule, dualization rewrites labels and flips the flag, so the
-/// two effects have to be separated.
 #[test]
 fn typed_truncspace_follows_stored_sectors_not_the_dual_flag() {
     let leg = typed_u1_leg(&[(-1, 3), (0, 3), (1, 3)]);

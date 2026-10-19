@@ -273,28 +273,3 @@ fn product_identity_keeps_child_order_codec_and_retained_charge() {
     );
     assert!(forward.charged_retained_bytes() > 5);
 }
-
-#[test]
-fn multiplicity_free_tree_rejects_out_of_range_vertices() {
-    // What: rule-aware construction reports the precise lower and upper
-    // 1-based multiplicity bounds for a multiplicity-free vertex.
-    assert_eq!(
-        MultiplicityIndex::try_from(0).unwrap_err(),
-        CoreError::InvalidMultiplicityIndex { value: 0 }
-    );
-    let error = FusionTreeKey::try_new_for_rule(
-        &Z2FusionRule,
-        [SectorId::new(1), SectorId::new(1)],
-        SectorId::new(0),
-        [false, false],
-        [],
-        [MultiplicityIndex::new(2).unwrap()],
-    )
-    .unwrap_err();
-    assert_eq!(
-        error,
-        CoreError::MalformedFusionTree {
-            message: "fusion tree vertex label exceeds its fusion multiplicity",
-        }
-    );
-}

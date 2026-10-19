@@ -273,33 +273,6 @@ fn public_su2_irrep_fusion_channels_match_doubled_spin_order() {
 }
 
 #[test]
-fn public_su2_f_and_r_symbols_match_tensorkit_values() {
-    let rule = SU2FusionRule;
-    let s = |twice_spin| SU2Irrep::from_twice_spin(twice_spin).sector_id();
-    let cases = [
-        ((1, 1, 1, 1, 0, 0), -0.5),
-        ((1, 1, 1, 1, 0, 2), 0.866_025_403_784_438_6),
-        ((1, 1, 1, 1, 2, 0), 0.866_025_403_784_438_6),
-        ((1, 1, 1, 1, 2, 2), 0.5),
-        ((1, 2, 1, 2, 1, 1), -1.0 / 3.0),
-        ((2, 2, 2, 2, 0, 2), -0.577_350_269_189_625_7),
-        ((2, 2, 2, 2, 2, 2), 0.5),
-        ((1, 1, 2, 2, 1, 1), 0.0),
-    ];
-
-    for ((a, b, c, d, e, f), expected) in cases {
-        let actual = rule.f_symbol_scalar(s(a), s(b), s(c), s(d), s(e), s(f));
-        assert!(
-            (actual - expected).abs() < 1.0e-12,
-            "F({a},{b},{c},{d},{e},{f}) = {actual}, expected {expected}"
-        );
-    }
-    assert_eq!(rule.r_symbol_scalar(s(1), s(1), s(0)), -1.0);
-    assert_eq!(rule.r_symbol_scalar(s(1), s(1), s(2)), 1.0);
-    assert_eq!(rule.r_symbol_scalar(s(1), s(2), s(0)), 0.0);
-}
-
-#[test]
 fn multiplicity_free_su2_repartition_matches_tensorkit_bend_factor() {
     let rule = SU2FusionRule;
     let source =

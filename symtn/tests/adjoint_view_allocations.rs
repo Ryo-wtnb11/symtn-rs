@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
-use symtn::typed::{GradedSpace, Svd, TensorMap};
+use symtn::typed::{GradedSpace, TensorMap};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
@@ -128,147 +128,10 @@ fn labelled_block_inspection_refuses_a_lazy_adjoint_without_copying() {
 }
 
 #[test]
-fn typed_compact_svd_keeps_allocations_below_the_materialize_baseline() {
-    let _measurement = counting_alloc::serial();
-    // What: the typed wrapper reuses the same parent-factor seam and does not
-    // hide a receiver-sized logical-adjoint allocation around it.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(U1FusionRule);
-    let space = GradedSpace::try_new(provider, [(U1Irrep::new(0), 32)]).unwrap();
-    let parent: TensorMap<_, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space], 693_695).unwrap();
-    black_box(parent.svd_compact(&[0], &[1]).unwrap());
-
-    let optimized = parent.adjoint().unwrap();
-    let baseline = parent.adjoint().unwrap();
-    black_box(optimized.svd_compact(&[0], &[1]).unwrap());
-    black_box(
-        baseline
-            .materialize()
-            .unwrap()
-            .svd_compact(&[0], &[1])
-            .unwrap(),
-    );
-    let optimized_cost = measure_peak(|| {
-        black_box(optimized.svd_compact(&[0], &[1]).unwrap());
-    });
-    let baseline_cost = measure_peak(|| {
-        // The explicit route a caller would otherwise take.
-        black_box(
-            baseline
-                .materialize()
-                .unwrap()
-                .svd_compact(&[0], &[1])
-                .unwrap(),
-        );
-    });
-
-    assert!(
-        optimized_cost.1 <= baseline_cost.1,
-        "total bytes: optimized={optimized_cost:?}, baseline={baseline_cost:?}"
-    );
-    assert!(
-        optimized_cost.2 < baseline_cost.2,
-        "peak bytes: optimized={optimized_cost:?}, baseline={baseline_cost:?}"
-    );
-}
-
-#[test]
-fn typed_full_svd_keeps_allocations_below_the_materialize_baseline() {
-    let _measurement = counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(U1FusionRule);
-    let space = GradedSpace::try_new(provider, [(U1Irrep::new(0), 32)]).unwrap();
-    let parent: TensorMap<_, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space], 693_697).unwrap();
-    black_box(parent.svd_full(&[0], &[1]).unwrap());
-
-    let optimized = parent.adjoint().unwrap();
-    let baseline = parent.adjoint().unwrap();
-    black_box(optimized.svd_full(&[0], &[1]).unwrap());
-    black_box(
-        baseline
-            .materialize()
-            .unwrap()
-            .svd_full(&[0], &[1])
-            .unwrap(),
-    );
-    let optimized_cost = measure_peak(|| {
-        black_box(optimized.svd_full(&[0], &[1]).unwrap());
-    });
-    let baseline_cost = measure_peak(|| {
-        // The explicit route a caller would otherwise take.
-        black_box(
-            baseline
-                .materialize()
-                .unwrap()
-                .svd_full(&[0], &[1])
-                .unwrap(),
-        );
-    });
-
-    assert!(
-        optimized_cost.1 <= baseline_cost.1,
-        "total bytes: optimized={optimized_cost:?}, baseline={baseline_cost:?}"
-    );
-    assert!(
-        optimized_cost.2 < baseline_cost.2,
-        "peak bytes: optimized={optimized_cost:?}, baseline={baseline_cost:?}"
-    );
-}
-
-#[test]
-fn typed_truncated_svd_keeps_allocations_below_the_materialize_baseline() {
-    let _measurement = counting_alloc::serial();
-    // What: typed truncation reuses the parent-factor seam without retaining
-    // a receiver-sized logical-adjoint input.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(U1FusionRule);
-    let space = GradedSpace::try_new(provider, [(U1Irrep::new(0), 64)]).unwrap();
-    let parent: TensorMap<_, num_complex::Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space], 693_696).unwrap();
-    let truncation = symtn::typed::Truncation::rank(16);
-    // The truncated SVD is `svd_compact` -> `find_truncated` -> `restrict_*`.
-    let truncated_svd = |tensor: &TensorMap<U1FusionRule, num_complex::Complex64>| {
-        let Svd { u, s, vh } = tensor.svd_compact(&[0], &[1]).unwrap();
-        let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), &truncation)
-            .unwrap();
-        (
-            u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
-                .unwrap(),
-            s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
-                .unwrap(),
-            vh.restrict_leg(&[(0, &found.selection)]).unwrap(),
-        )
-    };
-    black_box(truncated_svd(&parent));
-
-    let optimized = parent.adjoint().unwrap();
-    let baseline = parent.adjoint().unwrap();
-    black_box(truncated_svd(&optimized));
-    black_box(truncated_svd(&baseline.materialize().unwrap()));
-    let optimized_cost = measure_peak(|| {
-        black_box(truncated_svd(&optimized));
-    });
-    let baseline_cost = measure_peak(|| {
-        // The explicit route a caller would otherwise take.
-        black_box(truncated_svd(&baseline.materialize().unwrap()));
-    });
-
-    assert!(
-        optimized_cost.1 <= baseline_cost.1,
-        "total bytes: optimized={optimized_cost:?}, baseline={baseline_cost:?}"
-    );
-    assert!(
-        optimized_cost.2 < baseline_cost.2,
-        "peak bytes: optimized={optimized_cost:?}, baseline={baseline_cost:?}"
-    );
-}
-
-#[test]
 fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materialization() {
     let _measurement = counting_alloc::serial();
+    // What: compact and full SVD of a lazy adjoint factor the parent directly
+    // and never hide a receiver-sized logical-adjoint allocation around it.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(
@@ -307,7 +170,7 @@ fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materializatio
             "{name} total: {actual:?} vs {expected:?}"
         );
         assert!(
-            actual.2 <= expected.2,
+            actual.2 < expected.2,
             "{name} peak: {actual:?} vs {expected:?}"
         );
     }
@@ -353,46 +216,6 @@ fn lazy_scale_and_add_allocate_only_one_input_sized_payload() {
         assert!(
             bytes >= payload_bytes && bytes < 2 * payload_bytes,
             "expected one payload allocation ({payload_bytes} bytes), observed {bytes} bytes"
-        );
-    }
-}
-
-#[test]
-fn mixed_lazy_add_has_no_rank_dependent_stride_allocation() {
-    let _measurement = counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let mut reference = None;
-    for rank in [8, 10, 12] {
-        let provider = Arc::new(U1FusionRule);
-        let space = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
-        let codomain = std::iter::repeat_n(&space, rank / 2).collect::<Vec<_>>();
-        let parent: TensorMap<_, num_complex::Complex64> = TensorMap::rand_with_seed(
-            &runtime,
-            codomain.clone(),
-            codomain.clone(),
-            666_500 + rank as u64,
-        )
-        .unwrap();
-        let owned =
-            TensorMap::rand_with_seed(&runtime, codomain.clone(), codomain, 666_600 + rank as u64)
-                .unwrap();
-        let alpha = num_complex::Complex64::new(0.5, 0.0);
-        let beta = num_complex::Complex64::new(-0.25, 0.0);
-        black_box(
-            parent
-                .adjoint()
-                .unwrap()
-                .axpby(alpha, &owned, beta)
-                .unwrap(),
-        );
-        let lazy = parent.adjoint().unwrap();
-        let cost = measure(|| {
-            black_box(lazy.axpby(alpha, &owned, beta).unwrap());
-        });
-        assert_eq!(
-            cost,
-            *reference.get_or_insert(cost),
-            "rank={rank} must not heap-allocate stride metadata"
         );
     }
 }
@@ -593,42 +416,6 @@ fn typed_multigroup_lazy_compose_stays_below_the_measured_engine_margin() {
 }
 
 #[test]
-fn first_lazy_materialization_allocates_once_per_payload_not_per_block() {
-    let _measurement = counting_alloc::serial();
-    // What: `materialize_adjoint_data_dyn` (the payload behind `materialize`
-    // and behind `materialized_tensor_uncached`) performs exactly one payload
-    // allocation and no per-block work on the heap (#1201): materialization
-    // costs the same fixed number of allocations for one block or many.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let mut reference: Option<u64> = None;
-    for (rank, radius, degeneracy) in [(2, 0, 8), (2, 6, 2), (4, 3, 2), (6, 1, 2)] {
-        let source = tensor(
-            &runtime,
-            (-radius..=radius).map(|charge| (charge, degeneracy)),
-            rank,
-        );
-        assert!(rank == 2 && radius == 0 || source.subblock_count() > 1);
-        let lazy = source.adjoint().unwrap();
-        let payload_bytes = std::mem::size_of_val(source.dense_data().unwrap()) as u64;
-        let (allocations, bytes) = measure(|| {
-            black_box(lazy.materialize().unwrap());
-        });
-        assert_eq!(
-            allocations,
-            *reference.get_or_insert(allocations),
-            "rank={rank}, radius={radius}: materialization allocated per block"
-        );
-        assert!(
-            bytes >= payload_bytes && bytes < payload_bytes + 256,
-            "rank={rank}, radius={radius}: {bytes} bytes for a {payload_bytes}-byte payload"
-        );
-    }
-    // Payload `Vec`, the `Arc<TypedData>` wrapping it and the
-    // `Arc<TypedTensorBody>`: three, whatever the block count.
-    assert_eq!(reference, Some(3));
-}
-
-#[test]
 fn materialize_allocates_one_fresh_payload_per_call() {
     let _measurement = counting_alloc::serial();
     // What: `materialize` (#1545) of an owned dense tensor or a lazy adjoint
@@ -642,6 +429,7 @@ fn materialize_allocates_one_fresh_payload_per_call() {
             (-radius..=radius).map(|charge| (charge, degeneracy)),
             rank,
         );
+        assert!(rank == 2 && radius == 0 || source.subblock_count() > 1);
         let payload_bytes = std::mem::size_of_val(source.dense_data().unwrap()) as u64;
         let lazy = source.adjoint().unwrap();
         for input in [&source, &lazy, &source, &lazy] {

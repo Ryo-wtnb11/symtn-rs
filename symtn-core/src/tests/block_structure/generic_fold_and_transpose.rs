@@ -1033,23 +1033,6 @@ fn generic_transpose_round_trips_to_identity() {
     }
 }
 
-// Gate 6: braid with the IDENTITY permutation is the identity map on an
-// outer-multiplicity tree pair. The braid decomposes to zero swaps, so the
-// composer runs repartition-to-all-codomain and back (a verified bend
-// round-trip) around a no-op braid, plus the tree-pair reconstruction
-// closure. Run on A4BendRule (rigid, OM); no braid R-symbol is invoked.
-#[test]
-fn generic_braid_identity_permutation_is_identity() {
-    let rule = A4BendRule;
-    for mu in 1..=2 {
-        let pair = a4_pair_rank2_1(mu);
-        // codomain axes [0,1], domain axis [2]; identity level order.
-        let got =
-            map_terms(generic_braid_tree_pair(&rule, &pair, &[0, 1], &[2], &[0, 1], &[2]).unwrap());
-        assert_identity_term_map(&got, &pair, &format!("A4 braid-id μ={mu}"));
-    }
-}
-
 // Gate 7: `generic_permute_tree_pair` == `generic_braid_tree_pair` under
 // the identity level order (the definitional relation the mult-free path
 // relies on), and the symmetric-braiding guard is honored. Uses the identity

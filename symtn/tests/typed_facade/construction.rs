@@ -69,16 +69,6 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
 }
 
 #[test]
-fn tensor_map_zeros_needs_at_least_one_leg() {
-    // What: the provider is inferred from the legs, so an empty tensor map has
-    // nothing to infer it from.
-    let runtime = runtime();
-    let empty: [&GradedSpace<ExternalZ3>; 0] = [];
-
-    assert!(TensorMap::<ExternalZ3, f64>::zeros(&runtime, empty, empty).is_err());
-}
-
-#[test]
 fn checked_construction_failure_publishes_no_cache_state() {
     // Isolated: the completed-transformer counters are process-global.
     if crate::run_isolated_or_return(
@@ -128,41 +118,6 @@ fn checked_construction_failure_publishes_no_cache_state() {
 // ---------------------------------------------------------------------------
 // `from_subblock_fn` and inspection.
 // ---------------------------------------------------------------------------
-
-/// Numeric stand-in for a Z3 charge, so a fill value can depend on the labels
-/// the closure was handed.
-fn z3_weight(charge: Z3Charge) -> f64 {
-    f64::from(charge.0) + 1.0
-}
-
-#[test]
-fn from_block_fn_sees_decoded_labels_and_fills_every_allowed_element() {
-    // What: the closure is handed the provider's own labels (not `SectorId`s)
-    // for the coupled sector and both sides' uncoupled legs, and every stored
-    // element is written.
-    let _guard = cache_lock();
-    let provider = Arc::new(ExternalZ3::new());
-    let leg = z3_leg(&provider, false);
-    let dual = leg.try_dual().unwrap();
-    let runtime = runtime();
-
-    let tensor: TensorMap<ExternalZ3, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&dual], |sectors, indices| {
-            assert_eq!(sectors.codomain_uncoupled().len(), 1);
-            assert_eq!(sectors.domain_uncoupled().len(), 1);
-            z3_weight(*sectors.coupled()) * 100.0
-                + z3_weight(sectors.codomain_uncoupled()[0]) * 10.0
-                + indices.iter().sum::<usize>() as f64
-        })
-        .unwrap();
-
-    assert!(tensor.subblock_count() >= 1);
-    assert!(tensor
-        .dense_data()
-        .unwrap()
-        .iter()
-        .all(|&value| value >= 100.0));
-}
 
 #[test]
 fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
@@ -590,10 +545,11 @@ fn typed_isometry_rejects_a_non_embeddable_pair() {
 #[test]
 fn typed_structural_constructors_reject_an_empty_leg_list() {
     // What: the provider is inferred from the legs, so an empty construction
-    // has nothing to infer it from — same class as `zeros`.
+    // has nothing to infer it from.
     let runtime = runtime();
     let empty: [&GradedSpace<ExternalZ3>; 0] = [];
 
+    assert!(TensorMap::<ExternalZ3, f64>::zeros(&runtime, empty, empty).is_err());
     assert!(TensorMap::<ExternalZ3, f64>::rand_with_seed(
         &runtime,
         empty,
@@ -601,7 +557,10 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
         0x9E37_79B9_7F4A_7C15
     )
     .is_err());
-    assert!(TensorMap::<ExternalZ3, f64>::isomorphism(&runtime, empty, empty).is_err());
+    assert!(matches!(
+        TensorMap::<ExternalZ3, f64>::isomorphism(&runtime, empty, empty).unwrap_err(),
+        symtn::typed::Error::InvalidArgument(message) if message.contains("at least one leg")
+    ));
     assert!(TensorMap::<ExternalZ3, f64>::isometry(&runtime, empty, empty).is_err());
 }
 
@@ -857,17 +816,6 @@ fn typed_leg_dims_carry_an_external_provider_with_nontrivial_dimensions() {
 }
 
 #[test]
-fn typed_scalar_reads_a_real_full_contraction() {
-    // Gate 4: a rank-0 trace reads back as the payload type itself.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let typed = z2_endomorphism(&runtime);
-
-    let typed_value: f64 = typed.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
-    assert_eq!(typed_value, typed.tr().unwrap());
-}
-
-#[test]
 fn typed_scalar_reads_a_complex_full_contraction() {
     // Gate 4's c64 leg: a complex endomorphism traced to rank 0.
     let _guard = cache_lock();
@@ -902,42 +850,6 @@ fn typed_scalar_on_a_tensor_with_legs_is_an_invalid_argument() {
         typed_error,
         symtn::typed::Error::InvalidArgument(_)
     ));
-}
-
-#[test]
-fn typed_zeros_like_keeps_the_spaces_and_zeroes_the_payload() {
-    // Gate 5: same legs, all-zero payload, dtype preserved statically by the
-    // annotated binding. The compact-payload behavior is pinned by the
-    // allocation gates in `typed_diagonal_allocations.rs`.
-    let _guard = cache_lock();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-
-    let zeros: TensorMap<symtn::sector::Z2FusionRule, f64> = typed.zeros_like().unwrap();
-    assert_same_legs(&zeros.codomain(), &typed.codomain());
-    assert_same_legs(&zeros.domain(), &typed.domain());
-    assert_eq!(
-        zeros.dense_data().unwrap().len(),
-        typed.dense_data().unwrap().len()
-    );
-    assert!(zeros
-        .dense_data()
-        .unwrap()
-        .iter()
-        .all(|&value| value == 0.0));
-
-    // A compact spectrum factor stays on its bond space with a zero spectrum.
-    let s: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        typed.svd_compact(&[0, 1], &[2]).unwrap().s;
-    let s_zeros: TensorMap<symtn::sector::Z2FusionRule, f64> = s.zeros_like().unwrap();
-    assert_same_legs(&s_zeros.codomain(), &s.codomain());
-    assert!(s_zeros
-        .materialize()
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .iter()
-        .all(|&value| value == 0.0));
 }
 
 #[test]

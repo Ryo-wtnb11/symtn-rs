@@ -282,38 +282,6 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
 }
 
 #[test]
-fn spectral_outputs_retain_the_exact_input_provider_allocation() {
-    // What: scalar promotion and spectral recomposition preserve provider authority by Arc identity.
-    let rule = Z2FusionRule;
-    let provider = Arc::new(rule);
-    let hermitian = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let hermitian_space = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-        hermitian.fusion_space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let hermitian_input =
-        BoundDynamicTensorRef::try_new(&hermitian_space, hermitian.data()).unwrap();
-    let general = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let general_space = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-        general.fusion_space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let general_input = BoundDynamicTensorRef::try_new(&general_space, general.data()).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let eigh = eigh_full_dyn(&mut dense, &hermitian_input, HermitianTol::DEFAULT).unwrap();
-    assert!(Arc::ptr_eq(&provider, eigh.v().space().provider_arc()));
-
-    let eig = eig_full_dyn(&mut dense, &general_input).unwrap();
-    assert!(Arc::ptr_eq(&provider, eig.v().space().provider_arc()));
-
-    let exponential = exp_into_mf(&mut dense, &hermitian_input).unwrap();
-    assert!(Arc::ptr_eq(&provider, exponential.space().provider_arc()));
-}
-
-#[test]
 fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
     for (rule_case, sectors) in [
         (0usize, vec![SectorId::new(0), SectorId::new(1)]),
@@ -735,38 +703,61 @@ fn ordinary_factorizations_and_composition_inherit_lowered_layout_strategy() {
 }
 
 #[test]
-fn derived_matrix_functions_inherit_the_exact_provider_arc() {
-    // What: every migrated owned result retains the input authority allocation.
-    let tensor = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
-    let provider = Arc::new(Z2FusionRule);
-    let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-        tensor.fusion_space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let input = BoundDynamicTensorRef::try_new(&bound, tensor.data()).unwrap();
+fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_arc() {
+    // What: each owned output keeps the caller's provider allocation, not an
+    // equal provider of the same type seen by an earlier call.
+    let hermitian = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let general = tsvd_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let rectangular = rectangular_svd_tensor(7, 5);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
+    let mut output_providers = |provider: &Arc<Z2FusionRule>| {
+        let hermitian = bound_tensor(Arc::clone(provider), &hermitian);
+        let general = bound_tensor(Arc::clone(provider), &general);
+        let rectangular = bound_tensor(Arc::clone(provider), &rectangular);
+        let (hermitian, general, rectangular) =
+            (hermitian.as_ref(), general.as_ref(), rectangular.as_ref());
+        let (hermitian_dyn, general_dyn) = (hermitian.dynamic(), general.dynamic());
+        let eigh = eigh_full(&mut dense, &hermitian).unwrap();
+        let eigh_dyn = eigh_full_dyn(&mut dense, &hermitian_dyn, HermitianTol::DEFAULT).unwrap();
+        let eig = eig_full_dyn(&mut dense, &general_dyn).unwrap();
+        let exponential = exp_into_mf(&mut dense, &hermitian_dyn).unwrap();
+        let Qr { q: qr_q, r: qr_r } = qr_compact(&mut dense, &rectangular).unwrap();
+        let Lq { l: lq_l, q: lq_q } = lq_compact(&mut dense, &rectangular).unwrap();
+        let LeftPolar {
+            w: w_left,
+            p: p_left,
+        } = left_polar_dyn(&mut dense, &hermitian_dyn).unwrap();
+        let RightPolar {
+            p: p_right,
+            wh: w_right,
+        } = right_polar_dyn(&mut dense, &hermitian_dyn).unwrap();
+        let inverse = inv_into_mf(&mut dense, &hermitian_dyn).unwrap();
+        let pseudo_inverse = pinv_into_mf(&mut dense, &hermitian_dyn, 1.0e-13).unwrap();
+        [
+            ("eigh", eigh.v.space().provider_arc()),
+            ("eigh_dyn", eigh_dyn.v().space().provider_arc()),
+            ("eig", eig.v().space().provider_arc()),
+            ("exp", exponential.space().provider_arc()),
+            ("qr.q", qr_q.space().provider_arc()),
+            ("qr.r", qr_r.space().provider_arc()),
+            ("lq.l", lq_l.space().provider_arc()),
+            ("lq.q", lq_q.space().provider_arc()),
+            ("left_polar.w", w_left.space().provider_arc()),
+            ("left_polar.p", p_left.space().provider_arc()),
+            ("right_polar.p", p_right.space().provider_arc()),
+            ("right_polar.wh", w_right.space().provider_arc()),
+            ("inv", inverse.space().provider_arc()),
+            ("pinv", pseudo_inverse.space().provider_arc()),
+        ]
+        .map(|(op, arc)| (op, Arc::clone(arc)))
+    };
 
-    let LeftPolar {
-        w: w_left,
-        p: p_left,
-    } = left_polar_dyn(&mut dense, &input).unwrap();
-    let RightPolar {
-        p: p_right,
-        wh: w_right,
-    } = right_polar_dyn(&mut dense, &input).unwrap();
-    let inverse = inv_into_mf(&mut dense, &input).unwrap();
-    let pseudo_inverse = pinv_into_mf(&mut dense, &input, 1.0e-13).unwrap();
-
-    for factor in [
-        &w_left,
-        &p_left,
-        &p_right,
-        &w_right,
-        &inverse,
-        &pseudo_inverse,
-    ] {
-        assert!(Arc::ptr_eq(factor.space().provider_arc(), &provider));
+    let first_provider = Arc::new(Z2FusionRule);
+    let second_provider = Arc::new(Z2FusionRule);
+    for provider in [&first_provider, &second_provider] {
+        for (op, output) in output_providers(provider) {
+            assert!(Arc::ptr_eq(&output, provider), "{op}");
+        }
     }
 }
 

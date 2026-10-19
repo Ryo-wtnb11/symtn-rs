@@ -42,34 +42,14 @@ fn warm_working_sets_never_evict() {
     let u1 = |q: i32| U1Irrep::new(q);
 
     // E1-style ledger: several ops back to back without a reset, as the E1
-    // rows run, so their structures share the cache.
+    // rows run, so their structures share the cache. Permute, compose and
+    // contract on this leg are covered by `complete_structure_warm_hits.rs`.
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         (-1..=1).map(|q| (u1(q), 2)),
     )
     .unwrap();
     let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 1).unwrap();
-    let square =
-        TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 2).unwrap();
-    let matrix = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg], [&leg], 3).unwrap();
-    assert_warm("permute", 1, || {
-        a.permute(&[1, 2], &[3, 0]).unwrap();
-    });
-    assert_warm("compose", 1, || {
-        a.compose(&square).unwrap();
-    });
-    assert_warm("contract", 3, || {
-        a.contract(
-            &matrix,
-            &ContractSpec {
-                lhs: &[0],
-                rhs: &[1],
-                codomain: &[0, 1, 2],
-                domain: &[3],
-            },
-        )
-        .unwrap();
-    });
     assert_warm("qr_compact", 2, || {
         a.qr_compact(&[0, 1], &[2, 3]).unwrap();
     });

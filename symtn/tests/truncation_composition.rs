@@ -1039,9 +1039,13 @@ fn find_truncated_rejects_a_truncation_space_from_another_rule() {
     let leg = u1_leg(&[(0, 3), (1, 2)]);
     let foreign = su2_leg(&[(0, 1)]);
     let spectra = [spectrum(0, &[3.0, 2.0, 1.0]), spectrum(1, &[2.0, 1.0])];
-    assert!(leg
-        .find_truncated(&spectra, &Truncation::space(foreign.truncspace()))
-        .is_err());
+    // A U(1) leg's `SectorId`s read as SU(2)'s would name unrelated spins and
+    // truncate to nothing, so the mismatch must be a typed error.
+    let result = leg.find_truncated(&spectra, &Truncation::space(foreign.truncspace()));
+    assert!(
+        matches!(result, Err(Error::Operation(_))),
+        "a foreign-rule profile must be a typed error, got {result:?}"
+    );
 }
 
 #[test]

@@ -30,13 +30,9 @@ fi
 # matches substrings; each name below is a full test function name.
 non_device=(
   checked_generic_public_transform_measurement
-  dynamic_tree_release_measurement direct_core_release_measurement signed_core_release_measurement
-  eager_c1_c2_per_member_baseline signed_eager_per_member_baseline
   su2_recoupling_matrix_transforms_scale_componentwise
-  public_copy_c_batch_measurement public_host_batch_cold_warm_measurement
-  public_host_swapped_core_release_measurement public_signed_direct_release_measurement
-  public_dynamic_source_twist_release_measurement ignored_isolated_probe member_batch_measurement
-  axioms_su2_exhaustive axioms_fz2_u1_su2_triple_exhaustive itebd_heisenberg_short_run_release
+  ignored_isolated_probe member_batch_measurement
+  axioms_su2_exhaustive axioms_fz2_u1_su2_triple_exhaustive
   runs_installed_cotengra_when_requested measure_checked_generic_transform_phases
 )
 # Need device 1 as well as device 0; run only with --two-gpu.

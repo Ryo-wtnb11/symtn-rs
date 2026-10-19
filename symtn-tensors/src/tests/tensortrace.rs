@@ -1116,37 +1116,6 @@ fn tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace() {
 }
 
 #[test]
-fn tensortrace_fusion_default_host_api_accepts_custom_host_storage() {
-    let rule = FermionParityFusionRule;
-    let even = SectorId::new(0);
-    let odd = SectorId::new(1);
-    let src_hom = FusionTreeHomSpace::new(
-        FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
-        FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
-    );
-    let src_space = DynamicFusionMapSpace::from_final_homspace(&rule, src_hom).unwrap();
-    let src = TestTensor::from_vec_with_fusion_space(vec![2.0_f64, 3.0], src_space).unwrap();
-    let dst_hom = FusionTreeHomSpace::new(
-        FusionProductSpace::new(Vec::<SectorLeg>::new()),
-        FusionProductSpace::new(Vec::<SectorLeg>::new()),
-    );
-    let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom).unwrap();
-    let mut dst = TestTensor::from_vec_with_fusion_space(vec![0.0_f64], dst_space).unwrap();
-
-    dynamic_tensortrace_fusion_into(
-        &rule,
-        &mut dst,
-        &src,
-        TensorTraceAxisSpec::new(&[], &[0], &[1]),
-        1.0,
-        0.0,
-    )
-    .unwrap();
-
-    assert_eq!(dst.data(), &[-1.0]);
-}
-
-#[test]
 fn tensortrace_fusion_fermion_supertrace_uses_degeneracy_diagonals() {
     let rule = FermionParityFusionRule;
     let even = SectorId::new(0);

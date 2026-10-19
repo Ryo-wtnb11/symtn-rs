@@ -335,46 +335,27 @@ mod tests {
     }
 
     #[test]
-    fn permutation_axes_identity_inline_rank() {
-        // rank <= 8: inline SmallVec storage, no heap spill.
-        let axes = permutation_axes(OutputAxisOrder::identity(), 4).unwrap();
-        assert_eq!(axes, vec![0, 1, 2, 3]);
+    fn permutation_axes_identity_empty_inline_and_spilled_rank() {
+        // rank <= 8 stays in inline SmallVec storage; rank > 8 spills to the heap.
+        for rank in [0, 4, 12] {
+            let axes = permutation_axes(OutputAxisOrder::identity(), rank).unwrap();
+            assert_eq!(axes, (0..rank).collect::<Vec<_>>());
+        }
     }
 
     #[test]
-    fn permutation_axes_identity_empty() {
-        let axes = permutation_axes(OutputAxisOrder::identity(), 0).unwrap();
-        assert!(axes.is_empty());
-    }
-
-    #[test]
-    fn permutation_axes_identity_spilled_rank() {
-        // rank > 8: SmallVec spills to the heap; behavior must match inline case.
-        let rank = 12;
-        let axes = permutation_axes(OutputAxisOrder::identity(), rank).unwrap();
-        assert_eq!(axes, (0..rank).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn permutation_axes_explicit_inline_round_trip() {
-        let requested = [3usize, 1, 0, 2];
-        let axes = permutation_axes(OutputAxisOrder::from_axes(&requested), 4).unwrap();
-        assert_eq!(axes, requested.to_vec());
-        assert_eq!(
-            axes,
-            vec_permutation_axes(OutputAxisOrder::from_axes(&requested), 4).unwrap()
-        );
-    }
-
-    #[test]
-    fn permutation_axes_explicit_spilled_round_trip() {
-        let requested: Vec<usize> = (0..12).rev().collect();
-        let axes = permutation_axes(OutputAxisOrder::from_axes(&requested), 12).unwrap();
-        assert_eq!(axes, requested);
-        assert_eq!(
-            axes,
-            vec_permutation_axes(OutputAxisOrder::from_axes(&requested), 12).unwrap()
-        );
+    fn permutation_axes_explicit_inline_and_spilled_round_trip() {
+        let inline = vec![3usize, 1, 0, 2];
+        let spilled: Vec<usize> = (0..12).rev().collect();
+        for requested in [inline, spilled] {
+            let rank = requested.len();
+            let axes = permutation_axes(OutputAxisOrder::from_axes(&requested), rank).unwrap();
+            assert_eq!(axes, requested);
+            assert_eq!(
+                axes,
+                vec_permutation_axes(OutputAxisOrder::from_axes(&requested), rank).unwrap()
+            );
+        }
     }
 
     #[test]
@@ -414,19 +395,6 @@ mod tests {
     }
 
     #[test]
-    fn permutation_axes_inline_matches_vec_permutation_axes() {
-        // permutation_axes is permutation_axes_inline plus AxisVec::into_vec;
-        // both public entry points must agree.
-        let requested = [1usize, 0, 3, 2];
-        let via_inline: Vec<usize> =
-            permutation_axes_inline(OutputAxisOrder::from_axes(&requested), 4)
-                .unwrap()
-                .into_vec();
-        let via_public = permutation_axes(OutputAxisOrder::from_axes(&requested), 4).unwrap();
-        assert_eq!(via_inline, via_public);
-    }
-
-    #[test]
     fn from_axis_vecs_inline_round_trips_new() {
         let lhs = vec![0usize, 1];
         let rhs = vec![1usize, 0];
@@ -445,6 +413,15 @@ mod tests {
         assert_eq!(via_new.output_axes(), out.as_slice());
         assert!(!via_new.lhs_conjugate());
         assert!(!via_new.rhs_conjugate());
+
+        let conjugated = TensorContractSpecOwned::new_with_conjugation(lhs, rhs, out, true, false);
+        assert!(conjugated.lhs_conjugate());
+        assert!(!conjugated.rhs_conjugate());
+        assert_eq!(
+            conjugated.output_axes(),
+            via_axis_vecs.output_axes(),
+            "conjugation flags leave the axes unchanged"
+        );
     }
 
     #[test]
@@ -490,27 +467,5 @@ mod tests {
         );
         assert!(as_spec.lhs_conjugate());
         assert!(as_spec.rhs_conjugate());
-    }
-
-    #[test]
-    fn new_with_conjugation_matches_from_axis_vecs() {
-        let lhs = vec![0usize];
-        let rhs = vec![0usize];
-        let out: Vec<usize> = vec![];
-        let via_new = TensorContractSpecOwned::new_with_conjugation(
-            lhs.clone(),
-            rhs.clone(),
-            out.clone(),
-            true,
-            false,
-        );
-        let via_axis_vecs = TensorContractSpecOwned::from_axis_vecs(
-            AxisVec::from_vec(lhs),
-            AxisVec::from_vec(rhs),
-            AxisVec::from_vec(out),
-            true,
-            false,
-        );
-        assert_eq!(via_new, via_axis_vecs);
     }
 }

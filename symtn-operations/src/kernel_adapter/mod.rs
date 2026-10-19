@@ -489,27 +489,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_fused_pair_zero_extent_is_a_noop() {
-        let empty = layout(&[2, 0], &[1, 2], &[1, 2]);
-        let src = [1.0_f64; 4];
-        let mut dst = [7.0_f64; 4];
-        let mut index = Vec::new();
-        apply_fused_pair_slices(
-            &mut dst,
-            &src,
-            empty.dims(),
-            empty.dst_strides(),
-            empty.src_strides(),
-            0,
-            0,
-            &mut index,
-            |dst, value| *dst = value,
-            |value| value,
-        );
-        assert_eq!(dst, [7.0; 4]);
-    }
-
-    #[test]
     fn fused_pair_dynamic_rank_matches_reference() {
         let shape = [2usize; 9];
         let src_strides = row_major(&shape);

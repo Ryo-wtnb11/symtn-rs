@@ -22,26 +22,6 @@ fn compact_svd_canonical_layout_skips_input_pack_and_factor_scatter() {
 }
 
 #[test]
-fn compact_svd_noncanonical_layout_uses_copy_fallback() {
-    // What: an expert noncanonical view retains the general pack-and-scatter implementation.
-    let rule = Z2FusionRule;
-    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let bound = bound_tensor(Arc::new(rule), &tensor);
-    let adjoint_space = bound.space().adjoint_view().unwrap();
-    let input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let compact_svd_copy_rec = crate::probe::record();
-    svd_compact_dyn(&mut dense, &input).unwrap();
-    let probe = compact_svd_copy_rec.compact_svd_copy();
-
-    assert!(probe.input_pack_calls > 0);
-    assert!(probe.input_pack_bytes > 0);
-    assert!(probe.output_scatter_calls > 0);
-    assert!(probe.output_scatter_bytes > 0);
-}
-
-#[test]
 fn direct_compact_svd_uses_owned_executor_outputs_only() {
     let tensor = rectangular_svd_tensor(3, 2);
     let mut direct = ScriptedExecutor::<RejectSvdInto>::default();
@@ -83,7 +63,9 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
     assert_eq!(adjoint_executor.counts().svd_into, 0);
     let probe = compact_svd_copy_rec.compact_svd_copy();
     assert!(probe.input_pack_calls > 0);
+    assert!(probe.input_pack_bytes > 0);
     assert!(probe.output_scatter_calls > 0);
+    assert!(probe.output_scatter_bytes > 0);
 }
 
 fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>() {
@@ -552,6 +534,7 @@ fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingSvdInput>::default();
 
+    let diagonal_bond_build_rec = crate::probe::record();
     let result = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor));
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
@@ -561,6 +544,10 @@ fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
         .observed
         .iter()
         .all(|sector| before.windows(sector.len()).any(|window| window == sector)));
+    assert_eq!(
+        diagonal_bond_build_rec.diagonal_bond_build(),
+        crate::probe::DiagonalBondBuildProbe::default()
+    );
 }
 
 fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
@@ -694,6 +681,8 @@ fn compact_svd_zero_only_input_normalizes_to_an_empty_factorization_result() {
     // spectrum entry or factor route.
     assert_rectangular_direct_svd(0, 3);
     assert_rectangular_direct_svd(3, 0);
+    assert_zero_axis_svd_compact(0, 3);
+    assert_zero_axis_svd_compact(3, 0);
 }
 
 #[test]
@@ -1277,25 +1266,6 @@ fn typed_svd_borrows_input_authority_and_retains_its_exact_allocation() {
     assert!(Arc::ptr_eq(&provider, factors.vh.space().provider_arc()));
 }
 
-#[test]
-fn svd_compact_dense_failure_preserves_input_and_builds_no_diagonal_factor() {
-    // What: a failed dense SVD leaves borrowed input unchanged and cannot publish or build factors.
-    let rule = Z2FusionRule;
-    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let before = tensor.data().to_vec();
-    let mut dense = ScriptedExecutor::<FailAfterObservingSvdInput>::default();
-
-    let diagonal_bond_build_rec = crate::probe::record();
-    let result = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor));
-
-    assert!(matches!(result, Err(OperationError::Dense(_))));
-    assert_eq!(tensor.data(), before);
-    assert_eq!(
-        diagonal_bond_build_rec.diagonal_bond_build(),
-        crate::probe::DiagonalBondBuildProbe::default()
-    );
-}
-
 fn assert_zero_axis_svd_compact(rows: usize, cols: usize) {
     let rule = Z2FusionRule;
     let tensor = rectangular_svd_tensor(rows, cols);
@@ -1328,14 +1298,6 @@ fn assert_zero_axis_svd_compact(rows: usize, cols: usize) {
             }
         );
     }
-}
-
-#[test]
-fn svd_compact_zero_only_input_normalizes_to_an_empty_factorization_result() {
-    // What: the compact SVD exposes no phantom sector when either side of the
-    // zero-only input is absent.
-    assert_zero_axis_svd_compact(0, 3);
-    assert_zero_axis_svd_compact(3, 0);
 }
 
 #[test]

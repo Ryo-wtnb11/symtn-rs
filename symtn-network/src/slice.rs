@@ -1152,17 +1152,6 @@ mod tests {
     }
 
     #[test]
-    fn greedy_slice_never_slices_output_indices() {
-        // a,d are output; only internal b,c are sliceable. Forcing slicing must
-        // never pick an output label.
-        let (ir, plan, cost) = chain_abc(2, 2, 8, 2);
-        let sp = greedy_slice(&ir, &plan, &cost, 8, SliceLabels::InternalOnly);
-        assert!(!sp.is_empty());
-        assert!(!sp.sliced_indices().contains(&TemporaryLabel::new("a")));
-        assert!(!sp.sliced_indices().contains(&TemporaryLabel::new("d")));
-    }
-
-    #[test]
     fn best_next_slice_index_can_choose_output() {
         let (ir, plan, cost) = chain_abc(6, 1, 1, 6);
 

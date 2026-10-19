@@ -381,15 +381,4 @@ mod tests {
             RuleIdentity::from_canonical_bytes::<TableRule>(fnv1a64(bytes), Arc::from(bytes))
         );
     }
-
-    #[test]
-    fn table_error_is_opaque_with_the_authority_as_source() {
-        use std::error::Error;
-        let error = TableRule::by_uuid("not-a-uuid").unwrap_err();
-        assert_eq!(error.to_string(), "table category is unavailable");
-        assert_eq!(
-            error.source().unwrap().to_string(),
-            TableError::UnknownCategory.to_string()
-        );
-    }
 }

@@ -151,27 +151,20 @@ mod tests {
     }
 
     #[test]
-    fn zeroed_payload_single_precision_vec_can_grow_and_drop() {
-        // What: the `alloc_zeroed` allocation carries a `Vec`-compatible
-        // layout for the 4- and 8-byte scalars too, so reallocation and drop
-        // of the returned buffer are sound (the Miri check of the new impls).
-        let mut values = zeroed_payload::<num_complex::Complex32>(3);
-        values.push(num_complex::Complex32::new(1.0, 2.0));
-        assert_eq!(values.len(), 4);
-        assert_eq!(values[3].re, 1.0);
-
-        let mut reals = zeroed_payload::<f32>(5);
-        reals.push(1.5);
-        assert_eq!(reals.len(), 6);
-        assert_eq!(reals[5], 1.5);
-    }
-
-    #[test]
     fn zeroed_payload_vec_can_grow_and_drop() {
-        let mut values = zeroed_payload::<num_complex::Complex64>(3);
-        values.push(num_complex::Complex64::new(1.0, 2.0));
-        assert_eq!(values.len(), 4);
-        assert_eq!(values[3].re, 1.0);
+        // What: the `alloc_zeroed` allocation carries a `Vec`-compatible
+        // layout for every scalar width, so reallocation and drop of the
+        // returned buffer are sound (the Miri check).
+        fn grow<T: ZeroBytes + Copy + PartialEq + std::fmt::Debug>(len: usize, value: T) {
+            let mut values = zeroed_payload::<T>(len);
+            values.push(value);
+            assert_eq!(values.len(), len + 1);
+            assert_eq!(values[len], value);
+        }
+        grow(5, 1.5_f32);
+        grow(5, 1.5_f64);
+        grow(3, num_complex::Complex32::new(1.0, 2.0));
+        grow(3, num_complex::Complex64::new(1.0, 2.0));
     }
 
     #[test]

@@ -37,6 +37,15 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
         );
         assert_checked_keys_match_encoded_oracle(&SU2FusionRule, &singleton_rank_hom(su2(1), rank));
     }
+    // Dual legs change the stored key duality flags on a non-product rule too.
+    let su2_dual_leg = FusionProductSpace::new([
+        SectorLeg::new([(su2(1), 2)], true),
+        SectorLeg::new([(su2(1), 2)], false),
+    ]);
+    assert_checked_keys_match_encoded_oracle(
+        &SU2FusionRule,
+        &FusionTreeHomSpace::new(su2_dual_leg.clone(), su2_dual_leg),
+    );
 
     type U1Fz2Codec = PackedProductCodec<U1SectorLayout, Fz2SectorLayout>;
     type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2Codec>;
