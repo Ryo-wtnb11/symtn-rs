@@ -140,11 +140,14 @@ fn compact_factor_plan_rejects_duplicate_missing_mismatched_and_extra_routes() {
     let mut duplicate = u.to_vec();
     duplicate.push(u[0].clone());
     assert!(
-        crate::factorize::validate_compact_factor_routes_for_test(&source, &duplicate, &vh,)
-            .is_err()
+        matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &duplicate, &vh,), Err(OperationError::UnsupportedTensorContractScope { message }) if message.contains("duplicate sector"))
     );
-    assert!(crate::factorize::validate_compact_factor_routes_for_test(&source, &[], &vh,).is_err());
-    assert!(crate::factorize::validate_compact_factor_routes_for_test(&source, &vh, &vh,).is_err());
+    assert!(
+        matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &[], &vh,), Err(OperationError::SpaceMismatch { message }) if message.contains("left factor is missing"))
+    );
+    assert!(
+        matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &vh, &vh,), Err(OperationError::SpaceMismatch { message }) if message.contains("left sector region has an unexpected shape"))
+    );
 
     let multi = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let multi_bound = bound_tensor(Arc::new(rule), &multi);
@@ -172,7 +175,7 @@ fn compact_factor_plan_rejects_duplicate_missing_mismatched_and_extra_routes() {
             .clone(),
     );
     assert!(
-        crate::factorize::validate_compact_factor_routes_for_test(&source, &extra, &vh,).is_err()
+        matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &extra, &vh,), Err(OperationError::SpaceMismatch { message }) if message.contains("left factor contains an unused"))
     );
 }
 

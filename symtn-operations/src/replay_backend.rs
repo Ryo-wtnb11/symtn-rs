@@ -671,7 +671,9 @@ mod tests {
                 &[(4, -1.0), (0, -1.0)],
             )
             .unwrap_err();
-        assert!(matches!(error, OperationError::InvalidArgument { .. }));
+        assert!(
+            matches!(error, OperationError::InvalidArgument { message } if message.contains("strictly increasing"))
+        );
         assert_eq!(untouched, [5.0; 16]);
     }
 

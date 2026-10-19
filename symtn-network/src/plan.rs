@@ -878,7 +878,7 @@ mod tests {
         ];
         assert!(matches!(
             ContractionPlan::from_steps(&ir, steps),
-            Err(ContractError::InvalidContractionPlan(_))
+            Err(ContractError::InvalidContractionPlan(message)) if message.contains("result_labels")
         ));
     }
 }

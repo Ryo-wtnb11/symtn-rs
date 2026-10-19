@@ -61,7 +61,9 @@ fn pinv_rejects_invalid_rcond_before_dense_execution() {
     for rcond in [-1.0, f64::NAN, f64::INFINITY] {
         let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
         let error = pinv(&mut dense, &input.as_ref(), rcond).unwrap_err();
-        assert!(matches!(error, OperationError::InvalidArgument { .. }));
+        assert!(
+            matches!(error, OperationError::InvalidArgument { message } if message.contains("rcond"))
+        );
     }
 }
 

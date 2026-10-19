@@ -704,7 +704,9 @@ pub(super) fn assert_eigh_preflight_at<D: FactorScalar + std::fmt::Debug>(
         assert!(matches!(error, OperationError::Dense(_)));
         assert_eq!(dense.counts().of(EIGH_ENTRIES), 1);
     } else {
-        assert!(matches!(error, OperationError::InvalidArgument { .. }));
+        assert!(
+            matches!(error, OperationError::InvalidArgument { message } if message.contains("Hermitian"))
+        );
         assert_eq!(dense.counts().of(EIGH_ENTRIES), 0);
     }
 }

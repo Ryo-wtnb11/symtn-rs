@@ -256,7 +256,7 @@ fn loaded_order_for_another_network_is_rejected_when_used() {
     let tensors = chain_tensors(&runtime);
     assert!(matches!(
         chain().contract(&tensors.each_ref()),
-        Err(Error::InvalidArgument(_))
+        Err(Error::InvalidArgument(message)) if message.contains("result_labels")
     ));
 }
 

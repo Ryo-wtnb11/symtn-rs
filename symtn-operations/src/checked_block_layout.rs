@@ -737,7 +737,7 @@ mod tests {
                     } else {
                         assert!(matches!(
                             result,
-                            Err(OperationError::InvalidArgument { .. })
+                            Err(OperationError::InvalidArgument { message }) if message.contains("write-once")
                         ));
                     }
 
@@ -1015,7 +1015,7 @@ mod tests {
                 1.0,
                 1.0
             ),
-            Err(OperationError::InvalidArgument { .. })
+            Err(OperationError::InvalidArgument { message }) if message.contains("filled for two sources")
         ));
     }
 }

@@ -1490,7 +1490,7 @@ mod tests {
         duplicated[0].sector = duplicated[2].sector;
         assert!(matches!(
             select(&duplicated, &Truncation::Full),
-            Err(TruncationError::InvalidSpectrum { .. })
+            Err(TruncationError::InvalidSpectrum { message }) if message.contains("one spectrum")
         ));
     }
 

@@ -842,7 +842,7 @@ mod tests {
         });
         assert!(matches!(
             refused,
-            Err(OperationError::InvalidArgument { .. })
+            Err(OperationError::InvalidArgument { message }) if message.contains("block copies only")
         ));
     }
 
@@ -1014,13 +1014,15 @@ mod tests {
         });
         assert!(matches!(
             unwritten,
-            Err(OperationError::InvalidArgument { .. })
+            Err(OperationError::InvalidArgument { message }) if message.contains("left unwritten")
         ));
         let twice = overwrite_owned_blocks(&tiled(), |_, writer: &mut Writer<'_>| {
             writer.zero()?;
             writer.copy(|_| Ok(1), &source, 0, false, Complex64::new(1.0, 0.0))
         });
-        assert!(matches!(twice, Err(OperationError::InvalidArgument { .. })));
+        assert!(
+            matches!(twice, Err(OperationError::InvalidArgument { message }) if message.contains("written twice"))
+        );
         // A failed write leaves the block claimable, but an error returned
         // by the writer still aborts the output.
         let failed = overwrite_owned_blocks(&tiled(), |_, writer: &mut Writer<'_>| {

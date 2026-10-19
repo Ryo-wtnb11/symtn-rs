@@ -832,14 +832,14 @@ fn checked_only_generic_values_preserve_empty_scalar_and_shape_boundaries() {
     assert!(matches!(
         eigh_vals_dyn_checked_generic(&mut reject, &rectangular),
         Err(CheckedGenericFactorPlanError::Operation(
-            OperationError::SpaceMismatch { .. }
-        ))
+            OperationError::SpaceMismatch { message }
+        )) if message.contains("eigh requires an endomorphism")
     ));
     assert!(matches!(
         eig_vals_dyn_checked_generic(&mut reject, &rectangular),
         Err(CheckedGenericFactorPlanError::Operation(
-            OperationError::SpaceMismatch { .. }
-        ))
+            OperationError::SpaceMismatch { message }
+        )) if message.contains("eig requires an endomorphism")
     ));
     assert_eq!(rectangular_provider.calls.get(), rectangular_calls);
 }

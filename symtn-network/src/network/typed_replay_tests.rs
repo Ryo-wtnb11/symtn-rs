@@ -1967,7 +1967,9 @@ fn plan_with_rejects_a_plan_that_does_not_cover_the_network() {
     };
     let ab = matrix_product_plan(false, &["i", "k"]);
     let rejects = |result: Result<PlannedNetwork, Error>| {
-        assert!(matches!(result, Err(Error::InvalidArgument(_))));
+        assert!(
+            matches!(result, Err(Error::InvalidArgument(message)) if message.contains("plan topology"))
+        );
     };
 
     // A rank-0 operand is a closed scalar subnetwork: a 2-tensor A*B plan
