@@ -1,6 +1,6 @@
 //! The shape-based null spaces are orthonormal and annihilate the input on
-//! non-Abelian fusion trees with inner lines, dual legs and outer
-//! multiplicity (#2309).
+//! non-Abelian fusion trees with an inner line and a dual leg (SU(2)) and
+//! with outer multiplicity (SU(3)) (#2309).
 //!
 //! Oracle: the defining identities, evaluated by composition rather than by
 //! the factorization under test. A left null space `n` of `a` satisfies
@@ -54,18 +54,21 @@ macro_rules! assert_null_space {
     }};
 }
 
-/// Left null of the tall `[v, v*] <- [w]` and right null of the wide
-/// `[w] <- [v, v*]`, with the null bond's degeneracy per coupled sector.
+/// Left null of the tall `[legs..] <- [w]` and right null of the wide
+/// `[w] <- [legs..]`, with the null bond's degeneracy per coupled sector.
 macro_rules! check_both_sides {
-    ($runtime:expr, $scalar:ty, $v:expr, $v_dual:expr, $w:expr, $one:expr, $expected:expr) => {{
-        let (v, v_dual, w) = (&$v, &$v_dual, &$w);
+    ($runtime:expr, $scalar:ty, [$($leg:expr),+], $w:expr, $one:expr, $expected:expr) => {{
+        let w = &$w;
+        let legs = [$(&$leg),+];
+        let many: Vec<usize> = (0..legs.len()).collect();
+        let shifted: Vec<usize> = (1..=legs.len()).collect();
         let tall: TensorMap<_, $scalar> =
-            TensorMap::rand_with_seed(&$runtime, [v, v_dual], [w], 2309).unwrap();
-        let left = tall.left_null(&[0, 1], &[2]).unwrap();
+            TensorMap::rand_with_seed(&$runtime, legs, [w], 2309).unwrap();
+        let left = tall.left_null(&many, &[legs.len()]).unwrap();
         assert_null_space!($runtime, tall, left, true, $one);
         let wide: TensorMap<_, $scalar> =
-            TensorMap::rand_with_seed(&$runtime, [w], [v, v_dual], 2310).unwrap();
-        let right = wide.right_null(&[0], &[1, 2]).unwrap();
+            TensorMap::rand_with_seed(&$runtime, [w], legs, 2310).unwrap();
+        let right = wide.right_null(&[0], &shifted).unwrap();
         assert_null_space!($runtime, wide, right, false, $one);
         for (sector, nullity) in $expected {
             assert_eq!(
@@ -84,13 +87,23 @@ macro_rules! check_both_sides {
 
 #[test]
 fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs() {
-    // `v = 0^2 + (1/2)^2 + 1`, so `v (x) v*` has the coupled-sector rows
+    // `v = 0^2 + (1/2)^2 + 1`. Its pair `v (x) v*` has the degeneracies
     //   0:   (0,0) 4 + (1/2,1/2) 4 + (1,1) 1                 = 9
     //   1/2: (0,1/2) 4 + (1/2,0) 4 + (1/2,1) 2 + (1,1/2) 2   = 12
     //   1:   (0,1) 2 + (1,0) 2 + (1/2,1/2) 4 + (1,1) 1       = 9
     //   3/2: (1/2,1) 2 + (1,1/2) 2                           = 4
     //   2:   (1,1) 1                                         = 1
-    // against `w = 0 + (1/2)^2 + 1^3` columns `1, 2, 3, 0, 0`.
+    // which is the inner line `a` of the trees of `v (x) v* (x) v`. Fusing
+    // `a` with the third leg (`0 x2, 1/2 x2, 1 x1`) gives the rows
+    //   0:   a=0 18 + a=1/2 24 + a=1 9                       = 51
+    //   1/2: a=0 18 + a=1/2 24+12 + a=1 18 + a=3/2 4         = 76
+    //   1:   a=0 9 + a=1/2 24 + a=1 18+9 + a=3/2 8 + a=2 1   = 69
+    //   3/2: a=1/2 12 + a=1 18 + a=3/2 8+4 + a=2 2           = 44
+    //   2:   a=1 9 + a=3/2 8 + a=2 2+1                       = 20
+    //   5/2: a=3/2 4 + a=2 2                                 = 6
+    //   3:   a=2 1                                           = 1
+    // (total dimension `sum rows_c (2c+1) = 729 = 9^3`), against
+    // `w = 0 + (1/2)^2 + 1^3` columns `1, 2, 3, 0, 0, 0, 0`.
     let runtime = host_runtime();
     let rule = Arc::new(SU2FusionRule);
     let spin = SU2Irrep::from_twice_spin;
@@ -102,18 +115,19 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
     let v_dual = v.try_dual().unwrap();
     let w = GradedSpace::try_new(rule, [(spin(0), 1), (spin(1), 2), (spin(2), 3)]).unwrap();
     let expected = [
-        (spin(0), 8),
-        (spin(1), 10),
-        (spin(2), 6),
-        (spin(3), 4),
-        (spin(4), 1),
+        (spin(0), 50),
+        (spin(1), 74),
+        (spin(2), 66),
+        (spin(3), 44),
+        (spin(4), 20),
+        (spin(5), 6),
+        (spin(6), 1),
     ];
-    check_both_sides!(runtime, f64, v, v_dual, w, 1.0, expected);
+    check_both_sides!(runtime, f64, [v, v_dual, v], w, 1.0, expected);
     check_both_sides!(
         runtime,
         Complex64,
-        v,
-        v_dual,
+        [v, v_dual, v],
         w,
         Complex64::new(1.0, 0.0),
         expected
@@ -155,12 +169,11 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
         (vec![0, 3], 4),
         (vec![2, 2], 4),
     ];
-    check_both_sides!(runtime, f64, a, a_dual, b, 1.0, expected.clone());
+    check_both_sides!(runtime, f64, [a, a_dual], b, 1.0, expected.clone());
     check_both_sides!(
         runtime,
         Complex64,
-        a,
-        a_dual,
+        [a, a_dual],
         b,
         Complex64::new(1.0, 0.0),
         expected
