@@ -291,11 +291,19 @@ mod tests {
         // no two destination slices share a row; a later bad entry rejects
         // the whole list.
         assert!(validate_gather_rows(4, 6, &[(0, 0, 2), (2, 3, 2), (0, 5, 1)]).is_ok());
-        assert!(validate_gather_rows(4, 6, &[(0, 0, 2), (0, 5, 2)]).is_err());
-        assert!(validate_gather_rows(4, 6, &[(0, 0, 2), (3, 2, 2)]).is_err());
-        assert!(validate_gather_rows(4, 6, &[(0, 0, 3), (0, 2, 2)]).is_err());
+        assert!(
+            matches!(validate_gather_rows(4, 6, &[(0, 0, 2), (0, 5, 2)]), Err(message) if message.contains("row entry 1") && message.contains("exceeds"))
+        );
+        assert!(
+            matches!(validate_gather_rows(4, 6, &[(0, 0, 2), (3, 2, 2)]), Err(message) if message.contains("row entry 1") && message.contains("exceeds"))
+        );
+        assert!(validate_gather_rows(4, 6, &[(0, 0, 3), (0, 2, 2)])
+            .unwrap_err()
+            .contains("write the same destination rows"));
         assert!(validate_gather_rows(4, 6, &[(0, 1, 0), (0, 1, 2)]).is_ok());
-        assert!(validate_gather_rows(4, 6, &[(usize::MAX, 0, 2)]).is_err());
+        assert!(
+            matches!(validate_gather_rows(4, 6, &[(usize::MAX, 0, 2)]), Err(message) if message.contains("row entry 0") && message.contains("exceeds"))
+        );
     }
 
     #[test]

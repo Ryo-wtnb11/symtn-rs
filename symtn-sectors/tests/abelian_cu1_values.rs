@@ -9,9 +9,9 @@
 
 use num_complex::{Complex32, Complex64};
 use symtn_sectors::{
-    CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FusionRule,
-    MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorId, U1FusionRule, U1Irrep,
-    Z2FusionRule, Z2Irrep, ZNFusionRule, CU1_MAX_TWICE_CHARGE,
+    CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FusionAlgebraError,
+    FusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorId,
+    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule, CU1_MAX_TWICE_CHARGE,
 };
 
 #[path = "../../tests/support/numerics.rs"]
@@ -132,10 +132,13 @@ fn u1_fusion_leaving_the_charge_range_is_an_error() {
     let (min, max) = (i32::MIN + 1, i32::MAX);
     assert_eq!(rule.try_dual_sector(u1(max)), Ok(u1(min)));
     for (a, b) in [(max, 1), (1, max), (min, -1), (-1, min)] {
-        assert!(rule.try_fusion_channels(u1(a), u1(b)).is_err(), "{a} ⊗ {b}");
+        assert!(
+            matches!(rule.try_fusion_channels(u1(a), u1(b)), Err(FusionAlgebraError::U1FusionOverflow { left, .. }) if left == a),
+            "{a} ⊗ {b}"
+        );
         for c in [min, -1, 0, 1, max] {
             assert!(
-                rule.try_nsymbol(u1(a), u1(b), u1(c)).is_err(),
+                matches!(rule.try_nsymbol(u1(a), u1(b), u1(c)), Err(FusionAlgebraError::U1FusionOverflow { left, .. }) if left == a),
                 "N {a} {b} {c}"
             );
         }
@@ -348,12 +351,12 @@ fn cu1_fusion_leaving_the_charge_range_is_an_error() {
     );
     for (a, b) in [(1, max), (max, 1), (half + 1, half + 1), (max, max)] {
         assert!(
-            rule.try_fusion_channels(id(j(a)), id(j(b))).is_err(),
+            matches!(rule.try_fusion_channels(id(j(a)), id(j(b))), Err(FusionAlgebraError::FusionNotRepresentable { left, .. }) if left == id(j(a))),
             "{a} ⊗ {b}"
         );
         for c in [OP, OM, j(1), j(max)] {
             assert!(
-                rule.try_nsymbol(id(j(a)), id(j(b)), id(c)).is_err(),
+                matches!(rule.try_nsymbol(id(j(a)), id(j(b)), id(c)), Err(FusionAlgebraError::FusionNotRepresentable { left, .. }) if left == id(j(a))),
                 "N {a} {b} {c:?}"
             );
         }

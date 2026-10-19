@@ -278,9 +278,14 @@ fn checked_tree_normalizes_structure_before_provider_calls() {
         ),
         FusionTreeKey::new([SectorId::new(0)], SectorId::new(1), [false], [], []),
     ] {
+        let needle = if tree.uncoupled().len() == 2 {
+            "duality flags"
+        } else {
+            "must equal its uncoupled sector"
+        };
         assert!(matches!(
             tree.validate_for_rule_checked(&rule),
-            Err(CheckedFusionSpaceError::Core(_))
+            Err(CheckedFusionSpaceError::Core(e)) if matches!(*e, CoreError::MalformedFusionTree { message } if message.contains(needle))
         ));
     }
     assert_eq!(rule.channel_calls.load(Ordering::Relaxed), 0);
@@ -342,7 +347,7 @@ fn checked_tree_pair_preserves_validation_precedence() {
     assert!(matches!(
         FusionTreePairKey::pair(bad_shape, overflow.clone())
             .validate_for_rule_checked(&U1FusionRule),
-        Err(CheckedFusionSpaceError::Core(_))
+        Err(CheckedFusionSpaceError::Core(e)) if matches!(*e, CoreError::MalformedFusionTree { message } if message.contains("duality flags"))
     ));
     assert_eq!(
         FusionTreePairKey::pair(FusionTreeKey::new([], u1(0), [], [], []), overflow,)
@@ -392,7 +397,7 @@ fn fusion_subset_structural_proof_precedes_algebra_and_preserves_unchecked_work(
     let checked = CheckedTreeProbe::default();
     assert!(matches!(
         homspace.validate_subblock_structure_subset_checked(&checked, &malformed_structure,),
-        Err(CheckedFusionSpaceError::Core(_))
+        Err(CheckedFusionSpaceError::Core(e)) if matches!(*e, CoreError::MalformedFusionTree { message } if message.contains("duality flags"))
     ));
     assert_eq!(checked.channel_calls.load(Ordering::Relaxed), 0);
     assert_eq!(checked.nsymbol_calls.load(Ordering::Relaxed), 0);
@@ -425,7 +430,7 @@ fn fusion_subset_structural_proof_precedes_algebra_and_preserves_unchecked_work(
     assert!(matches!(
         homspace
             .validate_subblock_structure_subset_checked(&coupling_probe, &mismatched_structure,),
-        Err(CheckedFusionSpaceError::Core(_))
+        Err(CheckedFusionSpaceError::Core(e)) if matches!(*e, CoreError::MalformedFusionTree { message } if message.contains("matching coupled sectors"))
     ));
     assert_eq!(coupling_probe.channel_calls.load(Ordering::Relaxed), 0);
     assert_eq!(coupling_probe.nsymbol_calls.load(Ordering::Relaxed), 0);
@@ -483,7 +488,7 @@ fn checked_layout_and_space_admission_reject_finite_nonclosure_transactionally()
                 ),
             ],
         ),
-        Err(CheckedFusionSpaceError::Core(_))
+        Err(CheckedFusionSpaceError::Core(e)) if matches!(*e, CoreError::MalformedFusionTree { message } if message.contains("duality flags"))
     ));
     assert_eq!(structural_probe.channel_calls.load(Ordering::Relaxed), 0);
     assert_eq!(structural_probe.nsymbol_calls.load(Ordering::Relaxed), 0);

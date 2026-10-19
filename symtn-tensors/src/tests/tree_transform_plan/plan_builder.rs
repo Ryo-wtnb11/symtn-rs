@@ -1187,7 +1187,7 @@ fn all_codomain_repeated_axis_is_an_invalid_permutation() {
         build_all_codomain_tree_transform_group_plan(&SU2FusionRule, invalid_operation, &structure);
     assert!(matches!(
         result,
-        Err(OperationError::InvalidPermutation { .. })
+        Err(OperationError::InvalidPermutation { rank: 2, .. })
     ));
 }
 

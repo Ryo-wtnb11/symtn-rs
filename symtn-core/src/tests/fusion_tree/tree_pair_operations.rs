@@ -466,15 +466,17 @@ fn nonidentity_tree_pair_braid_does_not_enter_split_only_path() {
         (&[0, 3][..], &[1][..]),
         (&[0][..], &[1][..]),
     ] {
-        assert!(multiplicity_free_braid_tree_pair(
-            &rule,
-            &source,
-            codomain_axes,
-            domain_axes,
-            &[0],
-            &[1, 2],
-        )
-        .is_err());
+        assert!(matches!(
+            multiplicity_free_braid_tree_pair(
+                &rule,
+                &source,
+                codomain_axes,
+                domain_axes,
+                &[0],
+                &[1, 2],
+            ),
+            Err(CoreError::InvalidPermutation { rank: 3, .. })
+        ));
     }
 }
 
@@ -486,33 +488,32 @@ fn identity_braid_tree_pair_validates_levels_before_symbol_free_return() {
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap();
 
-    assert!(multiplicity_free_braid_tree_pair(
-        &IdentitySymbolPanicRule,
-        &source,
-        &[0],
-        &[1],
-        &[],
-        &[3],
-    )
-    .is_err());
-    assert!(multiplicity_free_braid_tree_pair(
-        &IdentitySymbolPanicRule,
-        &source,
-        &[0],
-        &[1],
-        &[19],
-        &[],
-    )
-    .is_err());
-    assert!(multiplicity_free_braid_tree_pair(
-        &IdentitySymbolPanicRule,
-        &source,
-        &[0],
-        &[0],
-        &[19],
-        &[3],
-    )
-    .is_err());
+    assert!(matches!(
+        multiplicity_free_braid_tree_pair(&IdentitySymbolPanicRule, &source, &[0], &[1], &[], &[3],),
+        Err(CoreError::DimensionMismatch { actual: 0, .. })
+    ));
+    assert!(matches!(
+        multiplicity_free_braid_tree_pair(
+            &IdentitySymbolPanicRule,
+            &source,
+            &[0],
+            &[1],
+            &[19],
+            &[],
+        ),
+        Err(CoreError::DimensionMismatch { actual: 0, .. })
+    ));
+    assert!(matches!(
+        multiplicity_free_braid_tree_pair(
+            &IdentitySymbolPanicRule,
+            &source,
+            &[0],
+            &[0],
+            &[19],
+            &[3],
+        ),
+        Err(CoreError::InvalidPermutation { rank: 2, .. })
+    ));
 }
 
 #[test]
