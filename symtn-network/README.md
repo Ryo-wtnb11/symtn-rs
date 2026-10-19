@@ -14,8 +14,8 @@ cotengra for path search. `cuda` still requires a host backend, while
 `cgc-gen` forwards generated SUN support; see `Cargo.toml` for the
 other provider and BLAS flags.
 
-Run the [quickstart](examples/quickstart.rs) with:
+Run the [contraction example](examples/contract.rs) with:
 
 ```sh
-cargo run -p symtn-network --example quickstart
+cargo run -p symtn-network --example contract
 ```

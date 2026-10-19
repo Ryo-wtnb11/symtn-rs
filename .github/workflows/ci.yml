@@ -515,8 +515,12 @@ jobs:
         working-directory: symtn
         env:
           CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
-      - name: Run quickstart example
-        run: cargo run --locked -p symtn-network --example quickstart
+      - name: Run primitive examples
+        run: |
+          for example in spaces_and_tensors permute_braid_twist factorize_and_truncate eigh_and_matrix_functions trace_inner_norm dense_roundtrip; do
+            cargo run --locked -p symtn --example "$example"
+          done
+          cargo run --locked -p symtn-network --example contract
         working-directory: symtn
         env:
           CARGO_PROFILE_DEV_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
