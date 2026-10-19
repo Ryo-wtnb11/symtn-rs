@@ -108,7 +108,8 @@ let theta = Network::new(
     vec![1, 2, 1, 2, 1, 2],
     vec!["l", "pa", "pb", "r"],
     Some(2),
-)?
+)
+.expect("fixed network labels are valid")
 .contract(&[l_out, g1, l_mid, g2, l_out, gate])?;
 ```
 
