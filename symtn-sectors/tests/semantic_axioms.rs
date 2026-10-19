@@ -1,5 +1,5 @@
 //! Systematic TensorKit-semantics axiom checks for the multiplicity-free
-//! symbol layer (issue #9, part 1).
+//! symbol layer.
 //!
 //! Conventions implemented here are copied verbatim from TensorKitSectors
 //! v0.3.6 (`~/.julia/packages/TensorKitSectors/LXgpR/src/sectors.jl`), which
@@ -32,7 +32,7 @@
 //! `frobenius_schur_phase` outputs, checked against TensorKit 0.17.1
 //! (TensorKitSectors 0.3.10, Julia 1.11.6).
 
-use symtn_core::{
+use symtn_sectors::{
     CU1FusionRule, CU1Irrep, FermionParityFusionRule, FusionRule, Fz2SectorLayout,
     MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, PackedProductCodec,
     ProductFusionRule, ProductSectorCodec, ProductSectorLayout, SU2FusionRule, SU2Irrep, SectorId,
@@ -388,7 +388,7 @@ fn axioms_su2() {
 }
 
 /// Exhaustive SU(2) pentagon sweep over 2j <= 6.
-/// Run with: `cargo test -p symtn-core --release -- --ignored su2_exhaustive`
+/// Run with: `cargo test -p symtn-sectors --release -- --ignored su2_exhaustive`
 #[test]
 #[ignore = "exhaustive sweep, run explicitly in release"]
 fn axioms_su2_exhaustive() {
@@ -422,7 +422,7 @@ fn axioms_cantor_product_codec() {
 }
 
 /// Exhaustive packed triple-product sweep (|q| <= 2, 2j <= 2).
-/// Run with: `cargo test -p symtn-core --release -- --ignored triple_exhaustive`
+/// Run with: `cargo test -p symtn-sectors --release -- --ignored triple_exhaustive`
 #[cfg(target_pointer_width = "64")]
 #[test]
 #[ignore = "exhaustive sweep, run explicitly in release"]
