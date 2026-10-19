@@ -215,15 +215,92 @@ impl CheckedFusionAlgebra for ExternalSimpleRule {
     }
 }
 
+/// Degeneracies of sectors 0 and 1 on the two codomain legs of
+/// [`unique_matrix_homspace`]; its domain legs are their duals in the same
+/// order, so the domain of one copy contracts with the codomain of another.
+const UNIQUE_LEGS: [[usize; 2]; 2] = [[2, 3], [1, 4]];
+
 fn unique_matrix_homspace() -> FusionTreeHomSpace {
     // Rank-4 XOR space whose codomain and domain each couple to {0, 1}.
     // The domain legs are dual so every fixture built from this space also
     // covers the dual-leg duality flags in the checked layout.
-    let leg = |dual| SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 3)], dual);
+    let leg = |[even, odd]: [usize; 2], dual| {
+        SectorLeg::new([(SectorId::new(0), even), (SectorId::new(1), odd)], dual)
+    };
     FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg(false), leg(false)]),
-        FusionProductSpace::new([leg(true), leg(true)]),
+        FusionProductSpace::new([leg(UNIQUE_LEGS[0], false), leg(UNIQUE_LEGS[1], false)]),
+        FusionProductSpace::new([leg(UNIQUE_LEGS[0], true), leg(UNIQUE_LEGS[1], true)]),
     )
+}
+
+/// One block: codomain sectors and dual flags, domain sectors and dual
+/// flags, coupled sector, shape.
+type BlockRow = (
+    Vec<usize>,
+    Vec<bool>,
+    Vec<usize>,
+    Vec<bool>,
+    usize,
+    Vec<usize>,
+);
+
+fn block_rows(space: &DynamicFusionMapSpace) -> Vec<BlockRow> {
+    let ids = |sectors: &[SectorId]| sectors.iter().map(|s| s.id()).collect::<Vec<_>>();
+    let mut rows = (0..space.structure().block_count())
+        .map(|index| {
+            let block = space.structure().block(index).unwrap();
+            let key = block.key().as_fusion_tree_pair().unwrap();
+            (
+                ids(key.codomain_uncoupled()),
+                key.codomain_is_dual().to_vec(),
+                ids(key.domain_uncoupled()),
+                key.domain_is_dual().to_vec(),
+                key.coupled().id(),
+                block.shape().to_vec(),
+            )
+        })
+        .collect::<Vec<_>>();
+    rows.sort();
+    rows
+}
+
+/// Hand oracle for the XOR rule, where every sector is self-dual and a
+/// rank-2 tree has no inner line: one block per sector assignment whose
+/// codomain and domain XORs agree (that XOR is the coupled sector), shaped
+/// by the leg degeneracies.
+fn xor_rows(codomain: &[([usize; 2], bool)], domain: &[([usize; 2], bool)]) -> Vec<BlockRow> {
+    let legs = codomain.len() + domain.len();
+    let mut rows = Vec::new();
+    for mask in 0..1usize << legs {
+        let sectors = (0..legs).map(|leg| (mask >> leg) & 1).collect::<Vec<_>>();
+        let (cod, dom) = sectors.split_at(codomain.len());
+        let coupled = cod.iter().fold(0, |acc, s| acc ^ s);
+        if dom.iter().fold(0, |acc, s| acc ^ s) != coupled {
+            continue;
+        }
+        let shape = codomain
+            .iter()
+            .chain(domain)
+            .zip(&sectors)
+            .map(|((degeneracy, _), &sector)| degeneracy[sector])
+            .collect();
+        rows.push((
+            cod.to_vec(),
+            codomain.iter().map(|&(_, dual)| dual).collect(),
+            dom.to_vec(),
+            domain.iter().map(|&(_, dual)| dual).collect(),
+            coupled,
+            shape,
+        ));
+    }
+    rows.sort();
+    rows
+}
+
+/// Packed storage of a complete grid: the tree blocks tile each coupled
+/// matrix, so the length is the sum of the block volumes.
+fn packed_len(rows: &[BlockRow]) -> usize {
+    rows.iter().map(|row| row.5.iter().product::<usize>()).sum()
 }
 
 fn simple_matrix_homspace() -> FusionTreeHomSpace {
@@ -237,51 +314,58 @@ fn simple_matrix_homspace() -> FusionTreeHomSpace {
 }
 
 #[test]
-fn checked_final_root_builds_multi_block_layout_matching_the_encoded_oracle() {
-    // What: external Unique and Simple providers build a complete
-    // multi-block runtime-rank layout through the checked root, structurally
-    // identical to the trusted encoded (infallible) construction.
+fn checked_final_root_builds_the_hand_enumerated_multi_block_layout() {
+    // What: external Unique and Simple providers build, through the checked
+    // root, a complete runtime-rank layout whose blocks are exactly the
+    // hand-enumerated fusion-tree pairs with their leg degeneracies.
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     clear_structure_caches();
-    let unique = ExternalUniqueRule::new();
-    let oracle = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(unique),
-        unique_matrix_homspace(),
-    )
-    .unwrap();
     let checked = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
-        Arc::new(unique),
+        Arc::new(ExternalUniqueRule::new()),
         unique_matrix_homspace(),
     )
     .unwrap();
-    assert!(checked.space().structure().block_count() >= 2);
+    let [first, second] = UNIQUE_LEGS;
+    let expected = xor_rows(
+        &[(first, false), (second, false)],
+        &[(first, true), (second, true)],
+    );
+    assert_eq!(expected.len(), 8);
     assert!(matches!(
         checked.space().admission(),
         FusionSpaceAdmission::Complete(_)
     ));
-    assert_eq!(checked.space(), oracle.space());
+    assert_eq!(block_rows(checked.space()), expected);
     assert_eq!(
         checked.space().required_len().unwrap(),
-        oracle.space().required_len().unwrap()
+        packed_len(&expected)
     );
 
     clear_structure_caches();
-    let simple = ExternalSimpleRule;
-    let oracle = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(simple),
-        simple_matrix_homspace(),
-    )
-    .unwrap();
     let checked = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
-        Arc::new(simple),
+        Arc::new(ExternalSimpleRule),
         simple_matrix_homspace(),
     )
     .unwrap();
-    assert!(checked.space().structure().block_count() >= 2);
-    assert_eq!(checked.space(), oracle.space());
+    // spin-1/2 x spin-1/2 = spin 0 + spin 1 on both sides, one tree each.
+    let half = SU2Irrep::from_twice_spin(1).sector_id().id();
+    let row = |twice_spin| {
+        (
+            vec![half, half],
+            vec![false, false],
+            vec![half, half],
+            vec![false, false],
+            SU2Irrep::from_twice_spin(twice_spin).sector_id().id(),
+            vec![2, 2, 2, 2],
+        )
+    };
+    let mut expected = vec![row(0), row(2)];
+    expected.sort();
+    assert_eq!(block_rows(checked.space()), expected);
+    assert_eq!(checked.space().required_len().unwrap(), 32);
 }
 
 #[test]
@@ -373,48 +457,53 @@ fn checked_final_root_stage_failures_publish_no_layout_or_admission() {
 }
 
 #[test]
-fn checked_bound_space_permute_and_contract_match_the_encoded_oracle() {
+fn checked_bound_space_permute_and_contract_build_hand_enumerated_layouts() {
     // What: the reachable Permute and Contract dispatcher arms of a checked
-    // capability produce results identical to the same public operation on
-    // an encoded-bound oracle. The Select and OutwardLeg arms have no public
-    // BoundDynamicFusionMapSpace caller that routes through the stored
-    // capability (their capability methods are dead code outside the encoded
-    // and lowered helpers), so they are not reachable to smoke-test here.
+    // capability build the hand-enumerated output layouts. The Select and
+    // OutwardLeg arms have no public BoundDynamicFusionMapSpace caller that
+    // routes through the stored capability (their capability methods are
+    // dead code outside the encoded and lowered helpers), so they are not
+    // reachable to smoke-test here.
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_structure_caches();
 
-    let encoded = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(ExternalUniqueRule::new()),
-        unique_matrix_homspace(),
-    )
-    .unwrap();
     let checked = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::new(ExternalUniqueRule::new()),
         unique_matrix_homspace(),
     )
     .unwrap();
+    let [first, second] = UNIQUE_LEGS;
 
-    let operation = TreeTransformOperation::permute([1, 0], [3, 2]);
+    // Swapping the two codomain legs and the two domain legs swaps their
+    // degeneracies; distinct per-leg degeneracies make the swap visible.
+    let permuted = checked
+        .transformed_multiplicity_free(&TreeTransformOperation::permute([1, 0], [3, 2]))
+        .unwrap();
+    let expected = xor_rows(
+        &[(second, false), (first, false)],
+        &[(second, true), (first, true)],
+    );
+    assert_eq!(block_rows(permuted.space()), expected);
     assert_eq!(
-        checked
-            .transformed_multiplicity_free(&operation)
-            .unwrap()
-            .space(),
-        encoded
-            .transformed_multiplicity_free(&operation)
-            .unwrap()
-            .space(),
+        permuted.space().required_len().unwrap(),
+        packed_len(&expected)
     );
 
-    let checked_contract =
+    // The outer product keeps every lhs axis in the codomain and every rhs
+    // axis in the domain. A leg crossing the split is dualized (TensorKit
+    // `permute`): the lhs dual domain legs become plain codomain legs and
+    // the rhs plain codomain legs become dual domain legs.
+    let outer =
         BoundDynamicFusionMapSpace::contracted_multiplicity_free(&checked, &checked, &[], &[])
             .unwrap();
-    let encoded_contract =
-        BoundDynamicFusionMapSpace::contracted_multiplicity_free(&encoded, &encoded, &[], &[])
-            .unwrap();
-    assert_eq!(checked_contract.space(), encoded_contract.space());
+    let plain = [(first, false), (second, false)];
+    let dual = [(first, true), (second, true)];
+    let expected = xor_rows(&[plain, plain].concat(), &[dual, dual].concat());
+    assert_eq!(expected.len(), 128);
+    assert_eq!(block_rows(outer.space()), expected);
+    assert_eq!(outer.space().required_len().unwrap(), packed_len(&expected));
 }
 
 #[test]
