@@ -57,7 +57,8 @@ operations avoid QSpace's per-product flatten and unflatten copies.
   `inner`/`norm` is a device-to-host sync, so a device implementation belongs
   with a fused basis projection (#1139).
 - `similar` of a lazy adjoint or a compact diagonal is
-  `Error::InvalidArgument`, naming `materialize()`: neither is an
+  `Error::Unsupported { operation: "Vector::similar", alternative:
+  Materialize }`: neither is an
   `axpby_into` destination, and densifying silently would hide a copy. Both
   are accepted as sources of `copy_from` and `axpby`.
 - Operation errors (space mismatch, a destination shared with a clone, …)

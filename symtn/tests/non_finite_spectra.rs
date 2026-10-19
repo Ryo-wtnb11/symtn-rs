@@ -24,6 +24,12 @@ use report::cause;
 
 use fixtures::host_runtime;
 
+/// pinv's finite-input refusal, the same typed operation error on compact and
+/// dense storage.
+const PINV_NONFINITE: OperationError = OperationError::InvalidArgument {
+    message: "pinv singular values must be finite",
+};
+
 fn policies() -> Vec<Truncation> {
     vec![
         Truncation::Full,
@@ -60,7 +66,7 @@ macro_rules! assert_nan_spectrum_is_rejected {
             assert!(
                 matches!(
                     diagonal.pinv(&[0], &[1], rcond),
-                    Err(Error::InvalidArgument(_))
+                    Err(Error::Operation(error)) if *error == PINV_NONFINITE
                 ),
                 "compact pinv hid a NaN entry at rcond {rcond}"
             );
@@ -200,7 +206,7 @@ fn compact_pinv_of_a_finite_diagonal_is_unchanged() {
 
 /// A NaN tensor through the dense multiplicity-free pinv routes (owned and
 /// lazy adjoint): the finite-input stage refuses it before any provider SVD,
-/// so every provider answers the compact route's `Error::InvalidArgument`.
+/// so every provider answers the compact route's typed operation error.
 #[test]
 fn dense_pinv_of_a_nan_tensor_is_invalid_argument() {
     let runtime = host_runtime();
@@ -231,10 +237,8 @@ fn dense_pinv_of_a_nan_tensor_is_invalid_argument() {
             ),
         ] {
             match result {
-                Err(Error::InvalidArgument(message)) => {
-                    assert!(message.contains("must be finite"), "{case}: {message}")
-                }
-                other => panic!("{case}: expected InvalidArgument, got {other:?}"),
+                Err(Error::Operation(error)) => assert_eq!(*error, PINV_NONFINITE, "{case}"),
+                other => panic!("{case}: expected the finite-input refusal, got {other:?}"),
             }
         }
         // rcond validation precedes the finite scan.

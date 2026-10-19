@@ -33,7 +33,8 @@
 //!
 //! - Host storage only: CUDA tensors do not implement [`Vector`].
 //! - `similar` of a lazy adjoint or a compact diagonal is
-//!   [`crate::typed::Error::InvalidArgument`]: neither is a valid `axpby_into`
+//!   [`crate::typed::Error::Unsupported`] with
+//!   [`crate::typed::Alternative::Materialize`]: neither is a valid `axpby_into`
 //!   destination, and densifying silently would hide a copy. Start from
 //!   `x0.materialize()?`; such tensors are still accepted as the source of
 //!   `copy_from`/`axpby`.
@@ -99,11 +100,10 @@ macro_rules! host_vector {
 
             fn similar(&self) -> Result<Self, Self::Error> {
                 if !self.is_owned_dense() {
-                    return Err(crate::typed::Error::InvalidArgument(
-                        "krylov needs an owned dense vector: pass `materialize()` of a lazy \
-                         adjoint or compact diagonal"
-                            .into(),
-                    )
+                    return Err(crate::typed::Error::Unsupported {
+                        operation: "Vector::similar",
+                        alternative: crate::typed::Alternative::Materialize,
+                    }
                     .into());
                 }
                 self.zeros_like()

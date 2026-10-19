@@ -230,8 +230,12 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
     let (v, _) = su2_legs();
     let x = filled!(&rt, [&v], [&v], Complex64, 4);
     let lazy = x.adjoint().unwrap();
-    let names_materialize =
-        |e: &Error| matches!(e, Error::InvalidArgument(m) if m.contains("materialize()"));
+    let names_materialize = |e: &Error| {
+        *e == Error::Unsupported {
+            operation: "Vector::similar",
+            alternative: symtn::typed::Alternative::Materialize,
+        }
+    };
     assert!(names_materialize(&lazy.similar().unwrap_err()));
     let compact = TensorMap::<_, Complex64>::diagonal(
         &rt,

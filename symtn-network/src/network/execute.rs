@@ -527,7 +527,7 @@ impl PlannedNetwork {
             let rule_identity = TypedSectorAdmission::typed_rule_identity(tensors[0].provider());
             for (index, &tensor) in tensors.iter().enumerate() {
                 if !runtime_identity.matches(tensor.runtime()) {
-                    return Err(invalid(format!("operand {index} uses a different Runtime")).into());
+                    return Err(Error::RuntimeMismatch.into());
                 }
                 if rule_identity != TypedSectorAdmission::typed_rule_identity(tensor.provider()) {
                     return Err(Error::RuleMismatch.into());

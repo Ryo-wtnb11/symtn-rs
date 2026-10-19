@@ -1721,6 +1721,12 @@ fn tenferro_dot_config(config: &DenseDotConfig) -> DotGeneralConfig {
 }
 
 pub(crate) fn tenferro_error(op: &'static str, err: tenferro_tensor::Error) -> DenseError {
+    if err.kind() == tenferro_tensor::ErrorKind::Unsupported {
+        return DenseError::Unsupported {
+            op,
+            message: err.to_string(),
+        };
+    }
     DenseError::Backend {
         backend: DenseBackend::Tenferro,
         op,

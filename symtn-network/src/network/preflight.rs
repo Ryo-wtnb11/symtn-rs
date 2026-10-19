@@ -16,9 +16,9 @@ where
     };
     let runtime = __network::runtime_identity(first.runtime());
     let identity = TypedSectorAdmission::typed_rule_identity(first.provider());
-    for (index, tensor) in tensors.iter().enumerate().skip(1) {
+    for tensor in tensors.iter().skip(1) {
         if !runtime.matches(tensor.runtime()) {
-            return Err(invalid(format!("operand {index} uses a different Runtime")).into());
+            return Err(Error::RuntimeMismatch.into());
         }
         if identity != TypedSectorAdmission::typed_rule_identity(tensor.provider()) {
             return Err(Error::RuleMismatch.into());

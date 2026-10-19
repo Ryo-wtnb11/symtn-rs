@@ -456,19 +456,6 @@ pub(crate) fn validate_norm_p(p: f64) -> Result<(), Error> {
     Ok(())
 }
 
-/// Surfaces a pinv seam's argument rejection (a non-finite singular value)
-/// as [`Error::InvalidArgument`], the variant the facade already uses for a
-/// bad `rcond` and the compact arm uses for the same non-finite condition, so
-/// the storage form does not pick the public error.
-pub(super) fn pinv_seam_error(error: symtn_tensors::OperationError) -> Error {
-    match error {
-        symtn_tensors::OperationError::InvalidArgument { message } => {
-            Error::InvalidArgument(message.to_string())
-        }
-        other => other.into(),
-    }
-}
-
 /// Julia's `max` for the `norm(t, Inf)` reduction: NaN in either argument wins.
 ///
 /// `f64::max` implements IEEE `maxNum`, which *discards* a NaN operand, so a
