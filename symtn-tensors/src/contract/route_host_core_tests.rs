@@ -1,12 +1,10 @@
 //! Core and CopyC routes on the one Host executor (#1859).
 //!
-//! The eager characterization compares, bit for bit and on the machine
-//! running the test, every eager Core / CopyC replay with `e6e9cac8`'s eager
-//! step sequence spelled with the replay primitives ([`base_core`],
-//! [`base_copy_c`]): alpha/beta placement, `Zeroed`, signed zeros and
-//! non-finite operands. The pinned digests fold signed zeros and NaNs (their
-//! signs are chosen by the dense backend's architecture-specific kernels) and
-//! tie the values to `e6e9cac8` on every platform.
+//! The eager accumulation contract `dst = alpha · lhs·rhs + beta · dst`
+//! (`Zeroed`, strong-zero beta, NaN propagation) is checked by hand formula
+//! against a product verified by the dense physical-basis oracle. Zero signs
+//! and NaN payloads are not pinned: the dense backend's architecture-specific
+//! kernels choose them.
 
 use super::*;
 
@@ -40,240 +38,230 @@ fn core_fixtures() -> Vec<(&'static str, Case<U1FusionRule>, RouteKind)> {
     fixtures
 }
 
-fn eager_resolution<R>(case: &Case<R>) -> crate::contract::StorageContractResolution<f64>
+/// Contracts `lhs` with `rhs` into `out` through the eager Host entry.
+#[allow(clippy::too_many_arguments)]
+fn eager_into<R>(
+    context: &mut Context<f64>,
+    case: &Case<R>,
+    lhs: &[f64],
+    rhs: &[f64],
+    alpha: f64,
+    init: ContractDestinationInit<f64>,
+    mut out: Vec<f64>,
+) -> Vec<f64>
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
-    Context::<f64>::default()
-        .plan_contract::<crate::contract::HostEagerExecutor, _>(
+    context
+        .tensorcontract_prelowered_into(
             &case.dst(),
+            &mut out,
             FusionOperand::direct(case.lhs.space()),
+            lhs,
             FusionOperand::direct(case.rhs.space()),
-            &case.lhs_axes,
-            &case.rhs_axes,
-            &case.output_axes,
+            rhs,
+            case.axes(),
+            alpha,
+            init,
         )
-        .unwrap()
+        .unwrap();
+    out
 }
 
-type Operand<'a> = (&'a Arc<symtn_core::BlockStructure>, &'a [f64]);
-
-/// `e6e9cac8`'s eager Core arm: the operands swapped for the B·A candidate,
-/// then `execute_raw_zeroed(alpha)` or `execute_raw(alpha, beta)`.
-#[allow(clippy::too_many_arguments)]
-fn base_core(
-    plan: &symtn_operations::fusion_replay::FusionBlockContractPlan<f64>,
-    swapped: bool,
-    dst_structure: &Arc<symtn_core::BlockStructure>,
-    dst: &mut [f64],
-    lhs: Operand<'_>,
-    rhs: Operand<'_>,
-    alpha: f64,
-    init: ContractDestinationInit<f64>,
-) {
-    let ((left_structure, left), (right_structure, right)) =
-        if swapped { (rhs, lhs) } else { (lhs, rhs) };
-    let mut backend = DenseTreeTransformOperations::default();
-    let mut backend_workspace = crate::contract::backend::TensorContractWorkspace::default();
-    let mut gemm = BackendRank2Gemm::<_, _, f64>::new(&mut backend, &mut backend_workspace);
-    let mut kernels = crate::StridedHostKernelAdapter::default();
-    let mut workspace = FusionBlockContractWorkspace::default();
-    match init {
-        ContractDestinationInit::Zeroed => plan.execute_raw_zeroed(
-            &mut kernels,
-            &mut gemm,
-            &mut workspace,
-            dst_structure,
-            dst,
-            left_structure,
-            left,
-            right_structure,
-            right,
-            alpha,
-        ),
-        ContractDestinationInit::Axpby(beta) => plan.execute_raw(
-            &mut kernels,
-            &mut gemm,
-            &mut workspace,
-            dst_structure,
-            dst,
-            left_structure,
-            left,
-            right_structure,
-            right,
-            alpha,
-            beta,
-        ),
-    }
-    .unwrap();
+fn close(found: f64, want: f64) -> bool {
+    (found - want).abs() <= 1e-12 * (1.0 + want.abs())
 }
 
-/// `e6e9cac8`'s eager CopyC arm (TensorKit `blas_contract!` copyC): the core
-/// `(1, 0)` into a zeroed temporary, then `overwrite(alpha)` for `Zeroed`
-/// or `into(alpha, beta)`.
-fn base_copy_c(
-    copy: &crate::contract::CopyCRoute<f64>,
-    dst_structure: &Arc<symtn_core::BlockStructure>,
-    dst: &mut [f64],
-    lhs: Operand<'_>,
-    rhs: Operand<'_>,
-    alpha: f64,
-    init: ContractDestinationInit<f64>,
-) {
-    let mut temporary = vec![0.0; copy.temporary_len];
-    base_core(
-        &copy.core,
-        copy.swapped,
-        &copy.temporary,
-        &mut temporary,
-        lhs,
-        rhs,
-        1.0,
-        ContractDestinationInit::Axpby(0.0),
-    );
-    let mut tree = TreeTransformExecutionContext::<f64, RuleIdentity>::new(
-        DenseTreeTransformOperations::default(),
-    );
-    match init {
-        ContractDestinationInit::Zeroed => tree.tree_transform_structure_overwrite_into_raw(
-            &copy.transform,
-            dst_structure,
-            &copy.temporary,
-            dst,
-            &temporary,
-            alpha,
-            &[],
-        ),
-        ContractDestinationInit::Axpby(beta) => tree.tree_transform_structure_into_raw(
-            &copy.transform,
-            dst_structure,
-            &copy.temporary,
-            dst,
-            &temporary,
-            alpha,
-            beta,
-        ),
-    }
-    .unwrap();
-}
-
-/// `e6e9cac8`'s eager sequence of a Core or CopyC resolution.
-#[allow(clippy::too_many_arguments)]
-fn base_route(
-    resolution: &crate::contract::StorageContractResolution<f64>,
-    dst_structure: &Arc<symtn_core::BlockStructure>,
-    dst: &mut [f64],
-    lhs: Operand<'_>,
-    rhs: Operand<'_>,
-    alpha: f64,
-    init: ContractDestinationInit<f64>,
-) {
-    match &resolution.route {
-        crate::contract::resolution::ContractRoute::Core { plan, swapped } => {
-            base_core(plan, *swapped, dst_structure, dst, lhs, rhs, alpha, init)
-        }
-        crate::contract::resolution::ContractRoute::CopyC(copy) => {
-            base_copy_c(copy, dst_structure, dst, lhs, rhs, alpha, init)
-        }
-        crate::contract::resolution::ContractRoute::DynamicTree(_) => {
-            panic!("Core / CopyC fixture planned DynamicTree")
-        }
-    }
-}
-
-/// Every eager `(alpha, init)` replay plus non-finite operand replays, each
-/// bit-identical to [`base_route`]; the portable digest of all outputs.
-fn eager_core_digest<R>(case: &Case<R>, route: RouteKind) -> u64
+/// `lhs · rhs` in storage order, checked against the dense physical-basis
+/// contraction (an oracle independent of every replay path).
+fn checked_product<R>(
+    context: &mut Context<f64>,
+    case: &Case<R>,
+    lhs: &[f64],
+    rhs: &[f64],
+) -> Vec<f64>
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
+        + symtn_core::PhysicalFusionBasis<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
     let dst = case.dst();
     let len = dst.space().required_len().unwrap();
-    let lhs = exact_data(case.lhs.space().required_len().unwrap(), 1);
-    let rhs = exact_data(case.rhs.space().required_len().unwrap(), 3);
-    let resolution = eager_resolution(case);
-    let mut digest = FNV_START;
-    let mut context = Context::<f64>::default();
-    let mut run = |lhs: &[f64], alpha: f64, init: ContractDestinationInit<f64>, out: Vec<f64>| {
-        let mut expected = out.clone();
-        base_route(
-            &resolution,
-            dst.space().structure(),
-            &mut expected,
-            (case.lhs.space().structure(), lhs),
-            (case.rhs.space().structure(), &rhs),
-            alpha,
-            init,
-        );
-        let mut actual = out;
-        context
-            .tensorcontract_prelowered_into(
-                &dst,
-                &mut actual,
-                FusionOperand::direct(case.lhs.space()),
-                lhs,
-                FusionOperand::direct(case.rhs.space()),
-                &rhs,
-                case.axes(),
-                alpha,
-                init,
-            )
+    let product = eager_into(
+        context,
+        case,
+        lhs,
+        rhs,
+        1.0,
+        ContractDestinationInit::Zeroed,
+        vec![0.0; len],
+    );
+    let (oracle_shape, oracle) = physical_oracle(case, lhs, rhs);
+    let (shape, found) =
+        crate::expand_physical_host(crate::BoundDynamicTensorRef::try_new(&dst, &product).unwrap())
             .unwrap();
-        assert_eq!(
-            context.last_resolution_is_core(),
-            route == RouteKind::Core,
-            "{route:?}"
-        );
-        assert_eq!(bits(&actual), bits(&expected), "alpha {alpha}, {init:?}");
-        fnv(&mut digest, &actual);
-    };
-    for alpha in [0.0, 1.0, -1.0, 2.5] {
-        for (init, read) in inits() {
-            let out = match (init, read) {
-                (ContractDestinationInit::Zeroed, _) => vec![0.0; len],
-                (_, None) => vec![f64::NAN; len],
-                (_, Some(_)) => exact_data(len, 11),
-            };
-            run(&lhs, alpha, init, out);
-        }
+    assert_eq!(shape, oracle_shape);
+    for (&value, &want) in found.iter().zip(&oracle) {
+        assert!(close(value, want), "product: {value} vs {want}");
     }
-    let mut poisoned = lhs.clone();
-    poisoned[0] = f64::NAN;
-    if poisoned.len() > 1 {
-        poisoned[1] = f64::INFINITY;
-    }
-    for alpha in [0.0, 1.0] {
-        run(
-            &poisoned,
-            alpha,
-            ContractDestinationInit::Axpby(1.0),
-            exact_data(len, 11),
-        );
-    }
-    digest
+    assert!(product.iter().any(|&value| value != 0.0));
+    product
 }
 
-/// Portable digests (see [`portable_bits`]) of the eager Core / CopyC
-/// replays, recorded on `e6e9cac8`.
-const EAGER_CORE_PINNED: [(&str, u64); 4] = [
-    ("core, inactive block", 0xa9b1_d5db_d80a_fb07),
-    ("core, swapped", 0xf11f_58af_16f1_4d74),
-    ("copyC C1p", 0x2be7_3679_de6f_8c4e),
-    ("copyC C2p", 0x9258_b27c_c589_c856),
-];
+/// Every eager `(alpha, init)` replay against `alpha · P + beta · dst`,
+/// elementwise in storage order, with `P` the oracle-checked product; then
+/// NaN in the destination and, when `poison_lhs`, NaN in an operand.
+fn check_accumulation<R>(name: &str, case: &Case<R>, route: RouteKind, poison_lhs: bool)
+where
+    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+        + symtn_core::PhysicalFusionBasis<Scalar = f64>
+        + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
+{
+    let len = case.dst().space().required_len().unwrap();
+    let lhs = exact_data(case.lhs.space().required_len().unwrap(), 1);
+    // Nonzero, so a NaN lhs entry reaches every output it is multiplied into.
+    let rhs = exact_data(case.rhs.space().required_len().unwrap(), 3)
+        .into_iter()
+        .map(|value| value + 3.0)
+        .collect::<Vec<_>>();
+    let mut context = Context::<f64>::default();
+    let product = checked_product(&mut context, case, &lhs, &rhs);
+    assert_eq!(
+        context.last_resolution_is_core(),
+        route == RouteKind::Core,
+        "{name}"
+    );
+    let start = exact_data(len, 11);
+    let zeros = vec![0.0; len];
+    for alpha in [0.0, -1.0, 2.5] {
+        // `(init, beta, initial destination, what beta multiplies)`. A zero
+        // beta of either sign is BLAS `beta == 0`: the destination is not
+        // read, so its NaNs do not reach the output.
+        for (init, beta, out, read) in [
+            (
+                ContractDestinationInit::Axpby(0.0),
+                0.0,
+                vec![f64::NAN; len],
+                &zeros,
+            ),
+            (
+                ContractDestinationInit::Axpby(-0.0),
+                0.0,
+                vec![f64::NAN; len],
+                &zeros,
+            ),
+            (
+                ContractDestinationInit::Axpby(1.0),
+                1.0,
+                start.clone(),
+                &start,
+            ),
+            (
+                ContractDestinationInit::Axpby(-0.5),
+                -0.5,
+                start.clone(),
+                &start,
+            ),
+            (ContractDestinationInit::Zeroed, 0.0, zeros.clone(), &zeros),
+        ] {
+            let found = eager_into(&mut context, case, &lhs, &rhs, alpha, init, out);
+            for (index, &value) in found.iter().enumerate() {
+                let want = alpha * product[index] + beta * read[index];
+                assert!(
+                    close(value, want),
+                    "{name}, alpha {alpha}, {init:?}, [{index}]: {value} vs {want}"
+                );
+            }
+        }
+    }
+    // A NaN destination entry read through a nonzero beta stays NaN and
+    // leaves every other entry exact.
+    let mut nan_start = start.clone();
+    nan_start[0] = f64::NAN;
+    nan_start[len - 1] = f64::NAN;
+    let found = eager_into(
+        &mut context,
+        case,
+        &lhs,
+        &rhs,
+        2.5,
+        ContractDestinationInit::Axpby(-0.5),
+        nan_start.clone(),
+    );
+    for (index, &value) in found.iter().enumerate() {
+        if nan_start[index].is_nan() {
+            assert!(value.is_nan(), "{name}, NaN dst [{index}]: {value}");
+        } else {
+            let want = 2.5 * product[index] - 0.5 * start[index];
+            assert!(close(value, want), "{name}, NaN dst [{index}]: {value}");
+        }
+    }
+    if !poison_lhs {
+        return;
+    }
+    // A NaN in `lhs[0]` reaches exactly the outputs that depend on it: those
+    // that change when `lhs[0]` is shifted by one (with U(1) coefficients
+    // ±1 and a nonzero rhs, no dependence cancels).
+    let mut shifted = lhs.clone();
+    shifted[0] += 1.0;
+    let reach = checked_product(&mut context, case, &shifted, &rhs);
+    let mut poisoned = lhs.clone();
+    poisoned[0] = f64::NAN;
+    let found = eager_into(
+        &mut context,
+        case,
+        &poisoned,
+        &rhs,
+        2.5,
+        ContractDestinationInit::Axpby(1.0),
+        start.clone(),
+    );
+    let mut reached = 0;
+    for (index, &value) in found.iter().enumerate() {
+        if reach[index] != product[index] {
+            reached += 1;
+            assert!(value.is_nan(), "{name}, NaN lhs [{index}]: {value}");
+        } else {
+            let want = 2.5 * product[index] + start[index];
+            assert!(close(value, want), "{name}, NaN lhs [{index}]: {value}");
+        }
+    }
+    assert!(reached > 0, "{name}");
+}
 
 #[test]
-fn eager_core_and_copy_c_bits_are_pinned() {
-    let observed = core_fixtures()
-        .iter()
-        .map(|(name, case, route)| (*name, eager_core_digest(case, *route)))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        observed, EAGER_CORE_PINNED,
-        "observed digests: {observed:#x?}"
-    );
+fn eager_host_routes_accumulate_alpha_times_product_plus_beta_times_destination() {
+    // What: on every Host route (Core unswapped with an inactive block and
+    // swapped, CopyC in both orientations, DynamicTree with identity and
+    // transformed output; U(1) and SU(2)), the eager result is
+    // `alpha · lhs·rhs + beta · dst` for alpha in {0, -1, 2.5} and beta in
+    // {0, -0, 1, -0.5}; `Zeroed` and a zero beta of either sign never read
+    // the destination; a destination NaN read through beta and an operand
+    // NaN propagate only to the entries they reach.
+    for (name, case, route) in core_fixtures() {
+        check_accumulation(name, &case, route, true);
+    }
+    for (name, case) in dynamic_tree_fixtures().0 {
+        check_accumulation(name, &case, RouteKind::DynamicTree, true);
+    }
+    let su2 = Arc::new(SU2FusionRule);
+    for (name, case, route) in [
+        (
+            "SU2 core",
+            square_case(&su2, su2_leg, [2, 3], [0, 1], [0, 1, 2, 3]),
+            RouteKind::Core,
+        ),
+        (
+            "SU2 copyC C1p",
+            square_case(&su2, su2_leg, [3, 2], [1, 0], [1, 0, 3, 2]),
+            RouteKind::CopyC,
+        ),
+        ("SU2 dynamicTree", su2_rank5_case(), RouteKind::DynamicTree),
+    ] {
+        assert_eq!(owned_routes(&case), (route, route), "{name}");
+        check_accumulation(name, &case, route, false);
+    }
 }
 
 /// The Host member entry over default dense executors, for any route.
