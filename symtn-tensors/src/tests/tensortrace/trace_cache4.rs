@@ -1,6 +1,6 @@
 //! Trace permutation columns through cache 4 (#2072): multiplicity-free
-//! output bits pinned to a revision without this cache, cold and warm; per-group
-//! hits and misses, key splits, presence and the per-pair oracle.
+//! terms and outputs against the per-pair oracle, cold and warm; per-group
+//! hits and misses, key splits and presence.
 
 use super::*;
 use crate::probe::{take_trace_column_activity, CoefficientGroupActivity};
@@ -10,39 +10,6 @@ use symtn_core::{
 
 type FpSu2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
 
-/// FNV-1a over 64-bit words: a bit-exact fingerprint of terms and outputs.
-pub(super) fn fingerprint(words: impl IntoIterator<Item = u64>) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for word in words {
-        for byte in word.to_le_bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-    hash
-}
-
-/// A platform-portable word for a pinned value: rounded to `f32`, with ±0
-/// and every NaN folded. Why not the `f64` bits: symbol providers and dense
-/// kernels may round the last bits differently across platforms (libm, FMA,
-/// SIMD width; #2104), while a changed term set, order or accumulation
-/// path moves values far beyond `f32` rounding. Same-run comparisons (cold
-/// against warm) stay bit-exact.
-pub(super) fn portable(value: f64) -> u64 {
-    let value = value as f32;
-    if value == 0.0 {
-        0
-    } else if value.is_nan() {
-        u64::MAX
-    } else {
-        u64::from(value.to_bits())
-    }
-}
-
-/// `(terms, f64 output, Complex64 output)` fingerprints of one MF trace:
-/// term blocks exact, values through [`portable`].
-type Prints = [u64; 3];
-
 fn real(i: usize) -> f64 {
     ((i * 7919 + 13) % 1009) as f64 / 37.0 - 13.0
 }
@@ -51,71 +18,245 @@ fn complex(i: usize) -> Complex64 {
     Complex64::new(real(i), real(i + 503) / 3.0)
 }
 
-fn mf_prints<R>(
-    provider: Arc<R>,
-    src_hom: FusionTreeHomSpace,
-    axes: TensorTraceAxisSpec<'_>,
-    dst_nout: usize,
-) -> Prints
+/// The materialized adjoint of `src` with payload `data`: TensorKit's
+/// `block(t', (f2, f1)) = permutedims(conj(block(t, (f1, f2))))`, codomain
+/// and domain swapped without dualizing.
+fn materialized_adjoint<R, T>(
+    provider: &Arc<R>,
+    src: &BoundDynamicFusionMapSpace<R>,
+    data: &[T],
+    conj: impl Fn(T) -> T,
+) -> (BoundDynamicFusionMapSpace<R>, Vec<T>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_core::CheckedFusionAlgebra,
+    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+    T: Copy + Default,
 {
-    let src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::clone(&provider),
-        src_hom,
+    let hom = src.space().homspace();
+    let adjoint = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::clone(provider),
+        FusionTreeHomSpace::new(hom.domain().clone(), hom.codomain().clone()),
     )
     .unwrap();
-    let dst_hom = crate::tensortrace_fusion_dyn_preflight_checked(&src, axes, dst_nout)
-        .unwrap()
-        .into_selected_homspace();
-    let dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(provider, dst_hom)
-        .unwrap();
-    let structure =
-        TensorTraceFusionStructure::<f64>::compile_fusion_dyn_checked(&dst, &src, axes).unwrap();
-    let terms = fingerprint(structure.terms().iter().flat_map(|term| {
-        [
-            term.dst_block() as u64,
-            term.src_block() as u64,
-            portable(*term.coefficient()),
-        ]
-    }));
-    let len = src.space().required_len().unwrap();
-    let real_data = (0..len).map(real).collect::<Vec<_>>();
-    let complex_data = (0..len).map(complex).collect::<Vec<_>>();
-    let real_out =
-        crate::tensortrace_fusion_dyn_owned_checked(&dst, &src, &real_data, axes, 1.0).unwrap();
-    let complex_out = crate::tensortrace_fusion_dyn_owned_checked(
-        &dst,
-        &src,
-        &complex_data,
-        axes,
-        Complex64::new(1.0, 0.0),
-    )
-    .unwrap();
-    [
-        terms,
-        fingerprint(real_out.iter().map(|&value| portable(value))),
-        fingerprint(
-            complex_out
-                .iter()
-                .flat_map(|value| [portable(value.re), portable(value.im)]),
-        ),
-    ]
+    let parent = src.space().structure();
+    let structure = adjoint.space().structure();
+    let mut out = vec![T::default(); adjoint.space().required_len().unwrap()];
+    for index in 0..structure.block_count() {
+        let block = structure.block(index).unwrap();
+        let key = expect_tree_key(block.key());
+        let source = parent
+            .fusion_tree_pair_block(&FusionTreePairKey::pair(
+                key.domain_tree().clone(),
+                key.codomain_tree().clone(),
+            ))
+            .unwrap();
+        let split = key.codomain_tree().uncoupled().len();
+        for_each_index(block.shape(), |index| {
+            let parent_index = [&index[split..], &index[..split]].concat();
+            let at = |offset: usize, strides: &[usize], index: &[usize]| {
+                offset + index.iter().zip(strides).map(|(i, s)| i * s).sum::<usize>()
+            };
+            out[at(block.offset(), block.strides(), index)] =
+                conj(data[at(source.offset(), source.strides(), &parent_index)]);
+        });
+    }
+    (adjoint, out)
 }
 
-/// A named bit-pin case.
-type Case<'a> = (&'a str, Prints, Box<dyn Fn() -> Prints + 'a>);
+fn for_each_index(shape: &[usize], mut visit: impl FnMut(&[usize])) {
+    let count = shape.iter().product::<usize>();
+    let mut index = vec![0; shape.len()];
+    for linear in 0..count {
+        let mut rest = linear;
+        for (slot, &extent) in index.iter_mut().zip(shape) {
+            *slot = rest % extent;
+            rest /= extent;
+        }
+        visit(&index);
+    }
+}
 
-/// Runs a case cold (after a reset) and warm; both must equal `expected`.
-fn assert_cold_and_warm(name: &str, expected: Prints, prints: impl Fn() -> Prints) {
-    let _guard = crate::test_support::CACHE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+/// `Σ_terms coefficient · (partial trace of the source block)` into each
+/// destination block, by explicit index loops: destination axis `k` reads
+/// source axis `output[k]`, and each traced pair shares one index.
+fn trace_data_oracle<T>(
+    terms: &[(FusionTreePairKey, FusionTreePairKey, usize, usize, f64)],
+    dst: &BlockStructure,
+    dst_len: usize,
+    src: &BlockStructure,
+    data: &[T],
+    (output, lhs, rhs): (&[usize], &[usize], &[usize]),
+) -> Vec<T>
+where
+    T: Copy + Default + std::ops::AddAssign + std::ops::Mul<f64, Output = T>,
+{
+    let mut out = vec![T::default(); dst_len];
+    for (_, _, dst_block, src_block, coefficient) in terms {
+        let (d, s) = (
+            dst.block(*dst_block).unwrap(),
+            src.block(*src_block).unwrap(),
+        );
+        let traced = lhs.iter().map(|&axis| s.shape()[axis]).collect::<Vec<_>>();
+        for_each_index(d.shape(), |open| {
+            let mut src_index = vec![0; s.shape().len()];
+            for (k, &axis) in output.iter().enumerate() {
+                src_index[axis] = open[k];
+            }
+            let mut sum = T::default();
+            for_each_index(&traced, |shared| {
+                for (i, (&l, &r)) in lhs.iter().zip(rhs).enumerate() {
+                    src_index[l] = shared[i];
+                    src_index[r] = shared[i];
+                }
+                let at = s.offset()
+                    + src_index
+                        .iter()
+                        .zip(s.strides())
+                        .map(|(i, stride)| i * stride)
+                        .sum::<usize>();
+                sum += data[at];
+            });
+            let at = d.offset()
+                + open
+                    .iter()
+                    .zip(d.strides())
+                    .map(|(i, stride)| i * stride)
+                    .sum::<usize>();
+            out[at] += sum * *coefficient;
+        });
+    }
+    out
+}
+
+/// One multiplicity-free trace, cold (after a cache reset) then warm: the
+/// compiled terms equal [`scalar_trace_term_oracle`] (unless `conjugate`,
+/// whose terms are over the parent layout), and the f64 and c64 outputs
+/// equal [`trace_data_oracle`] over the source, or over its materialized
+/// adjoint when `conjugate`. Warm equals cold bit for bit.
+fn check_mf_trace<R>(
+    name: &str,
+    provider: Arc<R>,
+    hom: FusionTreeHomSpace,
+    (output, lhs, rhs): (&[usize], &[usize], &[usize]),
+    conjugate: bool,
+) where
+    R: MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_core::CheckedFusionAlgebra,
+{
+    let axes = TensorTraceAxisSpec::new_with_conjugation(output, lhs, rhs, conjugate);
+    let nout = output.len().min(1);
+    let trace = MfTrace::new(Arc::clone(&provider), hom, axes, nout);
+    let len = trace.src.space().required_len().unwrap();
+    let real_data = (0..len).map(real).collect::<Vec<_>>();
+    let complex_data = (0..len).map(complex).collect::<Vec<_>>();
+    // A conjugating spec names the stored tensor's axes; the trace acts on
+    // its adjoint, whose axis for stored axis `a` is TensorKit's
+    // `adjointtensorindex`: codomain axis `a` becomes `nin + a`, domain axis
+    // `a` becomes `a - nout`.
+    let (stored_nout, stored_nin) = (trace.src.space().nout(), trace.src.space().nin());
+    let logical_axis = |axis: &usize| match (conjugate, *axis < stored_nout) {
+        (false, _) => *axis,
+        (true, true) => stored_nin + axis,
+        (true, false) => axis - stored_nout,
+    };
+    let map = |axes: &[usize]| axes.iter().map(logical_axis).collect::<Vec<_>>();
+    let (output, lhs, rhs) = (map(output), map(lhs), map(rhs));
+    let (logical, real_logical, complex_logical) = if conjugate {
+        let (space, real_adjoint) = materialized_adjoint(&provider, &trace.src, &real_data, |x| x);
+        let (_, complex_adjoint) =
+            materialized_adjoint(&provider, &trace.src, &complex_data, |x| x.conj());
+        (space, real_adjoint, complex_adjoint)
+    } else {
+        (trace.src.clone(), real_data.clone(), complex_data.clone())
+    };
+    // The destination the conjugating trace selects is the one a plain trace
+    // of the materialized adjoint selects.
+    let logical_dst = crate::tensortrace_fusion_dyn_preflight_checked(
+        &logical,
+        TensorTraceAxisSpec::new(&output, &lhs, &rhs),
+        nout,
+    )
+    .unwrap()
+    .into_selected_homspace();
+    assert_eq!(&logical_dst, trace.dst.space().homspace(), "{name}");
+    let oracle = scalar_trace_term_oracle(
+        provider.as_ref(),
+        trace.dst.space().structure(),
+        logical.space().structure(),
+        &output,
+        &lhs,
+        &rhs,
+        nout,
+    );
+    assert!(!oracle.is_empty(), "{name}");
+    let dst_len = trace.dst.space().required_len().unwrap();
+    let (dst, src) = (trace.dst.space().structure(), logical.space().structure());
+    let axes_triple = (&output[..], &lhs[..], &rhs[..]);
+    let want_real = trace_data_oracle(&oracle, dst, dst_len, src, &real_logical, axes_triple);
+    let want_complex = trace_data_oracle(&oracle, dst, dst_len, src, &complex_logical, axes_triple);
+    let run = || {
+        let structure = trace.compile(axes);
+        if !conjugate {
+            assert_eq!(structure.terms().len(), oracle.len(), "{name}");
+            for (actual, (dst_key, src_key, dst_block, src_block, coefficient)) in
+                structure.terms().iter().zip(&oracle)
+            {
+                assert_eq!(
+                    (
+                        actual.dst_key(),
+                        actual.src_key(),
+                        actual.dst_block(),
+                        actual.src_block()
+                    ),
+                    (dst_key, src_key, *dst_block, *src_block),
+                    "{name}"
+                );
+                assert!(
+                    (actual.coefficient() - coefficient).abs()
+                        <= 1.0e-12 * (1.0 + coefficient.abs()),
+                    "{name}"
+                );
+            }
+        }
+        let real_out = crate::tensortrace_fusion_dyn_owned_checked(
+            &trace.dst, &trace.src, &real_data, axes, 1.0,
+        )
+        .unwrap();
+        let complex_out = crate::tensortrace_fusion_dyn_owned_checked(
+            &trace.dst,
+            &trace.src,
+            &complex_data,
+            axes,
+            Complex64::new(1.0, 0.0),
+        )
+        .unwrap();
+        for (index, (got, want)) in real_out.iter().zip(&want_real).enumerate() {
+            assert!(
+                (got - want).abs() <= 1e-11 * (1.0 + want.abs()),
+                "{name} f64 [{index}]: {got} vs {want}"
+            );
+        }
+        for (index, (got, want)) in complex_out.iter().zip(&want_complex).enumerate() {
+            assert!(
+                (got - want).norm() <= 1e-11 * (1.0 + want.norm()),
+                "{name} c64 [{index}]: {got} vs {want}"
+            );
+        }
+        assert!(want_real.iter().any(|value| *value != 0.0), "{name}");
+        (
+            real_out
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            complex_out
+                .iter()
+                .flat_map(|value| [value.re.to_bits(), value.im.to_bits()])
+                .collect::<Vec<_>>(),
+        )
+    };
+    let _guard = cache_lock();
     clear_structure_caches();
-    let cold = prints();
-    let warm = prints();
+    let cold = run();
+    let warm = run();
     assert_eq!(cold, warm, "{name}: warm differs from cold");
-    assert_eq!(cold, expected, "{name}: differs from the pinned revision");
 }
 
 fn su2_leg() -> SectorLeg {
@@ -169,124 +310,29 @@ fn u1_hom() -> FusionTreeHomSpace {
     )
 }
 
-/// What: multiplicity-free trace terms and outputs keep the bits of
-/// c7b82353/a04e59c2 (one `(p…, q…)` braid, the identity permutation, the
-/// lazy adjoint, two pairs) for SU(2), the fermionic fZ2⊠SU(2) product
-/// (twist factor) and U(1) (Unique), and a warm call equals a cold one.
+/// What: multiplicity-free trace terms and outputs (one `(p…, q…)` braid,
+/// the identity permutation, the lazy adjoint, two pairs) equal the per-pair
+/// oracle and its explicit index-loop evaluation for SU(2), the fermionic
+/// fZ2⊠SU(2) product (twist factor) and U(1) (Unique), cold and warm.
 #[test]
-fn mf_trace_bits_match_pinned_revision_cold_and_warm() {
-    let open = TensorTraceAxisSpec::new(&[1, 3], &[0], &[2]);
-    let identity = TensorTraceAxisSpec::new(&[0, 2], &[1], &[3]);
-    let adjoint = TensorTraceAxisSpec::new_with_conjugation(&[1, 3], &[0], &[2], true);
-    let both = TensorTraceAxisSpec::new(&[], &[0, 1], &[2, 3]);
+fn mf_trace_terms_and_outputs_match_the_per_pair_oracle_cold_and_warm() {
+    let open: (&[usize], &[usize], &[usize]) = (&[1, 3], &[0], &[2]);
+    let identity: (&[usize], &[usize], &[usize]) = (&[0, 2], &[1], &[3]);
+    let both: (&[usize], &[usize], &[usize]) = (&[], &[0, 1], &[2, 3]);
     let su2 = || Arc::new(SU2FusionRule);
     let fp = || Arc::new(FpSu2Rule::default());
     let u1 = || Arc::new(U1FusionRule);
-    let cases: [Case; 10] = [
-        (
-            "su2 open",
-            PIN_SU2_OPEN,
-            Box::new(|| mf_prints(su2(), su2_hom(), open, 1)),
-        ),
-        (
-            "su2 identity",
-            PIN_SU2_IDENTITY,
-            Box::new(|| mf_prints(su2(), su2_hom(), identity, 1)),
-        ),
-        (
-            "su2 adjoint",
-            PIN_SU2_ADJOINT,
-            Box::new(|| mf_prints(su2(), su2_hom(), adjoint, 1)),
-        ),
-        (
-            "su2 both",
-            PIN_SU2_BOTH,
-            Box::new(|| mf_prints(su2(), su2_hom(), both, 0)),
-        ),
-        (
-            "fp⊠su2 open",
-            PIN_FP_OPEN,
-            Box::new(|| mf_prints(fp(), fp_su2_hom(), open, 1)),
-        ),
-        (
-            "fp⊠su2 identity",
-            PIN_FP_IDENTITY,
-            Box::new(|| mf_prints(fp(), fp_su2_hom(), identity, 1)),
-        ),
-        (
-            "fp⊠su2 adjoint",
-            PIN_FP_ADJOINT,
-            Box::new(|| mf_prints(fp(), fp_su2_hom(), adjoint, 1)),
-        ),
-        (
-            "fp⊠su2 both",
-            PIN_FP_BOTH,
-            Box::new(|| mf_prints(fp(), fp_su2_hom(), both, 0)),
-        ),
-        (
-            "u1 open",
-            PIN_U1_OPEN,
-            Box::new(|| mf_prints(u1(), u1_hom(), open, 1)),
-        ),
-        (
-            "u1 adjoint",
-            PIN_U1_ADJOINT,
-            Box::new(|| mf_prints(u1(), u1_hom(), adjoint, 1)),
-        ),
-    ];
-    for (name, expected, prints) in cases {
-        assert_cold_and_warm(name, expected, prints);
-    }
+    check_mf_trace("su2 open", su2(), su2_hom(), open, false);
+    check_mf_trace("su2 identity", su2(), su2_hom(), identity, false);
+    check_mf_trace("su2 adjoint", su2(), su2_hom(), open, true);
+    check_mf_trace("su2 both", su2(), su2_hom(), both, false);
+    check_mf_trace("fp⊠su2 open", fp(), fp_su2_hom(), open, false);
+    check_mf_trace("fp⊠su2 identity", fp(), fp_su2_hom(), identity, false);
+    check_mf_trace("fp⊠su2 adjoint", fp(), fp_su2_hom(), open, true);
+    check_mf_trace("fp⊠su2 both", fp(), fp_su2_hom(), both, false);
+    check_mf_trace("u1 open", u1(), u1_hom(), open, false);
+    check_mf_trace("u1 adjoint", u1(), u1_hom(), open, true);
 }
-
-/// Recorded through [`portable`] at 25724aa2, whose f64 bits equal
-/// those of a04e59c2 (a revision without cache 4) on macOS arm64.
-const PIN_SU2_OPEN: Prints = [
-    11611427905873280266,
-    10875861184201763681,
-    18314849795358653513,
-];
-const PIN_SU2_IDENTITY: Prints = [
-    4232214989127025742,
-    14871361164243178883,
-    7230379840223023516,
-];
-const PIN_SU2_ADJOINT: Prints = [
-    11908699873957774648,
-    10875861184201763681,
-    595741395235360969,
-];
-const PIN_SU2_BOTH: Prints = [
-    3784787345327458428,
-    2335335494070420844,
-    18406391343200945282,
-];
-const PIN_FP_OPEN: Prints = [
-    6096770442742908238,
-    9093196998694218356,
-    13131061586690796996,
-];
-const PIN_FP_IDENTITY: Prints = [9754700174760375834, 954779586424958464, 90324878527814011];
-const PIN_FP_ADJOINT: Prints = [
-    7639453720453207797,
-    18388007180403325428,
-    8925810726760189892,
-];
-const PIN_FP_BOTH: Prints = [
-    549713337742343836,
-    13971276279694029957,
-    4008062945554711502,
-];
-const PIN_U1_OPEN: Prints = [
-    13709948616143683732,
-    11264073318909681051,
-    8471838890349698562,
-];
-const PIN_U1_ADJOINT: Prints = [
-    10518078638784018340,
-    13735893356685760447,
-    15747945630213552074,
-];
 
 /// One multiplicity-free trace: its bound source and selected destination.
 struct MfTrace<R> {

@@ -11,8 +11,8 @@ mod compose_plan_tests;
 #[path = "contract_batch_copy_c.rs"]
 mod copy_c;
 #[cfg(test)]
-#[path = "contract_batch_pins.rs"]
-mod member_pins;
+#[path = "contract_batch_members.rs"]
+mod members;
 
 /// Immutable contraction structure for owned-dense Host or CUDA stacks.
 ///

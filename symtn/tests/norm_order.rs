@@ -1,12 +1,11 @@
 //! `TensorMap::norm(p)` is the single norm entry (#1544).
 //!
-//! It replaced `norm()`, `norm_p(p)` and `norm_inf()`. The golden bit patterns
-//! below were emitted by those three methods at `origin/main` cf19fa17, so
-//! each arm is pinned bit-for-bit to the reduction it replaced:
-//! `norm(2.0)` to the old `norm()` (overflow rescaling included, see `huge`
-//! and `tiny`), `norm(f64::INFINITY)` to the old `norm_inf()`, and every other
-//! exponent to the old `norm_p(p)`. TensorKit agreement of the same values is
-//! asserted in `tk_norm_p.rs` and `tk_norm_range.rs`.
+//! Every arm is checked against TensorKit's formula evaluated by hand from
+//! the fill functions: `max |x|` for `p = ∞`, else
+//! `(Σ_c dim(c) Σ |x|^p)^(1/p)` (`src/tensors/linalg.jl`), over dense, compact,
+//! lazy-adjoint, single-precision and out-of-range (rescaled) payloads.
+//! Recorded TensorKit values of the same fixtures are asserted in
+//! `tk_norm_p.rs` and `tk_norm_range.rs`.
 
 use std::sync::Arc;
 
@@ -78,38 +77,72 @@ fn compact_su2(rt: &Runtime) -> TensorMap<SU2FusionRule, f64> {
     .unwrap()
 }
 
-/// Exponents of the golden rows, in column order.
+/// Exponents checked for every tensor.
 const EXPONENTS: [f64; 5] = [2.0, f64::INFINITY, 1.0, 3.0, 0.5];
 
-/// `[norm(), norm_inf(), norm_p(1), norm_p(3), norm_p(0.5)]` at cf19fa17.
-#[rustfmt::skip]
-const GOLDEN: [(&str, [u64; 5]); 9] = [
-    ("u1_f64", [0x4018d1c0be7f20ac, 0x4004000000000000, 0x4039000000000000, 0x401052557b4bcdc2, 0x407d4f0c460c8e65]),
-    ("u1_c64", [0x40204a535d95fbc8, 0x4005308af161f4a5, 0x40420b48518ebb90, 0x40143d951de00fc4, 0x4087458a2847fef7]),
-    ("su2_f64", [0x4023502e64db5456, 0x4004000000000000, 0x404bc00000000000, 0x40165ae90b39d16f, 0x40a010e47e6135e6]),
-    ("su2_c64", [0x40274630b96b8bd8, 0x4005308af161f4a5, 0x4051b59da4e7f12a, 0x401a0e633b5258e8, 0x40a5b1b21a04a538]),
-    ("su2_c32", [0x40274630b96b8bd8, 0x4005308af161f4a5, 0x4051b59da4e7f12a, 0x401a0e633b5258e8, 0x40a5b1b21a04a538]),
-    ("huge", [0x69a93b2d98b14ad9, 0x698a20df0dcd3af0, 0x69d220678b2cc74a, 0x699d3486888a73ef, 0x6a24fd2a72ec208c]),
-    ("tiny", [0x1698f05b18cca0af, 0x1680383813b5fbff, 0x16bb9faa12d422d0, 0x168efc7d7000c5fe, 0x1701d033aafa02c9]),
-    ("compact", [0x40231c8c3cc94cf6, 0x4012000000000000, 0x403f000000000000, 0x401bf66fac709513, 0x407d4754f90d31c9]),
-    ("adjoint", [0x40274630b96b8bd8, 0x4005308af161f4a5, 0x4051b59da4e7f12a, 0x401a0e633b5258e8, 0x40a5b1b21a04a538]),
-];
+/// `(dim(c), rows, cols)` of every coupled block of a `[V] ← [W]` pair:
+/// the sectors both legs carry, with their quantum dimensions.
+fn u1_blocks() -> Vec<(f64, usize, usize)> {
+    vec![(1.0, 2, 5), (1.0, 3, 1), (1.0, 4, 2)]
+}
 
-fn assert_golden(name: &str, norm: impl Fn(f64) -> Result<f64, Error>) {
-    let (_, bits) = GOLDEN.iter().find(|(row, _)| *row == name).unwrap();
-    for (&p, &expected) in EXPONENTS.iter().zip(bits) {
+fn su2_blocks() -> Vec<(f64, usize, usize)> {
+    vec![(1.0, 2, 5), (2.0, 3, 1), (3.0, 4, 2)]
+}
+
+/// TensorKit `norm(t, p)` by hand: `max |x|` for `p = ∞`, else
+/// `(Σ_c dim(c) Σ |x|^p)^(1/p)` over `(dim(c), entries of block c)`.
+fn hand_norm(blocks: &[(f64, Vec<f64>)], p: f64) -> f64 {
+    let entries = || {
+        blocks
+            .iter()
+            .flat_map(|(dim, values)| values.iter().map(move |value| (*dim, value.abs())))
+    };
+    if p.is_infinite() {
+        return entries().map(|(_, value)| value).fold(0.0, f64::max);
+    }
+    entries()
+        .map(|(dim, value)| dim * value.powf(p))
+        .sum::<f64>()
+        .powf(p.recip())
+}
+
+/// The magnitudes of `fill(i, j)` over each `rows × cols` block.
+fn filled(
+    blocks: Vec<(f64, usize, usize)>,
+    magnitude: impl Fn(&[usize]) -> f64,
+) -> Vec<(f64, Vec<f64>)> {
+    blocks
+        .into_iter()
+        .map(|(dim, rows, cols)| {
+            let values = (0..rows)
+                .flat_map(|i| (0..cols).map(move |j| [i, j]))
+                .map(|ij| magnitude(&ij))
+                .collect();
+            (dim, values)
+        })
+        .collect()
+}
+
+fn assert_hand(
+    name: &str,
+    blocks: &[(f64, Vec<f64>)],
+    scale: f64,
+    tol: f64,
+    norm: impl Fn(f64) -> Result<f64, Error>,
+) {
+    for p in EXPONENTS {
         let actual = norm(p).unwrap();
-        assert_eq!(
-            actual.to_bits(),
-            expected,
-            "{name} norm({p}) = {actual:e}, expected {:e}",
-            f64::from_bits(expected)
+        let expected = scale * hand_norm(blocks, p);
+        assert!(
+            (actual - expected).abs() <= tol * expected,
+            "{name} norm({p}) = {actual:e}, expected {expected:e}"
         );
     }
 }
 
 #[test]
-fn every_arm_is_bit_identical_to_the_method_it_replaced() {
+fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
     let rt = host_runtime();
     let (uv, uw) = u1();
     let (sv, sw) = su2();
@@ -121,6 +154,7 @@ fn every_arm_is_bit_identical_to_the_method_it_replaced() {
         TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| real_fill(i)).unwrap();
     let su2_c64: TensorMap<SU2FusionRule, Complex64> =
         TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
+    // Every fill entry is dyadic, so the `f32` payload holds it exactly.
     let su2_c32: TensorMap<SU2FusionRule, Complex32> =
         TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| {
             let z = complex_fill(i);
@@ -128,7 +162,7 @@ fn every_arm_is_bit_identical_to_the_method_it_replaced() {
         })
         .unwrap();
     // Squares leave the f64 range in both directions, so `p = 2` and the
-    // power sums take their rescaling passes.
+    // power sums take their rescaling passes; the norm scales linearly.
     let huge: TensorMap<SU2FusionRule, f64> =
         TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| 1e200 * real_fill(i)).unwrap();
     let tiny: TensorMap<U1FusionRule, Complex64> =
@@ -136,15 +170,25 @@ fn every_arm_is_bit_identical_to_the_method_it_replaced() {
     let compact = compact_su2(&rt);
     let adjoint = su2_c64.adjoint().unwrap();
 
-    assert_golden("u1_f64", |p| u1_f64.norm(p));
-    assert_golden("u1_c64", |p| u1_c64.norm(p));
-    assert_golden("su2_f64", |p| su2_f64.norm(p));
-    assert_golden("su2_c64", |p| su2_c64.norm(p));
-    assert_golden("su2_c32", |p| su2_c32.norm(p));
-    assert_golden("huge", |p| huge.norm(p));
-    assert_golden("tiny", |p| tiny.norm(p));
-    assert_golden("compact", |p| compact.norm(p));
-    assert_golden("adjoint", |p| adjoint.norm(p));
+    let real = |i: &[usize]| real_fill(i).abs();
+    let modulus = |i: &[usize]| complex_fill(i).norm();
+    let (u1_real, u1_complex) = (filled(u1_blocks(), real), filled(u1_blocks(), modulus));
+    let (su2_real, su2_complex) = (filled(su2_blocks(), real), filled(su2_blocks(), modulus));
+    let diagonal = vec![
+        (1.0, vec![3.25, 0.5]),
+        (2.0, vec![1.75, 0.0, 2.125]),
+        (3.0, vec![0.375, 4.5, 1.0, 0.625]),
+    ];
+    let tol = 1e-14;
+    assert_hand("u1_f64", &u1_real, 1.0, tol, |p| u1_f64.norm(p));
+    assert_hand("u1_c64", &u1_complex, 1.0, tol, |p| u1_c64.norm(p));
+    assert_hand("su2_f64", &su2_real, 1.0, tol, |p| su2_f64.norm(p));
+    assert_hand("su2_c64", &su2_complex, 1.0, tol, |p| su2_c64.norm(p));
+    assert_hand("su2_c32", &su2_complex, 1.0, 1e-6, |p| su2_c32.norm(p));
+    assert_hand("huge", &su2_real, 1e200, tol, |p| huge.norm(p));
+    assert_hand("tiny", &u1_complex, 1e-200, tol, |p| tiny.norm(p));
+    assert_hand("compact", &diagonal, 1.0, tol, |p| compact.norm(p));
+    assert_hand("adjoint", &su2_complex, 1.0, tol, |p| adjoint.norm(p));
 }
 
 #[test]
@@ -228,9 +272,9 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
         complex.adjoint().unwrap().norm(2.0).unwrap().to_bits(),
         complex_norm.to_bits()
     );
-    let host = f64::from_bits(GOLDEN[0].1[0]);
+    let host = hand_norm(&filled(u1_blocks(), |i| real_fill(i).abs()), 2.0);
     assert!((real_norm - host).abs() <= 1e-13 * host);
-    let host = f64::from_bits(GOLDEN[3].1[0]);
+    let host = hand_norm(&filled(su2_blocks(), |i| complex_fill(i).norm()), 2.0);
     assert!((complex_norm - host).abs() <= 1e-13 * host);
 
     for p in [f64::INFINITY, 1.0, 3.0, 0.5] {

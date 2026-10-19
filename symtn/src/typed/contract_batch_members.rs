@@ -1,15 +1,15 @@
 //! #1859 Host H2: `ContractPlan` Host member replays of the Core and CopyC
-//! routes, pinned on exactly representable data.
-//!
-//! The digests fold signed zeros and NaNs, whose signs the dense backend's
-//! architecture-specific kernels choose, so they are platform-independent;
-//! every other bit is pinned. Recorded on `e6e9cac8`, before Core and CopyC
-//! joined the one Host executor.
+//! routes on one plan and workspace across B = 1, 2, 17, 1, into fresh and
+//! NaN-poisoned destinations, against the eager `contract` of each member's
+//! own operands (independently checked against TensorKit's `blas_contract!`
+//! steps and the physical-basis contraction in
+//! `tests/typed_contract_host_oracle.rs`).
 
 use super::*;
 use crate::sector::{U1FusionRule, U1Irrep};
 use crate::typed::{ContractSpec, GradedSpace, TensorMap};
 
+/// Exactly representable payload in `{-2, -1, ±0, 1, 2}`.
 fn exact(len: usize, salt: usize) -> Vec<f64> {
     (0..len)
         .map(|index| {
@@ -23,25 +23,34 @@ fn exact(len: usize, salt: usize) -> Vec<f64> {
         .collect()
 }
 
-fn digest(digest: &mut u64, values: &[f64]) {
-    for &value in values {
-        let bits = if value.is_nan() {
-            f64::NAN.to_bits()
-        } else if value == 0.0 {
-            0
-        } else {
-            value.to_bits()
-        };
-        for byte in bits.to_le_bytes() {
-            *digest ^= u64::from(byte);
-            *digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
-        }
+/// Every member of `dst` equals the eager contraction of that member's
+/// operands; exact data, so up to the sign of an exact zero.
+fn assert_members_are_eager(
+    what: &str,
+    dst: &StackedTensorMap<U1FusionRule, f64>,
+    lhs: &StackedTensorMap<U1FusionRule, f64>,
+    rhs: &StackedTensorMap<U1FusionRule, f64>,
+    spec: &ContractSpec<'_>,
+    members: usize,
+) {
+    for member in 0..members {
+        let eager = lhs
+            .member(member)
+            .unwrap()
+            .contract(&rhs.member(member).unwrap(), spec)
+            .unwrap();
+        let expected = eager.dense_data().unwrap();
+        assert!(expected.iter().any(|value| *value != 0.0), "{what}");
+        let actual = dst.member(member).unwrap();
+        assert_eq!(
+            actual.dense_data().unwrap(),
+            expected,
+            "{what}, B = {members}, member {member}"
+        );
     }
 }
 
-/// Member replays at B = 1, 2, 17, 1 on one workspace into NaN-poisoned
-/// destinations, folded into one portable digest.
-fn member_digest(lhs_axes: &[usize], codomain: &[usize], copy_c: bool) -> u64 {
+fn check_members(name: &str, lhs_axes: &[usize], codomain: &[usize], copy_c: bool) {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
@@ -62,7 +71,6 @@ fn member_digest(lhs_axes: &[usize], codomain: &[usize], copy_c: bool) -> u64 {
         codomain,
         domain: &[2],
     };
-    let mut state = 0xcbf2_9ce4_8422_2325;
     let mut plan_and_workspace = None;
     for members in [1, 2, 17, 1] {
         let mut lhs = StackedTensorMap::pack(&vec![&a; members]).unwrap();
@@ -76,29 +84,19 @@ fn member_digest(lhs_axes: &[usize], codomain: &[usize], copy_c: bool) -> u64 {
             let workspace = plan.workspace().unwrap();
             (plan, workspace)
         });
-        assert_eq!(plan.copy_c().is_some(), copy_c);
-        assert!(!plan.resolution.is_dynamic_tree());
+        assert_eq!(plan.copy_c().is_some(), copy_c, "{name}");
+        assert!(!plan.resolution.is_dynamic_tree(), "{name}");
         plan.execute(&lhs, &rhs, workspace).unwrap();
         let mut dst = workspace.take_output().unwrap();
+        assert_members_are_eager(name, &dst, &lhs, &rhs, &spec, members);
         dst.storage.fill(f64::NAN);
         plan.execute_into(&lhs, &rhs, &mut dst, workspace).unwrap();
-        digest(&mut state, &dst.storage);
+        assert_members_are_eager(name, &dst, &lhs, &rhs, &spec, members);
     }
-    state
 }
 
 #[test]
-fn member_core_and_copy_c_bits_are_pinned() {
-    let observed = [
-        ("core", member_digest(&[2], &[0, 1], false)),
-        ("copyC", member_digest(&[2], &[1, 0], true)),
-    ];
-    assert_eq!(
-        observed,
-        [
-            ("core", 0x07e5_80a2_cdf4_b8b8),
-            ("copyC", 0x3b1b_a5df_92e3_eab8)
-        ],
-        "observed digests: {observed:#x?}"
-    );
+fn member_core_and_copy_c_replays_equal_the_eager_contraction_per_member() {
+    check_members("core", &[2], &[0, 1], false);
+    check_members("copyC", &[2], &[1, 0], true);
 }

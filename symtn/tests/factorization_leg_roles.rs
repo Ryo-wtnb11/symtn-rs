@@ -3,9 +3,8 @@
 //! `t.permute(rows, cols)?.op(current split)`.
 //!
 //! The oracle is that composition, spelled with the `permute` primitive and
-//! the current-split call, whose results the recorded fingerprints of
-//! `named_factorization_bit_identity` pin to the pre-#1553 implementation.
-//! Both sides run the same deterministic kernels on the same bytes with a
+//! the current-split call, whose factors `named_factorization_reconstruction`
+//! checks by reconstruction. Both sides run the same deterministic kernels on the same bytes with a
 //! single-threaded dense executor, so the factors are compared bit for bit.
 //! Reconstructions against the permuted tensor are checked as well, so a
 //! wrong permutation cannot hide behind an equally wrong oracle.

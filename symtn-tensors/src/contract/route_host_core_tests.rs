@@ -109,13 +109,27 @@ where
     product
 }
 
-/// Every eager `(alpha, init)` replay against `alpha · P + beta · dst`,
-/// elementwise in storage order, with `P` the oracle-checked product; then
-/// NaN in the destination and, when `poison_lhs`, NaN in an operand.
 fn check_accumulation<R>(name: &str, case: &Case<R>, route: RouteKind, poison_lhs: bool)
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn_core::PhysicalFusionBasis<Scalar = f64>
+        + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
+{
+    check_accumulation_with(name, case, route, poison_lhs, checked_product);
+}
+
+/// Every eager `(alpha, init)` replay against `alpha · P + beta · dst`,
+/// elementwise in storage order, with `P = product(lhs, rhs)` the
+/// oracle-checked product; then NaN in the destination and, when
+/// `poison_lhs`, NaN in an operand.
+fn check_accumulation_with<R>(
+    name: &str,
+    case: &Case<R>,
+    route: RouteKind,
+    poison_lhs: bool,
+    checked_product: impl Fn(&mut Context<f64>, &Case<R>, &[f64], &[f64]) -> Vec<f64>,
+) where
+    R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
     let len = case.dst().space().required_len().unwrap();
@@ -234,7 +248,7 @@ where
 fn eager_host_routes_accumulate_alpha_times_product_plus_beta_times_destination() {
     // What: on every Host route (Core unswapped with an inactive block and
     // swapped, CopyC in both orientations, DynamicTree with identity and
-    // transformed output; U(1) and SU(2)), the eager result is
+    // transformed output; U(1), SU(2) and twisted fZ2xU(1)), the eager result is
     // `alpha · lhs·rhs + beta · dst` for alpha in {0, -1, 2.5} and beta in
     // {0, -0, 1, -0.5}; `Zeroed` and a zero beta of either sign never read
     // the destination; a destination NaN read through beta and an operand
@@ -242,9 +256,32 @@ fn eager_host_routes_accumulate_alpha_times_product_plus_beta_times_destination(
     for (name, case, route) in core_fixtures() {
         check_accumulation(name, &case, route, true);
     }
-    for (name, case) in dynamic_tree_fixtures().0 {
+    let (u1, fermionic) = dynamic_tree_fixtures();
+    for (name, case) in u1 {
         check_accumulation(name, &case, RouteKind::DynamicTree, true);
     }
+    // No physical basis for fermions: the unit product is the eager one,
+    // checked against TensorKit's `blas_contract!` steps with the twist on
+    // the same geometry by the typed layer
+    // (`symtn/tests/typed_contract_host_oracle.rs`).
+    check_accumulation_with(
+        "fermionic twisted dynamicTree",
+        &fermionic,
+        RouteKind::DynamicTree,
+        true,
+        |context, case, lhs, rhs| {
+            let len = case.dst().space().required_len().unwrap();
+            eager_into(
+                context,
+                case,
+                lhs,
+                rhs,
+                1.0,
+                ContractDestinationInit::Zeroed,
+                vec![0.0; len],
+            )
+        },
+    );
     let su2 = Arc::new(SU2FusionRule);
     for (name, case, route) in [
         (
@@ -342,72 +379,6 @@ where
     )
 }
 
-/// `e6e9cac8`'s `ContractPlan` Host member sequence: the exact-sign stacked
-/// replay of the core (`zero_inactive`) into the destination, or into a
-/// zeroed temporary followed by the member overwrite transform (CopyC).
-#[allow(clippy::too_many_arguments)]
-fn base_members(
-    resolution: &crate::contract::StorageContractResolution<f64>,
-    dst_structure: &Arc<symtn_core::BlockStructure>,
-    dst: &mut [f64],
-    lhs: &[f64],
-    rhs: &[f64],
-    members: usize,
-) {
-    use symtn_operations::stacked::{
-        StackedDirectReplay, StackedStorageView, StackedStorageViewMut,
-    };
-    let stacked = |plan: &Arc<symtn_operations::fusion_replay::FusionBlockContractPlan<f64>>,
-                   swapped: bool,
-                   out: &mut [f64]| {
-        let replay = StackedDirectReplay::new_signed(Arc::clone(plan), members).unwrap();
-        let [dst_len, left_len, right_len] = replay.member_lens();
-        let (left, right) = if swapped { (rhs, lhs) } else { (lhs, rhs) };
-        let (left, right) = (left.to_vec(), right.to_vec());
-        let mut out_storage = out.to_vec();
-        let mut backend = DenseTreeTransformOperations::default();
-        let mut backend_workspace = crate::contract::backend::TensorContractWorkspace::default();
-        replay
-            .execute_signed_host(
-                &mut crate::StridedHostKernelAdapter::default(),
-                &mut BackendRank2Gemm::<_, _, f64>::new(&mut backend, &mut backend_workspace),
-                &mut StackedStorageViewMut::new::<f64>(&mut out_storage, dst_len, members, dst_len)
-                    .unwrap(),
-                &StackedStorageView::new::<f64>(&left, left_len, members, left_len).unwrap(),
-                &StackedStorageView::new::<f64>(&right, right_len, members, right_len).unwrap(),
-                true,
-            )
-            .unwrap();
-        out.copy_from_slice(&out_storage);
-    };
-    match &resolution.route {
-        crate::contract::resolution::ContractRoute::Core { plan, swapped } => {
-            stacked(plan, *swapped, dst)
-        }
-        crate::contract::resolution::ContractRoute::CopyC(copy) => {
-            let mut temporary = vec![0.0; copy.temporary_len * members];
-            stacked(&copy.core, copy.swapped, &mut temporary);
-            symtn_operations::tree_transform_members_overwrite_raw(
-                &mut crate::StridedHostKernelAdapter::default(),
-                &mut symtn_dense::DefaultDenseExecutor::new(),
-                &mut symtn_operations::TreeTransformWorkspace::default(),
-                &copy.transform,
-                dst_structure,
-                &copy.temporary,
-                dst,
-                &temporary,
-                members,
-                1,
-                &[],
-            )
-            .unwrap();
-        }
-        crate::contract::resolution::ContractRoute::DynamicTree(_) => {
-            panic!("Core / CopyC fixture planned DynamicTree")
-        }
-    }
-}
-
 /// The uniform-twist fZ2×U(1) `mul!` form: its twist rides the Core GEMMs
 /// as ±1 per-job alpha.
 fn fermionic_core_fixture() -> Case<FermionU1> {
@@ -431,14 +402,71 @@ fn fermionic_core_fixture() -> Case<FermionU1> {
     case
 }
 
-fn check_member_bits<R>(name: &str, case: &Case<R>)
-where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
-        + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
-{
-    let resolution = member_resolution(case);
+/// The [`fermionic_core_fixture`] contraction by hand: TensorKit's
+/// `blas_contract!` twists B's dual contracted codomain leg `v*`, whose
+/// sector is the coupled sector `c` of the one-leg trees, so each
+/// destination block is `θ_c · Σ_Y A[X, Y] B[Y, Z]` with `θ_c = -1` for odd
+/// fermion parity, matched by fusion-tree key and degeneracy index.
+fn fermionic_core_oracle(case: &Case<FermionU1>, lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
+    let rule = FermionParityFusionRule.product(U1FusionRule);
+    let odd = [1, -1].map(|q| rule.encode_component_ids(ODD, U1Irrep::new(q).sector_id()));
+    let tree = |key: &symtn_core::BlockKey| match key {
+        symtn_core::BlockKey::FusionTree(tree) => tree.clone(),
+        other => panic!("fusion-tree block expected, got {other:?}"),
+    };
+    let at = |block: &symtn_core::BlockRef<'_>, row: usize, col: usize| {
+        block.offset() + row * block.strides()[0] + col * block.strides()[1]
+    };
+    let (a, b) = (case.lhs.space().structure(), case.rhs.space().structure());
     let dst = case.dst();
-    let len = dst.space().required_len().unwrap();
+    let c = dst.space().structure();
+    let mut out = vec![0.0; dst.space().required_len().unwrap()];
+    for index in 0..c.block_count() {
+        let block = c.block(index).unwrap();
+        let key = tree(block.key());
+        let theta = if odd.contains(&key.codomain_tree().coupled()) {
+            -1.0
+        } else {
+            1.0
+        };
+        for i in 0..a.block_count() {
+            let a_block = a.block(i).unwrap();
+            let a_key = tree(a_block.key());
+            if a_key.codomain_tree() != key.codomain_tree() {
+                continue;
+            }
+            for j in 0..b.block_count() {
+                let b_block = b.block(j).unwrap();
+                let b_key = tree(b_block.key());
+                if b_key.domain_tree() != key.domain_tree()
+                    || b_key.codomain_tree() != a_key.domain_tree()
+                {
+                    continue;
+                }
+                let [rows, cols] = [block.shape()[0], block.shape()[1]];
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let sum = (0..a_block.shape()[1])
+                            .map(|k| lhs[at(&a_block, row, k)] * rhs[at(&b_block, k, col)])
+                            .sum::<f64>();
+                        out[at(&block, row, col)] += theta * sum;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn fermionic_core_members_match_the_hand_twisted_product() {
+    // What: on one workspace across B = 1, 2, 17, 1, 2 into NaN-poisoned
+    // destinations, each member of the uniform-twist fZ2×U(1) Core replay
+    // equals `θ_c · A_c · B_c` of its own operands; odd and even coupled
+    // sectors both occur.
+    let case = fermionic_core_fixture();
+    let resolution = member_resolution(&case);
+    let len = case.dst().space().required_len().unwrap();
     let lhs_len = case.lhs.space().required_len().unwrap();
     let rhs_len = case.rhs.space().required_len().unwrap();
     let mut workspace = crate::contract::HostContractMembersWorkspace::default();
@@ -448,7 +476,7 @@ where
         let mut actual = vec![f64::NAN; len * members];
         run_route_members(
             &resolution,
-            case,
+            &case,
             &mut workspace,
             &mut actual,
             &lhs,
@@ -456,29 +484,25 @@ where
             members,
         )
         .unwrap();
-        let mut expected = vec![f64::NAN; len * members];
-        base_members(
-            &resolution,
-            dst.space().structure(),
-            &mut expected,
-            &lhs,
-            &rhs,
-            members,
-        );
-        assert_eq!(bits(&actual), bits(&expected), "{name}, B = {members}");
+        for member in 0..members {
+            let want = fermionic_core_oracle(
+                &case,
+                &lhs[member * lhs_len..(member + 1) * lhs_len],
+                &rhs[member * rhs_len..(member + 1) * rhs_len],
+            );
+            assert!(want.iter().any(|&value| value < 0.0), "B = {members}");
+            for (index, (&found, &want)) in actual[member * len..(member + 1) * len]
+                .iter()
+                .zip(&want)
+                .enumerate()
+            {
+                assert!(
+                    close(found, want),
+                    "B = {members}, member {member} [{index}]: {found} vs {want}"
+                );
+            }
+        }
     }
-}
-
-#[test]
-fn member_core_and_copy_c_replays_match_the_base_member_sequence() {
-    // What: on one workspace across B = 1, 2, 17, 1, 2, every Core and
-    // CopyC member replay is bit-identical, on this machine, to the
-    // `ContractPlan` Host sequence it replaces (exact data; NaN-poisoned
-    // destinations; a retained CopyC temporary across B changes).
-    for (name, case, _) in core_fixtures() {
-        check_member_bits(name, &case);
-    }
-    check_member_bits("fermionic core", &fermionic_core_fixture());
 }
 
 fn check_member_oracle<R>(name: &str, case: &Case<R>)
@@ -494,7 +518,7 @@ where
     let lhs_len = case.lhs.space().required_len().unwrap();
     let rhs_len = case.rhs.space().required_len().unwrap();
     let mut workspace = crate::contract::HostContractMembersWorkspace::default();
-    for members in [1, 2, 17] {
+    for members in [1, 2, 17, 1, 2] {
         let lhs = (0..members)
             .flat_map(|i| host_data(case.lhs.space(), 3 + 2 * i))
             .collect::<Vec<_>>();
@@ -539,9 +563,11 @@ where
 
 #[test]
 fn member_core_and_copy_c_replays_match_the_dense_oracle() {
-    // What: each member of a B = 1, 2, 17 stack equals the dense
-    // physical-basis contraction of its own operands (an oracle independent
-    // of every replay path), U(1) and SU(2), Core and CopyC.
+    // What: on one workspace across B = 1, 2, 17, 1, 2 (a retained CopyC
+    // temporary across B changes) into NaN-poisoned destinations, each
+    // member equals the dense physical-basis contraction of its own
+    // operands (an oracle independent of every replay path), U(1) and
+    // SU(2), Core and CopyC.
     for (name, case, _) in core_fixtures() {
         check_member_oracle(name, &case);
     }
@@ -572,18 +598,13 @@ fn a_failed_copy_c_member_replay_refills_its_temporary_on_retry() {
     let rhs_len = case.rhs.space().required_len().unwrap();
     let mut workspace = crate::contract::HostContractMembersWorkspace::default();
     let fills = |members: usize, poison: bool, workspace: &mut _| {
-        let lhs = exact_data(lhs_len * members, 1);
-        let rhs = exact_data(rhs_len * members, 3);
+        let lhs = (0..members)
+            .flat_map(|i| host_data(case.lhs.space(), 3 + 2 * i))
+            .collect::<Vec<_>>();
+        let rhs = (0..members)
+            .flat_map(|i| host_data(case.rhs.space(), 7 + 4 * i))
+            .collect::<Vec<_>>();
         let mut actual = vec![f64::NAN; len * members];
-        let mut expected = vec![f64::NAN; len * members];
-        base_members(
-            &resolution,
-            dst.space().structure(),
-            &mut expected,
-            &lhs,
-            &rhs,
-            members,
-        );
         let workspace: &mut crate::contract::HostContractMembersWorkspace<f64> = workspace;
         if poison {
             workspace.poison_dst_then_fail();
@@ -604,7 +625,30 @@ fn a_failed_copy_c_member_replay_refills_its_temporary_on_retry() {
             return None;
         }
         result.unwrap();
-        assert_eq!(bits(&actual), bits(&expected), "B = {members}");
+        // Each member against the dense physical-basis contraction of its
+        // own operands: a stale temporary on retry shows up as a wrong value.
+        for member in 0..members {
+            let (oracle_shape, oracle) = physical_oracle(
+                &case,
+                &lhs[member * lhs_len..(member + 1) * lhs_len],
+                &rhs[member * rhs_len..(member + 1) * rhs_len],
+            );
+            let (shape, found) = crate::expand_physical_host(
+                crate::BoundDynamicTensorRef::try_new(
+                    &dst,
+                    &actual[member * len..(member + 1) * len],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(shape, oracle_shape);
+            for (&value, &want) in found.iter().zip(&oracle) {
+                assert!(
+                    close(value, want),
+                    "B = {members}, member {member}: {value} vs {want}"
+                );
+            }
+        }
         Some(workspace.core_inactive_fills() - before)
     };
     for members in [2, 1] {
