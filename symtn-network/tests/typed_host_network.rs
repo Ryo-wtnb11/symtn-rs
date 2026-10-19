@@ -396,6 +396,34 @@ fn wrong_input_codomain_split_is_rejected() {
     assert!(matches!(result, Err(Error::InvalidArgument(_))));
 }
 
+/// Operands of two Runtimes are refused with the typed `RuntimeMismatch`
+/// every other facade operation returns, both by the eager preflight and by
+/// a plan executed on operands it was not planned with.
+#[test]
+fn operands_of_different_runtimes_are_a_runtime_mismatch() {
+    let runtime = Runtime::builder().build().unwrap();
+    let other = Runtime::builder().build().unwrap();
+    let space = u1_space();
+    let lhs =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&space], [&space], 165).unwrap();
+    let rhs =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&space], [&space], 166).unwrap();
+    let foreign =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(&other, [&space], [&space], 167).unwrap();
+    let network = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"]);
+    assert!(matches!(
+        network.contract(&[&lhs, &foreign]),
+        Err(Error::RuntimeMismatch)
+    ));
+    let planned = network
+        .plan(&[&lhs, &rhs], &symtn_network::GreedyDenseOptimizer)
+        .unwrap();
+    assert!(matches!(
+        planned.execute(&[&lhs, &foreign], &mut Default::default()),
+        Err(Error::RuntimeMismatch)
+    ));
+}
+
 #[test]
 fn contracted_leg_degeneracy_mismatch_spells_out_both_legs() {
     let runtime = Runtime::builder().build().unwrap();

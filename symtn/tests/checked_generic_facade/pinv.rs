@@ -398,10 +398,16 @@ fn checked_generic_pinv_of_a_nan_tensor_is_invalid_argument() {
             ),
         ] {
             match result {
-                Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(message))) => {
-                    assert!(message.contains("must be finite"), "{case}: {message}")
+                Err(GenericTensorError::Facade(symtn::typed::Error::Operation(error))) => {
+                    assert_eq!(
+                        *error,
+                        symtn::typed::OperationError::InvalidArgument {
+                            message: "pinv singular values must be finite"
+                        },
+                        "{case}"
+                    )
                 }
-                other => panic!("{case}: expected InvalidArgument, got {other:?}"),
+                other => panic!("{case}: expected the finite-input refusal, got {other:?}"),
             }
         }
         // rcond validation precedes the finite scan.
@@ -590,8 +596,10 @@ fn checked_compact_diagonal_pinv_refuses_nonfinite_like_multiplicity_free() {
         .unwrap();
         assert!(matches!(
             input.pinv(&[0], &[1], 0.5),
-            Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(message)))
-                if message == "pinv singular values must be finite"
+            Err(GenericTensorError::Facade(symtn::typed::Error::Operation(error)))
+                if *error == symtn::typed::OperationError::InvalidArgument {
+                    message: "pinv singular values must be finite"
+                }
         ));
     }
 }

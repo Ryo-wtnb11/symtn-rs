@@ -63,7 +63,7 @@ where
                 symtn_matrixalgebra::seam::pinv_diagonal_spectrum(spectrum, rcond, |value: D| {
                     value.recip_value()
                 })
-                .map_err(pinv_seam_error)?;
+                .map_err(Error::from)?;
             return Ok(self.with_spectrum(inverted));
         }
         let output = self.swapped_output_space()?;
@@ -86,7 +86,7 @@ where
                 })
             }
         }
-        .map_err(pinv_seam_error)?;
+        .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
 }

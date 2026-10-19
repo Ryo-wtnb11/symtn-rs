@@ -834,8 +834,7 @@ fn default_executor_rejects_integer_linalg_view() {
 
     assert!(matches!(
         err,
-        DenseError::Backend {
-            backend: DenseBackend::Tenferro,
+        DenseError::Unsupported {
             op: "qr_read",
             ref message,
         } if message.contains("does not support dtype I32")
@@ -1616,8 +1615,7 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
         .unwrap_err();
     assert!(matches!(
         error,
-        DenseError::Backend {
-            backend: DenseBackend::Tenferro,
+        DenseError::Unsupported {
             op: "svd_values",
             ref message,
         } if message.contains("does not support dtype I32")
@@ -1631,8 +1629,7 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
         .unwrap_err();
     assert!(matches!(
         error,
-        DenseError::Backend {
-            backend: DenseBackend::Tenferro,
+        DenseError::Unsupported {
             op: "eigh_values",
             ref message,
         } if message.contains("does not support dtype Bool")

@@ -89,8 +89,9 @@ where
     /// [`Error::InvalidArgument`] when `legs` is empty, an axis is out of
     /// range or appears twice, or an axis is not the leg its selection was
     /// built from; [`Error::RuleMismatch`] when a selection belongs to a
-    /// different rule; [`Error::InvalidArgument`] for a compact diagonal
-    /// payload with any set other than both legs and one selection (call
+    /// different rule; [`Error::Unsupported`] with
+    /// [`Alternative::Materialize`] for a compact diagonal payload with any
+    /// set other than both legs and one selection (call
     /// [`Self::materialize`] first for a dense result). Nothing is allocated
     /// before every check has passed.
     pub fn restrict_leg(&self, legs: &[(usize, &LegSelection<R>)]) -> Result<Self, FacadeError<R>>
@@ -108,12 +109,12 @@ where
                 {
                     Ok((spectrum, *first))
                 }
-                _ => Err(FacadeError::<R>::from(Error::InvalidArgument(
-                    "restrict_leg: a compact diagonal stays compact only with one selection \
-                     on both legs, &[(0, sel), (1, sel)]; call materialize() first for any \
-                     other restriction"
-                        .to_string(),
-                ))),
+                // A compact diagonal stays compact only with one selection on
+                // both legs; any other restriction needs the dense payload.
+                _ => Err(FacadeError::<R>::from(Error::Unsupported {
+                    operation: "restrict_leg",
+                    alternative: Alternative::Materialize,
+                })),
             })
             .transpose()?;
         let destination = restricted_space(self.logical_space(), legs)?;

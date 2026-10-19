@@ -128,10 +128,10 @@ where
     ///
     /// - [`Error::InvalidArgument`] when `rcond` is not finite or is negative,
     ///   checked before any provider work or dense allocation.
-    /// - [`Error::InvalidArgument`] (`pinv singular values must be finite`)
-    ///   for a nonfinite entry on dense or compact input, in every fusion
-    ///   mode and on every dense provider; the dense route refuses it before
-    ///   any provider SVD.
+    /// - [`Error::Operation`] (an `InvalidArgument`: `pinv singular values
+    ///   must be finite`) for a nonfinite entry on dense or compact input, in
+    ///   every fusion mode and on every dense provider; the dense route
+    ///   refuses it before any provider SVD.
     /// - [`Error::Operation`] / [`Error::Core`] from dense SVD or recomposition.
     ///
     /// There is no singular-input failure: sending the offending directions to

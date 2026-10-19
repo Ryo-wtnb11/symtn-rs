@@ -370,7 +370,7 @@ fn nonfinite_compact_values_fail_or_map_through_alike() {
     // One pinv refusal in both modes: the dense cutoff's typed error.
     assert_eq!(
         get(&rows, "pinv"),
-        &failed("invalid argument: pinv singular values must be finite")
+        &failed("pinv singular values must be finite")
     );
 }
 

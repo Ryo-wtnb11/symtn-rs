@@ -689,11 +689,12 @@ fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejec
         vec![(0, &selection)],
         vec![(0, &selection), (1, &different)],
     ] {
-        let error = diagonal.restrict_leg(&set).err().unwrap();
-        assert!(
-            matches!(&error, symtn::typed::Error::InvalidArgument(message)
-                if message.contains("compact diagonal") && message.contains("materialize()")),
-            "{error:?}"
+        assert_eq!(
+            diagonal.restrict_leg(&set).err().unwrap(),
+            symtn::typed::Error::Unsupported {
+                operation: "restrict_leg",
+                alternative: symtn::typed::Alternative::Materialize,
+            }
         );
         assert!(diagonal.materialize().unwrap().restrict_leg(&set).is_ok());
     }
