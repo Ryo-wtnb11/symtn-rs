@@ -1,9 +1,12 @@
-//! `DenseTreeTransformOperations` runs the one batched-GEMM replay (#1767);
-//! the per-block strided driver is only the reference oracle.
+//! `DenseTreeTransformOperations` runs the one batched-GEMM replay (#1767).
+//! Its values are checked against the explicit-index oracle in `common`
+//! (`Fixture::expected_scaled`), which walks each fixture's block metadata and
+//! never reads the compiled structure; the per-block strided driver serves only
+//! as the bitwise dispatch witness.
 
 mod common;
 
-use common::{recoupling_fixtures, Fixture, TestScalar};
+use common::{all_fixtures, recoupling_fixtures, Fixture, TestScalar};
 use num_complex::Complex64;
 use symtn_operations::{
     tree_transform_structure_overwrite_with_strided_kernel_raw,
@@ -17,7 +20,21 @@ struct Replays<T> {
     reference: Vec<T>,
 }
 
-fn replay<T>(fixture: &Fixture, overwrite: bool) -> Replays<T>
+/// Non-dyadic payload so the GEMM and scalar-loop summation orders round
+/// differently.
+fn payload<T: TestScalar>(fixture: &Fixture) -> Vec<T> {
+    (0..fixture.src_len())
+        .map(|i| T::from_parts((i as f64 * 0.731 + 0.3).sin(), (i as f64 * 1.37).cos()))
+        .collect()
+}
+
+fn initial<T: TestScalar>(fixture: &Fixture) -> Vec<T> {
+    (0..fixture.dst_len())
+        .map(|index| T::from_parts(-3.0 - index as f64, 0.5))
+        .collect()
+}
+
+fn replay<T>(fixture: &Fixture, overwrite: bool, alpha: T) -> Replays<T>
 where
     T: TestScalar
         + TreeTransformScalar
@@ -28,14 +45,8 @@ where
     let structure = fixture.compile();
     let dst_structure = fixture.dst_structure();
     let src_structure = fixture.src_structure();
-    // Non-dyadic payload so the two summation orders round differently.
-    let source: Vec<T> = (0..fixture.src_len())
-        .map(|i| T::from_parts((i as f64 * 0.731 + 0.3).sin(), (i as f64 * 1.37).cos()))
-        .collect();
-    let initial: Vec<T> = (0..fixture.dst_len())
-        .map(|index| T::from_parts(-3.0 - index as f64, 0.5))
-        .collect();
-    let alpha = T::from_parts(0.7, -0.3);
+    let source = payload::<T>(fixture);
+    let initial = initial::<T>(fixture);
     let beta = T::from_parts(1.0, 0.0);
 
     let mut dense = initial.clone();
@@ -94,6 +105,18 @@ where
     Replays { dense, reference }
 }
 
+/// One, a scale that is neither 1 nor -1, both signed zeros, and a genuinely
+/// complex one (its real part on `f64`).
+fn alphas<T: TestScalar>() -> Vec<T> {
+    vec![
+        T::from_parts(1.0, 0.0),
+        T::from_parts(-2.5, 0.0),
+        T::from_parts(0.0, 0.0),
+        T::from_parts(-0.0, -0.0),
+        T::from_parts(0.7, -0.3),
+    ]
+}
+
 fn check<T>() -> bool
 where
     T: TestScalar
@@ -102,20 +125,32 @@ where
         + DenseRecouplingScalar
         + ConjugateValue,
 {
-    // The scalar-loop oracle and the GEMM path round differently; a fixture
-    // where they differ bitwise shows the backend ran the GEMM path.
+    let recoupling: Vec<&str> = recoupling_fixtures().iter().map(|f| f.name).collect();
+    // The scalar-loop strided driver and the GEMM path round differently; a
+    // recoupling fixture where they differ bitwise shows the backend ran the
+    // GEMM path.
     let mut paths_differ = false;
-    for fixture in recoupling_fixtures() {
+    for fixture in all_fixtures() {
+        let source = payload::<T>(&fixture);
+        let initial = initial::<T>(&fixture);
         for overwrite in [true, false] {
-            let r = replay::<T>(&fixture, overwrite);
-            for (a, b) in r.dense.iter().zip(&r.reference) {
-                assert!(
-                    a.distance(*b) <= 1e-12,
-                    "{} overwrite={overwrite}: {a:?} vs oracle {b:?}",
-                    fixture.name
-                );
+            for alpha in alphas::<T>() {
+                let r = replay::<T>(&fixture, overwrite, alpha);
+                let expected = fixture.expected_scaled(&source, &initial, overwrite, alpha);
+                assert_eq!(r.dense.len(), expected.len(), "{}", fixture.name);
+                for (index, (a, b)) in r.dense.iter().zip(&expected).enumerate() {
+                    assert!(
+                        a.distance(*b) <= 1e-12,
+                        "{} / {} / overwrite={overwrite} / alpha={alpha:?}: \
+                         element {index} is {a:?}, oracle {b:?}",
+                        fixture.name,
+                        T::NAME,
+                    );
+                }
+                if recoupling.contains(&fixture.name) {
+                    paths_differ |= r.dense != r.reference;
+                }
             }
-            paths_differ |= r.dense != r.reference;
         }
     }
     paths_differ
@@ -123,6 +158,11 @@ where
 
 #[test]
 fn dense_backend_is_the_batched_gemm_path() {
+    // What: the production batched-GEMM replay equals the explicit-index
+    // semantics on every shared fixture (degeneracy > 1, several blocks,
+    // Single and Multi recoupling groups, conjugated sources, inactive and
+    // zero-extent layouts), in both destination modes, for every caller
+    // scale and both payload dtypes.
     let real = check::<f64>();
     let complex = check::<Complex64>();
     assert!(
