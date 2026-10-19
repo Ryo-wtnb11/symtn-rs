@@ -46,6 +46,10 @@ where
         coupled: SectorId,
     ) -> Result<usize, Self::FacadeError>;
 
+    /// The provider's position of `sector` in TensorKit's sector order.
+    #[doc(hidden)]
+    fn sector_order_key(provider: &R, sector: SectorId) -> symtn_core::SectorOrderKey;
+
     /// TensorKit `fuse` of two sector contents, `N`-symbol weighted and in
     /// sector-id order.
     #[doc(hidden)]

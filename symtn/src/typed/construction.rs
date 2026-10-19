@@ -282,21 +282,40 @@ where
             })
             .into());
         }
-        let mut tensor = Self::build(runtime, provider, &codomain, &domain, Fill::Zeros)?;
-        // TensorKit's `one!` per coupled-sector block (`tensors/linalg.jl:102-158`).
-        // A block's rows and columns enumerate (fusion tree, degeneracy)
-        // pairs, so for a Generic provider the diagonal is also the
-        // equal-tree, equal-vertex, equal-degeneracy identity.
-        write_identity_blocks_generic(&mut tensor)?;
+        let mut tensor = Self::build(
+            runtime,
+            Arc::clone(&provider),
+            &codomain,
+            &domain,
+            Fill::Zeros,
+        )?;
+        // TensorKit's `one!` per coupled-sector block (`tensors/linalg.jl:102-158`),
+        // over (fusion tree, vertex, degeneracy) rows and columns in
+        // TensorKit's tree order.
+        write_identity_blocks_generic(&mut tensor, |sector, dual| {
+            let sector = if dual {
+                provider
+                    .try_dual_id(sector)
+                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?
+            } else {
+                sector
+            };
+            Ok::<_, FacadeError<R>>(<R::Mode as TypedTensorModeDispatch<R>>::sector_order_key(
+                &provider, sector,
+            ))
+        })?;
         Ok(tensor)
     }
 
     /// The canonical structural isomorphism `codomain <- domain` (TensorKit
     /// `isomorphism(W ← V)`; also TensorKit `id(V)` as `isomorphism(V, V)` and
     /// `unitary`, which only adds a Euclidean inner-product check every symtn
-    /// provider satisfies): every coupled-sector block is the identity matrix,
-    /// which requires the fused codomain and domain to carry identical sector
-    /// content. Multiplicity-free and checked-Generic providers alike.
+    /// provider satisfies): every coupled-sector block is the identity matrix
+    /// with rows and columns in TensorKit's fusion-tree order, which requires
+    /// the fused codomain and domain to carry identical sector content. Since
+    /// [`Self::block`] lists trees in storage order, a block between different
+    /// spaces can read as a permuted identity there. Multiplicity-free and
+    /// checked-Generic providers alike.
     ///
     /// # Errors
     ///
@@ -306,7 +325,8 @@ where
     ///
     /// # Complexity
     ///
-    /// One fused-content fold over the legs plus one `O(stored_len)` payload.
+    /// One fused-content fold over the legs, one sort of each coupled block's
+    /// trees, plus one `O(stored_len)` payload.
     pub fn isomorphism<'a, C, M>(
         runtime: &Runtime,
         codomain: C,
@@ -323,7 +343,8 @@ where
     /// The canonical isometry `codomain <- domain` (TensorKit
     /// `isometry(W ← V)`): each
     /// coupled-sector block is the partial identity (the first `cols` columns
-    /// of the identity), so `t† ∘ t = isomorphism(domain, domain)`. Requires
+    /// of the identity) with rows and columns in TensorKit's fusion-tree
+    /// order, so `t† ∘ t = isomorphism(domain, domain)`. Requires
     /// the domain to embed isometrically in the codomain (sectorwise
     /// `deg_domain <= deg_codomain` on the fused content). Multiplicity-free
     /// and checked-Generic providers alike.
@@ -336,7 +357,8 @@ where
     ///
     /// # Complexity
     ///
-    /// One fused-content fold over the legs plus one `O(stored_len)` payload.
+    /// One fused-content fold over the legs, one sort of each coupled block's
+    /// trees, plus one `O(stored_len)` payload.
     pub fn isometry<'a, C, M>(
         runtime: &Runtime,
         codomain: C,

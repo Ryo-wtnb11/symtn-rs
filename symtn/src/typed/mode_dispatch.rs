@@ -163,6 +163,10 @@ where
         error
     }
 
+    fn sector_order_key(provider: &R, sector: SectorId) -> symtn_core::SectorOrderKey {
+        symtn_core::FusionRule::sector_order_key(provider, sector)
+    }
+
     fn coupled_block_dimension(
         provider: &R,
         product: &FusionProductSpace,
@@ -273,6 +277,10 @@ where
             GenericTensorError::Facade(error) => error,
             other => Error::InvalidArgument(format!("adjoint view: {other}")),
         }
+    }
+
+    fn sector_order_key(provider: &R, sector: SectorId) -> symtn_core::SectorOrderKey {
+        CheckedGenericFusion::sector_order_key(provider, sector)
     }
 
     fn coupled_block_dimension(
