@@ -664,21 +664,24 @@ where
     assert_eq!(domain.domain()[0].is_dual(), !source.domain()[0].is_dual());
     assert_values(&domain, value, |_| -1.0);
 
-    provider.reset_ledger(2);
-    let repeated = source.flip(&[0, 0], Direction::Forward).unwrap();
-    assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
-    provider.finish_observation();
-    assert_eq!(
-        repeated.codomain()[0].is_dual(),
-        source.codomain()[0].is_dual()
-    );
-    assert_values(&repeated, value, |trees| {
-        if trees.codomain_uncoupled()[0] == Label::X {
-            -1.0
-        } else {
-            1.0
+    provider.reset_ledger(0);
+    match source.flip(&[0, 0], Direction::Forward) {
+        Err(GenericTensorError::Facade(Error::InvalidArgument(message))) => {
+            assert!(message.contains("listed more than once"), "{message}");
         }
-    });
+        other => panic!("expected InvalidArgument, got {:?}", other.map(|_| ())),
+    }
+    for counter in [
+        &provider.style_queries,
+        &provider.vacuum_queries,
+        &provider.other_queries,
+        &provider.fs_queries,
+        &provider.twist_queries,
+        &provider.post_stage_queries,
+    ] {
+        assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+    provider.finish_observation();
 
     let lazy = source.adjoint().unwrap();
     provider.reset_ledger(2);
@@ -714,7 +717,7 @@ where
 #[test]
 fn checked_generic_flip_scales_full_keys_and_lazy_duality_for_real_and_complex_payloads() {
     // What: checked Generic replay uses staged χ/θ factors on complete μ=2
-    // keys, including repeated legs, and a lazy result owns toggled metadata.
+    // keys; repeated legs fail before provider queries, and lazy results own toggled metadata.
     assert_flip_nontrivial_case(|marker| marker as f64);
     assert_flip_nontrivial_case(|marker| Complex64::new(marker as f64, -(marker as f64) / 10.0));
 }
@@ -728,6 +731,15 @@ fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
         -1.0,
     ));
     let source = fixture(&runtime, &provider, |marker| marker as f64);
+
+    provider.reset_ledger(0);
+    match source.flip(&[0, 0], Direction::Forward) {
+        Err(GenericTensorError::Facade(Error::InvalidArgument(message))) => {
+            assert!(message.contains("listed more than once"), "{message}");
+        }
+        other => panic!("expected InvalidArgument, got {:?}", other.map(|_| ())),
+    }
+    assert_eq!(provider.style_queries.load(Ordering::Relaxed), 0);
 
     provider.reset_ledger(0);
     assert!(matches!(

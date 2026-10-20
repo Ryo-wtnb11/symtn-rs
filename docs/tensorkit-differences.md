@@ -79,6 +79,12 @@ provider, scalar and placement combinations are in the
   `Result` error and no output tensor. Reason: Rust's checked errors
   ([design](design.md)).
 
+- **Distinct legs for `flip`.** Repeated legs return `InvalidArgument` before
+  provider queries. Reason: TensorKit 0.17.1 inconsistently treats repeated
+  indices in its space and fusion-tree helpers, so acceptance depends on
+  multiplicity and sectors. symtn rejects all duplicates explicitly (#2290).
+  `twist` still applies one factor per occurrence, matching TensorKit.
+
 ## Conventions
 
 - **Storage order of sectors.** Blocks are stored in `SectorId` order, which

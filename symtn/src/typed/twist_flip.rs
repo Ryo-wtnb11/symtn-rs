@@ -10,7 +10,8 @@ where
     /// TensorKit `twist(t, inds; inv)` (and its in-place `twist!`): multiplies
     /// each fusion-tree block by the product over `legs` (flat leg indices,
     /// codomain first) of that leg's ribbon-twist eigenvalue, or by its
-    /// inverse for [`Direction::Inverse`].
+    /// inverse for [`Direction::Inverse`]. Repeated legs contribute one twist
+    /// factor per occurrence, matching TensorKit’s product over `inds`.
     ///
     /// A bosonic provider, a NoBraiding provider restricted to unit legs, or
     /// selected sectors whose staged twists are all one returns a body-sharing
@@ -205,8 +206,7 @@ where
 {
     /// TensorKit `flip(t, I; inv)`:
     /// return a tensor isomorphic to `self` where the duality flag of each
-    /// leg in `legs` (flat indices, codomain first; a leg listed twice is
-    /// flipped twice, sequentially) is toggled,
+    /// leg in `legs` (distinct flat indices, codomain first) is toggled,
     /// `space(t', i) = flip(space(t, i))`. The stored sectors and the block
     /// layout are unchanged; each fusion-tree block picks up the
     /// Z-isomorphism phase of TensorKit's fusion-tree `flip`
@@ -216,7 +216,7 @@ where
     /// domain leg → `d ? χ̄ : θ`.
     ///
     /// Like TensorKit's, this `flip` is *not* an involution: flipping the
-    /// same leg twice returns to the original spaces but scales each block
+    /// same leg in two calls returns to the original spaces but scales each block
     /// by `χ_a·θ_a` (codomain) or `θ_a·χ̄_a` (domain), e.g. by θ = −1 on
     /// fermionic legs; so `flip⁴ = id` only when every `θ_a² = 1`, and for
     /// an anyon it is `θ_a²`. [`Direction::Inverse`] applies the inverse
@@ -233,8 +233,10 @@ where
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidArgument`] when a leg is out of range, before the
-    /// empty-list short-circuit; empty `legs` returns an identical clone.
+    /// [`Error::InvalidArgument`] when a leg is out of range or repeated.
+    /// The full out-of-range check precedes the duplicate check; both precede
+    /// provider queries and the empty-list short-circuit. Empty `legs` returns
+    /// an identical clone.
     /// Otherwise [`Error::Operation`] /
     /// [`Error::Core`] from the layout derivation of the toggled hom space.
     /// Checked-Generic admission and pivotal failures retain their typed
@@ -248,6 +250,15 @@ where
                 "{name} leg {leg} out of range for rank {rank}"
             ))
             .into());
+        }
+        if let Some((_, &leg)) = legs
+            .iter()
+            .enumerate()
+            .find(|&(index, leg)| legs[..index].contains(leg))
+        {
+            return Err(
+                Error::InvalidArgument(format!("{name} leg {leg} listed more than once")).into(),
+            );
         }
         if legs.is_empty() {
             return Ok(self.clone());
@@ -319,7 +330,7 @@ where
     }
 
     /// The admitted duality-toggled space of a flip of `legs`, with each
-    /// flip occurrence's pre-flip duality. The stored layout must not change.
+    /// distinct leg's stored duality. The stored layout must not change.
     #[expect(
         clippy::type_complexity,
         reason = "the flip destination carries its occurrence metadata"

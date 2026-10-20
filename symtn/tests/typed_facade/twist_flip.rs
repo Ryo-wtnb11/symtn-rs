@@ -195,20 +195,6 @@ fn typed_inverse_index_ops_pin_values_and_preserve_structure() {
         assert_same_legs(&restored.codomain(), &simple.codomain());
         assert_same_legs(&restored.domain(), &simple.domain());
     }
-    assert_eq!(
-        simple
-            .flip(&[1, 1], Direction::Inverse)
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        simple
-            .flip(&[1], Direction::Inverse)
-            .unwrap()
-            .flip(&[1], Direction::Inverse)
-            .unwrap()
-            .dense_data()
-            .unwrap()
-    );
 
     let complex = simple.convert::<Complex64>();
     assert_eq!(
@@ -382,25 +368,60 @@ fn typed_flip_is_a_fourth_root_of_identity_and_flip_squared_scales_odd_blocks() 
 }
 
 #[test]
-fn typed_flip_repeated_leg_in_one_call_is_sequential() {
-    // What: the same leg listed twice in one call flips it twice sequentially;
-    // the second occurrence sees the duality the first one left.
+fn typed_flip_rejects_a_repeated_leg() {
     let _guard = cache_lock();
     let runtime = runtime();
-    let typed = typed_fz2_doctest(&runtime);
-    let typed_twice: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed.flip(&[1, 1], Direction::Forward).unwrap();
-    assert_eq!(typed_twice.dense_data().unwrap(), &[2.0, -3.0]);
-    let typed_stepwise: TensorMap<symtn::sector::FermionParityFusionRule, f64> = typed
-        .flip(&[1], Direction::Forward)
-        .unwrap()
-        .flip(&[1], Direction::Forward)
-        .unwrap();
-    assert_eq!(
-        typed_twice.dense_data().unwrap(),
-        typed_stepwise.dense_data().unwrap()
-    );
-    assert_same_legs(&typed_twice.domain(), &typed.domain());
+    let u1_leg = GradedSpace::try_new(
+        Arc::new(symtn::sector::U1FusionRule),
+        [(symtn::sector::U1Irrep::new(1), 1)],
+    )
+    .unwrap();
+    let u1 = TensorMap::from_subblock_fn(&runtime, [&u1_leg], [&u1_leg], |_, _| 7.0).unwrap();
+    let spin =
+        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let su2 =
+        TensorMap::from_subblock_fn(&runtime, [&spin, &spin], [&spin, &spin], |_, _| 5.0).unwrap();
+    macro_rules! rejects {
+        ($source:expr) => {{
+            let source = $source;
+            for direction in [Direction::Forward, Direction::Inverse] {
+                for (legs, fragment) in [
+                    (vec![0, 0], "listed more than once"),
+                    (vec![0, 1, 0], "listed more than once"),
+                    (vec![0, 0, 0], "listed more than once"),
+                    (vec![source.rank(), 0, 0], "out of range"),
+                    (vec![0, 0, source.rank()], "out of range"),
+                ] {
+                    match source.flip(&legs, direction) {
+                        Err(symtn::typed::Error::InvalidArgument(message)) => {
+                            assert!(message.contains(fragment), "{message}");
+                        }
+                        other => panic!("expected InvalidArgument, got {:?}", other.map(|_| ())),
+                    }
+                }
+            }
+        }};
+    }
+    let fz2 = fz2_index(&runtime);
+    rejects!(&fz2);
+    rejects!(&u1);
+    rejects!(&su2);
+    rejects!(&fz2.adjoint().unwrap());
+
+    for direction in [Direction::Forward, Direction::Inverse] {
+        let together = su2.flip(&[0, 2], direction).unwrap();
+        let stepwise = su2
+            .flip(&[0], direction)
+            .unwrap()
+            .flip(&[2], direction)
+            .unwrap();
+        assert_eq!(
+            together.dense_data().unwrap(),
+            stepwise.dense_data().unwrap()
+        );
+        assert_same_legs(&together.codomain(), &stepwise.codomain());
+        assert_same_legs(&together.domain(), &stepwise.domain());
+    }
 }
 
 #[test]

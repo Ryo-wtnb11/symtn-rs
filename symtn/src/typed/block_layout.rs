@@ -925,7 +925,7 @@ where
     })
 }
 
-/// TensorKit-compatible Z-isomorphism phase for sequential flip occurrences,
+/// TensorKit-compatible Z-isomorphism phase for distinct flipped legs,
 /// reading each uncoupled sector's (χ, θ) from `values`.
 pub(crate) fn flip_block_factor<C: CategoricalScalar + Copy>(
     values: &impl Fn(SectorId) -> (C, C),
@@ -965,13 +965,12 @@ pub(crate) fn flip_block_factor<C: CategoricalScalar + Copy>(
         .fold(C::one(), |product, factor| product * factor)
 }
 
-/// Returns the duality-toggled HomSpace and each flip occurrence's pre-state.
+/// Returns the duality-toggled HomSpace and each distinct leg's stored duality.
 pub(crate) fn flip_toggled_homspace(
     hom: &FusionTreeHomSpace,
     legs: &[usize],
 ) -> (FusionTreeHomSpace, Vec<(usize, bool)>) {
     let nout = hom.codomain().len();
-    let rank = nout + hom.domain().len();
     let leg_of = |leg: usize| {
         if leg < nout {
             &hom.codomain().legs()[leg]
@@ -979,18 +978,13 @@ pub(crate) fn flip_toggled_homspace(
             &hom.domain().legs()[leg - nout]
         }
     };
-    let mut flip_count = vec![0usize; rank];
     let occurrences = legs
         .iter()
-        .map(|&leg| {
-            let dual = leg_of(leg).is_dual() ^ (flip_count[leg] % 2 == 1);
-            flip_count[leg] += 1;
-            (leg, dual)
-        })
+        .map(|&leg| (leg, leg_of(leg).is_dual()))
         .collect();
 
     let toggled_leg = |index: usize, leg: &SectorLeg| {
-        if flip_count[index] % 2 == 1 {
+        if legs.contains(&index) {
             SectorLeg::new(leg.iter(), !leg.is_dual())
         } else {
             leg.clone()
