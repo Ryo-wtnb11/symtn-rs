@@ -8,6 +8,13 @@ before #2273 use `tenet-<x>` / `TENET_*`; they are now `symtn-<x>` / `SYMTN_*`.
 
 ## Current harnesses
 
+- `symtn/benches/vector_ops.rs`: single-thread Host vector operations, slice
+  oracles and 1/4/8/16-lane dot candidates for U(1), SU(2), and Fibonacci;
+  f64, Complex64, and f32 for U(1)/SU(2), Complex64 only for Fibonacci,
+  with allocation calls/bytes. Run
+  `cargo bench -p symtn --bench vector_ops --offline -- U1` (optional substring
+  filter). Each selected row runs for at least 0.2 seconds after warmup.
+
 - `operation_matrix.sh` and `operation_matrix.md`: Host operation matrix,
   environment capture, and comparison protocol.
 - `eager_overhead_ledger.sh` (`symtn/benches/eager_overhead_ledger.rs`,

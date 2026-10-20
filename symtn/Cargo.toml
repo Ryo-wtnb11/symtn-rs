@@ -72,3 +72,7 @@ harness = false
 [[bench]]
 name = "contract_batch_timing"
 harness = false
+
+[[bench]]
+name = "vector_ops"
+harness = false
