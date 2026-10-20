@@ -1,6 +1,6 @@
 //! Revision-pinned device performance baseline for the existing CUDA path.
 //!
-//! Mirrors the Host protocol of `symtn/examples/operation_matrix.rs`: a fresh
+//! Mirrors the Host protocol of `symtn/benches/operation_matrix.rs`: a fresh
 //! `Runtime` per row, the fixture built before the timer, one cold call then a
 //! warm-up then `--iterations` measured calls, correctness checked after the
 //! timer, environment header lines, a CSV table, and caller-thread allocation
@@ -127,7 +127,7 @@ mod device {
             device: 0,
             precision: Precision::Double,
         };
-        let mut args = std::env::args().skip(1);
+        let mut args = std::env::args().skip(1).filter(|arg| arg != "--bench");
         while let Some(flag) = args.next() {
             let value = args
                 .next()

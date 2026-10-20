@@ -2,8 +2,8 @@
 # Revision-pinned device performance baseline of the existing CUDA path.
 #
 # Mirrors benchmarks/operation_matrix.sh: capture the environment that pins the
-# measurement, build the release example, run it, emit the header lines and the
-# CSV on stdout. The example owns the protocol (fresh Runtime per row, fixture
+# measurement, build the release bench, run it, emit the header lines and the
+# CSV on stdout. The bench owns the protocol (fresh Runtime per row, fixture
 # before the timer, cold/warm-up/warm, correctness after the timers).
 #
 # Usage: benchmarks/cuda_operation_matrix.sh [--blocks A,B] [--degeneracy A,B]
@@ -117,10 +117,10 @@ printf '# cutensor_resolved=%s cutensor_version=%s\n' \
 printf '# threads=RAYON_NUM_THREADS:%s OPENBLAS_NUM_THREADS:%s OMP_NUM_THREADS:%s MKL_NUM_THREADS:%s\n' \
     "$RAYON_NUM_THREADS" "$OPENBLAS_NUM_THREADS" "$OMP_NUM_THREADS" "$MKL_NUM_THREADS"
 
-cargo build --locked --offline --release -p symtn-network --example cuda_operation_matrix \
+cargo bench --no-run --profile release --locked --offline -p symtn-network --bench cuda_operation_matrix \
     --no-default-features --features "$CUDA_OP_MATRIX_CARGO_FEATURES" >&2
 
-cargo run --locked --offline --release -p symtn-network --example cuda_operation_matrix --quiet \
+cargo bench --profile release --locked --offline -p symtn-network --bench cuda_operation_matrix --quiet \
     --no-default-features --features "$CUDA_OP_MATRIX_CARGO_FEATURES" -- "$@"
 
 if [[ "$(sha256_file Cargo.lock)" != "$lock_sha256" ]]; then

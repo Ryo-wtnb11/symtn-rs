@@ -24,7 +24,7 @@ complete median row; its environment is recorded above rather than emitted by
 the example. Caller allocation counters exclude worker threads, native BLAS
 allocations, frees, and peak/live bytes.
 
-Representative commands:
+Historical commands (the cached-network program has been retired):
 
 ```sh
 cargo test -p tenet-tensors --features racah-generated \
@@ -37,8 +37,6 @@ OP_MATRIX_MIN_MS=0 OP_MATRIX_OPERATION=permute OP_MATRIX_FORM=owned \
 OP_MATRIX_DEGENERACY=2 OP_MATRIX_MIN_MS=5 \
   OP_MATRIX_OPERATION=contract_input_swap OP_MATRIX_FORM=owned \
   benchmarks/operation_matrix.sh
-cargo run --release -p tenet-network --example microbench_cached_network \
-  --features racah-generated --quiet
 ```
 
 ## P0: checked-Generic tree transforms

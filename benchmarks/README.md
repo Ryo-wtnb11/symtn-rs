@@ -10,7 +10,7 @@ before #2273 use `tenet-<x>` / `TENET_*`; they are now `symtn-<x>` / `SYMTN_*`.
 
 - `operation_matrix.sh` and `operation_matrix.md`: Host operation matrix,
   environment capture, and comparison protocol.
-- `eager_overhead_ledger.sh` (`symtn/examples/eager_overhead_ledger.rs`,
+- `eager_overhead_ledger.sh` (`symtn/benches/eager_overhead_ledger.rs`,
   `tensorkit_eager_overhead.jl`, `eager_overhead_phases.py`): per-call time,
   allocations, thread layouts, and sampled phase attribution of the eager
   primitives on small many-block tensors against TensorKit.

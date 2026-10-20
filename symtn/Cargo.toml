@@ -27,8 +27,9 @@ cgc-gen = ["symtn-core/cgc-gen", "symtn-tensors/cgc-gen"]
 krylov = ["dep:krylov"]
 
 # The CUDA batch timing harness needs a device runtime.
-[[example]]
+[[bench]]
 name = "cuda_contract_batch_timing"
+harness = false
 required-features = ["cuda"]
 
 [[example]]
@@ -59,3 +60,15 @@ symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features
 # `if let`. Why-not apply them: the workspace's 2021 rustfmt style cannot
 # format let-chains, and the 2024 style would reformat the whole crate.
 collapsible_if = "allow"
+
+[[bench]]
+name = "operation_matrix"
+harness = false
+
+[[bench]]
+name = "eager_overhead_ledger"
+harness = false
+
+[[bench]]
+name = "contract_batch_timing"
+harness = false

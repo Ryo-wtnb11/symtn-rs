@@ -18,14 +18,8 @@ Both revisions used the exact source in
 `tenet-core/examples/issue_245_layout_cache.rs`. The source was copied into the
 detached main worktree without changing the main revision.
 
-```console
-cargo build --release -p tenet-core --example issue_245_layout_cache
-CARGO_TARGET_DIR=/private/tmp/tenet-245-main-perf-target cargo build --offline --release -p tenet-core --example issue_245_layout_cache
-/private/tmp/tenet-245-main-perf-target/release/examples/issue_245_layout_cache
-/private/tmp/tenet-245-layout-identity/target/release/examples/issue_245_layout_cache
-```
-
-The last two commands were invoked in that order for each of seven samples.
+The retired program was built in release mode for each revision.
+The main executable ran before the branch executable for each of seven samples.
 The program reports two warm paths in nanoseconds per operation for U(1)
 spaces with 1, 8, and 64 sectors: direct `fusion_tree_keys`/layout lookup, and
 coupled-block lookup including shape cloning and coupled-structure lookup.
