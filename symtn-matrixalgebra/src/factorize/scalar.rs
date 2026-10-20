@@ -87,14 +87,17 @@ impl FactorScalar for f32 {
         value as f32
     }
 
+    #[inline]
     fn widen_complex(self) -> Complex64 {
         Complex64::new(self as f64, 0.0)
     }
 
+    #[inline]
     fn from_complex64(value: Complex64) -> Self {
         value.re as f32
     }
 
+    #[inline]
     fn adjoint(self) -> Self {
         self
     }
@@ -139,14 +142,17 @@ impl FactorScalar for f64 {
         value
     }
 
+    #[inline]
     fn widen_complex(self) -> Complex64 {
         Complex64::new(self, 0.0)
     }
 
+    #[inline]
     fn from_complex64(value: Complex64) -> Self {
         value.re
     }
 
+    #[inline]
     fn adjoint(self) -> Self {
         self
     }
@@ -195,14 +201,17 @@ impl FactorScalar for num_complex::Complex32 {
         num_complex::Complex32::new(value as f32, 0.0)
     }
 
+    #[inline]
     fn widen_complex(self) -> Complex64 {
         Complex64::new(self.re as f64, self.im as f64)
     }
 
+    #[inline]
     fn from_complex64(value: Complex64) -> Self {
         num_complex::Complex32::new(value.re as f32, value.im as f32)
     }
 
+    #[inline]
     fn adjoint(self) -> Self {
         self.conj()
     }
@@ -247,14 +256,17 @@ impl FactorScalar for Complex64 {
         Complex64::new(value, 0.0)
     }
 
+    #[inline]
     fn widen_complex(self) -> Complex64 {
         self
     }
 
+    #[inline]
     fn from_complex64(value: Complex64) -> Self {
         value
     }
 
+    #[inline]
     fn adjoint(self) -> Self {
         self.conj()
     }

@@ -113,11 +113,7 @@ where
     E: From<Error>,
 {
     if unique {
-        let mut total = D::Wide::from_real(0.0);
-        for (&ai, &bi) in a.iter().zip(b) {
-            total = total + FactorScalar::adjoint(ai.widen()) * bi.widen();
-        }
-        return Ok(total.widen_complex());
+        return Ok(super::numeric::wide_conj_dot(a, b).widen_complex());
     }
     coupled_region_inner(structure, nout, a, b, weight_of)
 }
@@ -260,6 +256,11 @@ where
     /// current generic mixed-block reduction, which visits those stored dense
     /// positions and therefore propagates their non-finite values. See
     /// [`Self::norm`] for the weighting, lazy behavior, and example.
+    ///
+    /// On Host storage owned dense sums use a fixed multi-accumulator order, widening
+    /// single-precision inputs to double precision before arithmetic. If an
+    /// intermediate partial sum overflows, the result is unspecified among
+    /// ±Inf/NaN.
     ///
     /// On CUDA storage the sum accumulates in `f64` within and across coupled
     /// sectors at every payload dtype and narrows to `D` once, as on the

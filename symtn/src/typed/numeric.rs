@@ -285,6 +285,32 @@ pub(crate) fn sector_regions(
         .ok_or_else(|| internal_layout_error("non-packed coupled-sector layout"))
 }
 
+/// Eight independent wide sums break the serial dependency chain; the fixed
+/// pairwise combine keeps the result independent of scheduling.
+#[inline]
+pub(super) fn wide_conj_dot<D: ScalarOps>(a: &[D], b: &[D]) -> D::Wide {
+    const LANES: usize = 8;
+    let mut sums = [D::Wide::from_real(0.0); LANES];
+    let (aa, a_remainder) = a.as_chunks::<LANES>();
+    let (bb, b_remainder) = b.as_chunks::<LANES>();
+    for (a, b) in aa.iter().zip(bb) {
+        for i in 0..LANES {
+            sums[i] = sums[i] + FactorScalar::adjoint(a[i].widen()) * b[i].widen();
+        }
+    }
+    for (i, (&a, &b)) in a_remainder.iter().zip(b_remainder).enumerate() {
+        sums[i] = sums[i] + FactorScalar::adjoint(a.widen()) * b.widen();
+    }
+    let mut width = LANES;
+    while width > 1 {
+        for i in 0..width / 2 {
+            sums[i] = sums[2 * i] + sums[2 * i + 1];
+        }
+        width /= 2;
+    }
+    sums[0]
+}
+
 /// Quantum-dimension-weighted region inner product `sum_c dim(c) * <a_c, b_c>`
 /// over the packed coupled-sector regions, first argument conjugated.
 ///
@@ -321,12 +347,7 @@ where
         let rhs = b.get(range).ok_or_else(|| {
             internal_layout_error("coupled-sector region exceeds the right scalar buffer")
         })?;
-        // Accumulated in `D::Wide` (see `symtn_tensors::WideScalar`): the identity for
-        // the double-precision payloads, double precision for the single ones.
-        let mut partial = D::Wide::from_real(0.0);
-        for (&ai, &bi) in lhs.iter().zip(rhs) {
-            partial = partial + FactorScalar::adjoint(ai.widen()) * bi.widen();
-        }
+        let partial = wide_conj_dot(lhs, rhs);
         total += partial.widen_complex() * weight_of(region.coupled())?;
     }
     Ok(total)

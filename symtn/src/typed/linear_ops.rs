@@ -416,15 +416,16 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
         y: Option<(&TensorMap<R, D>, D)>,
     ) -> Result<TensorMap<R, D>, Error> {
         let Some((y, beta)) = y else {
-            return Ok(x.with_data(
-                x.owned_body()
-                    .expect("owned scale input")
-                    .materialized_dense_data()
-                    .as_ref()
-                    .iter()
-                    .map(|&value| scale_value(value, alpha))
-                    .collect(),
-            ));
+            let data = x
+                .owned_body()
+                .expect("owned scale input")
+                .materialized_dense_data();
+            let scaled = if alpha.is_zero() {
+                vec![D::zero() * alpha; data.len()]
+            } else {
+                data.iter().map(|&value| alpha * value).collect()
+            };
+            return Ok(x.with_data(scaled));
         };
         let _host_pool = x.runtime.enter_host_pool();
         if matches!(&x.repr, TypedTensorRepr::Adjoint(_))
@@ -566,13 +567,25 @@ where
         let data = body
             .and_then(|body| Arc::get_mut(&mut body.data))
             .ok_or(Error::DestinationShared)?;
-        let scale = |value: &mut D| *value = scale_value(*value, factor);
-        match data {
-            TypedData::Dense(data) => data.iter_mut().for_each(scale),
-            TypedData::Diagonal(spectrum) => spectrum
-                .iter_mut()
-                .flat_map(|entry| entry.values.iter_mut())
-                .for_each(scale),
+        if factor.is_zero() {
+            let zero = D::zero() * factor;
+            match data {
+                TypedData::Dense(data) => data.fill(zero),
+                TypedData::Diagonal(spectrum) => {
+                    spectrum
+                        .iter_mut()
+                        .for_each(|entry| entry.values.fill(zero));
+                }
+            }
+        } else {
+            let scale = |value: &mut D| *value = factor * *value;
+            match data {
+                TypedData::Dense(data) => data.iter_mut().for_each(scale),
+                TypedData::Diagonal(spectrum) => spectrum
+                    .iter_mut()
+                    .flat_map(|entry| entry.values.iter_mut())
+                    .for_each(scale),
+            }
         }
         Ok(())
     }

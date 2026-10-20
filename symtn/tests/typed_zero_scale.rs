@@ -11,7 +11,7 @@
 //! `alpha * a + beta * b`, so the expectation here is
 //! `scale(a, alpha) + scale(b, beta)`.
 //!
-//! No fixture holds `-0.0`, so the sign of a zero cannot decide a comparison.
+//! The signed-zero regression also checks the storage-local `0 * factor` bits.
 
 use num_complex::Complex64;
 use symtn::sector::{
@@ -210,6 +210,26 @@ fn typed_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     check_dense!("SU(2) c64", su2(), Complex64);
     check_dense!("fZ2 f64", fz2(), f64);
     check_dense!("fZ2 c64", fz2(), Complex64);
+}
+
+#[test]
+fn zero_scale_overwrites_nonfinite_entries_with_signed_zero() {
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let leg = u1();
+    let x = tensor!(&runtime, &leg, X, f64);
+    for factor in [0.0, -0.0] {
+        let expected = (0.0_f64 * factor).to_bits();
+        let scaled = x.scale(factor).unwrap();
+        let mut assigned = x.materialize().unwrap();
+        assigned.scale_assign(factor).unwrap();
+        for result in [&scaled, &assigned] {
+            assert!(result
+                .dense_data()
+                .unwrap()
+                .iter()
+                .all(|value| value.to_bits() == expected));
+        }
+    }
 }
 
 /// The compact diagonal arms (TensorKit's `DiagonalTensorMap` `add`/`scale`,
