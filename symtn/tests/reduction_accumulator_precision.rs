@@ -690,3 +690,111 @@ mod checked_generic {
         assert_measurements_match_the_oracle(&measurements);
     }
 }
+
+#[test]
+fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
+    let runtime = host_runtime();
+    macro_rules! check {
+        ($rule:expr, $sector:expr, $weight:expr, $dtype:ty, $cast:expr) => {
+            for len in [0, 8, 13] {
+                let rule = Arc::new($rule);
+                let out = GradedSpace::try_new(rule.clone(), [($sector, len)]).unwrap();
+                let input = GradedSpace::try_new(rule, [($sector, 1)]).unwrap();
+                let a: TensorMap<_, $dtype> =
+                    TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, index| {
+                        ($cast)(Complex64::new(
+                            real_at(index[0] + 1),
+                            other_at(index[0] + 2),
+                        ))
+                    })
+                    .unwrap();
+                let b: TensorMap<_, $dtype> =
+                    TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, index| {
+                        ($cast)(Complex64::new(
+                            other_at(index[0] + 3),
+                            real_at(index[0] + 4),
+                        ))
+                    })
+                    .unwrap();
+                let aa = a.dense_data().unwrap();
+                let bb = b.dense_data().unwrap();
+                assert_eq!(aa.len(), len);
+                let mut serial = Complex64::new(0.0, 0.0);
+                for (&a, &b) in aa.iter().zip(bb) {
+                    serial += numerics::Numeric::wide(a).conj() * numerics::Numeric::wide(b);
+                }
+                // At most `len` bilinear terms, weighted by the known irrep dimension.
+                numerics::assert_close(
+                    "dense lane inner",
+                    a.inner(&b).unwrap(),
+                    ($cast)(serial * $weight),
+                    len,
+                );
+            }
+        };
+    }
+    macro_rules! providers {
+        ($dtype:ty, $cast:expr) => {
+            check!(U1FusionRule, U1Irrep::new(0), 1.0, $dtype, $cast);
+            check!(
+                SU2FusionRule,
+                SU2Irrep::from_twice_spin(1),
+                2.0,
+                $dtype,
+                $cast
+            );
+        };
+    }
+    providers!(f64, |v: Complex64| v.re);
+    providers!(Complex64, |v: Complex64| v);
+    providers!(f32, |v: Complex64| v.re as f32);
+    providers!(Complex32, |v: Complex64| Complex32::new(
+        v.re as f32,
+        v.im as f32
+    ));
+}
+
+#[test]
+fn dense_inner_cancellation_accumulates_wide() {
+    let runtime = host_runtime();
+    macro_rules! check {
+        ($rule:expr, $sector:expr, $weight:expr, $dtype:ty, $cast:expr) => {{
+            let rule = Arc::new($rule);
+            let out = GradedSpace::try_new(rule.clone(), [($sector, 17)]).unwrap();
+            let input = GradedSpace::try_new(rule, [($sector, 1)]).unwrap();
+            // Each lane sees a large value, a unit value, then cancellation;
+            // even an eight-lane f32 accumulator loses the unit in lane zero.
+            let mut values = [1.0_f32; 17];
+            values[0] = 1e8;
+            values[16] = -1e8;
+            let narrow = values.iter().copied().sum::<f32>();
+            assert!((narrow - 15.0).abs() > 1.0);
+            let a: TensorMap<_, $dtype> =
+                TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, _| ($cast)(1.0))
+                    .unwrap();
+            let b: TensorMap<_, $dtype> =
+                TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, index| {
+                    ($cast)(values[index[0]])
+                })
+                .unwrap();
+            numerics::assert_close(
+                "wide cancellation",
+                a.inner(&b).unwrap(),
+                ($cast)(15.0 * $weight),
+                17,
+            );
+        }};
+    }
+    check!(U1FusionRule, U1Irrep::new(0), 1.0, f32, |v| v);
+    check!(SU2FusionRule, SU2Irrep::from_twice_spin(1), 2.0, f32, |v| v);
+    check!(U1FusionRule, U1Irrep::new(0), 1.0, Complex32, |v| {
+        Complex32::new(v, 0.0)
+    });
+    check!(
+        SU2FusionRule,
+        SU2Irrep::from_twice_spin(1),
+        2.0,
+        Complex32,
+        |v| Complex32::new(v, 0.0)
+    );
+}
