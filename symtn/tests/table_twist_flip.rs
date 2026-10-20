@@ -379,3 +379,15 @@ fn no_braiding_table_keeps_its_typed_refusals() {
     );
     assert_eq!(t.dense_data().unwrap(), &before[..]);
 }
+
+#[test]
+fn fibonacci_flip_rejects_a_repeated_leg() {
+    let runtime = Runtime::builder().build().unwrap();
+    let t = operand(&runtime, &fibonacci());
+    match t.flip(&[1, 1], Direction::Forward) {
+        Err(Error::InvalidArgument(message)) => {
+            assert!(message.contains("listed more than once"), "{message}");
+        }
+        other => panic!("expected InvalidArgument, got {:?}", other.map(|_| ())),
+    }
+}
