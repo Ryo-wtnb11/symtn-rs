@@ -28,14 +28,14 @@ fn dot<D: Copy, W: Copy + Default + Add<Output = W> + Mul<Output = W>, const N: 
 ) -> W {
     assert_eq!(a.len(), b.len());
     let mut sums = [W::default(); N];
-    let mut aa = a.chunks_exact(N);
-    let mut bb = b.chunks_exact(N);
-    for (a, b) in aa.by_ref().zip(bb.by_ref()) {
+    let (aa, a_remainder) = a.as_chunks::<N>();
+    let (bb, b_remainder) = b.as_chunks::<N>();
+    for (a, b) in aa.iter().zip(bb) {
         for i in 0..N {
             sums[i] = sums[i] + conj(widen(a[i])) * widen(b[i]);
         }
     }
-    for (i, (&a, &b)) in aa.remainder().iter().zip(bb.remainder()).enumerate() {
+    for (i, (&a, &b)) in a_remainder.iter().zip(b_remainder).enumerate() {
         sums[i] = sums[i] + conj(widen(a)) * widen(b);
     }
     let mut width = N;
