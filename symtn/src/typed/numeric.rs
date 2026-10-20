@@ -291,14 +291,14 @@ pub(crate) fn sector_regions(
 pub(super) fn wide_conj_dot<D: ScalarOps>(a: &[D], b: &[D]) -> D::Wide {
     const LANES: usize = 8;
     let mut sums = [D::Wide::from_real(0.0); LANES];
-    let mut aa = a.chunks_exact(LANES);
-    let mut bb = b.chunks_exact(LANES);
-    for (a, b) in aa.by_ref().zip(bb.by_ref()) {
+    let (aa, a_remainder) = a.as_chunks::<LANES>();
+    let (bb, b_remainder) = b.as_chunks::<LANES>();
+    for (a, b) in aa.iter().zip(bb) {
         for i in 0..LANES {
             sums[i] = sums[i] + FactorScalar::adjoint(a[i].widen()) * b[i].widen();
         }
     }
-    for (i, (&a, &b)) in aa.remainder().iter().zip(bb.remainder()).enumerate() {
+    for (i, (&a, &b)) in a_remainder.iter().zip(b_remainder).enumerate() {
         sums[i] = sums[i] + FactorScalar::adjoint(a.widen()) * b.widen();
     }
     let mut width = LANES;
