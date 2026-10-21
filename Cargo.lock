@@ -1174,17 +1174,15 @@ dependencies = [
 
 [[package]]
 name = "fusion-symbols"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68098aaf2b112b7b335b610c88b28fd4a6cf7997e04b871be09a61ddd96f397e"
+checksum = "2627e4f0a3172cf3820cd3d183f492ffe8f2fc16acf61c1eb9b58cfa68afd29f"
 dependencies = [
  "num-bigint",
  "num-complex",
  "num-rational",
  "num-traits",
- "tenferro-cpu",
- "tenferro-linalg",
- "tenferro-runtime",
+ "t4a-faer",
 ]
 
 [[package]]
@@ -3723,6 +3721,56 @@ dependencies = [
  "derive-new",
  "serde",
  "smallvec",
+]
+
+[[package]]
+name = "t4a-faer"
+version = "0.24.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7442ea342f37c81922d0dc68ae424b3d5d5229b516756718bd3b52dc133cc45"
+dependencies = [
+ "bytemuck",
+ "dyn-stack",
+ "equator 0.6.0",
+ "gemm",
+ "generativity",
+ "libm",
+ "nano-gemm",
+ "num-complex",
+ "num-traits",
+ "pulp",
+ "reborrow",
+ "t4a-faer-traits",
+ "t4a-private-gemm-x86",
+]
+
+[[package]]
+name = "t4a-faer-traits"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b20254002b5028791c3b97cf7baebce6ea5f3541977348da1c109d16c1dc889"
+dependencies = [
+ "bytemuck",
+ "dyn-stack",
+ "generativity",
+ "libm",
+ "num-complex",
+ "num-traits",
+ "pulp",
+ "qd",
+ "reborrow",
+]
+
+[[package]]
+name = "t4a-private-gemm-x86"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6e140e3b2522528a14dc01752648b0eefa6594e1b8e7e7baff2c217acfb2c62"
+dependencies = [
+ "defer",
+ "interpol",
+ "num_cpus",
+ "raw-cpuid",
 ]
 
 [[package]]

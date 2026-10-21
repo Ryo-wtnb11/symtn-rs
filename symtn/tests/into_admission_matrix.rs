@@ -17,7 +17,7 @@
 //!    source the reference-step oracle (`materialize`, then eager) is eager
 //!    itself;
 //! 2. multiplicity-free SU(2) (`SU2FusionRule`) == checked Generic SU(2)
-//!    (`SUNFusionRule::new(2)`), two coefficient engines on one input;
+//!    (`SUNFusionRule::new(2)`), two adapters to the same exact A1 provider on one input;
 //! 3. the destination keeps its payload allocation and provider.
 //!
 //! 4. the reference-step oracle: eager on the materialized source equals

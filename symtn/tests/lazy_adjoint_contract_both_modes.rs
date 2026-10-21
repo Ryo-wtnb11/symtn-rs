@@ -19,7 +19,7 @@
 //!   same operation on owned operands;
 //! - (ii) cross-mode agreement: SU(2) admitted multiplicity-free
 //!   (`SU2FusionRule`) against checked Generic (`SUNFusionRule::new(2)`), two
-//!   coefficient engines on one input;
+//!   adapters to the same exact A1 provider on one input;
 //! - SU(3) (checked only) with outer multiplicity two (`8 ⊗ 8 → 8`) and a
 //!   dual leg against (i).
 //!

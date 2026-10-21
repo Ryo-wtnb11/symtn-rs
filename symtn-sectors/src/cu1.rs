@@ -1,4 +1,4 @@
-use fusion_symbols::cu1 as fs;
+use fusion_symbols::{category::FusionCategory, lie as fs};
 
 use crate::{
     BraidingStyleKind, CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError,
@@ -102,7 +102,7 @@ impl From<CU1Irrep> for SectorId {
 }
 
 /// TensorKit's `CU1Irrep` fusion rule. Every symbol (fusion, N, F, R, dim,
-/// twist, Frobenius–Schur phase) comes from [`fusion_symbols::cu1`], in
+/// twist, Frobenius–Schur phase) comes from [`fusion_symbols::lie::CU1`], in
 /// TensorKitSectors 0.3.9's gauge; this type owns symtn's label codec, its
 /// [`CU1_MAX_TWICE_CHARGE`] bound and the checked error contract.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
@@ -127,9 +127,8 @@ fn channels(left: CU1Irrep, right: CU1Irrep) -> Result<SectorVec, FusionAlgebraE
         left: left.into(),
         right: right.into(),
     };
-    let fusion = left
-        .fs()
-        .fusion(right.fs())
+    let fusion = fs::CU1
+        .fusion(&left.fs(), &right.fs())
         .map_err(|_| not_representable())?;
     fusion
         .map(|channel| {
@@ -177,7 +176,7 @@ impl FusionRule for CU1FusionRule {
 
 impl CheckedFusionAlgebra for CU1FusionRule {
     fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        let dual = checked_irrep(sector)?.fs().dual();
+        let dual = fs::CU1.dual(&checked_irrep(sector)?.fs());
         Ok(CU1Irrep::from_fs(dual)
             .expect("the dual keeps the twice charge")
             .into())
@@ -234,17 +233,19 @@ impl MultiplicityFreeFusionSymbols for CU1FusionRule {
         f: SectorId,
     ) -> f64 {
         let [a, b, c, d, e, f] = [a, b, c, d, e, f].map(|sector| self.label(sector));
-        fs::cu1_f_symbol(a, b, c, d, e, f)
+        fs::CU1.f_symbol(&a, &b, &c, &d, &e, &f).unwrap()
     }
 
     fn r_symbol_scalar(&self, a: SectorId, b: SectorId, c: SectorId) -> f64 {
-        fs::cu1_r_symbol(self.label(a), self.label(b), self.label(c))
+        fs::CU1
+            .r_symbol(&self.label(a), &self.label(b), &self.label(c))
+            .unwrap()
     }
 }
 
 impl MultiplicityFreeRigidSymbols for CU1FusionRule {
     fn dim_scalar(&self, sector: SectorId) -> f64 {
-        self.label(sector).dim()
+        fs::CU1.dim(&self.label(sector))
     }
     fn inv_dim_scalar(&self, sector: SectorId) -> f64 {
         1.0 / self.dim_scalar(sector)
@@ -256,9 +257,9 @@ impl MultiplicityFreeRigidSymbols for CU1FusionRule {
         1.0 / self.sqrt_dim_scalar(sector)
     }
     fn twist_scalar(&self, sector: SectorId) -> f64 {
-        self.label(sector).twist()
+        fs::CU1.twist(&self.label(sector))
     }
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> f64 {
-        self.label(sector).frobenius_schur()
+        fs::CU1.frobenius_schur_phase(&self.label(sector))
     }
 }

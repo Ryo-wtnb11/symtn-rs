@@ -10,7 +10,7 @@ The split follows TensorKit's ecosystem:
 
 | Concern | TensorKit ecosystem | This stack |
 | --- | --- | --- |
-| Elementary categorical data | WignerSymbols.jl, SUNRepresentations.jl, TensorKitSectors.jl, CategoryData.jl | the [`fusion-symbols`](https://github.com/Ryo-wtnb11/fusion-symbols) crate (formerly `racah`), 0.4.0 |
+| Elementary categorical data | WignerSymbols.jl, SUNRepresentations.jl, TensorKitSectors.jl, CategoryData.jl | the [`fusion-symbols`](https://github.com/Ryo-wtnb11/fusion-symbols) crate (formerly `racah`), 0.5.1 |
 | Symmetric tensors, fusion trees, structure, transforms | TensorKit.jl | symtn |
 | Dense arrays, linear algebra, devices | LinearAlgebra, TensorOperations.jl | tenferro |
 | Strided data movement | Strided.jl | strided-rs (`strided-kernel`) |
@@ -23,7 +23,7 @@ The split follows TensorKit's ecosystem:
 flowchart TB
     APP["Application<br/>MPS / PEPS / VMC algorithms"]
     SYMTN["<b>symtn</b><br/>tensor maps, fusion trees, structure, transforms"]
-    SYM["<b>Symbol layer</b> (fusion-symbols crate, formerly racah)<br/>su2 / sun / bcd / tables / abelian / cu1 modules<br/>planned: product"]
+    SYM["<b>Symbol layer</b> (fusion-symbols crate, formerly racah)<br/>category / lie / finite / fermion / table / product modules"]
     DENSE["<b>tenferro</b><br/>dense kernels, linalg, CPU/GPU providers"]
     STR["<b>strided-rs</b><br/>strided data-movement kernels"]
     PRIMS["tprims (planned)<br/>copy-free strided contraction"]
@@ -33,19 +33,22 @@ flowchart TB
     SYMTN --> STR
     DENSE --> STR
     DENSE -.planned.-> PRIMS
-    SYM --> DENSE
+    SYM --> FAER["t4a-faer<br/>sequential CGC-generation kernels"]
 ```
 
 The arrows show dependency direction, and no layer depends upward.
 
-The symbol layer uses tenferro only for the dense linear algebra of CGC
-generation (`fusion-symbols` `src/sun/linalg.rs` and `src/bcd/linalg.rs`, behind
-`cgc-gen`). It uses no tensor or fusion-tree concept.
+The symbol layer uses t4a-faer for dense CGC-generation kernels
+(`fusion-symbols` `src/lie/sun/linalg.rs` and `src/lie/bcd/linalg.rs`, behind
+`lie-generated`). These kernels run sequentially (`Par::Seq`), without rayon.
+symtn keeps its opt-in `cgc-gen` feature, forwarding to `lie-generated`, and
+disables fusion-symbols default features. The symbol layer uses no tensor or
+fusion-tree concept.
 
 ### 1. Symbol layer (`fusion-symbols` crate)
 
 The symbol layer is the published `fusion-symbols` crate (formerly `racah`),
-which symtn depends on at 0.4.0.
+which symtn depends on at 0.5.1.
 
 **Target ownership.** For each group or category, the symbol layer owns the
 elementary data a fusion category needs:
@@ -62,19 +65,19 @@ shaped around one consumer's call pattern.
 
 | Crate | Owns |
 | --- | --- |
-| `fusion-symbols` (formerly `racah`), modules `su2`, `sun`, `bcd` | Lie-group coefficients. SU(2) symbols are exact. Behind `cgc-gen` it generates CGC, F and R: SU(N) in the SUNRepresentations gauge, and B/C/D (SO(N)/Sp(2N)) in fusion-symbols' QSpace-derived sweep gauge (`docs/gauge_soN.md`). |
-| `fusion-symbols`, module `tables` | The pinned AnyonWiki tables (unitary, rank ≤ 4) behind `TableRule`, Fibonacci included (#2016, #2277). |
-| `fusion-symbols`, modules `abelian`, `cu1` | Z2, Z_N, U(1), fermion parity and CU(1): every symbol behind `Z2FusionRule`, `ZNFusionRule`, `U1FusionRule`, `FermionParityFusionRule` and `CU1FusionRule` (#2278). symtn keeps their labels, codecs, identities and checked errors. |
-| `fusion-symbols`, planned module `product` | Deligne products; they stay in symtn (`ProductFusionRule`) until that module ships. |
+| `fusion-symbols` (formerly `racah`), module `lie` | Lie-group coefficients. SU(2) symbols are exact. Behind `lie-generated` it generates CGC, F and R: SU(N), N ≥ 3, in the SUNRepresentations gauge, and B/C/D (SO(N)/Sp(2N)) in fusion-symbols' QSpace-derived sweep gauge (`docs/gauge_soN.md`). |
+| `fusion-symbols`, module `table` | The pinned AnyonWiki tables (unitary, rank ≤ 4) behind `TableRule`, Fibonacci included (#2016, #2277). |
+| `fusion-symbols`, modules `finite`, `fermion`, `lie` | Z2, Z_N, U(1), fermion parity and CU(1): every symbol behind `Z2FusionRule`, `ZNFusionRule`, `U1FusionRule`, `FermionParityFusionRule` and `CU1FusionRule` (#2278). symtn keeps their labels, codecs, identities and checked errors. |
+| `fusion-symbols`, module `product` | Deligne products; symtn still composes its own `ProductFusionRule` symbols pending #2016. |
 
 **Target: one provider shape across crates.** Every crate should answer N,
 dims, dual, FS phase and indicator, twist, F and R in the same shape, so a
 consumer adapts every crate the same way.
 
-**Current: the surface is not uniform.**
-- SU(2) uses free functions (`su2_frobenius_schur`, `su2_twist`).
-- SU(N) uses `Irrep` methods (`frobenius_schur_phase`, `frobenius_schur`, `twist`).
-- B/C/D has the FS indicator and twist but no FS-phase API.
+**Current:** fusion-symbols categories implement `category::FusionCategory`;
+CGCs additionally use `category::GroupRepresentations`. SU(2), including
+`SUNFusionRule::new(2)`, uses the exact A1 path. symtn preserves its own codecs,
+sector ordering, admission and braided-table `Anyonic` policy.
 
 **Contracts.**
 - **References.** Each function documents the reference `file:symbol` it
@@ -303,7 +306,7 @@ Outside the four, by design:
 | symtn → symbol layer | `symtn-sectors` | Mathematical queries (`N`, `dims`, `dual`, FS phase, `twist`, `F`, `R`), converted into symtn types. |
 | symtn → tenferro | `symtn-dense` | Grouped dense jobs and per-sector factorization requests, inside one execution context. |
 | symtn → strided-rs | `symtn-operations`, `symtn-tensors` | Strided data-movement kernels for structural permutation, pack and scatter. |
-| Symbol layer → tenferro | fusion-symbols' CGC-generation modules only | Small dense SVD, QR, least squares and matmul. Errors are carried as strings. |
+| Symbol layer → t4a-faer | fusion-symbols' Lie CGC-generation modules only | Sequential dense SVD, QR, least squares and matmul. Generation errors retain their source chain. |
 
 **Boundary rules (target).**
 - **Imports.** One crate per consumer imports a given dense or symbol
@@ -322,8 +325,8 @@ Outside the four, by design:
 ## Current deviations (tracked)
 
 - **Product symbols composed in symtn.** `ProductFusionRule` composes the
-  symbols of a product from its factors' in symtn, because fusion-symbols
-  has no `product` module; every factor's symbols, including abelian groups,
+  symbols of a product from its factors' in symtn. Delegation to the shipped
+  fusion-symbols `product` module remains #2016; every factor's symbols, including abelian groups,
   fermion parity, CU(1) and the table categories (`TableRule`), come from
   fusion-symbols.
 - **A tenferro type in symtn's public API.** `symtn-dense` re-exports

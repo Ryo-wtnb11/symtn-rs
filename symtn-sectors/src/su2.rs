@@ -1,3 +1,7 @@
+use fusion_symbols::{
+    category::FusionCategory,
+    lie::{GroupId, LieGroup, LieIrrep},
+};
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
@@ -75,8 +79,13 @@ const SU2_RACAH_IDENTITY_SCHEMA: u64 = 0x5355_3252_4143_4148;
 const SU2_ENCODING_IDENTITY: &[u8] =
     b"symtn:su2:sector-id=dj:max-doubled-spin=254:channels=ascending-step-2";
 
-fn racah_irrep(irrep: SU2Irrep) -> fusion_symbols::Su2Irrep {
-    fusion_symbols::Su2Irrep::new(irrep.twice_spin() as u32)
+fn category() -> &'static LieGroup {
+    static CATEGORY: OnceLock<LieGroup> = OnceLock::new();
+    CATEGORY.get_or_init(|| LieGroup::new(GroupId::su(2).unwrap()).unwrap())
+}
+
+fn racah_irrep(irrep: SU2Irrep) -> LieIrrep {
+    category().irrep(&[irrep.twice_spin() as i64]).unwrap()
 }
 
 fn checked_irrep(sector: SectorId) -> Result<SU2Irrep, FusionAlgebraError> {
@@ -101,9 +110,9 @@ impl FusionRule for SU2FusionRule {
         IDENTITY
             .get_or_init(|| {
                 let mut bytes = Vec::with_capacity(
-                    fusion_symbols::su2_authority_fingerprint().len() + SU2_ENCODING_IDENTITY.len(),
+                    category().authority_fingerprint().len() + SU2_ENCODING_IDENTITY.len(),
                 );
-                bytes.extend_from_slice(fusion_symbols::su2_authority_fingerprint());
+                bytes.extend_from_slice(category().authority_fingerprint());
                 bytes.extend_from_slice(SU2_ENCODING_IDENTITY);
                 RuleIdentity::from_canonical_bytes::<SU2FusionRule>(
                     SU2_RACAH_IDENTITY_SCHEMA,
@@ -154,13 +163,16 @@ impl SU2FusionRule {
                 right: right_sector,
             });
         }
-        for channel in racah_irrep(left)
-            .fusion(racah_irrep(right))
+        for channel in category()
+            .fusion(&racah_irrep(left), &racah_irrep(right))
             .expect("symtn SU(2) label range cannot overflow fusion-symbols labels")
         {
-            if let core::ops::ControlFlow::Break(error) =
-                emit(SU2Irrep::from_twice_spin(channel.dj() as usize))
-            {
+            if let core::ops::ControlFlow::Break(error) = emit(SU2Irrep::from_twice_spin(
+                channel
+                    .dynkin_labels()
+                    .next()
+                    .expect("SU(2) labels have rank one") as usize,
+            )) {
                 return Ok(core::ops::ControlFlow::Break(error));
             }
         }
@@ -171,7 +183,14 @@ impl SU2FusionRule {
 impl CheckedFusionAlgebra for SU2FusionRule {
     fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
         let irrep = checked_irrep(sector)?;
-        Ok(SU2Irrep::from_twice_spin(racah_irrep(irrep).dual().dj() as usize).into())
+        Ok(SU2Irrep::from_twice_spin(
+            category()
+                .dual(&racah_irrep(irrep))
+                .dynkin_labels()
+                .next()
+                .expect("SU(2) labels have rank one") as usize,
+        )
+        .into())
     }
 
     fn try_fusion_channels(
@@ -228,7 +247,7 @@ impl CanonicalUnitFusionRule for SU2FusionRule {}
 /// Opaque: the authority's own error is reachable only through
 /// [`std::error::Error::source`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SU2CoefficientError(fusion_symbols::Su2Error);
+pub struct SU2CoefficientError(fusion_symbols::lie::su2::Su2Error);
 
 impl fmt::Display for SU2CoefficientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -294,7 +313,7 @@ impl PhysicalFusionBasis for SU2FusionRule {
             *projection = doubled_spin as i32 - 2 * index as i32;
         }
 
-        match fusion_symbols::clebsch_gordan_checked(
+        match fusion_symbols::lie::su2::clebsch_gordan_checked(
             left.id() as u32,
             doubled_projections[0],
             right.id() as u32,
@@ -305,8 +324,8 @@ impl PhysicalFusionBasis for SU2FusionRule {
             Ok(coefficient) => Ok(coefficient.to_f64()),
             // A fusion tensor is dense over carrier indices. Magnetic-number
             // mismatch is therefore a structural zero, not a failed query.
-            Err(fusion_symbols::Su2Error::NotAdmissible(
-                fusion_symbols::AdmissibilityViolation::ProjectionSum { .. },
+            Err(fusion_symbols::lie::su2::Su2Error::NotAdmissible(
+                fusion_symbols::lie::su2::AdmissibilityViolation::ProjectionSum { .. },
             )) => Ok(0.0),
             Err(error) => Err(PhysicalBasisError::Coefficient(SU2CoefficientError(error))),
         }
@@ -325,14 +344,10 @@ impl MultiplicityFreeFusionSymbols for SU2FusionRule {
         left_coupled: SectorId,
         right_coupled: SectorId,
     ) -> Self::Scalar {
-        fusion_symbols::su2_f_symbol(
-            SU2Irrep::from_sector_id(left).twice_spin() as u32,
-            SU2Irrep::from_sector_id(middle).twice_spin() as u32,
-            SU2Irrep::from_sector_id(right).twice_spin() as u32,
-            SU2Irrep::from_sector_id(coupled).twice_spin() as u32,
-            SU2Irrep::from_sector_id(left_coupled).twice_spin() as u32,
-            SU2Irrep::from_sector_id(right_coupled).twice_spin() as u32,
-        )
+        let [a, b, c, d, e, f] = [left, middle, right, coupled, left_coupled, right_coupled]
+            .map(|sector| racah_irrep(SU2Irrep::from_sector_id(sector)));
+        let block = category().f_symbol(&a, &b, &c, &d, &e, &f).unwrap();
+        block.data().first().copied().unwrap_or(0.0)
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
@@ -354,17 +369,20 @@ impl MultiplicityFreeFusionSymbols for SU2FusionRule {
         if !admissible {
             return 0.0;
         }
-        fusion_symbols::su2_r_symbol(
-            left.twice_spin() as u32,
-            right.twice_spin() as u32,
-            coupled.id() as u32,
-        )
+        let block = category()
+            .r_symbol(
+                &racah_irrep(left),
+                &racah_irrep(right),
+                &racah_irrep(SU2Irrep::from_sector_id(coupled)),
+            )
+            .unwrap();
+        block.data().first().copied().unwrap_or(0.0)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for SU2FusionRule {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        racah_irrep(SU2Irrep::from_sector_id(sector)).dim() as f64
+        category().dim(&racah_irrep(SU2Irrep::from_sector_id(sector)))
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
@@ -380,17 +398,36 @@ impl MultiplicityFreeRigidSymbols for SU2FusionRule {
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        fusion_symbols::su2_twist(SU2Irrep::from_sector_id(sector).twice_spin() as u32)
+        category().twist(&racah_irrep(SU2Irrep::from_sector_id(sector)))
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        fusion_symbols::su2_frobenius_schur(SU2Irrep::from_sector_id(sector).twice_spin() as u32)
+        category().frobenius_schur_phase(&racah_irrep(SU2Irrep::from_sector_id(sector)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_and_label_boundary_are_unchanged() {
+        let bytes = b"racah:su2-exact:model=bigrational-round-once:3j=condon-shortley:cg=condon-shortley:6j=racah-single-sum:f=tks-su2irrep:r=tks-su2irrep:fs=tks-su2irrep:epoch=1symtn:su2:sector-id=dj:max-doubled-spin=254:channels=ascending-step-2";
+        assert_eq!(
+            SU2FusionRule.rule_identity(),
+            RuleIdentity::from_canonical_bytes::<SU2FusionRule>(
+                SU2_RACAH_IDENTITY_SCHEMA,
+                Arc::from(bytes.as_slice())
+            )
+        );
+        if let Some(id) = (u32::MAX as usize).checked_add(1) {
+            let sector = SectorId::new(id);
+            assert_eq!(
+                SU2FusionRule.decode_sector(sector),
+                Err(FusionAlgebraError::InvalidSector { sector })
+            );
+        }
+    }
 
     #[test]
     fn racah_twist_is_exactly_one() {
@@ -554,7 +591,7 @@ mod tests {
         assert!((reversed + (2.0_f64 / 3.0).sqrt()).abs() < 1.0e-14);
         assert_eq!(
             highest,
-            fusion_symbols::clebsch_gordan_checked(2, 2, 1, -1, 1, 1)
+            fusion_symbols::lie::su2::clebsch_gordan_checked(2, 2, 1, -1, 1, 1)
                 .unwrap()
                 .to_f64()
         );

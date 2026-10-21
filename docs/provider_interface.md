@@ -35,11 +35,17 @@ see [Outer multiplicity](#outer-multiplicity).
 
 `symtn-sectors/src/table_rule.rs` is the smallest complete non-abelian
 categorical example: one provider over every pinned AnyonWiki table of
-`fusion_symbols::tables::TableCategory` (Fibonacci, Ising, and fusion-only
+`fusion_symbols::table::TableCategory` (Fibonacci, Ising, and fusion-only
 categories such as Rep(S₃)), whose `RuleIdentity` is built from the table's
 authority fingerprint. `symtn-sectors/src/abelian.rs` has the abelian ones;
 `symtn-sectors/src/su2.rs` shows a provider that delegates its coefficients to
-an external crate.
+an external crate. fusion-symbols 0.5.1 supplies mathematics through
+`category::FusionCategory`; symtn validates sector ids before constructing
+objects in their owning category and uses `frobenius_schur_phase`.
+`SUNFusionRule` accepts shaped empty F/R blocks for absent channels. Its SU(2)
+Dynkin label is restricted to `0..=u32::MAX` and uses the provider's exact A1
+authority; `SU2FusionRule` retains its compact `0..=254` codec and descending
+magnetic basis. SU(N) codecs and identities for N >= 3 are unchanged.
 
 ## 1. `FusionRule`
 

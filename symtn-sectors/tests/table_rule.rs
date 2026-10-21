@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
 
-use fusion_symbols::tables::TableCategory;
+use fusion_symbols::table::TableCategory;
 use symtn_sectors::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionAlgebraError, FusionRule, FusionStyleKind,
     MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorCodec, SectorId, TableRule,

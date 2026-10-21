@@ -50,4 +50,4 @@ symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-fe
 symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }
 # Tests reset fusion-symbols' process-global caches as an application would.
-fusion-symbols = { version = "0.4.0" }
+fusion-symbols = { version = "0.5.1", default-features = false }

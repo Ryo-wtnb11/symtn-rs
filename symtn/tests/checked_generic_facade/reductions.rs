@@ -377,7 +377,6 @@ fn checked_generic_reduction_dimension_failure_is_typed_and_nonpublishing() {
 #[test]
 fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
     use symtn::sector::SUNFusionRule;
-    use symtn::sector::SUNFusionRuleError;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
@@ -404,10 +403,15 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
     let provider = SUNFusionRule::new(3).unwrap();
     let three = provider.encode_dynkin(&[1, 0]).unwrap();
     let eight = provider.encode_dynkin(&[1, 1]).unwrap();
-    assert!(matches!(
-        provider.try_r_symbol_generic(three, three, eight),
-        Err(SUNFusionRuleError::Racah(_))
-    ));
+    let r = provider.try_r_symbol_generic(three, three, eight).unwrap();
+    assert_eq!(
+        r.shape(),
+        (
+            provider.try_nsymbol(three, three, eight).unwrap(),
+            provider.try_nsymbol(three, three, eight).unwrap(),
+        )
+    );
+    assert!(r.data().is_empty());
 }
 
 /// TensorKit's zero-scale rule on the checked-generic `add`/`scale`

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use fusion_symbols::tables::{TableCategory, TableError, TableObject};
+use fusion_symbols::category::FusionCategory;
+use fusion_symbols::table::{TableCategory, TableError, TableObject};
 use num_complex::Complex64;
 
 use crate::{
@@ -146,7 +147,7 @@ impl TableRule {
         let pointed = category.objects().all(|a| {
             category
                 .objects()
-                .all(|b| category.fusion(a, b).count() == 1)
+                .all(|b| category.fusion(&a, &b).unwrap().count() == 1)
         });
         let fusion_style = if pointed {
             FusionStyleKind::Unique
@@ -172,7 +173,7 @@ impl TableRule {
 
     fn index(&self, sector: SectorId) -> Result<TableObject, FusionAlgebraError> {
         (sector.id() < self.rank())
-            .then(|| TableObject(sector.id() as u16 + 1))
+            .then(|| self.category.object(sector.id() as u16 + 1).unwrap())
             .ok_or(FusionAlgebraError::InvalidSector { sector })
     }
 
@@ -184,7 +185,7 @@ impl TableRule {
     }
 
     fn sector_id(object: TableObject) -> SectorId {
-        SectorId::new(usize::from(object.label()) - 1)
+        SectorId::new(usize::from(object.index()) - 1)
     }
 }
 
@@ -234,7 +235,7 @@ impl FusionRule for TableRule {
 
 impl CheckedFusionAlgebra for TableRule {
     fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        Ok(Self::sector_id(self.category.dual(self.index(sector)?)))
+        Ok(Self::sector_id(self.category.dual(&self.index(sector)?)))
     }
 
     fn try_fusion_channels(
@@ -245,7 +246,8 @@ impl CheckedFusionAlgebra for TableRule {
         let (left, right) = (self.index(left)?, self.index(right)?);
         Ok(self
             .category
-            .fusion(left, right)
+            .fusion(&left, &right)
+            .unwrap()
             .map(Self::sector_id)
             .collect())
     }
@@ -257,7 +259,7 @@ impl CheckedFusionAlgebra for TableRule {
         coupled: SectorId,
     ) -> Result<usize, FusionAlgebraError> {
         let (left, right, coupled) = (self.index(left)?, self.index(right)?, self.index(coupled)?);
-        Ok(self.category.nsymbol(left, right, coupled) as usize)
+        Ok(self.category.nsymbol(&left, &right, &coupled) as usize)
     }
 }
 
@@ -277,7 +279,7 @@ impl SectorCodec for TableRule {
     }
 
     fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        Ok(TableSector(self.index(id)?.label()))
+        Ok(TableSector(self.index(id)?.index()))
     }
 }
 
@@ -301,32 +303,39 @@ impl MultiplicityFreeFusionSymbols for TableRule {
         right_coupled: SectorId,
     ) -> Self::Scalar {
         let o = |sector| self.object("f_symbol_scalar", sector);
-        self.category.f_symbol(
-            o(left),
-            o(middle),
-            o(right),
-            o(coupled),
-            o(left_coupled),
-            o(right_coupled),
-        )
+        self.category
+            .f_symbol(
+                &o(left),
+                &o(middle),
+                &o(right),
+                &o(coupled),
+                &o(left_coupled),
+                &o(right_coupled),
+            )
+            .unwrap()
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
         let o = |sector| self.object("r_symbol_scalar", sector);
-        // Panics on a fusion-only entry (`TableError::NoBraiding`): every
-        // braiding operation is rejected on `braiding_style()` first.
-        self.category.r_symbol(o(left), o(right), o(coupled))
+        if !self.category.is_braided() {
+            std::panic::panic_any(
+                "r_symbol precondition violated: the category has no braiding".to_owned(),
+            );
+        }
+        self.category
+            .r_symbol(&o(left), &o(right), &o(coupled))
+            .unwrap()
     }
 }
 
 impl MultiplicityFreeRigidSymbols for TableRule {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Complex64::new(self.category.dim(self.object("dim_scalar", sector)), 0.0)
+        Complex64::new(self.category.dim(&self.object("dim_scalar", sector)), 0.0)
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         Complex64::new(
-            1.0 / self.category.dim(self.object("inv_dim_scalar", sector)),
+            1.0 / self.category.dim(&self.object("inv_dim_scalar", sector)),
             0.0,
         )
     }
@@ -334,7 +343,7 @@ impl MultiplicityFreeRigidSymbols for TableRule {
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         Complex64::new(
             self.category
-                .dim(self.object("sqrt_dim_scalar", sector))
+                .dim(&self.object("sqrt_dim_scalar", sector))
                 .sqrt(),
             0.0,
         )
@@ -344,20 +353,24 @@ impl MultiplicityFreeRigidSymbols for TableRule {
         Complex64::new(
             1.0 / self
                 .category
-                .dim(self.object("inv_sqrt_dim_scalar", sector))
+                .dim(&self.object("inv_sqrt_dim_scalar", sector))
                 .sqrt(),
             0.0,
         )
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        // Panics on a fusion-only entry, as `r_symbol_scalar`.
-        self.category.twist(self.object("twist_scalar", sector))
+        if !self.category.is_braided() {
+            std::panic::panic_any(
+                "twist precondition violated: the category has no braiding".to_owned(),
+            );
+        }
+        self.category.twist(&self.object("twist_scalar", sector))
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.category
-            .frobenius_schur(self.object("frobenius_schur_phase_scalar", sector))
+            .frobenius_schur_phase(&self.object("frobenius_schur_phase_scalar", sector))
     }
 }
 
