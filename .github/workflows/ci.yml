@@ -406,7 +406,10 @@ jobs:
   cuda-check:
     name: CUDA compile contract
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    # Why: ubuntu-latest moved to 26.04, for which NVIDIA's apt repository
+    # has no cuda packages yet ("Unable to locate package cuda-13-0"). Pin the
+    # CUDA job to the newest image the toolkit installer supports.
+    runs-on: ubuntu-24.04
     # Why: #436 — Jimver/cuda-toolkit's network setup can stall indefinitely,
     # making an unrelated PR look unstable rather than failing fast and
     # pointing at the toolkit setup step.
