@@ -139,6 +139,8 @@ fn checked_z2(sector: SectorId) -> Result<SectorId, InvalidSector> {
     }
 }
 
+impl symtn_core::testing::Provider for CheckedZ2 {}
+
 impl CheckedGenericFusion for CheckedZ2 {
     type Error = InvalidSector;
 

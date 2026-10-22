@@ -35,8 +35,14 @@ impl SectorMatrix {
 /// tensors with the same codomain trees get the same row order.
 pub fn sector_matrices<R>(tensor: &TensorMap<R, f64>) -> BTreeMap<String, SectorMatrix>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     type Keys = BTreeMap<String, usize>;
     let mut sectors: BTreeMap<String, (Keys, Keys, Vec<_>)> = BTreeMap::new();
@@ -137,7 +143,13 @@ pub fn hermitian_members<R>(
     salt: usize,
 ) -> Vec<TensorMap<R, f64>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     members::<R, f64>(runtime, codomain, codomain, count, salt)
         .into_iter()
@@ -154,7 +166,13 @@ pub fn single_leg<R>(
     entry: impl Fn(usize, usize, usize) -> f64,
 ) -> Vec<TensorMap<R, f64>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     (0..count)
         .map(|member| {
@@ -202,8 +220,14 @@ pub fn check_member<R>(
     reference: (&TensorMap<R, f64>, &TensorMap<R, f64>),
     eps: f64,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     let a = sector_matrices(source);
     let dm = sector_matrices(d);
@@ -317,8 +341,14 @@ pub fn check_member<R>(
 /// ±λ tie the `±λ` fixtures assert.
 pub fn has_plus_minus_tie<R>(d: &TensorMap<R, f64>) -> bool
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     sector_matrices(d).values().any(|m| {
         let values: Vec<f64> = (0..m.rows).map(|i| m.at(i, i)).collect();
@@ -334,8 +364,14 @@ where
 /// Whether some sector has an eigenvalue of multiplicity > 1.
 pub fn has_degenerate_group<R>(d: &TensorMap<R, f64>) -> bool
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     sector_matrices(d).values().any(|m| {
         let values: Vec<f64> = (0..m.rows).map(|i| m.at(i, i)).collect();

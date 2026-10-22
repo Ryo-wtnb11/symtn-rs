@@ -48,7 +48,7 @@ use fixtures::{codomain_axes, delta, domain_axes, plans, serial};
 fn check_device_batch<R>(label: &str, inputs: &[TensorMap<R, f64>])
 where
     R: DeviceRule,
-    R::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
     let device: Vec<_> = inputs.iter().map(|t| t.to_cuda().unwrap()).collect();
@@ -131,7 +131,7 @@ where
 fn equivalence<R>(label: &str, leg: GradedSpace<R>)
 where
     R: DeviceRule,
-    R::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     for count in [1, 2, 17] {
@@ -480,7 +480,7 @@ fn assert_diagonal_only<R>(
     output: &symtn::typed::EighStackOutput<'_, R, f64, symtn::typed::CudaStorage<f64>>,
 ) where
     R: DeviceRule,
-    R::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
     let d = output.d.to_host().unwrap();
     for member in 0..d.len() {

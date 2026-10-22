@@ -12,6 +12,8 @@ const TRUNCATED_R: TruncatedSymbolRule = TruncatedSymbolRule {
     truncate_bend_f: false,
 };
 
+impl symtn_sectors::testing::Provider for TruncatedSymbolRule {}
+
 impl FusionRule for TruncatedSymbolRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

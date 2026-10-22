@@ -105,6 +105,8 @@ struct CheckedToyRule;
 
 // The plain view too, so its spaces take the plain layout operations
 // (`adjoint_view`); every answer is `ToyGenericRule`'s.
+impl symtn_core::testing::Provider for CheckedToyRule {}
+
 impl FusionRule for CheckedToyRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

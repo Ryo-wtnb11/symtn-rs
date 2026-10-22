@@ -87,7 +87,13 @@ fn cuda_route_assembly_counts(plan: &CompactFactorPlan) -> (usize, usize, usize)
 fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     fn assert_host_spaces<R>(source: &TensorMap<R, f64>, plan: &CompactFactorPlan)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn_core::TypedSectorAdmission<
+                Sector = <R as symtn_core::SectorCodec>::Sector,
+                Error = symtn_core::FusionAlgebraError,
+                Mode = symtn_core::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
     {
         let space = source.logical_space();
         let (rows, cols) = (codomain_axes(source), domain_axes(source));
@@ -992,7 +998,13 @@ where
 #[cfg(feature = "cuda")]
 fn with_degenerate_spectrum<R, D>(host: &TensorMap<R, D>) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaFactorizationPayload,
 {
     let Svd { u, s, vh } = host
@@ -1021,7 +1033,13 @@ where
 #[cfg(feature = "cuda")]
 fn assert_device_svd_gauge_matches_host<R, D>(host: &TensorMap<R, D>) -> usize
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaFactorizationPayload,
 {
     let tolerance = 1.0e3 * D::epsilon();
@@ -1190,7 +1208,13 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
     .unwrap();
     fn cases<R>(runtime: &Runtime, leg: &GradedSpace<R>) -> usize
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn_core::TypedSectorAdmission<
+                Sector = <R as symtn_core::SectorCodec>::Sector,
+                Error = symtn_core::FusionAlgebraError,
+                Mode = symtn_core::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
     {
         let real = TensorMap::<R, f64>::rand_with_seed(runtime, [leg, leg], [leg], 21).unwrap();
         let complex =
@@ -1410,7 +1434,13 @@ fn widened_bits<D: FactorScalar>(value: D) -> (u64, u64) {
 #[cfg(feature = "cuda")]
 fn assert_device_svd_diagonal_matches_the_downloaded_one<R, D>(host: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaFactorizationPayload,
 {
     let regions = sector_regions(
@@ -1472,7 +1502,13 @@ fn assert_device_svd_diagonal_every_dtype<R>(
     codomain: &[&GradedSpace<R>],
     domain: &[&GradedSpace<R>],
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let fused = |legs: &[&GradedSpace<R>]| {
         legs[1..]

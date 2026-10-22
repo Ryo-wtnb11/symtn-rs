@@ -52,7 +52,13 @@ fn check<R, D>(
     symmetry: &str,
     oracle: impl Fn(&Case<R, D>) -> TensorMap<R, D>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     for (case, _) in probes::<R, D>(runtime, v) {
@@ -69,7 +75,13 @@ fn check<R, D>(
 /// Warm `(allocation calls, allocation bytes, tree-transform lookups)`.
 fn warm<R>(_runtime: &Runtime, case: &Case<R, f64>) -> (u64, u64, usize)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let call = || {
         black_box(&case.lhs)
@@ -90,7 +102,13 @@ where
 
 fn assert_warm_zero_copy<R>(v: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -223,7 +241,13 @@ fn zero_copy_fermionic_candidates_match_tensorkit_with_and_without_twist() {
 /// physical-basis expansion also applies to them.
 fn mixed_cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>, w: &GradedSpace<R>) -> Vec<Case<R, D>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let w_dual = w.try_dual().unwrap();
@@ -288,7 +312,11 @@ where
 
 fn mixed_values<R, D>(v: &GradedSpace<R>, w: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
@@ -315,7 +343,13 @@ where
 
 fn assert_mixed_zero_copy<R>(v: &GradedSpace<R>, w: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -370,7 +404,13 @@ fn transform_lookups(_: &Runtime) -> usize {
 /// The zero-copy candidate with its own output order, then one `permute`.
 fn contract_then_permute<R, D>(case: &Case<R, D>, swapped: bool) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let (temporary, codomain, domain) = copy_c_steps(case, swapped);
@@ -382,7 +422,13 @@ where
 /// permutation (codomain, domain) that places it in the requested order.
 fn copy_c_steps<R, D>(case: &Case<R, D>, swapped: bool) -> (TensorMap<R, D>, Vec<usize>, Vec<usize>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let lhs_open = case.lhs.rank() - case.lhs_axes.len();
@@ -437,7 +483,13 @@ where
 
 fn assert_output_permute_budget<R>(v: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -486,7 +538,13 @@ fn zero_copy_candidates_with_an_output_permute_allocate_like_contract_then_permu
 /// `P: v⊗w* ← w` and `B: w⊗v⊗v ← w`.
 fn uneven_swap<R, D>(runtime: &Runtime, v: &GradedSpace<R>, w: &GradedSpace<R>) -> Case<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let w_dual = w.try_dual().unwrap();
@@ -506,7 +564,11 @@ where
 
 fn output_permute_values<R, D>(v: &GradedSpace<R>, w: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
@@ -556,7 +618,13 @@ fn zero_copy_candidates_with_an_output_permute_match_tensorkit_and_the_dense_exp
 /// equals its literal zero-copy contraction then permute, bit for bit.
 fn output_permute_bits<R, D>(v: &GradedSpace<R>, w: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload + PartialEq,
 {
     let runtime = Runtime::builder().build().unwrap();
@@ -586,7 +654,13 @@ where
 /// a warm `contract` does.
 fn into_copy_c_bits<R, D>(v: &GradedSpace<R>, w: &GradedSpace<R>, symmetry: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload + PartialEq,
 {
     let _guard = counting_alloc::serial();

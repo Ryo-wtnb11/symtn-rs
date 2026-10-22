@@ -22,6 +22,8 @@ static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAl
 #[derive(Clone, Copy)]
 struct AllocationAnyonicRule;
 
+impl symtn_core::testing::Provider for AllocationAnyonicRule {}
+
 impl FusionRule for AllocationAnyonicRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

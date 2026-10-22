@@ -105,8 +105,11 @@ fn assert_reordered_overwrite<R, D>(
     sector_tag: &impl Fn(&<R as TypedSectorAdmission>::Sector) -> f64,
     output_factor: &impl Fn(&<R as TypedSectorAdmission>::Sector) -> f64,
 ) where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: OracleScalar,

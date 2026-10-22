@@ -3,6 +3,8 @@ use super::*;
 #[derive(Clone, Copy, Debug)]
 struct UnitLayoutGenericRule;
 
+impl symtn_sectors::testing::Provider for UnitLayoutGenericRule {}
+
 impl FusionRule for UnitLayoutGenericRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

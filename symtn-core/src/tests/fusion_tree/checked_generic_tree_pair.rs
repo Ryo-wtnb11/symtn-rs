@@ -161,6 +161,8 @@ impl SunProbe {
     }
 }
 
+impl symtn_sectors::testing::Provider for SunProbe {}
+
 impl CheckedGenericFusion for SunProbe {
     type Error = RigidSpyError;
     fn rule_identity(&self) -> RuleIdentity {

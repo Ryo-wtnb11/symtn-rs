@@ -117,7 +117,7 @@ type Structure<S> = Vec<(
     usize,
 )>;
 
-fn structure<R, D>(tensor: &TensorMap<R, D>) -> Structure<R::Sector>
+fn structure<R, D>(tensor: &TensorMap<R, D>) -> Structure<<R as symtn::sector::SectorCodec>::Sector>
 where
     R: DeviceRule,
     D: FactorPayload,

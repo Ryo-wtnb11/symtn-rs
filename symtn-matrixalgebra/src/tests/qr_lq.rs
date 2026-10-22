@@ -1171,6 +1171,8 @@ fn checked_lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
 /// exact geometry the multiplicity-free route factors.
 struct U1AsGeneric;
 
+impl symtn_core::testing::Provider for U1AsGeneric {}
+
 impl FusionRule for U1AsGeneric {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

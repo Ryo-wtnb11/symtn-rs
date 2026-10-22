@@ -5,6 +5,8 @@ struct CountingA4FoldRule {
     f_calls: std::cell::Cell<usize>,
 }
 
+impl symtn_sectors::testing::Provider for CountingA4FoldRule {}
+
 impl FusionRule for CountingA4FoldRule {
     fn rule_identity(&self) -> RuleIdentity {
         FusionRule::rule_identity(&A4FoldRule)
@@ -241,6 +243,8 @@ impl MalformedA4FProbe {
         }
     }
 }
+
+impl symtn_sectors::testing::Provider for MalformedA4FProbe {}
 
 impl FusionRule for MalformedA4FProbe {
     fn rule_identity(&self) -> RuleIdentity {

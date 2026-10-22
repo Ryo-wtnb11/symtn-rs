@@ -357,15 +357,23 @@ where
 pub(super) fn prepare_product_operand<S, P, D>(
     source: &TensorMap<S, D>,
     provider: Arc<P>,
-    embed: impl Fn(S::Sector) -> P::Sector,
-    project: impl Fn(&P::Sector) -> S::Sector,
+    embed: impl Fn(<S as SectorCodec>::Sector) -> <P as SectorCodec>::Sector,
+    project: impl Fn(&<P as SectorCodec>::Sector) -> <S as SectorCodec>::Sector,
 ) -> Result<PreparedProductOperand<'_, S, P, D>, Error>
 where
-    S: MultiplicityFreeRigidSymbols<Scalar = f64>
+    S: TypedSectorAdmission<
+            Sector = <S as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + CanonicalUnitFusionRule,
-    P: MultiplicityFreeRigidSymbols<Scalar = f64>
+    P: TypedSectorAdmission<
+            Sector = <P as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + CanonicalUnitFusionRule,
@@ -449,7 +457,11 @@ where
 impl<S, P, D> PreparedProductOperand<'_, S, P, D>
 where
     S: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    P: MultiplicityFreeRigidSymbols<Scalar = f64>
+    P: TypedSectorAdmission<
+            Sector = <P as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + CanonicalUnitFusionRule,

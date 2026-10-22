@@ -672,8 +672,11 @@ mod device {
         degeneracy: usize,
         space: &GradedSpace<R>,
     ) where
-        R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-            + MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + Send
@@ -1418,8 +1421,11 @@ mod device {
         degeneracy: usize,
         space: &GradedSpace<R>,
     ) where
-        R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-            + MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + Send

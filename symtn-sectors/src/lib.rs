@@ -14,6 +14,34 @@ pub use rule_identity::RuleIdentity;
 mod algebra;
 pub use algebra::*;
 
+mod category_rule;
+pub use category_rule::{
+    CanonicalUnitAdmission, CategoryAdapterError, CategoryAdmissionError, CategoryCodec,
+    CategoryFailure, CategoryOperation, CategoryRule, EnumeratedCodec, UncertifiedUnitAdmission,
+};
+
+/// The seal of the provider traits.
+///
+/// Why sealed: a new symmetry is a `fusion_symbols` category in a
+/// [`CategoryRule`], so symtn holds no second category implementation.
+mod seal {
+    /// The seal of [`FusionRule`](crate::FusionRule),
+    /// [`CheckedGenericFusion`](crate::CheckedGenericFusion),
+    /// [`TypedSectorAdmission`](crate::TypedSectorAdmission), and
+    /// [`PhysicalFusionBasis`](crate::PhysicalFusionBasis).
+    ///
+    /// A native test provider (instrumentation, failure injection, a
+    /// malformed-provider probe that no `fusion_symbols` category can
+    /// express) implements it explicitly; there is no blanket implementation.
+    pub trait Provider {}
+}
+
+/// Test-only access to native provider implementations.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
+    pub use crate::seal::Provider;
+}
+
 mod abelian;
 pub use abelian::{
     FermionParityFusionRule, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule, ZNIrrep,

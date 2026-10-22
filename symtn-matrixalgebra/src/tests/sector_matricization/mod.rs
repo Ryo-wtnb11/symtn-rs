@@ -6,6 +6,8 @@ use symtn_core::{BlockSpec, FusionTreePairKey, Z2FusionRule};
 #[derive(Clone, Copy)]
 struct TestGenericRule;
 
+impl symtn_core::testing::Provider for TestGenericRule {}
+
 impl FusionRule for TestGenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()
@@ -456,6 +458,8 @@ impl RecordingGeneric {
         self.log.borrow().clone()
     }
 }
+
+impl symtn_core::testing::Provider for RecordingGeneric {}
 
 impl CheckedGenericFusion for RecordingGeneric {
     type Error = std::convert::Infallible;

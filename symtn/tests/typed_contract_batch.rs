@@ -32,7 +32,11 @@ use symtn::typed::{ContractPlan, ContractSpec, Error, Runtime, StackedTensorMap,
 
 fn check<R, D>(case: Case<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + PhysicalFusionBasis<Scalar = f64>,
@@ -149,7 +153,11 @@ fn public_host_batch_core_and_swapped_core_match_reference_steps() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     fn probes<R, D>(runtime: &Runtime, v: &GradedSpace<R>)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + PhysicalFusionBasis<Scalar = f64>,
@@ -372,7 +380,11 @@ fn public_copy_c_both_orientations_and_dtypes() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     fn cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + PhysicalFusionBasis<Scalar = f64>,
@@ -408,7 +420,11 @@ fn public_copy_c_small_output_winners() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     fn cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>, c: &GradedSpace<R>)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + PhysicalFusionBasis<Scalar = f64>,
@@ -515,7 +531,13 @@ fn check_twisted_members<R, D>(
     role: TwistRole,
     twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     fn compare<D: Payload>(actual: &[D], expected: &[D], terms: usize, what: &str) {
@@ -638,7 +660,13 @@ fn check_fermionic_unit_batch<R, D>(
     split: usize,
     twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     for count in [1, 2, 17] {
@@ -812,7 +840,13 @@ fn check_mixed_signed_members<R, D>(
     swapped: bool,
     twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let dual = v.try_dual().unwrap();
@@ -1052,7 +1086,13 @@ fn partitioned_output_uses_requested_codomain_rank() {
 /// by a member-dependent real factor.
 fn rescaled_members<R, D>(case: &Case<R, D>, count: usize, lhs_scale: f64) -> Vec<Case<R, D>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     (0..count)
@@ -1083,7 +1123,13 @@ where
 /// kept from the stale call, including an inactive block, would differ.
 fn check_reused_output<R, D>(case: &Case<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let spec = case.spec();

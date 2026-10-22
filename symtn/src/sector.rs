@@ -1,10 +1,13 @@
-//! Symmetry contract: everything a user needs to define a fusion rule or to
-//! bound generic tensor code by one.
+//! Symmetry contract: everything a user needs to add a symmetry or to bound
+//! generic tensor code by one.
 //!
-//! A rule defined outside this workspace implements these traits and then
-//! uses the same [`crate::typed::TensorMap`] API as the built-in rules
-//! ([`U1FusionRule`], [`SU2FusionRule`], ...) exported here. This module is
-//! the only path to each item it lists.
+//! A category defined outside this workspace is a `fusion_symbols` category;
+//! [`CategoryRule`] with an [`EnumeratedCodec`] (or a [`CategoryCodec`] of
+//! its own) makes it a provider that uses the same
+//! [`crate::typed::TensorMap`] API as the built-in rules ([`U1FusionRule`],
+//! [`SU2FusionRule`], ...) exported here. The provider traits are sealed
+//! bounds, not an extension point. This module is the only path to each item
+//! it lists.
 
 /// Built-in fusion rules, their sector labels, and product constructors.
 pub use symtn_core::{
@@ -17,8 +20,14 @@ pub use symtn_core::{
     BraidingStyleKind, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
     SectorOrderKey, SectorVec,
 };
-/// Rule traits: the fusion, symbol and admission interfaces a rule
-/// implements, and the bounds generic code names.
+/// The fusion rule of a `fusion_symbols` category: the extension point for a
+/// category defined outside symtn, with its codec and admission vocabulary.
+pub use symtn_core::{
+    CanonicalUnitAdmission, CategoryAdapterError, CategoryAdmissionError, CategoryCodec,
+    CategoryFailure, CategoryOperation, CategoryRule, EnumeratedCodec, UncertifiedUnitAdmission,
+};
+/// Rule traits: the sealed fusion, symbol and admission interfaces of every
+/// provider, and the bounds generic code names.
 pub use symtn_core::{
     CanonicalUnitFusionRule, CategoricalScalar, CheckedCanonicalUnitFusionRule,
     CheckedFusionAlgebra, CheckedGenericFusion, CheckedGenericPivotal, CheckedGenericRigidSymbols,

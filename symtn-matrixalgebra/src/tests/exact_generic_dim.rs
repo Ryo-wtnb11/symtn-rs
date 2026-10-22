@@ -35,6 +35,8 @@ fn checked_decision(
 /// [`SU2FusionRule`], under its own identity and the Generic style.
 struct Su2Generic;
 
+impl symtn_core::testing::Provider for Su2Generic {}
+
 impl FusionRule for Su2Generic {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

@@ -158,7 +158,7 @@ impl CoupledSectorFoldBuilder {
     }
 }
 
-pub trait FusionRule: 'static {
+pub trait FusionRule: crate::seal::Provider + 'static {
     /// Stable semantic identity of this provider.
     ///
     /// Equal identities require immutable equivalence of every operation that
@@ -288,8 +288,9 @@ impl PartialOrd for SectorOrderKey {
 /// Implementors promise that the vacuum is self-dual, `1 x a -> a` and
 /// `a x 1 -> a` are the only multiplicity-one channels, and unitors and
 /// associators act as the identity on every multiplicity space.
-/// The marker is intentionally open: external sector providers can certify
-/// the same law without depending on symtn's execution crates.
+/// A [`CategoryRule`](crate::CategoryRule) implements it when its codec
+/// requests [`CanonicalUnitAdmission`](crate::CanonicalUnitAdmission), which
+/// requires the category's `has_canonical_unit` certificate.
 pub trait CanonicalUnitFusionRule: FusionRule {}
 
 /// Marks a checked Generic provider with the same canonical vacuum laws.
@@ -336,6 +337,9 @@ pub enum FusionAlgebraError {
         right: SectorId,
         coupled: SectorId,
     },
+    /// The category authority of a [`CategoryRule`](crate::CategoryRule)
+    /// failed outside this vocabulary; the failure is kept as the source.
+    CategoryFailure(crate::CategoryFailure),
 }
 
 impl fmt::Display for FusionAlgebraError {
@@ -370,6 +374,7 @@ impl fmt::Display for FusionAlgebraError {
                 formatter,
                 "fusion multiplicity overflows usize for {left:?} x {right:?} -> {coupled:?}"
             ),
+            Self::CategoryFailure(_) => formatter.write_str("fusion category failed"),
         }
     }
 }
@@ -378,6 +383,7 @@ impl std::error::Error for FusionAlgebraError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::ProductCodec(error) => Some(error),
+            Self::CategoryFailure(failure) => Some(failure),
             _ => None,
         }
     }
@@ -598,7 +604,7 @@ impl<Coefficient> From<FusionAlgebraError> for PhysicalBasisError<Coefficient> {
 /// There is intentionally no `FusionRule` supertrait: checked Generic
 /// providers do not implement that infallible interface. Tensor engines
 /// compose this capability with the provider's applicable structural trait.
-pub trait PhysicalFusionBasis {
+pub trait PhysicalFusionBasis: crate::seal::Provider {
     type Scalar: CategoricalScalar + Send + Sync;
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -635,8 +641,10 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     ///
     /// TensorKit's direct Unique + SymmetricBraiding permutation lowering
     /// relies on this stronger property, not symmetric braiding alone.
-    /// Defaulting to false keeps custom providers on the gauge-general Artin
-    /// path unless they explicitly certify the invariant.
+    /// Defaulting to false keeps a provider on the gauge-general Artin path
+    /// unless it certifies the invariant; a
+    /// [`CategoryRule`](crate::CategoryRule) forwards its category's
+    /// certificate.
     fn has_trivial_associator_gauge(&self) -> bool {
         false
     }
@@ -890,7 +898,7 @@ impl<Scalar> GenericRMatrix<Scalar> {
 /// Interior warm caches may change performance, but never catalog/gauge
 /// semantics. This permits one operation to use shared `&self` queries and
 /// equal-identity provider allocations as the same mathematical authority.
-pub trait CheckedGenericFusion {
+pub trait CheckedGenericFusion: crate::seal::Provider {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Stable semantic provider identity; the contract is the same as
@@ -955,7 +963,7 @@ pub trait CheckedGenericFusion {
 ///
 /// The provider owns this capability; tensor crates only select layout
 /// admission from [`Self::Mode`].
-pub trait TypedSectorAdmission: 'static {
+pub trait TypedSectorAdmission: crate::seal::Provider + 'static {
     /// Public semantic sector label.
     type Sector: Clone + Eq + Ord + core::hash::Hash + core::fmt::Debug;
     /// Provider error preserved by the typed facade.
@@ -981,39 +989,55 @@ pub struct MultiplicityFreeAdmissionMode;
 #[doc(hidden)]
 pub struct CheckedGenericAdmissionMode;
 
-impl<R> TypedSectorAdmission for R
-where
-    R: CheckedFusionAlgebra + SectorCodec,
-{
-    type Sector = R::Sector;
-    type Error = FusionAlgebraError;
-    type Mode = MultiplicityFreeAdmissionMode;
+/// Implements multiplicity-free typed admission by forwarding to the
+/// provider's [`SectorCodec`] and [`CheckedFusionAlgebra`].
+///
+/// Why explicit impls rather than the former blanket over
+/// `CheckedFusionAlgebra + SectorCodec`: the blanket overlapped every other
+/// admission impl, so [`CategoryRule`](crate::CategoryRule) could not choose
+/// its mode from its codec.
+macro_rules! multiplicity_free_typed_admission {
+    ($($rule:ty),+ $(,)?) => {$(
+        impl $crate::TypedSectorAdmission for $rule {
+            type Sector = <$rule as $crate::SectorCodec>::Sector;
+            type Error = $crate::FusionAlgebraError;
+            type Mode = $crate::MultiplicityFreeAdmissionMode;
 
-    fn typed_rule_identity(&self) -> RuleIdentity {
-        FusionRule::rule_identity(self)
-    }
+            fn typed_rule_identity(&self) -> $crate::RuleIdentity {
+                $crate::FusionRule::rule_identity(self)
+            }
 
-    fn try_encode_label(&self, sector: &Self::Sector) -> Result<SectorId, Self::Error> {
-        SectorCodec::encode_sector(self, sector)
-    }
+            fn try_encode_label(
+                &self,
+                sector: &Self::Sector,
+            ) -> Result<$crate::SectorId, Self::Error> {
+                $crate::SectorCodec::encode_sector(self, sector)
+            }
 
-    fn try_decode_label(&self, sector: SectorId) -> Result<Self::Sector, Self::Error> {
-        SectorCodec::decode_sector(self, sector)
-    }
+            fn try_decode_label(
+                &self,
+                sector: $crate::SectorId,
+            ) -> Result<Self::Sector, Self::Error> {
+                $crate::SectorCodec::decode_sector(self, sector)
+            }
 
-    fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
-        CheckedFusionAlgebra::try_dual_sector(self, sector)
-    }
+            fn try_dual_id(&self, sector: $crate::SectorId) -> Result<$crate::SectorId, Self::Error> {
+                $crate::CheckedFusionAlgebra::try_dual_sector(self, sector)
+            }
+        }
+    )+};
 }
+pub(crate) use multiplicity_free_typed_admission;
 
 /// Fallible categorical symbol access for Generic-fusion plan lowering.
 ///
-/// This extends [`CheckedGenericFusion`] with only the data needed to compile
+/// This extends [`CheckedGenericFusion`] with the data needed to compile
 /// Generic permute, repartition, and braid rows.  The provider's error type is
 /// the structural provider error, so a failed symbol lookup keeps its typed
-/// source all the way to the plan boundary.  A/B moves are deliberately not
-/// provider methods: their matrices are derived from these primitives after
-/// symtn validates the categorical F/R shapes.
+/// source all the way to the plan boundary.  The tensor engine derives its A/B
+/// moves from these F and rigidity primitives after validating the
+/// categorical F/R shapes; [`Self::try_a_symbol_generic`] and
+/// [`Self::try_b_symbol_generic`] expose the authority's A and B blocks.
 ///
 /// Implementations inherit [`CheckedGenericFusion`]'s logical-immutability
 /// contract: F/R and rigidity answers for one identity are stable across
@@ -1059,6 +1083,76 @@ pub trait CheckedGenericRigidSymbols: CheckedGenericFusion {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error>;
+
+    /// `A^{ab}_c` from the category authority, `N(a,b,c) x N(ā,c,b)`
+    /// row-major (TensorKitSectors `Asymbol`).
+    #[cfg(not(any(test, feature = "testing")))]
+    fn try_a_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error>;
+
+    /// `A^{ab}_c` from the category authority, `N(a,b,c) x N(ā,c,b)`
+    /// row-major (TensorKitSectors `Asymbol`).
+    ///
+    /// Under `testing` only, native probes inherit the literal
+    /// TensorKitSectors `Asymbol_from_Fsymbol` composition over their own
+    /// F and rigidity data; production providers forward their authority.
+    #[cfg(any(test, feature = "testing"))]
+    fn try_a_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
+        let f = self.try_f_symbol_generic(self.try_dual(a)?, a, b, b, self.vacuum(), c)?;
+        let (_, _, rows, cols) = f.shape();
+        let scale = self.try_sqrt_dim_scalar(a)?
+            * self.try_sqrt_dim_scalar(b)?
+            * self.try_inv_sqrt_dim_scalar(c)?;
+        let kappa = self.try_frobenius_schur_phase_scalar(a)?;
+        let data = (0..rows)
+            .flat_map(|mu| (0..cols).map(move |nu| (mu, nu)))
+            .map(|(mu, nu)| scale.clone() * (kappa.clone() * f.get(0, 0, mu, nu).clone()).conj())
+            .collect();
+        Ok(GenericRMatrix::new(data, rows, cols))
+    }
+
+    /// `B^{ab}_c` from the category authority, `N(a,b,c) x N(c,b̄,a)`
+    /// row-major (TensorKitSectors `Bsymbol`).
+    #[cfg(not(any(test, feature = "testing")))]
+    fn try_b_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error>;
+
+    /// `B^{ab}_c` from the category authority, `N(a,b,c) x N(c,b̄,a)`
+    /// row-major (TensorKitSectors `Bsymbol`).
+    ///
+    /// Under `testing` only, native probes inherit the literal
+    /// TensorKitSectors `Bsymbol_from_Fsymbol` composition.
+    #[cfg(any(test, feature = "testing"))]
+    fn try_b_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
+        let f = self.try_f_symbol_generic(a, b, self.try_dual(b)?, a, c, self.vacuum())?;
+        let (rows, cols, _, _) = f.shape();
+        let scale = self.try_sqrt_dim_scalar(a)?
+            * self.try_sqrt_dim_scalar(b)?
+            * self.try_inv_sqrt_dim_scalar(c)?;
+        let data = (0..rows)
+            .flat_map(|mu| (0..cols).map(move |nu| (mu, nu)))
+            .map(|(mu, nu)| scale.clone() * f.get(mu, nu, 0, 0).clone())
+            .collect();
+        Ok(GenericRMatrix::new(data, rows, cols))
+    }
 }
 
 /// Checked provider-owned pivotal/twist data for categorical traces.
@@ -1082,6 +1176,8 @@ impl<'a, R> InfallibleGeneric<'a, R> {
         Self(rule)
     }
 }
+
+impl<R> crate::seal::Provider for InfallibleGeneric<'_, R> {}
 
 impl<R: FusionRule> CheckedGenericFusion for InfallibleGeneric<'_, R> {
     type Error = Infallible;
@@ -1372,11 +1468,11 @@ impl CategoricalScalar for Complex64 {
 /// dimensions and Frobenius–Schur phase) for a rule whose `nsymbol` can
 /// exceed 1.
 ///
-/// The Generic A/B matrices are deliberately not provider methods: symtn
-/// derives them once from these primitives and the validated F-symbol, as
-/// TensorKitSectors `Asymbol_from_Fsymbol` / `Bsymbol_from_Fsymbol` do
-/// (`sectors.jl:501-552`, v0.3.6), so every engine reads the same
-/// coefficients (see [`CheckedGenericRigidSymbols`]).
+/// The Generic A/B matrices are not part of this tier: symtn derives them
+/// from these primitives and the validated F-symbol, as TensorKitSectors
+/// `Asymbol_from_Fsymbol` / `Bsymbol_from_Fsymbol` do (`sectors.jl:501-552`,
+/// v0.3.6), so every engine reads the same coefficients (see
+/// [`CheckedGenericRigidSymbols`]).
 ///
 /// `frobenius_schur_phase_scalar` stays a bare `Scalar` (not a matrix): the
 /// FS phase is `sign(F^{a ā a}_a[1])` and for *any* fusion style the relevant

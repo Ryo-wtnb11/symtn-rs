@@ -613,17 +613,17 @@ fn external_z3_twist_flip_and_units_hold_by_value() {
     // parity gates above; the harness has no fermionic external provider.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let w = z3_leg(&provider, false);
     let v = z3_leg(&provider, true);
-    let t: TensorMap<ExternalZ3, f64> =
+    let t: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&w], [&v], |sectors, indices| {
             f64::from(sectors.coupled().0) * 10.0 + (indices[0] * 3 + indices[1]) as f64
         })
         .unwrap();
 
     // Twist: identity, shared buffer.
-    let twisted: TensorMap<ExternalZ3, f64> = t.twist(&[0, 1], Direction::Forward).unwrap();
+    let twisted: TensorMap<ExternalZ3Rule, f64> = t.twist(&[0, 1], Direction::Forward).unwrap();
     assert_eq!(
         twisted.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()
@@ -631,7 +631,7 @@ fn external_z3_twist_flip_and_units_hold_by_value() {
 
     // Flip: values unchanged, duality flags toggled, non-self-dual sector
     // sets preserved as stored (flip toggles the flag, not the labels).
-    let flipped: TensorMap<ExternalZ3, f64> = t.flip(&[0, 1], Direction::Forward).unwrap();
+    let flipped: TensorMap<ExternalZ3Rule, f64> = t.flip(&[0, 1], Direction::Forward).unwrap();
     assert_eq!(flipped.dense_data().unwrap(), t.dense_data().unwrap());
     assert!(flipped.codomain()[0].is_dual());
     assert!(!flipped.domain()[0].is_dual());
@@ -642,14 +642,14 @@ fn external_z3_twist_flip_and_units_hold_by_value() {
 
     // Units: insert -> remove round trip on the external provider, O(1)
     // payload reuse observable through `data()`.
-    let inserted: TensorMap<ExternalZ3, f64> =
+    let inserted: TensorMap<ExternalZ3Rule, f64> =
         t.insert_unit(1, Side::Codomain, Duality::Dual).unwrap();
     assert_eq!(
         inserted.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()
     );
     assert_eq!(inserted.codomain()[1].sectors().unwrap(), vec![Z3Charge(0)]);
-    let removed: TensorMap<ExternalZ3, f64> = inserted.remove_unit(1).unwrap();
+    let removed: TensorMap<ExternalZ3Rule, f64> = inserted.remove_unit(1).unwrap();
     assert_eq!(
         removed.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()
@@ -668,13 +668,13 @@ fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
     // hit the same preflight before its own dispatch.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(PlanarZ2);
+    let provider = Arc::new(planar_z2());
     let mixed = GradedSpace::try_new(
         Arc::clone(&provider),
         [(PlanarParity(0), 1), (PlanarParity(1), 2)],
     )
     .unwrap();
-    let t: TensorMap<PlanarZ2, f64> =
+    let t: TensorMap<PlanarZ2Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&mixed], [&mixed], |sectors, indices| {
             f64::from(sectors.coupled().0) * 10.0 + (indices[0] * 3 + indices[1]) as f64
         })
@@ -695,7 +695,7 @@ fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
     // The compact diagonal arm rejects too: an SVD spectrum factor lives on
     // the mixed bond space, so its twist must fail before the compact
     // per-sector scaling ever runs.
-    let s: TensorMap<PlanarZ2, f64> = t.svd_compact(&[0], &[1]).unwrap().s;
+    let s: TensorMap<PlanarZ2Rule, f64> = t.svd_compact(&[0], &[1]).unwrap().s;
     let compact_error = s.twist(&[0], Direction::Forward).unwrap_err();
     assert!(
         matches!(compact_error, symtn::typed::Error::InvalidArgument(ref m) if m.contains("carries non-unit sectors")),
@@ -719,20 +719,21 @@ fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
     // identical clone and never reaches the guard.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(PlanarZ2);
+    let provider = Arc::new(planar_z2());
     let unit_only = GradedSpace::try_new(Arc::clone(&provider), [(PlanarParity(0), 2)]).unwrap();
-    let t: TensorMap<PlanarZ2, f64> =
+    let t: TensorMap<PlanarZ2Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&unit_only], [&unit_only], |_, indices| {
             (indices[0] * 2 + indices[1]) as f64
         })
         .unwrap();
 
-    let twisted: TensorMap<PlanarZ2, f64> = t.twist(&[0, 1], Direction::Forward).unwrap();
+    let twisted: TensorMap<PlanarZ2Rule, f64> = t.twist(&[0, 1], Direction::Forward).unwrap();
     assert_eq!(
         twisted.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()
     );
-    let twisted_inverse: TensorMap<PlanarZ2, f64> = t.twist(&[0, 1], Direction::Inverse).unwrap();
+    let twisted_inverse: TensorMap<PlanarZ2Rule, f64> =
+        t.twist(&[0, 1], Direction::Inverse).unwrap();
     assert_eq!(
         twisted_inverse.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()
@@ -750,12 +751,12 @@ fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
     assert!(matches!(t
         .flip(&[0], Direction::Inverse), Err(symtn::typed::Error::InvalidArgument(m)) if m.contains("fusion rule has no braiding")));
 
-    let unflipped: TensorMap<PlanarZ2, f64> = t.flip(&[], Direction::Forward).unwrap();
+    let unflipped: TensorMap<PlanarZ2Rule, f64> = t.flip(&[], Direction::Forward).unwrap();
     assert_eq!(
         unflipped.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()
     );
-    let unflipped_inverse: TensorMap<PlanarZ2, f64> = t.flip(&[], Direction::Inverse).unwrap();
+    let unflipped_inverse: TensorMap<PlanarZ2Rule, f64> = t.flip(&[], Direction::Inverse).unwrap();
     assert_eq!(
         unflipped_inverse.dense_data().unwrap().as_ptr(),
         t.dense_data().unwrap().as_ptr()

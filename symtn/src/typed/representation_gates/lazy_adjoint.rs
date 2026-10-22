@@ -133,7 +133,13 @@ fn generic_lazy_adjoint_keeps_parent_storage_and_refuses_a_dense_borrow() {
 
 fn assert_lazy_involution<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
 {
     let adjoint = source.adjoint().unwrap();
@@ -796,7 +802,13 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_bot
 
 fn assert_parent_native_elementwise<R, D>(source: &TensorMap<R, D>, alpha: D, beta: D)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
     let lazy = source.adjoint().unwrap();
@@ -908,7 +920,13 @@ fn adjoint_elementwise_and_reductions_stay_parent_native() {
 
 fn assert_parent_native_trace_pairs<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
     let lazy = source.adjoint().unwrap();
@@ -1007,7 +1025,13 @@ fn adjoint_trace_pairs_stays_parent_native() {
 
 fn assert_parent_native_tr<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar + core::fmt::Debug + numerics::Numeric,
 {
     let lazy = source.adjoint().unwrap();
@@ -1054,7 +1078,13 @@ fn adjoint_positive_trace_conjugates_the_parent_without_materializing() {
 
 fn assert_parent_native_contract_and_compose<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
     let lazy = source.adjoint().unwrap();

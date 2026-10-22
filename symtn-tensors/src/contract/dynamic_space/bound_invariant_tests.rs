@@ -101,6 +101,8 @@ impl FailAtCallRule {
     }
 }
 
+impl symtn_core::testing::Provider for FailAtCallRule {}
+
 impl FusionRule for FailAtCallRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity_calls.set(self.identity_calls.get() + 1);

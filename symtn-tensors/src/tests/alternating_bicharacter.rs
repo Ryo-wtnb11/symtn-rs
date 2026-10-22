@@ -27,6 +27,8 @@ fn omega_power(exponent: usize) -> Complex64 {
     )
 }
 
+impl symtn_core::testing::Provider for AlternatingZ3SquaredRule {}
+
 impl FusionRule for AlternatingZ3SquaredRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()

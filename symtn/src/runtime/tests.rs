@@ -60,6 +60,29 @@ fn network_destination_dual_stays_inside_complete_publication_epoch() {
 struct NetworkResetU1 {
     reset_on_dual: std::sync::atomic::AtomicBool,
 }
+impl symtn_core::testing::Provider for NetworkResetU1 {}
+
+impl symtn_core::TypedSectorAdmission for NetworkResetU1 {
+    type Sector = <Self as symtn_core::SectorCodec>::Sector;
+    type Error = symtn_core::FusionAlgebraError;
+    type Mode = symtn_core::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn_core::RuleIdentity {
+        symtn_core::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(&self, sector: &Self::Sector) -> Result<symtn_core::SectorId, Self::Error> {
+        symtn_core::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(&self, sector: symtn_core::SectorId) -> Result<Self::Sector, Self::Error> {
+        symtn_core::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn_core::SectorId,
+    ) -> Result<symtn_core::SectorId, Self::Error> {
+        symtn_core::CheckedFusionAlgebra::try_dual_sector(self, sector)
+    }
+}
+
 impl FusionRule for NetworkResetU1 {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -214,6 +237,29 @@ impl SectorCodec for CountingFibonacci {
 
     fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
         TableRule::fibonacci().decode_sector(id)
+    }
+}
+
+impl symtn_core::testing::Provider for CountingFibonacci {}
+
+impl symtn_core::TypedSectorAdmission for CountingFibonacci {
+    type Sector = <Self as symtn_core::SectorCodec>::Sector;
+    type Error = symtn_core::FusionAlgebraError;
+    type Mode = symtn_core::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn_core::RuleIdentity {
+        symtn_core::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(&self, sector: &Self::Sector) -> Result<symtn_core::SectorId, Self::Error> {
+        symtn_core::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(&self, sector: symtn_core::SectorId) -> Result<Self::Sector, Self::Error> {
+        symtn_core::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn_core::SectorId,
+    ) -> Result<symtn_core::SectorId, Self::Error> {
+        symtn_core::CheckedFusionAlgebra::try_dual_sector(self, sector)
     }
 }
 

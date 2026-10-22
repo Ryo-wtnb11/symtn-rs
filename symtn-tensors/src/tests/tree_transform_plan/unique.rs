@@ -446,6 +446,8 @@ impl TensorKitZ4Element2Rule {
     }
 }
 
+impl symtn_core::testing::Provider for TensorKitZ4Element2Rule {}
+
 impl FusionRule for TensorKitZ4Element2Rule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()

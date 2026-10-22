@@ -894,6 +894,8 @@ fn column_major_structure_like(structure: &BlockStructure, shape: Vec<usize>) ->
 #[derive(Clone, Copy, Debug)]
 struct UniqueZ2Rule;
 
+impl symtn_core::testing::Provider for UniqueZ2Rule {}
+
 impl FusionRule for UniqueZ2Rule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()
@@ -971,6 +973,8 @@ impl MultiplicityFreeRigidSymbols for UniqueZ2Rule {
 #[derive(Clone, Copy, Debug)]
 struct UniqueAnyonicRule;
 
+impl symtn_core::testing::Provider for UniqueAnyonicRule {}
+
 impl FusionRule for UniqueAnyonicRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()
@@ -1046,6 +1050,8 @@ impl MultiplicityFreeRigidSymbols for UniqueAnyonicRule {
 
 #[derive(Clone, Copy, Debug)]
 struct AsymmetricAnyonicPointedRule;
+
+impl symtn_core::testing::Provider for AsymmetricAnyonicPointedRule {}
 
 impl FusionRule for AsymmetricAnyonicPointedRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
@@ -1134,6 +1140,8 @@ impl MultiplicityFreeRigidSymbols for AsymmetricAnyonicPointedRule {
 #[derive(Clone, Copy, Debug)]
 struct UniquePlanarRule;
 
+impl symtn_core::testing::Provider for UniquePlanarRule {}
+
 impl FusionRule for UniquePlanarRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()
@@ -1211,6 +1219,8 @@ impl MultiplicityFreeRigidSymbols for UniquePlanarRule {
 #[derive(Clone, Copy, Debug)]
 struct SimpleSu2Rule;
 
+impl symtn_core::testing::Provider for SimpleSu2Rule {}
+
 impl FusionRule for SimpleSu2Rule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()
@@ -1238,6 +1248,8 @@ impl MultiplicityFreeFusionRule for SimpleSu2Rule {}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GenericMultiplicityRule;
+
+impl symtn_core::testing::Provider for GenericMultiplicityRule {}
 
 impl FusionRule for GenericMultiplicityRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {

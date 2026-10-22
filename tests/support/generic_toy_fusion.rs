@@ -16,6 +16,8 @@ use symtn_core::{
 #[derive(Clone, Copy)]
 pub struct ToyGenericRule<const ID: u8>;
 
+impl<const ID: u8> symtn_core::testing::Provider for ToyGenericRule<ID> {}
+
 impl<const ID: u8> FusionRule for ToyGenericRule<ID> {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

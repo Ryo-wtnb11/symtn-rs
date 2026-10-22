@@ -141,8 +141,14 @@ fn foreign_workspace_is_rejected_before_destination_write() {
 
 fn equivalence<R, D>(label: &str, (v, w): (GradedSpace<R>, GradedSpace<R>))
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
@@ -350,8 +356,14 @@ fn assert_members_compose<R, D>(
     b: &[TensorMap<R, D>],
 ) -> Vec<TensorMap<R, D>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
     assert_eq!(output.len(), a.len());

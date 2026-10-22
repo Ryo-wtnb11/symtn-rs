@@ -38,6 +38,10 @@ serde_json = { version = "1", optional = true }
 # linear-scan `VecDeque` LRU whose touch was O(capacity) per plan-cache hit.
 lru = "0.12"
 
+[dev-dependencies]
+# Native test providers implement the provider seal through `testing`.
+symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }
 

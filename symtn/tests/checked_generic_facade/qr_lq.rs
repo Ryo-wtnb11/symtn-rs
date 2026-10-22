@@ -350,6 +350,8 @@ fn checked_compact_diagonal_qr_rejects_nonfinite_and_skips_the_provider_when_fin
 /// so dual QR/LQ is checked on self-dual Z2 and non-self-dual U(1) labels.
 struct CheckedAbelian<R>(R);
 
+impl<R: symtn::sector::FusionRule> symtn_core::testing::Provider for CheckedAbelian<R> {}
+
 impl<R: symtn::sector::FusionRule> CheckedGenericFusion for CheckedAbelian<R> {
     type Error = ToyError;
 

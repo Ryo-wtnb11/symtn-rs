@@ -317,6 +317,8 @@ fn product_codec_reports_the_packing_failure_it_hit() {
 #[derive(Clone, Copy, Debug, Default)]
 struct TinyRule;
 
+impl symtn_sectors::testing::Provider for TinyRule {}
+
 impl FusionRule for TinyRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

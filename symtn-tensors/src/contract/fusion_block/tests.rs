@@ -306,6 +306,8 @@ fn canonical_region_join_scales_missing_sector_without_layout_compile() {
 #[derive(Clone, Copy)]
 struct LayoutToyGenericRule;
 
+impl symtn_core::testing::Provider for LayoutToyGenericRule {}
+
 impl FusionRule for LayoutToyGenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()

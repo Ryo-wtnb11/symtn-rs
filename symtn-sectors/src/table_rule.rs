@@ -199,6 +199,10 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     })
 }
 
+impl crate::seal::Provider for TableRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(TableRule);
+
 impl FusionRule for TableRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()

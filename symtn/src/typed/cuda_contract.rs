@@ -4,7 +4,13 @@ use super::*;
 /// device under one device lease, the placement checked under it first.
 impl<R, D> TraceExec<R, D> for CudaStorage<D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaPayload,
 {
     /// The #740 output upload, then every term accumulates (`beta = 1`), so

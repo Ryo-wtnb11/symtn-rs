@@ -473,6 +473,8 @@ fn borrowed_views_match_owned_keys() {
 #[derive(Clone, Copy, Debug)]
 struct MultiplicityTwoRule;
 
+impl symtn_core::testing::Provider for MultiplicityTwoRule {}
+
 impl FusionRule for MultiplicityTwoRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

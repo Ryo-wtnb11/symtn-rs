@@ -170,9 +170,15 @@ type Layout<S> = (
     Vec<symtn::typed::BlockFusionTrees<S>>,
 );
 
-fn layout<R, D>(tensor: &TensorMap<R, D>) -> Layout<R::Sector>
+fn layout<R, D>(tensor: &TensorMap<R, D>) -> Layout<<R as SectorCodec>::Sector>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
 {
     (
@@ -858,7 +864,13 @@ fn assert_lazy_adjoint_transforms_match_host<R, D>(
     what: &str,
     recouples: bool,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload + symtn::typed::CudaPayload,
 {
     let host_lazy = parent.adjoint().unwrap();
@@ -1007,7 +1019,13 @@ fn device_transforms_of_an_empty_tensor_produce_an_empty_tensor() {
 /// surviving NaN proves a block the replay failed to write.
 fn poisoned_like<R, D>(model: &TensorMap<R, D>) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let poisoned = model.scale(D::nan()).unwrap();
@@ -1564,7 +1582,13 @@ fn device_into_reads_a_lazy_source_through_its_parent_like_the_host() {
 /// must never be read), and asserts device == Host == the reference steps.
 fn assert_lazy_into_matches_host<R, D>(parent: &TensorMap<R, D>, alpha: D, beta: D, what: &str)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload + symtn::typed::CudaPayload,
 {
     let host_lazy = parent.adjoint().unwrap();

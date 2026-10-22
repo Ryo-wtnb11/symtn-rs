@@ -58,7 +58,7 @@ fn workspace_releases_its_claim_after_plan_is_dropped() {
 fn active_sectors<R, D>(a: &TensorMap<R, D>, b: &TensorMap<R, D>) -> usize
 where
     R: DeviceRule,
-    R::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Debug,
     D: DevicePayload,
 {
     let coupled = |t: &TensorMap<R, D>| {
@@ -72,7 +72,7 @@ where
 fn device_gate<R, D>(label: &str, (v, w): (GradedSpace<R>, GradedSpace<R>))
 where
     R: DeviceRule,
-    R::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Debug,
     D: DevicePayload,
 {
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
@@ -388,7 +388,7 @@ fn record_counters<R, D>(
     rows: &mut Vec<(String, Counters)>,
 ) where
     R: DeviceRule,
-    R::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Debug,
     D: DevicePayload,
 {
     let runtime = Runtime::builder().cuda(0).build().unwrap();

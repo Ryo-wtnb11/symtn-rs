@@ -94,6 +94,8 @@ fn checked_fibonacci_matches_valid_operations_and_rejects_unknown_sectors() {
 #[derive(Clone, Copy, Debug)]
 struct CheckedMultiplicityRule<const N: usize>;
 
+impl<const N: usize> symtn_sectors::testing::Provider for CheckedMultiplicityRule<N> {}
+
 impl<const N: usize> FusionRule for CheckedMultiplicityRule<N> {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

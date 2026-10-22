@@ -140,8 +140,11 @@ where
 /// `PlannedNetwork::execute` (`cuda_operand_admission`).
 impl<R, D, S> NetworkModeDispatch<R, D, S> for MultiplicityFreeAdmissionMode
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: TensorScalar,

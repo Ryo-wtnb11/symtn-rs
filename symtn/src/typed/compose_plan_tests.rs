@@ -193,7 +193,13 @@ fn hand_inactive_positions<R, D>(
     members: usize,
 ) -> Vec<usize>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
 {
     let coupled = |t: &TensorMap<R, D>, i: usize| {
@@ -234,7 +240,13 @@ fn assert_regions_cover<R, D>(
     b: &TensorMap<R, D>,
     members: usize,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
 {
     let mut covered = Vec::new();
@@ -270,7 +282,13 @@ fn regions_match_hand_derivation<R>(
     what: &str,
     (v, w): (GradedSpace<R>, GradedSpace<R>),
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let a = TensorMap::<_, f64>::rand_with_seed(runtime, [&v, &v], [&w], 11).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(runtime, [&w], [&v], 12).unwrap();

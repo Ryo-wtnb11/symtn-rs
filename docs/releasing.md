@@ -48,6 +48,6 @@ Tenferro source override, or fusion-symbols git override.
 
 The workspace manifests pin the `tenferro-*` crates at 0.7.1 (`symtn-dense/Cargo.toml`),
 `t4a-cubecl-runtime` at `=0.10.1` (kept in lockstep with Tenferro), and `fusion-symbols` at
-0.6.0 (`symtn-sectors/Cargo.toml`, `symtn-tensors/Cargo.toml`).
+0.7.0 (`symtn-sectors/Cargo.toml`, `symtn-tensors/Cargo.toml`).
 The registry-only gate must still verify compatible resolved versions before a
 future release.

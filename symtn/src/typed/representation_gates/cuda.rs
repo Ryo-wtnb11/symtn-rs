@@ -27,7 +27,13 @@ fn assert_cuda_tensor_matches_host<R>(
     provider: *const R,
     runtime: &crate::runtime::RuntimeIdentity,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     assert!(std::ptr::eq(actual.provider(), provider));
     assert!(runtime.matches(actual.runtime()));
@@ -54,7 +60,13 @@ fn assert_cuda_tensor_matches_host<R>(
 #[cfg(feature = "cuda")]
 fn assert_cuda_lazy_contract_orientations<R>(lhs: &TensorMap<R, f64>, rhs: &TensorMap<R, f64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let lhs_axes: Vec<_> = (lhs.codomain_rank()..lhs.rank()).collect();
     let rhs_axes: Vec<_> = (0..rhs.codomain_rank()).collect();
@@ -971,7 +983,13 @@ fn assert_cuda_twist_lowering_matches_host<R, D>(
     direction: Direction,
 ) -> usize
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaPayload + std::fmt::Debug,
 {
     let what = format!("{legs:?} {direction:?}");
@@ -1217,7 +1235,13 @@ fn with_opaque_keys(
 #[cfg(feature = "cuda")]
 fn assert_cuda_adjoint_lowering_matches_hand<R, D>(t: &TensorMap<R, D>, zero_blocks: bool)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaPayload + std::fmt::Debug,
 {
     let lazy = t.adjoint().unwrap();

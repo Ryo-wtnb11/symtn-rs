@@ -55,7 +55,13 @@ fn check_every_spec<R, D>(
     rhs_axes: &[usize],
 ) -> usize
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let lhs_open = lhs.rank() - lhs_axes.len();
@@ -143,7 +149,13 @@ where
 /// lazy-adjoint right operand.
 fn check_symmetry<R, D>(symmetry: &str, v: &GradedSpace<R>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -181,7 +193,13 @@ fn every_order_and_split_matches_contract_then_permute() {
 /// split and `permute`.
 fn check_compact<R>(symmetry: &str, v: &GradedSpace<R>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let t = TensorMap::<R, f64>::from_subblock_fn(&runtime, [v, v], [v], fill(21)).unwrap();

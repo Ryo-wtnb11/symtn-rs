@@ -3,6 +3,8 @@ use super::*;
 #[derive(Clone, Copy, Debug)]
 pub(super) struct UncertifiedCustomSymbolsRule;
 
+impl symtn_sectors::testing::Provider for UncertifiedCustomSymbolsRule {}
+
 impl FusionRule for UncertifiedCustomSymbolsRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -58,6 +60,8 @@ impl MultiplicityFreeFusionSymbols for UncertifiedCustomSymbolsRule {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ComplexAsymmetricUniqueRule;
+
+impl symtn_sectors::testing::Provider for ComplexAsymmetricUniqueRule {}
 
 impl FusionRule for ComplexAsymmetricUniqueRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -579,6 +583,8 @@ impl AlternatingZ3SquaredRule {
         )
     }
 }
+
+impl symtn_sectors::testing::Provider for AlternatingZ3SquaredRule {}
 
 impl FusionRule for AlternatingZ3SquaredRule {
     fn rule_identity(&self) -> RuleIdentity {

@@ -423,6 +423,8 @@ where
     }
 }
 
+impl<R> symtn_sectors::testing::Provider for DualCountingRule<R> {}
+
 impl<R> FusionRule for DualCountingRule<R>
 where
     R: FusionRule,
@@ -505,6 +507,8 @@ impl FaultyDualRule {
         U1FusionRule.try_dual_sector(sector)
     }
 }
+
+impl symtn_sectors::testing::Provider for FaultyDualRule {}
 
 impl FusionRule for FaultyDualRule {
     fn rule_identity(&self) -> RuleIdentity {

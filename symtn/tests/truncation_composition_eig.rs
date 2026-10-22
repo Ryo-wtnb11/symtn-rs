@@ -191,7 +191,11 @@ fn triangular<R, D>(
     zero: D,
 ) -> TensorMap<R, D>
 where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
     D: symtn::typed::TensorScalar,
@@ -208,7 +212,11 @@ where
 
 fn real_triangular<R>(leg: &GradedSpace<R>, seed: u64) -> TensorMap<R, f64>
 where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
 {
@@ -224,7 +232,11 @@ where
 
 fn complex_triangular<R>(leg: &GradedSpace<R>, seed: u64) -> TensorMap<R, Complex64>
 where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
 {
@@ -336,10 +348,14 @@ fn a_whole_sector_is_dropped_from_the_eig_bond() {
 /// shape).
 fn multi_tree_triangular<R>(codomain: [&GradedSpace<R>; 2], seed: u64) -> TensorMap<R, Complex64>
 where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
-    R::Sector: Ord + Clone,
+    <R as symtn::sector::SectorCodec>::Sector: Ord + Clone,
 {
     let mut state = seed;
     TensorMap::from_subblock_fn(&host_runtime(), codomain, codomain, |trees, indices| {

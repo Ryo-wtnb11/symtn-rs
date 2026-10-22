@@ -55,10 +55,19 @@ fn assert_matrix_close(actual: Matrix2, expected: Matrix2, what: &str) {
     }
 }
 
-fn coordinates<R>(state: &TensorMap<R, Complex64>, channels: [R::Sector; 2]) -> [Complex64; 2]
+fn coordinates<R>(
+    state: &TensorMap<R, Complex64>,
+    channels: [<R as SectorCodec>::Sector; 2],
+) -> [Complex64; 2]
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = Complex64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Copy,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = Complex64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Copy,
 {
     let mut values = [Complex64::new(0.0, 0.0); 2];
     for (trees, block) in state.subblocks().unwrap() {
@@ -78,7 +87,13 @@ fn sigma<R>(
     inverse: bool,
 ) -> TensorMap<R, Complex64>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = Complex64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = Complex64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let codomain = if generator == 1 { [1, 0, 2] } else { [0, 2, 1] };
     // Source axes are [tau_1, tau_2, tau_3 | total tau]. Increasing levels
@@ -94,13 +109,19 @@ where
 /// of `leg^n ← leg` for `n = 2, 3, 4`.
 fn planar_workflow<R>(
     provider: R,
-    leg: R::Sector,
-    channels: [R::Sector; 2],
+    leg: <R as SectorCodec>::Sector,
+    channels: [<R as SectorCodec>::Sector; 2],
     counts: [usize; 3],
 ) -> PlanarOracle
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = Complex64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Copy,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = Complex64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Copy,
 {
     let runtime = Runtime::builder().build().unwrap();
     let tau = GradedSpace::try_new(Arc::new(provider), [(leg, 1)]).unwrap();

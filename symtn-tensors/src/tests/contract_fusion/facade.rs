@@ -70,6 +70,8 @@ fn fibonacci_complex_provider_replays_crossing_free_prepared_contraction() {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct AdversarialNonuniformTwistRule;
 
+impl symtn_core::testing::Provider for AdversarialNonuniformTwistRule {}
+
 impl FusionRule for AdversarialNonuniformTwistRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

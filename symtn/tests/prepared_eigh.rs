@@ -48,8 +48,14 @@ const MEMBER_COUNTS: [usize; 3] = [1, 2, 7];
 /// so its gauge-fixed `v` equals eager's within the numerics rule.
 fn check_batch<R>(label: &str, runtime: &Runtime, inputs: &[TensorMap<R, f64>])
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0), runtime);
     let stack = StackedTensorMap::pack(inputs).unwrap();
@@ -148,8 +154,14 @@ where
 
 fn equivalence<R>(label: &str, leg: GradedSpace<R>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     let runtime = Runtime::builder().build().unwrap();
     for count in MEMBER_COUNTS {
@@ -255,7 +267,13 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
 /// Eager's verdict: `Some(fault)` when eager `eigh_full` rejects the member.
 fn eager_fault<R>(input: &TensorMap<R, f64>) -> Option<MemberFault>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let error = input
         .eigh_full(
@@ -287,7 +305,13 @@ fn rejected_members(result: Result<(), BatchError>) -> Vec<(usize, MemberFault)>
 /// Members spanning ±1000 binary orders of magnitude, Hermitian and not.
 pub fn mixed_scale_members<R>(runtime: &Runtime, leg: &GradedSpace<R>) -> Vec<TensorMap<R, f64>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let h = hermitian_members(runtime, &[leg, leg], 1, 5).remove(0);
     let x = members::<R, f64>(runtime, &[leg, leg], &[leg, leg], 1, 9).remove(0);
@@ -451,7 +475,13 @@ fn assert_equals_eager<R>(
     inputs: &[TensorMap<R, f64>],
     stack: &StackedTensorMap<R, f64>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let output = plan.execute(stack, ws).unwrap();
     for (member, input) in inputs.iter().enumerate() {
@@ -515,8 +545,14 @@ fn a_failed_batch_leaves_no_observable_output_and_the_next_call_is_whole() {
 /// U(1), SU(2) and fZ2xU(1).
 fn bitwise_across_member_counts<R>(label: &str, leg: GradedSpace<R>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
 {
     let runtime = Runtime::builder().build().unwrap();
     let all = hermitian_members(&runtime, &[&leg, &leg], 17, 21);

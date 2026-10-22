@@ -2,7 +2,13 @@ use super::*;
 
 fn assert_direct_contract_and_compose<R>(lhs: &TensorMap<R, f64>, rhs: &TensorMap<R, f64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let lhs_axes: Vec<_> = (lhs.codomain_rank()..lhs.rank()).collect();
     let rhs_axes: Vec<_> = (0..rhs.codomain_rank()).collect();
@@ -360,7 +366,13 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
 
 fn assert_c64_contract_and_compose<R>(lhs: &TensorMap<R, Complex64>, rhs: &TensorMap<R, Complex64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let lhs_axes: Vec<_> = (lhs.codomain_rank()..lhs.rank()).collect();
     let rhs_axes: Vec<_> = (0..rhs.codomain_rank()).collect();

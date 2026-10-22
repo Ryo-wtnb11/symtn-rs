@@ -22,6 +22,8 @@ impl RefuteOmRule {
     const F_PHI: f64 = std::f64::consts::PI / 7.0; // nontrivial F angle
 }
 
+impl symtn_sectors::testing::Provider for RefuteOmRule {}
+
 impl FusionRule for RefuteOmRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -315,6 +317,8 @@ impl A4SubBlockRule {
     const R333: [f64; 4] = [-1.0, 0.0, 0.0, 1.0];
 }
 
+impl symtn_sectors::testing::Provider for A4SubBlockRule {}
+
 impl FusionRule for A4SubBlockRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -447,6 +451,8 @@ fn tk_oracle_a4_generic_braid_matches_tensorkit() {
 
 #[derive(Clone, Copy, Debug)]
 struct MisreportedSimpleA4Rule;
+
+impl symtn_sectors::testing::Provider for MisreportedSimpleA4Rule {}
 
 impl FusionRule for MisreportedSimpleA4Rule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -777,6 +783,8 @@ fn a4_b_and_a_symbol_match_tensorkit() {
 // F-block whose row 0 is [0.3, 0.7] (all dims 1, so B = F[:, :, 0, 0]).
 #[derive(Clone, Copy, Debug)]
 struct OverwriteProbeRule;
+
+impl symtn_sectors::testing::Provider for OverwriteProbeRule {}
 
 impl FusionRule for OverwriteProbeRule {
     fn rule_identity(&self) -> RuleIdentity {

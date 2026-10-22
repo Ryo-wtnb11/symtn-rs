@@ -204,8 +204,15 @@ fn symtn_core_exports_exactly_the_pinned_names() {
         "CU1FusionRule",
         "CU1Irrep",
         "CU1_MAX_TWICE_CHARGE",
+        "CanonicalUnitAdmission",
         "CanonicalUnitFusionRule",
         "CategoricalScalar",
+        "CategoryAdapterError",
+        "CategoryAdmissionError",
+        "CategoryCodec",
+        "CategoryFailure",
+        "CategoryOperation",
+        "CategoryRule",
         "CheckedCanonicalUnitFusionRule",
         "CheckedFusionAlgebra",
         "CheckedFusionSpaceError",
@@ -218,6 +225,7 @@ fn symtn_core_exports_exactly_the_pinned_names() {
         "CheckedGenericSymbolError",
         "StructureCacheInfo",
         "StructureCache",
+        "EnumeratedCodec",
         "ErasedStructureCacheControl",
         "StructureCacheEquivalent",
         "CoreError",
@@ -318,6 +326,7 @@ fn symtn_core_exports_exactly_the_pinned_names() {
         "U1FusionRule",
         "U1Irrep",
         "U1SectorLayout",
+        "UncertifiedUnitAdmission",
         "UniqueTreePairScratch",
         "UnitLegInsertion",
         "WeakHomSpaceId",
@@ -412,6 +421,8 @@ fn only_testing_uses_the_test_or_feature_gate() {
 #[test]
 fn testing_feature_forwards_exactly_the_pinned_oracles() {
     let expected = [
+        // The provider seal native test fixtures implement.
+        "Provider",
         "generic_braid_tree_pair",
         "generic_permute_tree_pair",
         "mark_structure_canonical",

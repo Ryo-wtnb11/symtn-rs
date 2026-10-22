@@ -443,7 +443,13 @@ fn cuda_rows_match_host() {
         alpha: D,
         beta: D,
     ) where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: CudaFactorizationPayload + Into<Complex64> + std::fmt::Debug,
     {
         let (a_dev, b_dev) = (a.to_cuda().unwrap(), b.to_cuda().unwrap());
@@ -1174,7 +1180,13 @@ fn transform_cuda_rows_match_host() {
 
     fn device_rows<R, D>(a: &TensorMap<R, D>, b: &TensorMap<R, D>, alpha: D, beta: D)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: symtn::typed::CudaPayload + Into<Complex64> + std::fmt::Debug,
     {
         let agree = |device: &[D], host: &[D], what: &str| {
@@ -1316,7 +1328,13 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
 
     fn same<R, D>(what: &str, device: TensorMap<R, D, CudaStorage<D>>, host: TensorMap<R, D>)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: CudaPayload + Into<Complex64>,
     {
         let device = device.to_host().unwrap();
@@ -1335,7 +1353,13 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
 
     fn rows<R, D>(a: &TensorMap<R, D>, b: &TensorMap<R, D>, coefficients: &[(D, D)], nan: D)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: CudaPayload + Into<Complex64> + std::fmt::Debug,
     {
         let lazy = a.adjoint().unwrap();
@@ -1629,7 +1653,13 @@ fn contract_cuda_rows_match_host() {
 
     fn device_rows<R, D>(a: &TensorMap<R, D>, b: &TensorMap<R, D>, alpha: D, beta: D)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: symtn::typed::CudaPayload + Into<Complex64> + std::fmt::Debug,
     {
         let agree = |device: &TensorMap<R, D, symtn::typed::CudaStorage<D>>,
@@ -1940,7 +1970,13 @@ fn trace_cuda_rows_match_host() {
 
     fn device_rows<R, D>(a: &TensorMap<R, D>, b: &TensorMap<R, D>, alpha: D, beta: D)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: symtn::typed::CudaPayload + Into<Complex64> + std::fmt::Debug,
     {
         let agree = |device: &TensorMap<R, D, symtn::typed::CudaStorage<D>>,

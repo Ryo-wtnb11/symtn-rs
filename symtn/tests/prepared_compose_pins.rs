@@ -62,7 +62,13 @@ fn fold(state: &mut u64, values: impl IntoIterator<Item = f64>) {
 
 fn stack_digest<R, D>(stack: &StackedTensorMap<R, D>) -> u64
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let mut state = 0xcbf2_9ce4_8422_2325;
@@ -89,8 +95,14 @@ fn record<R, D>(
     (v, w): (GradedSpace<R>, GradedSpace<R>),
     rows: &mut Vec<(String, u64)>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

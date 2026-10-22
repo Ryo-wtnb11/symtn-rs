@@ -142,6 +142,8 @@ impl CheckedPivotalToy {
     }
 }
 
+impl symtn_core::testing::Provider for CheckedPivotalToy {}
+
 impl CheckedGenericFusion for CheckedPivotalToy {
     type Error = PivotalError;
 

@@ -11,6 +11,8 @@ use super::*;
 #[derive(Clone, Copy, Debug)]
 struct ComplexScalarProbeRule;
 
+impl symtn_sectors::testing::Provider for ComplexScalarProbeRule {}
+
 impl FusionRule for ComplexScalarProbeRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -214,6 +216,8 @@ impl UniqueFAdmissibilityProbe {
         )
     }
 }
+
+impl symtn_sectors::testing::Provider for UniqueFAdmissibilityProbe {}
 
 impl FusionRule for UniqueFAdmissibilityProbe {
     fn rule_identity(&self) -> RuleIdentity {

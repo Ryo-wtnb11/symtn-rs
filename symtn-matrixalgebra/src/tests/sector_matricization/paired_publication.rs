@@ -556,6 +556,8 @@ struct Z4GenericRule;
 
 static Z4_GENERIC: Z4GenericRule = Z4GenericRule;
 
+impl symtn_core::testing::Provider for Z4GenericRule {}
+
 impl FusionRule for Z4GenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()

@@ -50,6 +50,8 @@ pub(super) fn su2(twice_spin: usize) -> SectorId {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct IsomorphismMultiplicityRule;
 
+impl symtn_sectors::testing::Provider for IsomorphismMultiplicityRule {}
+
 impl FusionRule for IsomorphismMultiplicityRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -87,6 +89,8 @@ impl FusionRule for IsomorphismMultiplicityRule {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Z4PointedRule;
 
+impl symtn_sectors::testing::Provider for Z4PointedRule {}
+
 impl FusionRule for Z4PointedRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -116,6 +120,8 @@ impl MultiplicityFreeFusionRule for Z4PointedRule {}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PlanarZ2Rule;
+
+impl symtn_sectors::testing::Provider for PlanarZ2Rule {}
 
 impl FusionRule for PlanarZ2Rule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -193,6 +199,8 @@ impl MultiplicityFreeRigidSymbols for PlanarZ2Rule {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct IdentitySymbolPanicRule;
+
+impl symtn_sectors::testing::Provider for IdentitySymbolPanicRule {}
 
 impl FusionRule for IdentitySymbolPanicRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -275,6 +283,8 @@ pub(super) struct SplitOnlyCountingRule {
     pub(super) f_calls: std::sync::atomic::AtomicUsize,
     pub(super) r_calls: std::sync::atomic::AtomicUsize,
 }
+
+impl symtn_sectors::testing::Provider for SplitOnlyCountingRule {}
 
 impl FusionRule for SplitOnlyCountingRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -397,6 +407,8 @@ where
 #[derive(Clone, Copy, Debug)]
 pub(super) struct AsymmetricAnyonicRule;
 
+impl symtn_sectors::testing::Provider for AsymmetricAnyonicRule {}
+
 impl FusionRule for AsymmetricAnyonicRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -491,6 +503,8 @@ pub(super) struct CheckedTreeProbe {
     pub(super) unchecked_nsymbol_calls: AtomicUsize,
 }
 
+impl symtn_sectors::testing::Provider for CheckedTreeProbe {}
+
 impl FusionRule for CheckedTreeProbe {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -578,6 +592,8 @@ impl FibonacciFAdmissibilityProbe {
         )
     }
 }
+
+impl symtn_sectors::testing::Provider for FibonacciFAdmissibilityProbe {}
 
 impl FusionRule for FibonacciFAdmissibilityProbe {
     fn rule_identity(&self) -> RuleIdentity {
@@ -1173,6 +1189,8 @@ impl ToyOmRule {
     pub(super) const C: usize = 3;
 }
 
+impl symtn_sectors::testing::Provider for ToyOmRule {}
+
 impl FusionRule for ToyOmRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -1297,6 +1315,8 @@ impl UnitaryToyOmRule {
     // nonzero makes the braid genuinely spread over both OM channels.
     const R_THETA: f64 = std::f64::consts::PI / 5.0;
 }
+
+impl symtn_sectors::testing::Provider for UnitaryToyOmRule {}
 
 impl FusionRule for UnitaryToyOmRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -1518,6 +1538,8 @@ impl ArtinSpy {
     }
 }
 
+impl symtn_sectors::testing::Provider for ArtinSpy {}
+
 impl CheckedGenericFusion for ArtinSpy {
     type Error = ArtinSpyError;
     fn rule_identity(&self) -> RuleIdentity {
@@ -1656,6 +1678,8 @@ pub(super) fn unitary_rank3_tree(vertex1: usize) -> FusionTreeKey {
 // rule below supplies it.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct A4BendRule;
+
+impl symtn_sectors::testing::Provider for A4BendRule {}
 
 impl FusionRule for A4BendRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -1945,6 +1969,8 @@ impl CheckedA4Spy {
     }
 }
 
+impl symtn_sectors::testing::Provider for CheckedA4Spy {}
+
 impl CheckedGenericFusion for CheckedA4Spy {
     type Error = RigidSpyError;
 
@@ -2130,6 +2156,8 @@ pub(super) struct TransposeProbeRule;
 
 // Sector 1 is self-dual with dim 4 (so √dim=2, exercising the coeff factor);
 // 1⊗1 = {0 (rigidity), 1 (with N=2)}. Only the (1,1,1) block is non-trivial.
+impl symtn_sectors::testing::Provider for TransposeProbeRule {}
+
 impl FusionRule for TransposeProbeRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -2252,6 +2280,8 @@ pub(super) fn tp_expected_b() -> [[f64; 2]; 2] {
 // insufficient for multi_Fmove/associator (they consult every (e,f)).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct A4FoldRule;
+
+impl symtn_sectors::testing::Provider for A4FoldRule {}
 
 impl FusionRule for A4FoldRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -2438,6 +2468,8 @@ pub(super) fn a4f_rank3(inner: usize, v1: usize, v2: usize) -> FusionTreeKey {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ComplexUnitaryRule;
 
+impl symtn_sectors::testing::Provider for ComplexUnitaryRule {}
+
 impl FusionRule for ComplexUnitaryRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -2549,6 +2581,8 @@ impl GenericRigidSymbols for ComplexUnitaryRule {
 pub(super) struct Su3BendRule;
 
 // ids: 1 = (4,2,0) self-dual, 2 = (3,1,0), 3 = (3,2,0) = dual((3,1,0)).
+impl symtn_sectors::testing::Provider for Su3BendRule {}
+
 impl FusionRule for Su3BendRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

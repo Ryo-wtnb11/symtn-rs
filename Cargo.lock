@@ -1174,9 +1174,9 @@ dependencies = [
 
 [[package]]
 name = "fusion-symbols"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a87d39240c03b087573aeb62830c5417324a36807dd7b4d6d6c01c2ad9a369"
+checksum = "280e8ab3f33e09d2106477616b49195696ab2459039309744c3a81d67bc38e1f"
 dependencies = [
  "num-bigint",
  "num-complex",
@@ -3280,6 +3280,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "symtn"
 version = "0.1.1"
 dependencies = [
+ "fusion-symbols",
  "krylov",
  "num-complex",
  "rayon",
@@ -3349,6 +3350,7 @@ dependencies = [
  "opt-einsum-path",
  "serde_json",
  "symtn",
+ "symtn-core",
  "symtn-macros",
 ]
 

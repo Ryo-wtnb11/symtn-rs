@@ -267,7 +267,7 @@ fn adjoint_conjugates_a_complex_payload() {
 fn adjoint_carries_an_external_provider() {
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let adjoint = tensor.adjoint().unwrap();

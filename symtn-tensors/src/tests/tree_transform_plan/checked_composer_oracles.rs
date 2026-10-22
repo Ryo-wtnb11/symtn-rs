@@ -749,6 +749,8 @@ impl GaugedSun {
     }
 }
 
+impl symtn_core::testing::Provider for GaugedSun {}
+
 impl CheckedGenericFusion for GaugedSun {
     type Error = SUNFusionRuleError;
     fn rule_identity(&self) -> RuleIdentity {

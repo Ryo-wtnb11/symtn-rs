@@ -647,6 +647,8 @@ impl SpyTwin for FailSingleLegFold {
     }
 }
 
+impl symtn_core::testing::Provider for FailSingleLegFold {}
+
 impl FusionRule for FailSingleLegFold {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()

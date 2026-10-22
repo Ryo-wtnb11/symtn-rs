@@ -104,6 +104,10 @@ fn checked_irreps(
     Ok((left_irrep, right_irrep))
 }
 
+impl crate::seal::Provider for SU2FusionRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(SU2FusionRule);
+
 impl FusionRule for SU2FusionRule {
     fn rule_identity(&self) -> RuleIdentity {
         static IDENTITY: OnceLock<RuleIdentity> = OnceLock::new();

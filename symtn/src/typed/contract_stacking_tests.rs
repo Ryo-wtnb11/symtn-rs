@@ -230,7 +230,11 @@ fn assert_entries_close(
 /// Every stacking pair either reproduces the canonical result or is refused.
 fn assert_stacking_invariant<R>(rule: R, sectors: &[(SectorId, usize)])
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + Clone
@@ -586,7 +590,11 @@ fn assert_dense_close(actual: &PhysicalDense<f64>, expected: &PhysicalDense<f64>
 /// of checks.
 fn assert_stacking_matches_dense<R>(rule: R, sectors: &[(SectorId, usize)]) -> usize
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + PhysicalFusionBasis<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec

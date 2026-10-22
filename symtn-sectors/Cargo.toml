@@ -14,16 +14,17 @@ path = "src/lib.rs"
 [features]
 default = []
 cgc-gen = ["fusion-symbols/lie-generated", "dep:num-traits"]
-# The infallible Generic symbol tier (`GenericFusionSymbols`,
-# `GenericRigidSymbols`): test oracles for this and sibling crates only;
-# production Generic is checked only (#1854).
+# Test-only provider tier for this and sibling crates: the infallible Generic
+# symbol traits (`GenericFusionSymbols`, `GenericRigidSymbols`; production
+# Generic is checked only, #1854) and `testing::Provider`, the provider seal
+# that native test fixtures implement.
 testing = []
 
 [dependencies]
 smallvec = { version = "1", features = ["const_generics", "union"] }
 num-complex = "0.4"
 num-traits = { version = "0.2", optional = true }
-fusion-symbols = { version = "0.6.0", default-features = false }
+fusion-symbols = { version = "0.7.0", default-features = false }
 
 [dev-dependencies]
 # Enables `testing` for this crate's own integration tests.

@@ -21,7 +21,13 @@ fn assert_overwrite_matches<R, D>(
     alpha: D,
     overwrite: impl FnOnce(&mut TensorMap<R, D>) -> Result<(), Error>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar + core::fmt::Debug + crate::test_numerics::numerics::Numeric,
 {
     let source_before = source.dense_data().unwrap().to_vec();
@@ -68,8 +74,11 @@ fn assert_contract_overwrite_matches<R, D>(
     alpha: D,
     ordered_alias: bool,
 ) where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: TensorScalar + core::fmt::Debug + crate::test_numerics::numerics::Numeric,

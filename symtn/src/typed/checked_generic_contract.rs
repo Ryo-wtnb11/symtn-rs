@@ -611,7 +611,13 @@ fn contract_into_multiplicity_free<R, D, S>(
     beta: D,
 ) -> Result<(), Error>
 where
-    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols
+        + CheckedFusionAlgebra
+        + SectorCodec,
     R::Scalar: CategoricalScalar + symtn_tensors::DenseRecouplingScalar,
     D: TensorScalar + crate::runtime::MultiplicityFreeCoefficientLane<R::Scalar>,
     S: ContractExec<R, D>,
@@ -661,7 +667,13 @@ where
 
 impl<R, D> MultiplicityFreeContractExecution<R> for D
 where
-    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols
+        + CheckedFusionAlgebra
+        + SectorCodec,
     R::Scalar: CategoricalScalar + symtn_tensors::DenseRecouplingScalar,
     D: TensorScalar + crate::runtime::MultiplicityFreeCoefficientLane<R::Scalar>,
 {

@@ -33,10 +33,14 @@ fn assert_projection<R, D>(
     sign: f64,
     tol: f64,
 ) where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
-    R::Sector: std::fmt::Debug,
+    <R as symtn::sector::SectorCodec>::Sector: std::fmt::Debug,
     D: Numeric + symtn::typed::TensorScalar,
 {
     let mut entries = 0;

@@ -13,6 +13,8 @@ struct RejectingTraceTwist {
     twist_calls: AtomicUsize,
 }
 
+impl symtn_core::testing::Provider for RejectingTraceTwist {}
+
 impl CheckedGenericFusion for RejectingTraceTwist {
     type Error = SUNFusionRuleError;
     fn rule_identity(&self) -> RuleIdentity {

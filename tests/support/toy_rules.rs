@@ -65,6 +65,8 @@ impl GenericToy {
     }
 }
 
+impl symtn_core::testing::Provider for GenericToy {}
+
 impl CheckedGenericFusion for GenericToy {
     type Error = GenericError;
 
