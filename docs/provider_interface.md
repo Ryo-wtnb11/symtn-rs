@@ -39,7 +39,7 @@ categorical example: one provider over every pinned AnyonWiki table of
 categories such as Rep(S₃)), whose `RuleIdentity` is built from the table's
 authority fingerprint. `symtn-sectors/src/abelian.rs` has the abelian ones;
 `symtn-sectors/src/su2.rs` shows a provider that delegates its coefficients to
-an external crate. fusion-symbols 0.5.1 supplies mathematics through
+an external crate. fusion-symbols 0.6.0 supplies mathematics through
 `category::FusionCategory`; symtn validates sector ids before constructing
 objects in their owning category and uses `frobenius_schur_phase`.
 `SUNFusionRule` accepts shaped empty F/R blocks for absent channels. Its SU(2)

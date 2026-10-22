@@ -10,7 +10,7 @@ The split follows TensorKit's ecosystem:
 
 | Concern | TensorKit ecosystem | This stack |
 | --- | --- | --- |
-| Elementary categorical data | WignerSymbols.jl, SUNRepresentations.jl, TensorKitSectors.jl, CategoryData.jl | the [`fusion-symbols`](https://github.com/Ryo-wtnb11/fusion-symbols) crate (formerly `racah`), 0.5.1 |
+| Elementary categorical data | WignerSymbols.jl, SUNRepresentations.jl, TensorKitSectors.jl, CategoryData.jl | the [`fusion-symbols`](https://github.com/Ryo-wtnb11/fusion-symbols) crate (formerly `racah`), 0.6.0 |
 | Symmetric tensors, fusion trees, structure, transforms | TensorKit.jl | symtn |
 | Dense arrays, linear algebra, devices | LinearAlgebra, TensorOperations.jl | tenferro |
 | Strided data movement | Strided.jl | strided-rs (`strided-kernel`) |
@@ -48,7 +48,7 @@ fusion-tree concept.
 ### 1. Symbol layer (`fusion-symbols` crate)
 
 The symbol layer is the published `fusion-symbols` crate (formerly `racah`),
-which symtn depends on at 0.5.1.
+which symtn depends on at 0.6.0.
 
 **Target ownership.** For each group or category, the symbol layer owns the
 elementary data a fusion category needs:
