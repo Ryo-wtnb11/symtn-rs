@@ -12,8 +12,7 @@ use std::sync::Arc;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
-    ProductFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, SectorId, SectorLeg,
-    U1FusionRule, U1Irrep,
+    ProductFusionRule, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, U1FusionRule, U1Irrep,
 };
 use symtn_operations::{OutputAxisOrder, TensorContractSpec};
 
@@ -1167,7 +1166,10 @@ fn fermionic_twist_role_cases<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 }
 
 fn fermionic_cases() -> Vec<(&'static str, Case<FermionU1>)> {
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let leg = |dual| fermion_u1_leg(&provider, dual);
     let mut cases = vec![
         ("fZ2xU1 both", fermionic_general_case(&provider, leg, false)),
@@ -1190,7 +1192,10 @@ fn fermionic_cases() -> Vec<(&'static str, Case<FermionU1>)> {
 }
 
 fn fermionic_su2_cases() -> Vec<(&'static str, Case<FermionSu2>)> {
-    let provider = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let leg = |dual| fermion_su2_leg(&provider, dual);
     let mut cases = vec![
         (
@@ -1595,8 +1600,14 @@ where
 
 #[test]
 fn the_fermionic_twist_rides_on_the_operand_already_copied_or_the_smaller() {
-    let fu1 = Arc::new(FermionParityFusionRule.product(U1FusionRule));
-    let fsu2 = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let fu1 = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
+    let fsu2 = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let mut totals = Vec::new();
     for (role, case) in fermionic_twist_role_cases(&fu1, |dual| fermion_u1_leg(&fu1, dual)) {
         totals.push((
@@ -2779,8 +2790,14 @@ fn host_eager_and_the_device_planner_take_the_same_route() {
         let (host, planner) = owned_routes(&case);
         assert_eq!(host, planner, "{name}");
     }
-    let fu1 = Arc::new(FermionParityFusionRule.product(U1FusionRule));
-    let fsu2 = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let fu1 = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
+    let fsu2 = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let uniform = [
         (
             "fZ2xU1 uniform mul!",

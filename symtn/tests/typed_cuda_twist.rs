@@ -29,8 +29,8 @@ use symtn::typed::Direction;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{Runtime, TensorScalar};
@@ -212,7 +212,10 @@ fn device_twist_matches_the_host_for_product_providers() {
     let runtime = runtime();
 
     // fZ2 x U(1): fermionic signs on top of a charge grading.
-    let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
@@ -235,7 +238,10 @@ fn device_twist_matches_the_host_for_product_providers() {
     }
 
     // fZ2 (x) SU(2): fermionic signs with non-Abelian degeneracies.
-    let rule = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [

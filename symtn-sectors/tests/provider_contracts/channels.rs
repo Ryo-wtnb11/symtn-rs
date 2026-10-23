@@ -71,7 +71,8 @@ fn table_channels_follow_the_object_order() {
 #[test]
 fn product_channels_enumerate_the_left_factor_fastest() {
     // x = (1/2, 1): left SU(2) channels [0, 2], right [0, 2, 4] (doubled).
-    let su2_su2 = SU2FusionRule.product(SU2FusionRule);
+    let su2_su2 =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(SU2FusionRule, SU2FusionRule).unwrap();
     let x = su2_su2
         .encode_sector(&product_sector(
             SU2Irrep::from_twice_spin(1),
@@ -96,7 +97,8 @@ fn product_channels_enumerate_the_left_factor_fastest() {
         SU2FusionRule,
         SU2FusionRule,
         PackedProductCodec<Su2SectorLayout, Su2SectorLayout>,
-    >::default();
+    >::try_new(SU2FusionRule, SU2FusionRule)
+    .unwrap();
     let x = s(1 | (2 << 8));
     assert_eq!(
         ids(packed.try_fusion_channels(x, x).unwrap()),
@@ -108,7 +110,11 @@ fn product_channels_enumerate_the_left_factor_fastest() {
 fn nested_product_channels_enumerate_the_inner_product_fastest() {
     // ((1/2, odd), 1/2): inner channels (0, even), (2, even) = Cantor ids 0, 5;
     // outer right channels 0, 2.
-    let rule = SU2FusionRule.product(Z2FusionRule).product(SU2FusionRule);
+    let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(SU2FusionRule, Z2FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let x = rule
         .encode_sector(&product_sector(
             product_sector(SU2Irrep::from_twice_spin(1), Z2Irrep::ODD),

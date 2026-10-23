@@ -718,8 +718,12 @@ fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
 fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
     // What: direct lowering preserves the product rule's fermionic sign times
     // the SU(2) channel phase instead of synthesizing a diagonal coefficient.
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let left_sector =
         |parity, charge| left_rule.encode_component_ids(parity, U1Irrep::new(charge).sector_id());
     let sector = |parity, charge, twice_spin| {

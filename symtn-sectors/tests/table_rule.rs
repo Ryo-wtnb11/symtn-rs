@@ -7,7 +7,10 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
 
-use fusion_symbols::table::TableCategory;
+use fusion_symbols::{
+    category::{BraidingStyle, FusionCategory},
+    table::TableCategory,
+};
 use symtn_sectors::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionAlgebraError, FusionRule, FusionStyleKind,
     MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorCodec, SectorId, TableRule,
@@ -41,8 +44,7 @@ fn styles_follow_the_braiding_and_the_exact_fusion_table() {
     let semion = TableRule::by_uuid(SEMION).unwrap();
     assert_eq!(semion.fusion_style(), FusionStyleKind::Unique);
     assert_eq!(semion.braiding_style(), BraidingStyleKind::Anyonic);
-    // The direct Unique braid needs symmetric braiding and a certified
-    // trivial associator gauge; a table rule certifies neither.
+    // Semion's nontrivial associator prevents the direct Unique braid.
     assert!(!semion.has_trivial_associator_gauge());
 }
 
@@ -72,25 +74,33 @@ fn every_shipped_entry_constructs_with_its_own_identity() {
 }
 
 #[test]
-fn every_shipped_entry_has_a_certified_unit_and_an_uncertified_associator() {
-    // What: `TableRule`'s canonical-unit marker rests on the table's own
-    // certificate for every shipped entry, while the trivial-associator
-    // certificate stays withheld even where the table grants it, as
-    // conservatively as the reported `Anyonic` braiding.
-    use fusion_symbols::category::FusionCategory;
-    let mut granted_by_the_table = 0;
+fn every_shipped_entry_reports_the_category_style_and_certificates() {
+    let mut trivial = 0;
+    let mut nontrivial = 0;
+    let mut symmetric = 0;
     for uuid in TableCategory::shipped_uuids() {
         let category = TableCategory::by_uuid(uuid).unwrap();
+        let rule = TableRule::by_uuid(uuid).unwrap();
         assert!(category.has_canonical_unit(), "{uuid}");
-        granted_by_the_table += usize::from(category.has_trivial_associator_gauge());
-        assert!(
-            !TableRule::by_uuid(uuid)
-                .unwrap()
-                .has_trivial_associator_gauge(),
+        assert_eq!(
+            rule.has_trivial_associator_gauge(),
+            category.has_trivial_associator_gauge(),
             "{uuid}"
         );
+        let expected = match category.braiding_style() {
+            BraidingStyle::None => BraidingStyleKind::NoBraiding,
+            BraidingStyle::Bosonic => BraidingStyleKind::Bosonic,
+            BraidingStyle::Fermionic => BraidingStyleKind::Fermionic,
+            BraidingStyle::Anyonic => BraidingStyleKind::Anyonic,
+        };
+        assert_eq!(rule.braiding_style(), expected, "{uuid}");
+        trivial += usize::from(category.has_trivial_associator_gauge());
+        nontrivial += usize::from(!category.has_trivial_associator_gauge());
+        symmetric += usize::from(expected.is_symmetric());
     }
-    assert!(granted_by_the_table > 0);
+    // Both certificate outcomes and a symmetric category distinguish forwarding
+    // from the previous unconditional false / Anyonic overrides.
+    assert!(trivial > 0 && nontrivial > 0 && symmetric > 0);
 }
 
 #[test]

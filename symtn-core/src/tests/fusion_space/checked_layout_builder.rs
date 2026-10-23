@@ -49,7 +49,7 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
 
     type U1Fz2Codec = PackedProductCodec<U1SectorLayout, Fz2SectorLayout>;
     type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2Codec>;
-    let pair_rule = U1Fz2Rule::new(U1FusionRule, FermionParityFusionRule);
+    let pair_rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     let pair_sector = U1Fz2Codec::encode(u1(1), z2_odd());
 
     type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
@@ -57,10 +57,11 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
     type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
     type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
     type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
-    let triple_rule = TripleRule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    let triple_rule = TripleRule::try_new(
+        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
-    );
+    )
+    .unwrap();
     let triple_sector = TripleCodec::encode(Fz2U1Codec::encode(z2_odd(), u1(1)), su2(1));
     let triple_pair_coupled = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(2)), su2(0));
 
@@ -671,7 +672,7 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
     // recursive product closure failures retain exact causes.
     type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-    let rule = Rule::new(FermionParityFusionRule, U1FusionRule);
+    let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let malformed = singleton_rank_hom(SectorId::new(usize::MAX), 1);
     let error = malformed
         .prepare_fusion_tree_layout_checked(&rule)
@@ -768,7 +769,7 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
     type PairLayout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
     type TripleCodec = PackedProductCodec<PairLayout, Su2SectorLayout>;
     type TripleRule = ProductFusionRule<Rule, SU2FusionRule, TripleCodec>;
-    let triple_rule = TripleRule::new(rule, SU2FusionRule);
+    let triple_rule = TripleRule::try_new(rule, SU2FusionRule).unwrap();
     let triple = |parity, charge, spin| TripleCodec::encode(Codec::encode(parity, charge), spin);
     let triple_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
@@ -850,7 +851,7 @@ fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
 
     type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-    let product_rule = Rule::new(FermionParityFusionRule, U1FusionRule);
+    let product_rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let product_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new([(Codec::encode(z2_even(), u1(i32::MAX)), 1)], false),

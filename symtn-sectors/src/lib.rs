@@ -17,7 +17,8 @@ pub use algebra::*;
 mod category_rule;
 pub use category_rule::{
     CanonicalUnitAdmission, CategoryAdapterError, CategoryAdmissionError, CategoryCodec,
-    CategoryFailure, CategoryOperation, CategoryRule, EnumeratedCodec, UncertifiedUnitAdmission,
+    CategoryFailure, CategoryOperation, CategoryProvider, CategoryRule, EnumeratedCodec,
+    UncertifiedUnitAdmission,
 };
 
 /// The seal of the provider traits.
@@ -62,9 +63,7 @@ mod sun;
 pub use sun::{SUNFusionRule, SUNFusionRuleError, SUNSymbolError};
 
 mod product_rule;
-pub use product_rule::{
-    product_fusion_rule, product_fusion_rule_with_codec, ProductFusionRule, ProductFusionRuleExt,
-};
+pub use product_rule::{ProductAdmission, ProductFusionRule, ProductFusionRuleError};
 
 /// Opaque identifier used by one fusion-rule implementation.
 ///

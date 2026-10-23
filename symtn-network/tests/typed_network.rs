@@ -4,8 +4,8 @@ use symtn::typed::ContractSpec;
 
 use symtn::expert::TensorStorage;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -430,7 +430,10 @@ fn u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
 
 #[test]
 fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let make_space = |provider: &Arc<_>, spec: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::clone(provider),
@@ -491,7 +494,10 @@ fn provider_and_dtype_matrix_matches_direct_contract() {
     pair_case::<_, f64>(&fz2);
     pair_case::<_, Complex64>(&fz2);
 
-    let product_rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let product_rule = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let product = GradedSpace::try_new(
         product_rule,
         [
@@ -569,7 +575,10 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let z1 = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 1)]).unwrap();
     run(&runtime, &x0, &x1, &y, &z0, &z1, 748_001);
 
-    let product_rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let product_rule = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1)],

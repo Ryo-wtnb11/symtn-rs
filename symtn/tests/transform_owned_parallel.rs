@@ -8,9 +8,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{
-    product_sector, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -164,7 +162,9 @@ macro_rules! assert_bit_identical {
 fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
     let _measurement = counting_alloc::serial();
     let (serial, parallel) = runtimes();
-    let provider = Arc::new(U1FusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+    );
     let space = u1_su2_space(&provider);
     let real_serial: TensorMap<_, f64> =
         TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1217).unwrap();
@@ -234,7 +234,9 @@ fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
     // directly, with no `vec![0.0; P]` fallback and destination-reading
     // replay (#1217).
     let (serial, parallel) = runtimes();
-    let provider = Arc::new(U1FusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+    );
     let space = u1_su2_space(&provider);
     let source_serial: TensorMap<_, f64> =
         TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1221).unwrap();

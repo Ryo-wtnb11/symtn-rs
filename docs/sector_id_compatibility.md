@@ -31,8 +31,11 @@ Storage uses ID order. Two operations instead need a semantic basis order:
   cross-sector tie.
 - `isomorphism` and `isometry` between different spaces pair or select leading
   trees in TensorKit basis order, including dual flags and inner lines.
-  Product inner lines vary the first factor fastest, which differs from
-  sorting product sectors by their comparison key. For SU(N) with three or
+  Product inner lines follow fusion-symbols' native factor channel order,
+  varying the first factor fastest; this differs from sorting product sectors
+  by their comparison key. A generated Lie factor inside a product retains
+  category channel order, while standalone `SUNFusionRule` sorts encoded ids.
+  For SU(N) with three or
   more legs on a side, TensorKit's dictionary-based inner-line order has no
   stable counterpart; symtn uses sector order there.
 

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -137,7 +137,10 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
     assert_pair_case::<_, Complex64>(&runtime, &fz2, 750_122);
 
     let product = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+                .unwrap(),
+        ),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
             (product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 1),

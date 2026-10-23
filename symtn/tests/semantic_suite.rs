@@ -109,10 +109,13 @@ macro_rules! for_each_space {
         );
         $case!(
             "fZ2xU1xSU2",
-            Arc::new(Fz2U1Su2Rule::new(
-                Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
-                SU2FusionRule,
-            )),
+            Arc::new(
+                Fz2U1Su2Rule::try_new(
+                    Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+                    SU2FusionRule,
+                )
+                .unwrap()
+            ),
             [
                 (
                     product_sector(
@@ -766,10 +769,13 @@ fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
 #[test]
 fn triple_product_nonuniform_degeneracy_crossed_contract() {
     let rt = Runtime::builder().build().unwrap();
-    let rule = Arc::new(Fz2U1Su2Rule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
-        SU2FusionRule,
-    ));
+    let rule = Arc::new(
+        Fz2U1Su2Rule::try_new(
+            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let label = |parity, charge, spin| {
         product_sector(
             product_sector(parity, U1Irrep::new(charge)),
@@ -916,10 +922,13 @@ fn svd_qr_reconstruction_random_spaces() {
         SU2Irrep::from_twice_spin(0),
         [SU2Irrep::from_twice_spin(1), SU2Irrep::from_twice_spin(2),]
     );
-    let triple = Arc::new(Fz2U1Su2Rule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
-        SU2FusionRule,
-    ));
+    let triple = Arc::new(
+        Fz2U1Su2Rule::try_new(
+            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let label = |parity, charge, spin| {
         product_sector(
             product_sector(parity, U1Irrep::new(charge)),

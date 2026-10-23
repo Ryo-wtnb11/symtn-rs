@@ -13,8 +13,7 @@ use symtn::typed::{
     ContractSpec, CoreError, Error, GradedSpace, OperationError, Runtime, TensorMap,
 };
 use symtn_sectors::{
-    BraidingStyleKind, FusionRule, ProductFusionRuleExt, SectorCodec, SectorId, TableRule,
-    TableSector, Z2FusionRule,
+    BraidingStyleKind, FusionRule, SectorCodec, SectorId, TableRule, TableSector, Z2FusionRule,
 };
 
 /// Rep(S₃), `anyonwiki_code [3,1,0,2,2,0,1]`: objects `1` (trivial), `2`
@@ -80,7 +79,11 @@ fn seeded(
 fn rep_s3_reports_no_braiding_and_products_inherit_it() {
     let rule = rep_s3();
     assert_eq!(rule.braiding_style(), BraidingStyleKind::NoBraiding);
-    let product = TableRule::by_uuid(REP_S3).unwrap().product(Z2FusionRule);
+    let product = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        TableRule::by_uuid(REP_S3).unwrap(),
+        Z2FusionRule,
+    )
+    .unwrap();
     assert_eq!(product.braiding_style(), BraidingStyleKind::NoBraiding);
 }
 
@@ -258,7 +261,13 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
 fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     use symtn_sectors::{product_sector, Z2Irrep};
     let runtime = Runtime::builder().build().unwrap();
-    let product = Arc::new(TableRule::by_uuid(REP_S3).unwrap().product(Z2FusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            TableRule::by_uuid(REP_S3).unwrap(),
+            Z2FusionRule,
+        )
+        .unwrap(),
+    );
     assert_eq!(product.braiding_style(), BraidingStyleKind::NoBraiding);
     let leg = GradedSpace::try_new(
         product,

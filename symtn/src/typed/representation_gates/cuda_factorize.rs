@@ -1603,7 +1603,9 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
     // Spin 3/2 occurs in the codomain only.
     assert_device_svd_diagonal_every_dtype(&runtime, &[&su2_leg, &su2_leg, &su2_leg], &[&su2_leg]);
 
-    let fermion = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let fermion = Arc::new(
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+    );
     let fermion_leg = GradedSpace::try_new(
         Arc::clone(&fermion),
         [

@@ -6,9 +6,7 @@
 
 use std::sync::Arc;
 
-use symtn::sector::{
-    product_sector, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{LegSelection, Runtime};
 use symtn_tensors::host_pool::{
@@ -48,7 +46,9 @@ fn runtime(threads: usize) -> Runtime {
 
 /// Runs one of each Host work kind on `rt` and returns what the sites saw.
 fn observe(rt: &Runtime, salt: usize) -> Vec<HostPoolObservation> {
-    let provider = Arc::new(U1FusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+    );
     let v = space(&provider, salt);
     let t: TensorMap<_, f64> = TensorMap::rand_with_seed(rt, [&v, &v], [&v], 1531).unwrap();
     assert!(

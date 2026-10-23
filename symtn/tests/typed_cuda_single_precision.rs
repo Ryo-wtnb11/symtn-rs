@@ -38,8 +38,8 @@ use num_complex::{Complex32, Complex64};
 
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, ProductFusionRuleExt,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -164,7 +164,10 @@ type FermionSu2 = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
 
 /// `fZ2 ⊠ SU(2)`: fermionic signs *and* non-Abelian recoupling in one provider.
 fn fz2_su2_leg() -> GradedSpace<FermionSu2> {
-    let rule = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     GradedSpace::try_new(
         rule,
         [
@@ -592,7 +595,13 @@ type FermionU1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 /// `fZ2 ⊠ U(1)`: fermionic grading on top of an abelian charge.
 fn fz2_u1_leg() -> GradedSpace<FermionU1> {
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+        ),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
             (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),

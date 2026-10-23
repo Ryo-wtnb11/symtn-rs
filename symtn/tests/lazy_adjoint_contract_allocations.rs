@@ -117,10 +117,11 @@ fn warm_lazy_adjoint_fz2_u1_allocates_like_owned_contract() {
         }
     };
     assert_warm_lazy_adjoint!(
-        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule
-        ),
+        )
+        .unwrap(),
         centered(3).map(|q| ProductSector::new(parity(q), U1Irrep::new(q))),
     );
 }

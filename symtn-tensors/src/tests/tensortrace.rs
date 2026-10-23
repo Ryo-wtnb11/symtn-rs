@@ -391,8 +391,14 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         TensorTraceAxisSpec::new(&[], &[0], &[1]),
     );
 
-    let left_rule = FpU1Rule::default();
-    let product_provider = std::sync::Arc::new(FpU1Su2Rule::default());
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let product_provider = std::sync::Arc::new(
+        FpU1Su2Rule::try_new(
+            FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let product_sector = product_provider.encode_component_ids(
         left_rule.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
         SU2Irrep::from_twice_spin(1).sector_id(),
@@ -1877,8 +1883,12 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
 
 #[test]
 fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let odd = SectorId::new(1);
     let product_sector = |charge| {
         rule.encode_component_ids(
@@ -1972,7 +1982,13 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
             .any(|term| *term.coefficient() < 0.0),
         "odd-sector conjugate trace fixture must retain a negative structural coefficient"
     );
-    let provider = std::sync::Arc::new(FpU1Su2Rule::default());
+    let provider = std::sync::Arc::new(
+        FpU1Su2Rule::try_new(
+            FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let dynamic_src = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         src.fusion_space().unwrap().as_ref().clone(),
         std::sync::Arc::clone(&provider),

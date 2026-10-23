@@ -137,7 +137,7 @@ fn fixtures_are_equal_iff_structure_is_equal() {
         GradedSpace::try_new(Arc::new(SU2FusionRule), pairs).unwrap()
     });
     check_fixture!("fZ2xU1", |variant| {
-        let rule = Arc::new(Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule));
+        let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
         let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
         let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
         let pairs = match variant {

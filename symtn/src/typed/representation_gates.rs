@@ -75,7 +75,7 @@ impl<T> FactorPair<T> for RightPolar<T> {
         (self.p, self.wh)
     }
 }
-use symtn_core::{product_sector, ProductFusionRuleExt};
+use symtn_core::{product_sector, ProductFusionRule};
 use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, CU1FusionRule, CU1Irrep, FermionParityFusionRule,
     FusionTreeKey, FusionTreePairKey, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2FusionRule,

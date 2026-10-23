@@ -199,7 +199,7 @@ fn checked_tree_distinguishes_absent_channels_from_algebra_failure() {
     {
         type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
         type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-        let rule = Rule::new(FermionParityFusionRule, U1FusionRule);
+        let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
         let left = Codec::encode(z2_even(), u1(i32::MAX));
         let right = Codec::encode(z2_odd(), u1(1));
         let coupled = Codec::encode(z2_odd(), u1(0));
@@ -292,10 +292,11 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
         type InnerLayout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
         type Codec = PackedProductCodec<InnerLayout, Su2SectorLayout>;
         type Rule = ProductFusionRule<InnerRule, SU2FusionRule, Codec>;
-        let rule = Rule::new(
-            InnerRule::new(FermionParityFusionRule, U1FusionRule),
+        let rule = Rule::try_new(
+            InnerRule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
             SU2FusionRule,
-        );
+        )
+        .unwrap();
         let sector = |parity, charge, spin| Codec::encode(InnerCodec::encode(parity, charge), spin);
         assert_checked_tree_matches_infallible(
             &rule,
@@ -515,7 +516,7 @@ fn rule_validation_preserves_builtin_multiplicity_free_keys() {
     );
 
     type ProductRule = ProductFusionRule<U1FusionRule, SU2FusionRule>;
-    let product = ProductRule::default();
+    let product = ProductRule::try_new(U1FusionRule, SU2FusionRule).unwrap();
     let left = product.encode_component_ids(u1(1), half);
     let right = product.encode_component_ids(u1(-1), half);
     let coupled = product.encode_component_ids(u1(0), su2(0));

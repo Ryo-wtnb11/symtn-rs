@@ -5,9 +5,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
-use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, U1FusionRule, U1Irrep, Z2Irrep,
-};
+use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
@@ -212,7 +210,10 @@ fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
     assert_reordered_overwrite::<_, f64>(&runtime, &u1, &u1_tag, &bosonic_factor);
     assert_reordered_overwrite::<_, Complex64>(&runtime, &u1, &u1_tag, &bosonic_factor);
 
-    let product_provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let product_provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let product = GradedSpace::try_new(
         product_provider,
         [

@@ -534,8 +534,8 @@ where
         let invalid = FusionAlgebraError::InvalidSector { sector: id };
         let index = u64::try_from(id.id()).map_err(|_| invalid.clone())?;
         category().object_at(index).map_err(|error| match error {
-            EnumerationError::NotEnumerable => enumeration_failure(error),
             EnumerationError::OutOfRange | EnumerationError::Overflow => invalid,
+            _ => enumeration_failure(error),
         })
     }
 
@@ -835,18 +835,6 @@ pub(crate) trait AdapterAccess: crate::seal::Provider + 'static {
     fn identity(&self) -> &RuleIdentity;
     /// The id the codec gives the category's unit.
     fn vacuum_id(&self) -> SectorId;
-
-    /// The reported braiding style: the category's, unless the rule keeps a
-    /// more conservative execution policy.
-    fn braiding_policy(&self) -> BraidingStyleKind {
-        forward::braiding_style_kind(self.category().braiding_style())
-    }
-
-    /// The category's trivial-associator certificate, unless the rule keeps
-    /// a more conservative execution policy.
-    fn trivial_associator_policy(&self) -> bool {
-        self.category().has_trivial_associator_gauge()
-    }
 }
 
 impl<C, K> AdapterAccess for CategoryRule<C, K>
@@ -876,6 +864,150 @@ where
 }
 
 impl<C, K> crate::seal::Provider for CategoryRule<C, K> {}
+
+/// A provider backed by a `fusion_symbols` category: every built-in rule,
+/// every [`CategoryRule`], and every product of them.
+///
+/// Sealed. A product reaches its factors' categories and object conversion
+/// through this trait; it never sees their codecs.
+pub trait CategoryProvider: TypedSectorAdmission {
+    /// The category this provider answers from.
+    type Category: FusionCategory<Error: Send + Sync + 'static> + 'static;
+
+    /// The category value.
+    fn category(&self) -> &Self::Category;
+    /// The category object an id names.
+    fn object(
+        &self,
+        id: SectorId,
+    ) -> Result<<Self::Category as FusionCategory>::Object, Self::Error>;
+    /// The id of a category object.
+    fn sector_id(
+        &self,
+        object: &<Self::Category as FusionCategory>::Object,
+    ) -> Result<SectorId, Self::Error>;
+    /// Admits an operation's inputs with this provider's own checks and
+    /// precedence (e.g. U(1) fusion overflow), returning their objects.
+    fn admit<const N: usize>(
+        &self,
+        operation: crate::CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[<Self::Category as FusionCategory>::Object; N], Self::Error>;
+    /// Admits R's inputs; `None` is an R block known to be zero.
+    #[allow(clippy::type_complexity)]
+    fn admit_r(
+        &self,
+        ids: [SectorId; 3],
+    ) -> Result<Option<[<Self::Category as FusionCategory>::Object; 3]>, Self::Error>;
+    /// Translates a category or adapter failure into this provider's error.
+    fn map_error(
+        &self,
+        inputs: &[SectorId],
+        error: crate::CategoryAdapterError<<Self::Category as FusionCategory>::Error>,
+    ) -> Self::Error;
+    /// The id's position in TensorKit's sector order.
+    fn sector_order_key(&self, id: SectorId) -> crate::SectorOrderKey;
+}
+
+// Concrete categories keep private adapter types out of the public boundary.
+macro_rules! category_provider_via_adapter {
+    ($($rule:ty => $cat:ty),+) => {$(
+        impl CategoryProvider for $rule {
+            type Category = $cat;
+            fn category(&self) -> &Self::Category { AdapterAccess::category(self) }
+            fn object(&self, id: SectorId)
+                -> Result<<Self::Category as FusionCategory>::Object, Self::Error> {
+                crate::category_rule::member_object(AdapterAccess::codec(self), || AdapterAccess::category(self), id)
+            }
+            fn sector_id(&self, object: &<Self::Category as FusionCategory>::Object)
+                -> Result<SectorId, Self::Error> {
+                AdapterAccess::codec(self).sector_id(|| AdapterAccess::category(self), AdapterAccess::identity(self), object)
+            }
+            fn admit<const N: usize>(&self, operation: crate::CategoryOperation, ids: [SectorId; N])
+                -> Result<[<Self::Category as FusionCategory>::Object; N], Self::Error> {
+                AdapterAccess::codec(self).admit(|| AdapterAccess::category(self), AdapterAccess::identity(self), operation, ids)
+            }
+            fn admit_r(&self, ids: [SectorId; 3])
+                -> Result<Option<[<Self::Category as FusionCategory>::Object; 3]>, Self::Error> {
+                AdapterAccess::codec(self).admit_r(|| AdapterAccess::category(self), AdapterAccess::identity(self), ids)
+            }
+            fn map_error(&self, inputs: &[SectorId],
+                error: crate::CategoryAdapterError<<Self::Category as FusionCategory>::Error>) -> Self::Error {
+                AdapterAccess::codec(self).map_error(inputs, error)
+            }
+            fn sector_order_key(&self, id: SectorId) -> crate::SectorOrderKey {
+                AdapterAccess::codec(self).sector_order_key(id)
+            }
+        }
+    )+};
+}
+category_provider_via_adapter!(
+    crate::U1FusionRule => fusion_symbols::lie::U1,
+    crate::Z2FusionRule => fusion_symbols::finite::ZN,
+    crate::ZNFusionRule => fusion_symbols::finite::ZN,
+    crate::FermionParityFusionRule => fusion_symbols::fermion::FermionParity,
+    crate::CU1FusionRule => fusion_symbols::lie::CU1,
+    crate::SU2FusionRule => fusion_symbols::lie::LieGroup,
+    crate::TableRule => fusion_symbols::table::TableCategory
+);
+
+#[cfg(feature = "cgc-gen")]
+category_provider_via_adapter!(crate::SUNFusionRule => fusion_symbols::lie::LieGroup);
+
+impl<C, K> CategoryProvider for CategoryRule<C, K>
+where
+    C: FusionCategory + 'static,
+    C::Error: Send + Sync + 'static,
+    K: CategoryCodec<C>,
+{
+    type Category = C;
+    fn category(&self) -> &C {
+        AdapterAccess::category(self)
+    }
+    fn object(&self, id: SectorId) -> Result<C::Object, K::Error> {
+        crate::category_rule::member_object(
+            AdapterAccess::codec(self),
+            || AdapterAccess::category(self),
+            id,
+        )
+    }
+    fn sector_id(&self, object: &C::Object) -> Result<SectorId, K::Error> {
+        AdapterAccess::codec(self).sector_id(
+            || AdapterAccess::category(self),
+            AdapterAccess::identity(self),
+            object,
+        )
+    }
+    fn admit<const N: usize>(
+        &self,
+        operation: crate::CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[C::Object; N], K::Error> {
+        AdapterAccess::codec(self).admit(
+            || AdapterAccess::category(self),
+            AdapterAccess::identity(self),
+            operation,
+            ids,
+        )
+    }
+    fn admit_r(&self, ids: [SectorId; 3]) -> Result<Option<[C::Object; 3]>, K::Error> {
+        AdapterAccess::codec(self).admit_r(
+            || AdapterAccess::category(self),
+            AdapterAccess::identity(self),
+            ids,
+        )
+    }
+    fn map_error(
+        &self,
+        inputs: &[SectorId],
+        error: crate::CategoryAdapterError<C::Error>,
+    ) -> K::Error {
+        AdapterAccess::codec(self).map_error(inputs, error)
+    }
+    fn sector_order_key(&self, id: SectorId) -> crate::SectorOrderKey {
+        AdapterAccess::codec(self).sector_order_key(id)
+    }
+}
 
 pub(crate) mod forward {
     //! The category operations of an [`AdapterAccess`] rule, each admitted by
@@ -1305,7 +1437,7 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        self.braiding_policy()
+        forward::braiding_style_kind(self.category().braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {
@@ -1392,7 +1524,7 @@ where
     type Scalar = C::Scalar;
 
     fn has_trivial_associator_gauge(&self) -> bool {
-        self.trivial_associator_policy()
+        self.category().has_trivial_associator_gauge()
     }
 
     fn f_symbol_scalar(
@@ -1526,7 +1658,7 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        self.braiding_policy()
+        forward::braiding_style_kind(self.category().braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {
@@ -1709,7 +1841,7 @@ macro_rules! multiplicity_free_adapter_impls {
                     forward::multiplicity_free_style(self)
                 }
                 fn braiding_style(&self) -> BraidingStyleKind {
-                    self.braiding_policy()
+                    forward::braiding_style_kind(self.category().braiding_style())
                 }
                 fn vacuum(&self) -> SectorId {
                     self.vacuum_id()
@@ -1770,7 +1902,7 @@ macro_rules! multiplicity_free_adapter_impls {
                 type Scalar = $scalar;
 
                 fn has_trivial_associator_gauge(&self) -> bool {
-                    self.trivial_associator_policy()
+                    self.category().has_trivial_associator_gauge()
                 }
                 fn f_symbol_scalar(
                     &self,

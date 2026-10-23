@@ -115,7 +115,7 @@ fn fz2_u1_compact_factorizations_open_one_session() {
             })
             .collect::<Vec<_>>()
     };
-    let rule = || Fz2U1::new(FermionParityFusionRule, U1FusionRule);
+    let rule = || Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     for runtime in runtimes() {
         assert_one_session_per_factorization!(&runtime, rule(), f64, sectors(), 1, 1);
         assert_one_session_per_factorization!(&runtime, rule(), Complex64, sectors(), 2, 1);

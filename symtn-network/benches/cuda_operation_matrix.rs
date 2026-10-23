@@ -40,8 +40,8 @@ mod device {
 
     use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
     use symtn::sector::{
-        product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-        U1FusionRule, U1Irrep, Z2Irrep,
+        product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+        Z2Irrep,
     };
     use symtn::sector::{
         CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols,
@@ -1532,7 +1532,13 @@ mod device {
         });
         provider_rows!(config, "U1xfZ2", |blocks: usize, degeneracy: usize| {
             GradedSpace::try_new(
-                Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+                Arc::new(
+                    symtn_core::ProductFusionRule::<_, _>::try_new(
+                        FermionParityFusionRule,
+                        U1FusionRule,
+                    )
+                    .unwrap(),
+                ),
                 (0..blocks).map(|index| {
                     (
                         product_sector(

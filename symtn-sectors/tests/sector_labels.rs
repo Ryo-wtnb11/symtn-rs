@@ -149,7 +149,7 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
         2,
     );
     assert_decode_total(
-        &U1Fz2Rule::default(),
+        &U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
         [
             product_sector(U1Irrep::new(1), Z2Irrep::ODD),
             product_sector(U1Irrep::new(-2), Z2Irrep::EVEN),
@@ -282,7 +282,7 @@ type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2C
 fn product_codec_round_trips_component_labels() {
     // What: the product label is decoded back component-wise, so the pair
     // survives the packed id, not just the id itself.
-    let rule = U1Fz2Rule::default();
+    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     assert_round_trip(
         &rule,
         [
@@ -300,7 +300,7 @@ fn product_codec_round_trips_component_labels() {
 fn product_codec_reports_the_packing_failure_it_hit() {
     // What: the packed layout's own diagnosis survives to the caller instead
     // of being flattened into a generic label rejection.
-    let rule = U1Fz2Rule::default();
+    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     let sector = SectorId::new(1usize << 33);
     assert_eq!(
         SectorCodec::decode_sector(&rule, sector),

@@ -21,8 +21,8 @@ use std::sync::Arc;
 use num_complex::{Complex32, Complex64};
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{GradedSpace, TensorMap};
@@ -277,7 +277,13 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
     )
     .unwrap();
     let fz2_u1 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+        ),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
             (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),

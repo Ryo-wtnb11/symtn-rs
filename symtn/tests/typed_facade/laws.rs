@@ -34,10 +34,13 @@ fn u1_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<symtn::sector::U1
 /// constant on a leg — a product route that dropped either component would
 /// still produce a nonempty layout, but not this one.
 fn u1_fz2_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<U1Fz2Rule, f64> {
-    let rule = Arc::new(U1Fz2Rule::new(
-        symtn::sector::U1FusionRule,
-        symtn::sector::FermionParityFusionRule,
-    ));
+    let rule = Arc::new(
+        U1Fz2Rule::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
     let label = |charge: i32, parity: u8| {
         symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(charge),
@@ -614,7 +617,7 @@ fn reductions_and_factorizations_hold_on_fz2_u1_su2() {
 // Issue #610: the generic product provider as the canonical public route.
 //
 // Everything below is written the way a downstream user would have to write
-// it: `ProductFusionRuleExt::product` for the provider, `product_sector` for
+// it: `ProductFusionRule::try_new` for the provider, `product_sector` for
 // the label, `symtn::typed` for the space and the tensor. No
 // fixed product-space constructor appears, so the tests fail — they do not
 // silently reroute — if a group-specific constructor is the only working path.
@@ -630,8 +633,13 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
     let _guard = cache_lock();
     let runtime = runtime();
 
-    let rule =
-        Arc::new(symtn::sector::FermionParityFusionRule.product(symtn::sector::U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::FermionParityFusionRule,
+            symtn::sector::U1FusionRule,
+        )
+        .unwrap(),
+    );
     let label = |parity: symtn::sector::Z2Irrep, charge: i32| {
         symtn::sector::product_sector(parity, symtn::sector::U1Irrep::new(charge))
     };
@@ -691,9 +699,15 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     let _guard = cache_lock();
 
     let left_assoc = Arc::new(
-        symtn::sector::FermionParityFusionRule
-            .product(symtn::sector::U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                symtn::sector::FermionParityFusionRule,
+                symtn::sector::U1FusionRule,
+            )
+            .unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let label = |parity: symtn::sector::Z2Irrep, charge: i32, twice_spin: usize| {
         symtn::sector::product_sector(
@@ -735,8 +749,15 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     // provider with a different label type, and the identities do not compare
     // equal. The label type difference is what makes the line below compile
     // only when written for the right association.
-    let right_assoc = symtn::sector::FermionParityFusionRule
-        .product(symtn::sector::U1FusionRule.product(SU2FusionRule));
+    let right_assoc = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn::sector::FermionParityFusionRule,
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::U1FusionRule,
+            SU2FusionRule,
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let right_label = symtn::sector::product_sector(
         symtn::sector::Z2Irrep::ODD,
         symtn::sector::product_sector(symtn::sector::U1Irrep::new(1), SU2Irrep::from_twice_spin(1)),
@@ -750,8 +771,14 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
 
     // Factor order is not an equivalence either: swapping the two factors of
     // the inner product gives a third distinct provider.
-    let swapped = symtn::sector::U1FusionRule
-        .product(symtn::sector::FermionParityFusionRule)
-        .product(SU2FusionRule);
+    let swapped = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     assert_ne!(left_assoc.rule_identity(), swapped.rule_identity());
 }

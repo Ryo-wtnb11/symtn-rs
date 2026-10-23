@@ -79,9 +79,9 @@ fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
 
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type Product = ProductFusionRule<Fz2U1, SU2FusionRule>;
-    let pair = Fz2U1::new(FermionParityFusionRule, U1FusionRule);
+    let pair = Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let sector = pair.encode_component_ids(z2_odd(), u1(1));
-    let rule = Product::new(pair, SU2FusionRule);
+    let rule = Product::try_new(pair, SU2FusionRule).unwrap();
     let product_hom = || {
         FusionTreeHomSpace::from_sectors(
             [(rule.encode_component_ids(sector, su2(1)), 2)],

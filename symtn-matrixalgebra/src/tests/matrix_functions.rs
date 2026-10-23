@@ -626,12 +626,14 @@ fn inv_uses_sector_local_scale_for_su2_fz2_and_product_rules() {
         [SectorId::new(0), SectorId::new(1)],
     );
 
-    let fz2_u1 = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
+    let fz2_u1 =
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let product_sectors = [
         fz2_u1.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         fz2_u1.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
     ];
-    let fz2_u1_su2 = product_fusion_rule(fz2_u1, SU2FusionRule);
+    let fz2_u1_su2 = symtn_core::ProductFusionRule::<_, _>::try_new(fz2_u1, SU2FusionRule).unwrap();
     let nested_sectors = [
         fz2_u1_su2
             .encode_component_ids(product_sectors[0], SU2Irrep::from_twice_spin(0).sector_id()),

@@ -214,7 +214,9 @@ fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
         su2.permute_into(&[1], &[2, 0], destination, alpha, alpha * 0.0)
     });
 
-    let product_provider = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product_provider = Arc::new(
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+    );
     let product_leg = GradedSpace::try_new(
         product_provider,
         [
@@ -651,7 +653,9 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
     );
 
     let product_leg = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [
             (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
             (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),

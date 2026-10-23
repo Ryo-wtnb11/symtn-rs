@@ -1,9 +1,7 @@
 use std::hint::black_box;
 use std::sync::Arc;
 
-use symtn::sector::{
-    product_sector, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -42,7 +40,9 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     // What: a warmed multiplicity-free non-Abelian permutation reuses its
     // compiled plan and replay workspace without allocating on the caller.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(U1FusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+    );
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         [

@@ -2,13 +2,13 @@
 //! test suite, split by responsibility into sibling files (#1596).
 
 use symtn_core::{
-    product_fusion_rule, BlockKey, BlockSpec, BlockStructure, BraidingStyleKind,
-    CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, CoreError,
-    CoupledSectorFold, FermionParityFusionRule, FusionProductSpace, FusionRule, FusionStyleKind,
-    FusionTreeHomSpace, FusionTreeKey, GenericFArray, GenericFusionSymbols, GenericRMatrix,
-    GenericRigidSymbols, InfallibleGeneric, MultiplicityFreeFusionRule,
-    MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, RuleIdentity, SU2FusionRule,
-    SU2Irrep, SectorId, SectorLeg, SectorVec, U1FusionRule, U1Irrep, Z2FusionRule,
+    BlockKey, BlockSpec, BlockStructure, BraidingStyleKind, CheckedGenericAdmissionMode,
+    CheckedGenericFusion, CheckedGenericRigidSymbols, CoreError, CoupledSectorFold,
+    FermionParityFusionRule, FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeHomSpace,
+    FusionTreeKey, GenericFArray, GenericFusionSymbols, GenericRMatrix, GenericRigidSymbols,
+    InfallibleGeneric, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
+    MultiplicityFreeRigidSymbols, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg,
+    SectorVec, U1FusionRule, U1Irrep, Z2FusionRule,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, OperationError,

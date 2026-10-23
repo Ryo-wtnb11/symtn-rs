@@ -132,14 +132,14 @@ pin!(
 );
 pin!(
     product_f64,
-    Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
     fz2_u1(),
     f64,
     |re: f64, _im: f64| re
 );
 pin!(
     product_c64,
-    Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
     fz2_u1(),
     Complex64,
     Complex64::new

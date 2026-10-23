@@ -1,6 +1,12 @@
 //! `sector_order_key`: TensorKit `findindex - 1` positions per factor.
 
-use symtn_sectors::*;
+use symtn_sectors::{
+    product_sector, CU1FusionRule, FermionParityFusionRule, FusionRule, Fz2SectorLayout,
+    PackedProductCodec, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorCodec, SectorOrderKey,
+    TableRule, U1FusionRule, U1Irrep, U1SectorLayout, Z2FusionRule, Z2Irrep, ZNFusionRule,
+};
+#[cfg(feature = "cgc-gen")]
+use symtn_sectors::{CheckedGenericFusion, SUNFusionRule};
 
 use crate::s;
 
@@ -64,12 +70,14 @@ fn sun_orders_by_encoded_id() {
 
 #[test]
 fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
-    let cantor = U1FusionRule.product(Z2FusionRule);
+    let cantor =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap();
     let packed = ProductFusionRule::<
         U1FusionRule,
         Z2FusionRule,
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
-    >::default();
+    >::try_new(U1FusionRule, Z2FusionRule)
+    .unwrap();
     let labels = [
         (-1, Z2Irrep::EVEN),
         (1, Z2Irrep::ODD),
@@ -107,7 +115,11 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
         ]
     );
 
-    let nested = U1FusionRule.product(Z2FusionRule).product(SU2FusionRule);
+    let nested = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let label = product_sector(
         product_sector(U1Irrep::new(-1), Z2Irrep::ODD),
         SU2Irrep::from_twice_spin(3),

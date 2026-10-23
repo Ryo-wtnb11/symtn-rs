@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -205,7 +205,10 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
     let fz2 = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 2)]).unwrap();
     cuda_pair(&runtime, &fz2, 748_120);
     let product = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+                .unwrap(),
+        ),
         [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
@@ -928,7 +931,10 @@ fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() 
     let fz2 = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 2)]).unwrap();
     cuda_chain_reuse_matches_returning(&runtime, &fz2, 761_120);
     let product = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+                .unwrap(),
+        ),
         [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
@@ -1953,7 +1959,9 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
     );
     assert_dense_oracle(&runtime, [&v, &w, &p], 791_200, "SU(2)");
 
-    let u1_su2 = Arc::new(U1FusionRule.product(SU2FusionRule));
+    let u1_su2 = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+    );
     let product = |sectors: &[(i32, usize, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&u1_su2),
@@ -1989,7 +1997,10 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
         "U(1)xSU(2)",
     );
 
-    let fz2_u1 = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let fz2_u1 = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let fermion_u1 = |sectors: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&fz2_u1),
@@ -2025,7 +2036,10 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
         "fZ2xU(1)",
     );
 
-    let fz2_su2 = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let fz2_su2 = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let fermion_su2 = |sectors: &[(bool, usize, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&fz2_su2),
@@ -2187,7 +2201,10 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
     );
     warm::<_, f64>(&runtime, [&v, &w, &p], 795_000, "U(1) f64");
     warm::<_, Complex64>(&runtime, [&v, &w, &p], 795_100, "U(1) c64");
-    let fz2_u1 = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let fz2_u1 = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let space = |sectors: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&fz2_u1),

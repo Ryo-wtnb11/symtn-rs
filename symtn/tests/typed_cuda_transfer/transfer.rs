@@ -71,7 +71,10 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
         .unwrap(),
     );
 
-    let product_rule = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product_rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            .unwrap(),
+    );
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
@@ -165,7 +168,13 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     );
 
     let product = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                U1FusionRule,
+                FermionParityFusionRule,
+            )
+            .unwrap(),
+        ),
         [
             (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 1),
             (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 2),

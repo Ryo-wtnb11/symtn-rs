@@ -156,15 +156,20 @@ fn table_encode_rejection_names_the_label_and_rank() {
 #[test]
 fn cantor_product_ids_nest_through_both_factors() {
     // Cantor(l, r) = (l + r)(l + r + 1) / 2 + l.
-    let fz2_u1 = FermionParityFusionRule.product(U1FusionRule);
+    let fz2_u1 =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let odd_one = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
     // (1, 2) -> 3 * 4 / 2 + 1.
     assert_eq!(fz2_u1.encode_sector(&odd_one), Ok(s(7)));
     assert_eq!(fz2_u1.decode_sector(s(7)), Ok(odd_one));
 
-    let nested = FermionParityFusionRule
-        .product(U1FusionRule)
-        .product(SU2FusionRule);
+    let nested = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let label = product_sector(
         product_sector(Z2Irrep::ODD, U1Irrep::new(-1)),
         SU2Irrep::from_twice_spin(1),
@@ -177,7 +182,8 @@ fn cantor_product_ids_nest_through_both_factors() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn cantor_product_rejects_the_first_unpairable_ids() {
-    let u1_u1 = U1FusionRule.product(U1FusionRule);
+    let u1_u1 =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
     let widest = product_sector(U1Irrep::new(i32::MAX), U1Irrep::new(i32::MAX));
     assert_eq!(
         u1_u1.encode_sector(&widest),
@@ -221,7 +227,7 @@ fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
         FermionParityFusionRule,
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
     >;
-    let rule = U1Fz2::default();
+    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     let label = product_sector(U1Irrep::new(-1), Z2Irrep::ODD);
     assert_eq!(rule.encode_sector(&label), Ok(s(0x1_0000_0001)));
     assert_eq!(rule.decode_sector(s(0x1_0000_0001)), Ok(label));
@@ -231,7 +237,7 @@ fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
         SU2FusionRule,
         PackedProductCodec<Fz2SectorLayout, Su2SectorLayout>,
     >;
-    let rule = Fz2Su2::default();
+    let rule = Fz2Su2::try_new(FermionParityFusionRule, SU2FusionRule).unwrap();
     let label = product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(254));
     assert_eq!(rule.encode_sector(&label), Ok(s(509)));
     // 510 = spin component 255: inside the 8-bit width, outside SU(2)'s range.

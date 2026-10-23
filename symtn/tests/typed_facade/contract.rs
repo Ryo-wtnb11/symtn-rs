@@ -405,8 +405,13 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
         GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
     let lhs = TensorMap::from_subblock_fn(&runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
     let rhs = TensorMap::from_subblock_fn(&runtime, [&parity], [&parity], |_, _| 3.0).unwrap();
-    let product =
-        Arc::new(symtn::sector::U1FusionRule.product(symtn::sector::FermionParityFusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
 
     let result = lhs.deligne_product(&rhs, product).unwrap();
 
@@ -444,7 +449,13 @@ fn typed_deligne_product_rejects_a_component_identity_mismatch() {
     let u1 =
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(0), 1)]).unwrap();
     let rhs = TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, _| 3.0).unwrap();
-    let wrong = Arc::new(external_z3_tagged(1).product(symtn::sector::U1FusionRule));
+    let wrong = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            external_z3_tagged(1),
+            symtn::sector::U1FusionRule,
+        )
+        .unwrap(),
+    );
 
     assert!(matches!(
         lhs.deligne_product(&rhs, wrong).unwrap_err(),
@@ -471,7 +482,13 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
         &z3_dense_leg(&right_rule, 1),
         3.0,
     );
-    let wrong_both = Arc::new(external_z3_tagged(1).product(external_z3_tagged(3)));
+    let wrong_both = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            external_z3_tagged(1),
+            external_z3_tagged(3),
+        )
+        .unwrap(),
+    );
 
     assert!(matches!(
         lhs.deligne_product(&rhs, wrong_both).unwrap_err(),
@@ -484,7 +501,13 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
         &z3_dense_leg(&right_rule, 1),
         3.0,
     );
-    let wrong_right = Arc::new(external_z3_tagged(0).product(external_z3_tagged(3)));
+    let wrong_right = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            external_z3_tagged(0),
+            external_z3_tagged(3),
+        )
+        .unwrap(),
+    );
     assert!(matches!(
         lhs.deligne_product(&rhs, wrong_right).unwrap_err(),
         symtn::typed::Error::RuleMismatch
@@ -545,8 +568,13 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             }
         })
         .unwrap();
-    let product =
-        Arc::new(symtn::sector::U1FusionRule.product(symtn::sector::FermionParityFusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
 
     let actual = lhs.deligne_product(&rhs, product).unwrap();
     let codomain = actual.codomain();
@@ -597,10 +625,13 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
         GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
     let lhs = TensorMap::from_subblock_fn(&runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
     let rhs = TensorMap::from_subblock_fn(&runtime, [&parity], [&parity], |_, _| 5.0).unwrap();
-    let product = Arc::new(symtn::sector::ProductFusionRule::<_, _, Codec>::new(
-        symtn::sector::U1FusionRule,
-        symtn::sector::FermionParityFusionRule,
-    ));
+    let product = Arc::new(
+        symtn::sector::ProductFusionRule::<_, _, Codec>::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
 
     let result = lhs.deligne_product(&rhs, product).unwrap();
 
@@ -635,8 +666,13 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
         TensorMap::from_subblock_fn(&runtime, charges.iter(), [&charge_total], |_, _| 2.0).unwrap();
     let rhs =
         TensorMap::from_subblock_fn(&runtime, [&odd, &odd, &odd], [&odd], |_, _| 3.0).unwrap();
-    let product =
-        Arc::new(symtn::sector::U1FusionRule.product(symtn::sector::FermionParityFusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
 
     let result = lhs.deligne_product(&rhs, product).unwrap();
     let block = result.subblock_fusion_trees(0).unwrap();
@@ -680,13 +716,14 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
         TensorMap::from_subblock_fn(&runtime, [&charge_one], [&charge_one], |_, _| 2.0).unwrap();
     let rhs =
         TensorMap::from_subblock_fn(&runtime, [&charge_one], [&charge_one], |_, _| 3.0).unwrap();
-    let product = Arc::new(symtn::sector::ProductFusionRule::<
-        symtn::sector::U1FusionRule,
-        symtn::sector::U1FusionRule,
-        WrongCodec,
-    >::new(
-        symtn::sector::U1FusionRule, symtn::sector::U1FusionRule
-    ));
+    let product = Arc::new(
+        symtn::sector::ProductFusionRule::<
+            symtn::sector::U1FusionRule,
+            symtn::sector::U1FusionRule,
+            WrongCodec,
+        >::try_new(symtn::sector::U1FusionRule, symtn::sector::U1FusionRule)
+        .unwrap(),
+    );
     let before = (
         structure_cache_info(StructureCacheKind::SectorStructure),
         structure_cache_info(StructureCacheKind::DegeneracyStructure),

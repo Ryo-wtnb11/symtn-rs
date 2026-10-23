@@ -349,10 +349,11 @@ fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
     type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
     type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
-    let triple_rule = TripleRule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    let triple_rule = TripleRule::try_new(
+        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
-    );
+    )
+    .unwrap();
     let vacuum = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(0)), su2(0));
     let external = TripleCodec::encode(Fz2U1Codec::encode(z2_odd(), u1(0)), su2(1));
     let second_channel = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(0)), su2(2));

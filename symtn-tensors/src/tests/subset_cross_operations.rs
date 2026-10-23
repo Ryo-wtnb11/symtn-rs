@@ -159,8 +159,12 @@ fn bound_subset_is_a_structural_zero_source_across_public_operations() {
         [SectorId::new(0), SectorId::new(1)],
     );
 
-    let left_rule = FpU1Rule::default();
-    let product_rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let product_rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let product_sector = |parity, charge, twice_spin| {
         product_rule.encode_component_ids(
             left_rule.encode_component_ids(parity, U1Irrep::new(charge).sector_id()),

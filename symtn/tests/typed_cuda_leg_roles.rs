@@ -17,8 +17,8 @@ use symtn::typed::HermitianTol;
 use num_complex::Complex64;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::{Eigh, GradedSpace, Qr, Runtime, Svd, TensorMap};
 
@@ -181,7 +181,13 @@ fn device_leg_roles_equal_the_device_permute_composition() {
     );
     let fz2u1 = |sectors: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                    FermionParityFusionRule,
+                    U1FusionRule,
+                )
+                .unwrap(),
+            ),
             sectors.iter().map(|&(odd, q, n)| {
                 let parity = if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN };
                 (product_sector(parity, U1Irrep::new(q)), n)

@@ -54,8 +54,12 @@ fn fusion_tree_pair_block_reports_missing_key() {
 fn product_fusion_tree_homspace_matches_tensorkit_fz2_u1_su2_fixture() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(left_sector(parity, charge), su2(twice_spin))
@@ -326,8 +330,12 @@ fn nested_product_elementary_bend_keeps_the_fermionic_phase() {
     // product-category phase independently of the block/per-source runners.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::default();
-    let rule = ProductRule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = ProductRule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let coupled =
         rule.encode_component_ids(left_rule.encode_component_ids(z2_even(), u1(0)), su2(1));
     let odd_half =

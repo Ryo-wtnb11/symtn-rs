@@ -161,7 +161,7 @@ macro_rules! all_symmetries {
             )
         };
         side_only_case!(
-            Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
             [(f(false, 0), 2), (f(true, 1), 2)],
             [(f(false, 0), 1), (f(true, 1), 1)],
             [(f(false, 0), 2), (f(true, 1), 3), (f(true, 3), 2)],

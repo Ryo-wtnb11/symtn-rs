@@ -132,7 +132,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         ProductSector::new(parity, U1Irrep::new(q))
     };
     let v = GradedSpace::try_new(
-        std::sync::Arc::new(Fz2U1::new(FermionParityFusionRule, U1FusionRule)),
+        std::sync::Arc::new(Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap()),
         [(-1, 2), (0, 1), (1, 2), (2, 1)].map(|(q, n)| (sector(q), n)),
     )
     .unwrap();

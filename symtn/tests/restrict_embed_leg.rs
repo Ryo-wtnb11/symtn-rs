@@ -22,8 +22,8 @@ use symtn::typed::ContractSpec;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep, ZNFusionRule,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, LegSelection, Runtime, TensorMap};
@@ -841,7 +841,10 @@ fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
 #[test]
 fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
@@ -1317,7 +1320,10 @@ fn restrict_and_embed_are_exact_block_copies_on_su2_legs() {
 
 #[test]
 fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
@@ -1489,7 +1495,10 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
         [(1, gaps), (2, other_gaps)]
     );
 
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
@@ -1605,7 +1614,10 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
     assert_compact_stays_compact!(Complex64, leg.clone(), gaps);
     assert_compact_stays_compact!(f64, leg, [None, Some(Place::Single), Some(Place::End)]);
 
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },

@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 
 use super::probe::{self, Event, RoutePolicy};
@@ -294,7 +294,13 @@ fn su2_view_matches_owned_lazy_adjoint() {
 fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
     let leg = |pairs: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                    FermionParityFusionRule,
+                    U1FusionRule,
+                )
+                .unwrap(),
+            ),
             pairs.iter().map(|&(odd, q, d)| {
                 let parity = if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN };
                 (product_sector(parity, U1Irrep::new(q)), d)
@@ -360,7 +366,9 @@ fn deligne_product_refuses_an_adjoint_view() {
     let v = u1(&[(0, 2), (1, 1)]);
     let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1).unwrap();
     let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&v], 2).unwrap();
-    let product = Arc::new(U1FusionRule.product(U1FusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap(),
+    );
     let lazy = b.adjoint().unwrap();
     refused!(
         "deligne_product",
@@ -540,7 +548,13 @@ mod cuda {
         cuda_case!(v(), w(), Complex64, CX.0, CX.1, "CUDA SU2 c64");
         let leg = |pairs: &[(bool, i32, usize)]| {
             GradedSpace::try_new(
-                Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+                Arc::new(
+                    symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                        FermionParityFusionRule,
+                        U1FusionRule,
+                    )
+                    .unwrap(),
+                ),
                 pairs.iter().map(|&(odd, q, d)| {
                     let parity = if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN };
                     (product_sector(parity, U1Irrep::new(q)), d)

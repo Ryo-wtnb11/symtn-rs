@@ -658,7 +658,7 @@ fn lazy_otimes_orientations_and_deligne_inputs_stay_cold() {
     let eager_deligne_rhs = eager_adjoint_oracle(&deligne_rhs);
     let lazy_deligne_lhs = deligne_lhs.adjoint().unwrap();
     let lazy_deligne_rhs = deligne_rhs.adjoint().unwrap();
-    let product = Arc::new(U1FusionRule.product(U1FusionRule));
+    let product = Arc::new(ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap());
     let actual = lazy_deligne_lhs
         .deligne_product(&lazy_deligne_rhs, Arc::clone(&product))
         .unwrap();

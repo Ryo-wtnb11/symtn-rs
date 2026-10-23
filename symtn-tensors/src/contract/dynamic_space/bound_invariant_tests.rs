@@ -19,10 +19,11 @@ type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1C
 type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
 fn lowered_product_rule() -> TripleRule {
-    TripleRule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    TripleRule::try_new(
+        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
     )
+    .unwrap()
 }
 
 fn matrix_space() -> DynamicFusionMapSpace {

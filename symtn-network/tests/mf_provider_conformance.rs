@@ -8,8 +8,8 @@ use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
 use symtn::sector::{
-    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, ProductFusionRuleExt,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
+    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -154,7 +154,10 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     .unwrap();
     ordinary_network_and_workspace_reuse(&runtime, &cu1, 1004);
 
-    let product_rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let product_rule = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
@@ -188,9 +191,12 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     );
 
     let nested_rule = Arc::new(
-        FermionParityFusionRule
-            .product(U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+                .unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let nested = GradedSpace::try_new(
         nested_rule,

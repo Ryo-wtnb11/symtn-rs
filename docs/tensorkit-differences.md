@@ -9,7 +9,7 @@ this page records intentional differences.
 - **Tensor primitives.** Applications compose operations into DMRG, TDVP,
   PEPS and other algorithms; symtn supplies no application schedule.
 - **Separate symbol authority.** fusion-symbols owns elementary categorical
-  data. symtn keeps provider types, codecs, admission and product composition.
+  data, including product composition. symtn keeps provider types, codecs and admission.
   See [layering](layering.md).
 - **Separate dense backend.** Tenferro owns dense kernels, factorizations,
   devices and execution resources; symtn owns categorical structure and
@@ -54,11 +54,8 @@ this page records intentional differences.
   matches TensorKit; Ising differs by the vertex gauge `u^{σσ}_ψ = −1` and
   object order (`1, ψ, σ` versus `I, σ, ψ`). TensorKit is a
   gauge-equivalence oracle for those tables.
-- **Conservative braided-table style.** Every braided `TableRule` reports
-  `Anyonic`, even if its braiding happens to be symmetric: the tables supply
-  no symmetry certificate, and rounded coefficients are not a proof.
-  Ordinary arbitrary-axis `permute`, `contract` and `trace_pairs` are
-  consequently narrower than TensorKit for such tables; weighted `tr` remains
-  available. Use explicit braids or
-  crossing-free `transpose`, `compose` and `planar_contract` as appropriate;
-  see [provider boundaries](provider_interface.md#current-typed-api-boundaries).
+- **Table certificates.** `TableRule` forwards fusion-symbols' braiding style
+  and trivial-associator certificate. Anyonic tables require explicit braids
+  or crossing-free `transpose`, `compose` and `planar_contract` where symmetric
+  braiding is required; see
+  [provider boundaries](provider_interface.md#current-typed-api-boundaries).

@@ -114,11 +114,7 @@ impl CheckedFusionAlgebra for ExternalUniqueRule {
         coupled: SectorId,
     ) -> Result<usize, FusionAlgebraError> {
         if matches!(self.fail, Some(CheckedFailStage::Nsymbol)) {
-            return Err(FusionAlgebraError::MultiplicityOverflow {
-                left,
-                right,
-                coupled,
-            });
+            return Err(FusionAlgebraError::InvalidSector { sector: coupled });
         }
         Ok(self.nsymbol(left, right, coupled))
     }
@@ -429,10 +425,8 @@ fn checked_final_root_stage_failures_publish_no_layout_or_admission() {
         ),
         (
             CheckedFailStage::Nsymbol,
-            FusionAlgebraError::MultiplicityOverflow {
-                left: SectorId::new(0),
-                right: SectorId::new(0),
-                coupled: SectorId::new(0),
+            FusionAlgebraError::InvalidSector {
+                sector: SectorId::new(0),
             },
         ),
     ] {

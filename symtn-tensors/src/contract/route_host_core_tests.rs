@@ -382,7 +382,10 @@ where
 /// The uniform-twist fZ2×U(1) `mul!` form: its twist rides the Core GEMMs
 /// as ±1 per-job alpha.
 fn fermionic_core_fixture() -> Case<FermionU1> {
-    let fu1 = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let fu1 = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let case = Case {
         lhs: space(
             &fu1,
@@ -408,7 +411,9 @@ fn fermionic_core_fixture() -> Case<FermionU1> {
 /// destination block is `θ_c · Σ_Y A[X, Y] B[Y, Z]` with `θ_c = -1` for odd
 /// fermion parity, matched by fusion-tree key and degeneracy index.
 fn fermionic_core_oracle(case: &Case<FermionU1>, lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
-    let rule = FermionParityFusionRule.product(U1FusionRule);
+    let rule =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let odd = [1, -1].map(|q| rule.encode_component_ids(ODD, U1Irrep::new(q).sector_id()));
     let tree = |key: &symtn_core::BlockKey| match key {
         symtn_core::BlockKey::FusionTree(tree) => tree.clone(),

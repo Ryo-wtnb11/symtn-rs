@@ -245,7 +245,7 @@ fn checked_rank_one_validates_ids_by_unit_fusion() {
         type Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
         type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
         type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-        let rule = Rule::new(FermionParityFusionRule, U1FusionRule);
+        let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
         let invalid_product = SectorId::new(1usize << Layout::BITS);
         assert_invalid_rank_one_checked(
             &rule,

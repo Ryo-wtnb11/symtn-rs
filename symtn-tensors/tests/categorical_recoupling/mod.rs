@@ -24,8 +24,8 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use symtn_core::{
     BlockKey, BlockStructure, DegeneracyStructure, FermionParityFusionRule, FusionRule,
-    FusionTreeKey, FusionTreePairKey, MultiplicityIndex, ProductFusionRule, ProductFusionRuleExt,
-    RuleIdentity, SU2FusionRule, SectorId, SectorStructure,
+    FusionTreeKey, FusionTreePairKey, MultiplicityIndex, ProductFusionRule, RuleIdentity,
+    SU2FusionRule, SectorId, SectorStructure,
 };
 use symtn_operations::{TreeTransformBlock, TreeTransformStructure};
 use symtn_tensors::{build_tree_pair_transform_group_plan, TreeTransformOperation};
@@ -173,7 +173,8 @@ pub fn su2_space(legs: &[usize], inners: &[Vec<usize>], degeneracy: usize) -> Ar
 pub type FermionicSu2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
 
 pub fn fermionic_su2_rule() -> FermionicSu2Rule {
-    FermionParityFusionRule.product(SU2FusionRule)
+    symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+        .unwrap()
 }
 
 /// The fZ2 x SU(2) counterpart of [`su2_space`]: every leg is an odd-parity

@@ -280,10 +280,11 @@ type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
 type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
 fn triple_rule() -> TripleRule {
-    ProductFusionRule::new(
-        ProductFusionRule::new(FermionParityFusionRule, U1FusionRule),
+    ProductFusionRule::try_new(
+        ProductFusionRule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
     )
+    .unwrap()
 }
 
 fn triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
@@ -324,10 +325,11 @@ fn cantor_u1_fz2_sectors(window: i32) -> Vec<SectorId> {
 }
 
 fn cantor_triple_rule() -> CantorTripleRule {
-    ProductFusionRule::new(
-        ProductFusionRule::new(FermionParityFusionRule, U1FusionRule),
+    ProductFusionRule::try_new(
+        ProductFusionRule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
     )
+    .unwrap()
 }
 
 fn cantor_triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
@@ -398,7 +400,7 @@ fn axioms_su2_exhaustive() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn axioms_u1_fz2() {
-    let rule = U1Fz2Rule::new(U1FusionRule, FermionParityFusionRule);
+    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     check_all("U1xfZ2", &rule, &u1_fz2_sectors(2));
 }
 
@@ -412,7 +414,7 @@ fn axioms_fz2_u1_su2() {
 /// satisfy the axioms.
 #[test]
 fn axioms_cantor_product_codec() {
-    let pair = CantorU1Fz2Rule::new(U1FusionRule, FermionParityFusionRule);
+    let pair = CantorU1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     check_all("Cantor U1xfZ2", &pair, &cantor_u1_fz2_sectors(1));
     check_all(
         "Cantor fZ2xU1xSU2",

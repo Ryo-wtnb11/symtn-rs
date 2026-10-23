@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -239,7 +239,9 @@ fn su2_transforms_scale_componentwise() {
 
 #[test]
 fn u1_times_su2_transforms_scale_componentwise() {
-    let provider = Arc::new(U1FusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+    );
     let label = |charge: i32, twice_spin: usize| {
         product_sector(U1Irrep::new(charge), SU2Irrep::from_twice_spin(twice_spin))
     };
@@ -264,7 +266,10 @@ fn u1_times_su2_transforms_scale_componentwise() {
 /// which must stay a real sign rather than a complex multiply.
 #[test]
 fn fermionic_transforms_scale_componentwise() {
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
@@ -333,7 +338,10 @@ fn traces_scale_componentwise() {
     assert_componentwise!(Complex32, f32, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(&[(1, 3)]));
 
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },

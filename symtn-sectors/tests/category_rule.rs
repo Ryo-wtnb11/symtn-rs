@@ -199,7 +199,10 @@ fn a_downstream_category_is_a_provider_without_any_symtn_impl() {
     );
     assert_eq!(rule.encode_sector(&Z4(2)), Ok(s(2)));
     assert_eq!(rule.decode_sector(s(3)), Ok(Z4(3)));
-    assert_eq!(rule.sector_order_key(s(2)), SectorOrderKey::position(2));
+    assert_eq!(
+        FusionRule::sector_order_key(&rule, s(2)),
+        SectorOrderKey::position(2)
+    );
     assert_eq!(rule.try_dual_sector(s(7)), invalid(7));
     assert_eq!(rule.decode_sector(s(4)), invalid(4));
     assert_eq!(
@@ -953,7 +956,10 @@ fn enumeration_ids_round_trip_and_reach_past_32_bits() {
         rule.try_fusion_channels(s(1), s(1)).unwrap().as_slice(),
         &[s(3)]
     );
-    assert_eq!(rule.sector_order_key(s(2)), SectorOrderKey::position(2));
+    assert_eq!(
+        FusionRule::sector_order_key(&rule, s(2)),
+        SectorOrderKey::position(2)
+    );
 }
 
 #[test]
@@ -1974,7 +1980,8 @@ fn admission_expresses_the_product_schedule() {
     // Cantor (2, 0) = 5 as the coupled id: the left factor checks it.
     assert_eq!(rule.try_nsymbol(s(0), s(0), s(5)), invalid(2));
     // The same literals the built-in product is frozen to.
-    let builtin = Z2FusionRule.product(Z2FusionRule);
+    let builtin =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, Z2FusionRule).unwrap();
     for ids in [[17, 0, 0], [6, 0, 0], [0, 0, 5]] {
         let [a, b, c] = ids.map(s);
         assert_eq!(rule.try_nsymbol(a, b, c), builtin.try_nsymbol(a, b, c));

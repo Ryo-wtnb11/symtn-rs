@@ -32,10 +32,13 @@ fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize) {
 }
 
 fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
-    let rule = Arc::new(Fz2U1Su2Rule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
-        SU2FusionRule,
-    ));
+    let rule = Arc::new(
+        Fz2U1Su2Rule::try_new(
+            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let label = |parity: u8, charge: i32, twice_spin: usize| {
         product_sector(
             product_sector(

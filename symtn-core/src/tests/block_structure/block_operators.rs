@@ -209,7 +209,7 @@ fn fibonacci_braid_then_inverse_braid_is_identity() {
 #[test]
 fn tree_pair_block_apis_reject_mixed_product_sector_components() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = FpU1Rule::default();
+    let rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let sector_a = rule.encode_component_ids(z2_even(), u1(2)).id();
     let sector_b = rule.encode_component_ids(z2_even(), u1(3)).id();
     let coupled_a = rule.encode_component_ids(z2_even(), u1(4)).id();
@@ -492,8 +492,12 @@ fn split_only_nested_product_braid_matches_composition_oracle() {
     // both split directions.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::default();
-    let rule = ProductRule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = ProductRule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let coupled =
         rule.encode_component_ids(left_rule.encode_component_ids(z2_even(), u1(0)), su2(1));
     let domain_left =
@@ -583,8 +587,12 @@ fn identity_braid_rows_are_exact_for_supported_symmetry_families_and_rank_zero()
 
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::default();
-    let product_rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let product_rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let product_sector =
         product_rule.encode_component_ids(left_rule.encode_component_ids(z2_odd(), u1(2)), su2(1));
     let product_source = pair(product_sector);

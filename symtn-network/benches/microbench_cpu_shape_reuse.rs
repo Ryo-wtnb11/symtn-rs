@@ -9,8 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, ProductFusionRuleExt, U1FusionRule,
-    U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -653,14 +652,26 @@ fn run_child(case: &str, workspace_mode: &str) {
         ),
         "fz2xu1_f64" => run_case::<FermionU1, f64>(
             case,
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                symtn_core::ProductFusionRule::<_, _>::try_new(
+                    FermionParityFusionRule,
+                    U1FusionRule,
+                )
+                .unwrap(),
+            ),
             fermion_u1_patterns(),
             Some("same_total_redistribute_appear_disappear"),
             workspace_mode,
         ),
         "fz2xu1_c64" => run_case::<FermionU1, Complex64>(
             case,
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                symtn_core::ProductFusionRule::<_, _>::try_new(
+                    FermionParityFusionRule,
+                    U1FusionRule,
+                )
+                .unwrap(),
+            ),
             fermion_u1_patterns(),
             Some("same_total_redistribute_appear_disappear"),
             workspace_mode,

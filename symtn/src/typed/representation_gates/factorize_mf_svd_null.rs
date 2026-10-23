@@ -239,7 +239,9 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     assert_empty_null_spaces(&input, &[0], &[1]);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
-    let provider = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let provider = Arc::new(
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+    );
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let product = GradedSpace::try_new(Arc::clone(&provider), [(even, 2), (odd, 2)]).unwrap();
@@ -837,7 +839,7 @@ fn compact_diagonal_svd_other_host_scalars_and_sectors() {
         let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
         let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
         check!(
-            U1FusionRule.product(FermionParityFusionRule),
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
             [(even, 2), (odd, 1)],
             [
                 SectorSpectrum {

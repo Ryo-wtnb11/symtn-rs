@@ -342,7 +342,7 @@ fn su2_product_isometry_follows_tensorkit_inner_line_order() {
     };
     let space = |pairs: &[((usize, usize), usize)]| {
         GradedSpace::try_new(
-            Arc::new(Su2Su2::new(SU2FusionRule, SU2FusionRule)),
+            Arc::new(Su2Su2::try_new(SU2FusionRule, SU2FusionRule).unwrap()),
             pairs.iter().map(|&((a, b), n)| (p(a, b), n)),
         )
         .unwrap()

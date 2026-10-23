@@ -218,10 +218,11 @@ fn warm_output_axes_fz2_u1_costs_no_more_than_contract_then_permute() {
         }
     };
     assert_output_axes_cost!(
-        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule
-        ),
+        )
+        .unwrap(),
         centered(3).map(|q| ProductSector::new(parity(q), U1Irrep::new(q))),
     );
 }

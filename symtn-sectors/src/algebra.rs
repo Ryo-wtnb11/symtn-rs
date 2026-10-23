@@ -332,11 +332,6 @@ pub enum FusionAlgebraError {
     DualNotInjective {
         dual: SectorId,
     },
-    MultiplicityOverflow {
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    },
     /// The category authority of a [`CategoryRule`](crate::CategoryRule)
     /// failed outside this vocabulary; the failure is kept as the source.
     CategoryFailure(crate::CategoryFailure),
@@ -366,14 +361,6 @@ impl fmt::Display for FusionAlgebraError {
                 "fusion rule dual is not injective: two sectors share the dual {dual:?}"
             ),
             Self::ProductCodec(_) => formatter.write_str("product sector codec failed"),
-            Self::MultiplicityOverflow {
-                left,
-                right,
-                coupled,
-            } => write!(
-                formatter,
-                "fusion multiplicity overflows usize for {left:?} x {right:?} -> {coupled:?}"
-            ),
             Self::CategoryFailure(_) => formatter.write_str("fusion category failed"),
         }
     }
@@ -673,9 +660,8 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// `SU2FusionRule` too (`0` for an inadmissible 6j), and `TableRule`
     /// its table entry (`0`). A label outside a provider's sector domain
     /// panics for every shipped provider.
-    /// `ProductFusionRule` multiplies its components' values, so it inherits
-    /// each component's off-shell value and panics if a component panics or
-    /// an id does not decode into the product domain.
+    /// `ProductFusionRule` uses the `fusion-symbols` product value after
+    /// admitting the factor ids; a rejected id panics.
     fn f_symbol_scalar(
         &self,
         left: SectorId,
@@ -702,8 +688,8 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// Out-of-domain labels panic for every shipped provider, and
     /// `SU2FusionRule` also panics when the closure of `left x right` leaves
     /// its supported spin range, even for an admissible `coupled`.
-    /// `ProductFusionRule` multiplies its components' values and inherits
-    /// their off-shell behaviour and panics.
+    /// `ProductFusionRule` uses the `fusion-symbols` product value after
+    /// admitting the factor ids; a rejected id panics.
     ///
     /// # Braided rules only
     ///
@@ -1329,78 +1315,6 @@ pub trait CategoricalScalar:
     /// / `iszero(coeff) && continue` prune (`braiding_manipulations.jl:142`,
     /// `:184`). Exact compare mirrors Julia's `iszero`.
     fn is_zero(&self) -> bool;
-}
-
-/// The coefficient scalar a product category carries, given its components'.
-///
-/// TensorKitSectors derives it by promotion rather than by requiring the
-/// components to agree: `fusionscalartype(ProductSector{T}) =
-/// typeof(prod(zero ∘ fusionscalartype, _sectors(T)))` (0.3.6,
-/// `src/product.jl:218-219`, and `:230-231` for `sectorscalartype`), because
-/// the product's symbols are the componentwise products of the components'
-/// (`:95-100`, `:126-131`). Julia gets that from `promote_type`; Rust has no
-/// such operation, so the promotion is spelled out here.
-///
-/// Why a closed set of implementations rather than a numeric-tower
-/// abstraction: the admitted coefficient scalars are `f64` and [`Complex64`],
-/// the promotion between them is total, and a fifth case would be a new
-/// categorical decision rather than a new arithmetic one.
-pub trait PromoteCoefficientScalar<Rhs> {
-    /// The promoted scalar. `CategoricalScalar` supplies the unit,
-    /// conjugation and product the promoted symbols are combined with.
-    type Output: CategoricalScalar + Clone + Send + Sync;
-
-    fn promote_left(value: Self) -> Self::Output;
-
-    fn promote_right(value: Rhs) -> Self::Output;
-}
-
-impl PromoteCoefficientScalar<f64> for f64 {
-    type Output = f64;
-
-    fn promote_left(value: Self) -> Self::Output {
-        value
-    }
-
-    fn promote_right(value: f64) -> Self::Output {
-        value
-    }
-}
-
-impl PromoteCoefficientScalar<Complex64> for f64 {
-    type Output = Complex64;
-
-    fn promote_left(value: Self) -> Self::Output {
-        Complex64::new(value, 0.0)
-    }
-
-    fn promote_right(value: Complex64) -> Self::Output {
-        value
-    }
-}
-
-impl PromoteCoefficientScalar<f64> for Complex64 {
-    type Output = Complex64;
-
-    fn promote_left(value: Self) -> Self::Output {
-        value
-    }
-
-    fn promote_right(value: f64) -> Self::Output {
-        Complex64::new(value, 0.0)
-    }
-}
-
-impl PromoteCoefficientScalar<Complex64> for Complex64 {
-    type Output = Complex64;
-
-    fn promote_left(value: Self) -> Self::Output {
-        value
-    }
-
-    fn promote_right(value: Complex64) -> Self::Output {
-        value
-    }
 }
 
 impl CategoricalScalar for f64 {

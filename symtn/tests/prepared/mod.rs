@@ -53,7 +53,7 @@ pub fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
 }
 
 pub fn fz2u1_legs() -> (GradedSpace<Fz2U1Rule>, GradedSpace<Fz2U1Rule>) {
-    let rule = Arc::new(Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule));
+    let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
     let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
     let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
     (

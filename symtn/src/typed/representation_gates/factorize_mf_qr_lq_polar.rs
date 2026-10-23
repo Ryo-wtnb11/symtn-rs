@@ -375,7 +375,9 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let fermion = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [(even, 2), (odd, 1)],
     )
     .unwrap();
@@ -744,7 +746,9 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let fermion = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [(even, 2), (odd, 1)],
     )
     .unwrap();

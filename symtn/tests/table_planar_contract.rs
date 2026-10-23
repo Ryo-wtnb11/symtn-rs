@@ -535,10 +535,11 @@ fn fermionic_planar_contract_is_twist_free_and_matches_tensorkit() {
 fn fermionic_u1_space() -> GradedSpace<ProductFusionRule<FermionParityFusionRule, U1FusionRule>> {
     GradedSpace::try_new(
         Arc::new(
-            ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+            ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
                 FermionParityFusionRule,
                 U1FusionRule,
-            ),
+            )
+            .unwrap(),
         ),
         [
             (ProductSector::new(Z2Irrep::EVEN, U1Irrep::new(0)), 2),

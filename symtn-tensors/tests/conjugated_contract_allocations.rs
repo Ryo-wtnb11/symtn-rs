@@ -112,10 +112,11 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
 fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
     let _serial = counting_alloc::serial();
     let fz2_u1_rule = || {
-        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule,
         )
+        .unwrap()
     };
     let rows = |deg| {
         [

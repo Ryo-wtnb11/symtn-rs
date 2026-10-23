@@ -1426,10 +1426,13 @@ fn compact_full_trace_matches_the_forced_dense_route() {
             )
         };
         let mut typed_leg: GradedSpace<U1Fz2Rule> = GradedSpace::try_new(
-            Arc::new(U1Fz2Rule::new(
-                symtn::sector::U1FusionRule,
-                symtn::sector::FermionParityFusionRule,
-            )),
+            Arc::new(
+                U1Fz2Rule::try_new(
+                    symtn::sector::U1FusionRule,
+                    symtn::sector::FermionParityFusionRule,
+                )
+                .unwrap(),
+            ),
             [(product_label(0, 0), 2), (product_label(1, 1), 3)],
         )
         .unwrap();
