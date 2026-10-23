@@ -19,10 +19,11 @@ thread_local! {
 }
 
 fn rule() -> TripleRule {
-    TripleRule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    TripleRule::try_new(
+        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
     )
+    .unwrap()
 }
 
 fn sector(parity: usize, charge: i32, twice_spin: usize) -> SectorId {
@@ -601,7 +602,7 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
         },
     );
 
-    let product_rule = Arc::new(Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule));
+    let product_rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
     let product_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new(
@@ -848,7 +849,7 @@ fn admission_rejects_a_product_containing_the_excluded_u1_id_without_publication
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let provider = Arc::new(Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule));
+    let provider = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
     let scalar = FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
     let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),

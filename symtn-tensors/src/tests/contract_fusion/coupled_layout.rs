@@ -109,8 +109,12 @@ fn coupled_layout_contraction_matches_packed_layout_asymmetric_u1() {
 
 #[test]
 fn coupled_layout_contraction_matches_packed_layout_product() {
-    let left = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(
             left.encode_component_ids(parity, U1Irrep::new(charge).sector_id()),

@@ -9,8 +9,7 @@ use std::sync::Arc;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
-    ProductFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, SectorId, SectorLeg,
-    U1FusionRule, U1Irrep,
+    ProductFusionRule, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, U1FusionRule, U1Irrep,
 };
 use symtn_operations::fusion_replay::{Rank2Gemm, Rank2GemmBatchJob};
 use symtn_operations::stacked::{StackedDirectReplay, StackedStorageView, StackedStorageViewMut};
@@ -379,7 +378,9 @@ fn asymmetric_owned_candidate_reaches_swapped_storage_core() {
 
 #[test]
 fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
-    let rule = FermionParityFusionRule.product(U1FusionRule);
+    let rule =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let leg = fermion_u1_leg(&rule, false);
     assert_probes_resolve_to_core(&Arc::new(rule), &leg);
 }
@@ -391,7 +392,10 @@ fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
 /// Values against TensorKit's steps: `symtn/tests/typed_contract_host_oracle.rs`.
 #[test]
 fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_core() {
-    let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let (v, v_dual) = (fermion_u1_leg(&rule, false), fermion_u1_leg(&rule, true));
     let lhs = square(&rule, &v, &v_dual);
     let rhs = square(&rule, &v_dual, &v);

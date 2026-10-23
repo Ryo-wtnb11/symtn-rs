@@ -790,8 +790,12 @@ fn fz2_u1_su2_tree_pair_fixture() -> (
     DynamicFusionMapSpace,
     [SectorId; 2],
 ) {
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let left_sector =

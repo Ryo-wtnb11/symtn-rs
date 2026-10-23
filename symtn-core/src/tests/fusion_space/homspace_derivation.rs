@@ -370,10 +370,11 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
 
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let product_rule = ProductRule::new(
-        FpU1Rule::new(FermionParityFusionRule, U1FusionRule),
+    let product_rule = ProductRule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
-    );
+    )
+    .unwrap();
     let encode = |parity, charge, spin| {
         let inner =
             TensorKitProductCodec::encode(SectorId::new(parity), U1Irrep::new(charge).sector_id());
@@ -747,11 +748,13 @@ fn oriented_composed_leg_membership_is_linear_in_dual_operations() {
         SECTORS,
     );
 
-    let product_rule = DualCountingRule::new(ProductFusionRule::<
-        U1FusionRule,
-        FermionParityFusionRule,
-        TensorKitProductCodec,
-    >::new(U1FusionRule, FermionParityFusionRule));
+    let product_rule = DualCountingRule::new(
+        ProductFusionRule::<U1FusionRule, FermionParityFusionRule, TensorKitProductCodec>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
     assert_oriented_validation_dual_calls_are_linear(
         &product_rule,
         (0..SECTORS).map(|index| {

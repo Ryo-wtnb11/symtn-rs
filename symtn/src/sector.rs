@@ -11,10 +11,10 @@
 
 /// Built-in fusion rules, their sector labels, and product constructors.
 pub use symtn_core::{
-    product_fusion_rule, product_fusion_rule_with_codec, product_sector, CU1FusionRule, CU1Irrep,
-    FermionParityFusionRule, ProductFusionRule, ProductFusionRuleExt, ProductSector, SU2FusionRule,
-    SU2Irrep, SectorId, TableRule, TableRuleError, TableSector, U1FusionRule, U1Irrep,
-    Z2FusionRule, Z2Irrep, ZNFusionRule, ZNIrrep,
+    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, ProductAdmission,
+    ProductFusionRule, ProductFusionRuleError, ProductSector, SU2FusionRule, SU2Irrep, SectorId,
+    TableRule, TableRuleError, TableSector, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
+    ZNFusionRule, ZNIrrep,
 };
 pub use symtn_core::{
     BraidingStyleKind, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
@@ -24,7 +24,8 @@ pub use symtn_core::{
 /// category defined outside symtn, with its codec and admission vocabulary.
 pub use symtn_core::{
     CanonicalUnitAdmission, CategoryAdapterError, CategoryAdmissionError, CategoryCodec,
-    CategoryFailure, CategoryOperation, CategoryRule, EnumeratedCodec, UncertifiedUnitAdmission,
+    CategoryFailure, CategoryOperation, CategoryProvider, CategoryRule, EnumeratedCodec,
+    UncertifiedUnitAdmission,
 };
 /// Rule traits: the sealed fusion, symbol and admission interfaces of every
 /// provider, and the bounds generic code names.
@@ -46,8 +47,7 @@ pub use symtn_core::{
 };
 /// Vocabulary the rule traits' signatures use.
 pub use symtn_core::{
-    PhysicalBasisError, ProductSectorComponent, PromoteCoefficientScalar, SU2CoefficientError,
-    SymbolShapeError,
+    PhysicalBasisError, ProductSectorComponent, SU2CoefficientError, SymbolShapeError,
 };
 #[cfg(feature = "cgc-gen")]
 pub use symtn_core::{SUNFusionRule, SUNFusionRuleError, SUNSymbolError};

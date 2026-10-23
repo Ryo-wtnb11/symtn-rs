@@ -284,7 +284,7 @@ fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
     #[cfg(target_pointer_width = "64")]
     {
         type Rule = ProductFusionRule<U1FusionRule, Z2FusionRule, TensorKitProductCodec>;
-        let rule = Rule::new(U1FusionRule, Z2FusionRule);
+        let rule = Rule::try_new(U1FusionRule, Z2FusionRule).unwrap();
         let first = TensorKitProductCodec::encode(u1(-2), z2_even());
         let second = TensorKitProductCodec::encode(u1(1), z2_odd());
         let vacuum = TensorKitProductCodec::encode(u1(0), z2_even());
@@ -390,7 +390,9 @@ fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
     assert_direct_leg_degeneracy_structure_matches_reference(&SU2FusionRule, &su2_hom);
     assert_coupled_grid_layout_matches_key_reconstruction(&SU2FusionRule, &su2_hom);
 
-    let product_rule = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
+    let product_rule =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let product_hom = build(&[
         (
             product_rule.encode_component_ids(SectorId::new(0), u1(-1)),
@@ -554,7 +556,7 @@ fn sector_leg_dual_is_shared_for_non_self_dual_self_dual_and_product_rules() {
         assert_shared_dual(&SU2FusionRule, &su2_leg, &su2_expected);
 
         type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-        let product = Fz2U1::new(FermionParityFusionRule, U1FusionRule);
+        let product = Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
         let sector = |parity, charge| product.encode_component_ids(parity, u1(charge));
         let product_leg = SectorLeg::new(
             [

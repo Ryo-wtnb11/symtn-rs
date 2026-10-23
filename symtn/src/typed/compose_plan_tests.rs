@@ -6,9 +6,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, U1FusionRule, U1Irrep, Z2Irrep,
-};
+use crate::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
 #[cfg(feature = "cuda")]
 use crate::sector::{SU2FusionRule, SU2Irrep};
 use crate::typed::GradedSpace;
@@ -67,7 +65,10 @@ fn composition_resolves_to_the_unswapped_unit_core() {
     .unwrap();
     assert_unit_unswapped_core("U1", &plan);
 
-    let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
     let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
     let v =
@@ -318,7 +319,10 @@ fn cuda_zero_regions_match_the_hand_derivation() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     regions_match_hand_derivation(&runtime, "U1", u1_legs());
     regions_match_hand_derivation(&runtime, "SU2", su2_legs());
-    let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
     let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
     let fz2u1 = (

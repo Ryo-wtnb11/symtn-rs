@@ -114,10 +114,11 @@ fn warm_eager_calls_hit_complete_structure_cache() {
     warm_ops!(
         &runtime,
         "fZ2xU1",
-        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule
-        ),
+        )
+        .unwrap(),
         (-1..=1)
             .map(|q: i32| {
                 let parity = if q.rem_euclid(2) == 0 {

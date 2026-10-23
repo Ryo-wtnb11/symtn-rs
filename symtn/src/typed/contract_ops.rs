@@ -764,7 +764,8 @@ where
                 Sector = <R as SectorCodec>::Sector,
                 Error = FusionAlgebraError,
                 Mode = MultiplicityFreeAdmissionMode,
-            > + CanonicalUnitFusionRule,
+            > + CanonicalUnitFusionRule
+            + crate::sector::CategoryProvider,
         R2: TypedSectorAdmission<
                 Sector = <R2 as SectorCodec>::Sector,
                 Error = FusionAlgebraError,
@@ -772,8 +773,19 @@ where
             > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
-            + CanonicalUnitFusionRule,
+            + CanonicalUnitFusionRule
+            + crate::sector::CategoryProvider,
         C: ProductSectorCodec + Sync + 'static,
+        ProductFusionRule<R, R2, C>: MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + CanonicalUnitFusionRule
+            + SectorCodec<
+                Sector = ProductSector<<R as SectorCodec>::Sector, <R2 as SectorCodec>::Sector>,
+            > + TypedSectorAdmission<
+                Sector = ProductSector<<R as SectorCodec>::Sector, <R2 as SectorCodec>::Sector>,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            >,
     {
         let other = other.into().operand()?;
         let other = &*other;

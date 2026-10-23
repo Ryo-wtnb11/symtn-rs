@@ -946,7 +946,7 @@ where
 mod tests {
     use super::*;
     use symtn_core::{
-        FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, ProductFusionRuleExt,
+        FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, ProductFusionRule,
         SU2FusionRule, SU2Irrep, SectorId, SectorLeg, U1FusionRule, U1Irrep,
     };
 
@@ -988,9 +988,10 @@ mod tests {
             );
         }
 
-        let fp_u1 = FermionParityFusionRule.product(U1FusionRule);
+        let fp_u1 =
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
         let odd_charge = fp_u1.encode_component_ids(odd, U1Irrep::new(0).sector_id());
-        let product = fp_u1.product(SU2FusionRule);
+        let product = ProductFusionRule::<_, _>::try_new(fp_u1, SU2FusionRule).unwrap();
         let odd_product =
             product.encode_component_ids(odd_charge, SU2Irrep::from_twice_spin(0).sector_id());
         let rhs = single_sector_matrix_space(&product, odd_product, true, false);

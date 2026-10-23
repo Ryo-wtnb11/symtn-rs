@@ -68,8 +68,12 @@ fn sector_block_offset<R: MultiplicityFreeFusionRule>(
 fn product_sector_lookup_handles_simple_fusion_channels_without_manual_tree_keys() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(left_sector(parity, charge), su2(twice_spin))

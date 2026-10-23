@@ -878,7 +878,7 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
         0
     );
     probe!(
-        FermionParityFusionRule.product(U1FusionRule),
+        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 3),
             (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),

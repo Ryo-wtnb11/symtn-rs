@@ -233,7 +233,7 @@ fn destination_order_join_preserves_structural_zero_for_builtin_rules() {
         ],
     );
     type U1Su2Rule = ProductFusionRule<U1FusionRule, SU2FusionRule>;
-    let product = U1Su2Rule::default();
+    let product = U1Su2Rule::try_new(U1FusionRule, SU2FusionRule).unwrap();
     assert_missing_input_group_scales_destination(
         &product,
         [

@@ -172,10 +172,11 @@ fn su2_degeneracy_change_reuses_the_composed_coefficients() {
 fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
     let _serial = serial();
     let leg = |sectors: &[(i32, usize)]| {
-        let rule = ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+        let rule = ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule,
-        );
+        )
+        .unwrap();
         GradedSpace::try_new(
             Arc::new(rule),
             sectors.iter().map(|&(q, d)| {

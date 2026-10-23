@@ -240,7 +240,10 @@ fn a_warm_one_member_replay_converts_no_coefficient_pack() {
     // so a warm B = 1 replay of Multi transforms finds all three packs
     // installed instead of rebuilding them per stage.
     let su2 = su2_rank5_case();
-    let provider = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let v = || fermion_su2_leg(&provider, false);
     let fermionic = Case {
         lhs: space(&provider, vec![v(), v(), v()], vec![v(), v()]),
@@ -352,7 +355,10 @@ fn a_warm_eager_contraction_converts_no_coefficient_pack() {
         assert_eq!(run(&mut context), cold, "{what}");
     }
     check(&su2_rank5_case(), "SU2");
-    let provider = Arc::new(FermionParityFusionRule.product(SU2FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+    );
     let v = || fermion_su2_leg(&provider, false);
     check(
         &Case {

@@ -24,8 +24,8 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, ProductFusionRuleExt,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec,
@@ -71,7 +71,9 @@ pub type U1Su2 = ProductFusionRule<U1FusionRule, SU2FusionRule>;
 
 pub fn u1_su2() -> GradedSpace<U1Su2> {
     GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(SU2FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+        ),
         [
             (
                 product_sector(U1Irrep::new(0), SU2Irrep::from_twice_spin(0)),
@@ -96,7 +98,13 @@ pub type FermionSu2 = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
 /// fZ2 x U(1): odd sectors of both charge signs, degeneracy > 1.
 pub fn fermion_u1() -> GradedSpace<FermionU1> {
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+        ),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
             (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
@@ -110,7 +118,13 @@ pub fn fermion_u1() -> GradedSpace<FermionU1> {
 /// fZ2 (x) SU(2): fermionic signs over non-Abelian recoupling.
 pub fn fermion_su2() -> GradedSpace<FermionSu2> {
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(SU2FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                SU2FusionRule,
+            )
+            .unwrap(),
+        ),
         [
             (
                 product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),

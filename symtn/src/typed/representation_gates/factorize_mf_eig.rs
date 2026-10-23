@@ -308,7 +308,9 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let fermion = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [(even, 2), (odd, 1)],
     )
     .unwrap();
@@ -763,7 +765,9 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let fermion = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [(even, 2), (odd, 1)],
     )
     .unwrap();
@@ -1183,7 +1187,9 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let fermion = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [(even, 2), (odd, 1)],
     )
     .unwrap();
@@ -1432,7 +1438,9 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
     let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
     let fermion = GradedSpace::try_new(
-        Arc::new(U1FusionRule.product(FermionParityFusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ),
         [(even, 2), (odd, 1)],
     )
     .unwrap();

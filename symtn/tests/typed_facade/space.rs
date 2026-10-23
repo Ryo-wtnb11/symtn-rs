@@ -625,8 +625,13 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     assert_eq!(z2_dual.sectors().unwrap(), [symtn::sector::Z2Irrep::ODD]);
     assert!(z2_dual.is_dual());
 
-    let product_provider =
-        Arc::new(symtn::sector::U1FusionRule.product(symtn::sector::FermionParityFusionRule));
+    let product_provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::U1FusionRule,
+            symtn::sector::FermionParityFusionRule,
+        )
+        .unwrap(),
+    );
     let product_left = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [(

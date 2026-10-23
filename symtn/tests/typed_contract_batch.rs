@@ -24,8 +24,7 @@ use contract_cases::{
 };
 use std::sync::Arc;
 use symtn::sector::{
-    CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, ProductFusionRuleExt,
-    SectorCodec,
+    CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec,
 };
 use symtn::typed::GradedSpace;
 use symtn::typed::{ContractPlan, ContractSpec, Error, Runtime, StackedTensorMap, TensorMap};
@@ -1024,7 +1023,13 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
     use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
     let odd_only = || {
         GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                    FermionParityFusionRule,
+                    U1FusionRule,
+                )
+                .unwrap(),
+            ),
             [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
         )
         .unwrap()

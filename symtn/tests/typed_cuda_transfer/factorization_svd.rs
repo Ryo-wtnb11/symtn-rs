@@ -216,7 +216,10 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
         .unwrap();
     assert_typed_cuda_svd_matches_host(&fermion_tensor);
 
-    let product = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            .unwrap(),
+    );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
@@ -437,7 +440,10 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
         .unwrap();
     assert_typed_cuda_svd_trunc_composition_matches_host(&fermion_tensor, &Truncation::rank(2));
 
-    let product = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            .unwrap(),
+    );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [

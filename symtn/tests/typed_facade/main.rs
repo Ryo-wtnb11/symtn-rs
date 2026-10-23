@@ -35,9 +35,7 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
 }
 use fusion_symbols::category::{BraidingStyle, FusionCategory, FusionStyle};
 use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep};
-use symtn::sector::{
-    CU1FusionRule, CU1Irrep, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, SectorId,
-};
+use symtn::sector::{CU1FusionRule, CU1Irrep, SU2FusionRule, SU2Irrep, SectorId};
 use symtn::sector::{
     CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec, CategoryFailure,
     CategoryOperation, CategoryRule, CheckedFusionAlgebra, FusionRule,
@@ -1274,13 +1272,17 @@ fn fz2_u1_su2_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<Fz2U1Su2R
 
 /// The legs shared with the twist identity test below.
 fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Rule>) {
-    let rule = Arc::new(Fz2U1Su2Rule::new(
-        Fz2U1Rule::new(
-            symtn::sector::FermionParityFusionRule,
-            symtn::sector::U1FusionRule,
-        ),
-        SU2FusionRule,
-    ));
+    let rule = Arc::new(
+        Fz2U1Su2Rule::try_new(
+            Fz2U1Rule::try_new(
+                symtn::sector::FermionParityFusionRule,
+                symtn::sector::U1FusionRule,
+            )
+            .unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let label = |parity: u8, charge: i32, twice_spin: usize| {
         symtn::sector::ProductSector::new(
             symtn::sector::ProductSector::new(

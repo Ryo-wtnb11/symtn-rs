@@ -36,7 +36,7 @@ symtn disables its default features; `cgc-gen` opts into `lie-generated`.
 | SU(2), SU(N) | `SU2FusionRule` and `SUNFusionRule` use the adapter over `LieGroup` for fusion, N, F/R/A/B, dimensions, duals, twists and Frobenius–Schur phases. symtn keeps codecs, identities, ordering and checked admission. |
 | AnyonWiki categories | `TableRule` uses the category adapter over pinned tables in their own gauge. |
 | An application category | `CategoryRule<C, K>` adapts `FusionCategory`; the codec owns labels and admission, not symbol formulas. |
-| Products | `ProductFusionRule` composes its factors' symbols inside symtn. |
+| Products | `ProductFusionRule` uses the category adapter over fusion-symbols' `Product` for all categorical data. symtn keeps factor admission, labels, codecs, identities and TensorKit sector order. |
 
 Built-in rules retain their own types over the shared adapter; they are not
 `CategoryRule` aliases. SU2 retains its compact doubled-spin codec and checked
@@ -140,8 +140,6 @@ dependency changes require explicit approval under [AGENTS.md](../AGENTS.md).
 
 ## Current deviations
 
-- `ProductFusionRule` composes symbols in symtn rather than delegating to
-  fusion-symbols' product module.
 - `symtn-dense` re-exports Tenferro's `CpuBackendKind` through the expert API.
 - Opening a CUDA context fixes CubeCL's process-global stream count to one.
   See [backend policy](backend_policy.md#parallel-execution) for the required

@@ -21,8 +21,8 @@ use num_complex::{Complex32, Complex64};
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -364,7 +364,10 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_su2_legs() {
 
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let label = |odd: bool, charge: i32| {
         product_sector(
             if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },

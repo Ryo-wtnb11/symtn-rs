@@ -517,8 +517,12 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let left_sector =
@@ -631,8 +635,12 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
 
 #[test]
 fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let odd_charge = left_rule.encode_component_ids(SectorId::new(1), U1Irrep::new(0).sector_id());
     let odd = rule.encode_component_ids(odd_charge, SU2Irrep::from_twice_spin(0).sector_id());
     let matrix_hom = || {

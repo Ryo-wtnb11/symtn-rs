@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use symtn::expert::SectorLeg;
-use symtn::sector::FusionRule;
 #[cfg(feature = "cuda")]
-use symtn::sector::{product_sector, ProductFusionRuleExt};
+use symtn::sector::product_sector;
+use symtn::sector::FusionRule;
 use symtn::sector::{FermionParityFusionRule, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep};
 use symtn::typed::Complex64;
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap, TensorScalar};
@@ -1333,7 +1333,10 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let u1_z1 = GradedSpace::try_new(u1_rule, [(U1Irrep::new(0), 1)]).unwrap();
     assert_asymmetric_cuda_plan_parity(&runtime, &u1_x0, &u1_x1, &u1_y, &u1_z0, &u1_z1, 748_210);
 
-    let product_rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let product_rule = Arc::new(
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1)],

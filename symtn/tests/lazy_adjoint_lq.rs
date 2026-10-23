@@ -135,10 +135,11 @@ fn su2_lazy_adjoint_lq_matches_the_materialized_adjoint() {
 fn fermionic_u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(
-        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::new(
+        ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule,
-        ),
+        )
+        .unwrap(),
     );
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(

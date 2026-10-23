@@ -400,10 +400,13 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
     // eager `contract`, which carries the supertrace sign: every block is
     // the composition's up to a sign, and the odd blocks flip.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let rule = Arc::new(Fz2U1Rule::new(
-        symtn::sector::FermionParityFusionRule,
-        symtn::sector::U1FusionRule,
-    ));
+    let rule = Arc::new(
+        Fz2U1Rule::try_new(
+            symtn::sector::FermionParityFusionRule,
+            symtn::sector::U1FusionRule,
+        )
+        .unwrap(),
+    );
     let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
     let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
     let v =

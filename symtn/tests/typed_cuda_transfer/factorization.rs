@@ -278,7 +278,10 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     .unwrap();
     assert_reduction_parity(&fz2_lhs, &fz2_rhs);
 
-    let product_provider = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product_provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            .unwrap(),
+    );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [
@@ -446,7 +449,10 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     .unwrap();
     assert_typed_cuda_qr_matches_host(&su2_tensor);
 
-    let product = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            .unwrap(),
+    );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [

@@ -140,7 +140,9 @@ fn tsvd_fusion_reconstructs_fermion_parity_tensor() {
 #[test]
 fn tsvd_fusion_reconstructs_product_rule_tensor() {
     // What: direct sector spans are keyed by the encoded product SectorId.
-    let rule = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
+    let rule =
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let sectors = [
         rule.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         rule.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -222,7 +224,9 @@ fn compact_factors_do_not_relabel_the_lowest_u1_sector() {
 #[test]
 fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     // What: product-sector factors inherit the no-relabel contract for compact SVD, QR, LQ, and full EIGH.
-    let rule = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
+    let rule =
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let minimum = rule
         .try_encode_component_ids(SectorId::new(1), U1Irrep::new(i32::MIN + 1).sector_id())
         .unwrap();
@@ -600,7 +604,9 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
         &hermitian_test_tensor(&FermionParityFusionRule, &fz2),
     );
 
-    let product = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
+    let product =
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),

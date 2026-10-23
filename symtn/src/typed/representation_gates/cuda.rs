@@ -671,7 +671,9 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
         .unwrap();
     assert_cuda_lazy_contract_orientations(&su2_lhs, &su2_rhs);
 
-    let product_provider = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product_provider = Arc::new(
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+    );
     let product = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [
@@ -1137,7 +1139,9 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     // Fermionic products: fZ2 x U(1), and fZ2 x SU(2) with non-Abelian
     // degeneracies.
     let fu1 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        ),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
             (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
@@ -1153,7 +1157,9 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
         }
     }
     let fsu2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(SU2FusionRule)),
+        Arc::new(
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule).unwrap(),
+        ),
         [
             (
                 product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),

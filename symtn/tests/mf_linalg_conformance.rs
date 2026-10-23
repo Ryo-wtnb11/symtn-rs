@@ -381,7 +381,7 @@ fn public_multiplicity_free_linalg_conformance() {
     );
     factor_conformance!(
         "fZ2xU1",
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         [
             (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
@@ -389,10 +389,11 @@ fn public_multiplicity_free_linalg_conformance() {
     );
     factor_conformance!(
         "fZ2xU1xSU2",
-        Fz2U1Su2Rule::new(
-            Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+        Fz2U1Su2Rule::try_new(
+            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
             SU2FusionRule,
-        ),
+        )
+        .unwrap(),
         [(
             product_sector(
                 product_sector(Z2Irrep::ODD, U1Irrep::new(1)),

@@ -800,7 +800,7 @@ fn unique_production_lowering_matches_generic_across_pointed_rules_and_operation
         TreeTransformOperation::transpose([2, 0], [1]),
     );
 
-    let product = FpU1Rule::default();
+    let product = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let odd_charge = product.encode_component_ids(SectorId::new(1), U1Irrep::new(2).sector_id());
     let even_charge = product.encode_component_ids(SectorId::new(0), U1Irrep::new(-1).sector_id());
     let coupled = product.fusion_channels(odd_charge, even_charge)[0];

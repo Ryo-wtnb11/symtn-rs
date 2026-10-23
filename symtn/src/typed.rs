@@ -18,7 +18,7 @@
 //!
 //! A product symmetry needs no new constructor here, and no new type in the
 //! engine. A product of providers *is* a provider — build it with
-//! [`crate::sector::ProductFusionRuleExt::product`] and label it with
+//! [`crate::sector::ProductFusionRule::try_new`] and label it with
 //! [`crate::sector::product_sector`] — so this facade drives `fZ2 ⊠ U(1)`, or any
 //! other ordered product of admitted components, through the same
 //! [`GradedSpace::try_new`] and [`TensorMap::zeros`] as a single symmetry:
@@ -26,13 +26,13 @@
 //! ```
 //! use std::sync::Arc;
 //! use symtn::sector::{
-//!     product_sector, FermionParityFusionRule, ProductFusionRuleExt, U1FusionRule, U1Irrep, Z2Irrep,
+//!     product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, Z2Irrep,
 //! };
 //! use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Error> {
 //! let runtime = Runtime::builder().build()?;
-//! let rule = FermionParityFusionRule.product(U1FusionRule);
+//! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
 //!
 //! let even = product_sector(Z2Irrep::EVEN, U1Irrep::new(0));
 //! let odd = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
@@ -49,7 +49,7 @@
 //! itself a provider. The spelling
 //!
 //! ```text
-//! FermionParityFusionRule.product(U1FusionRule).product(SU2FusionRule)
+//! ProductFusionRule::try_new(ProductFusionRule::try_new(FermionParityFusionRule, U1FusionRule)?, SU2FusionRule)?
 //! ```
 //!
 //! is the left-associated `(fZ2 ⊠ U(1)) ⊠ SU(2)`, whose labels are

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use symtn::typed::{ContractSpec, Direction, Duality, Side};
 
 use symtn::sector::{
-    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, ProductFusionRuleExt,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
+    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
 };
 use symtn::typed::{Complex64, GradedSpace, TensorMap};
 
@@ -130,7 +130,10 @@ fn z2_cat_and_absorb_have_hand_computed_slabs() {
 #[test]
 fn fermionic_product_contract_otimes_and_reductions_keep_provider_and_signs() {
     let runtime = host_runtime();
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let odd = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(odd, 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
@@ -167,9 +170,15 @@ fn fermionic_product_contract_otimes_and_reductions_keep_provider_and_signs() {
 fn nested_fermionic_su2_product_and_complex_adjoint_are_publicly_conformant() {
     let runtime = host_runtime();
     let provider = Arc::new(
-        FermionParityFusionRule
-            .product(U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let spin_half = product_sector(
         product_sector(Z2Irrep::ODD, U1Irrep::new(1)),
@@ -371,13 +380,20 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
     }
     check!(SU2FusionRule, SU2Irrep::from_twice_spin(1));
     check!(
-        FermionParityFusionRule.product(U1FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
         product_sector(Z2Irrep::ODD, U1Irrep::new(1))
     );
     check!(
-        FermionParityFusionRule
-            .product(U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule
+            )
+            .unwrap(),
+            SU2FusionRule
+        )
+        .unwrap(),
         product_sector(
             product_sector(Z2Irrep::ODD, U1Irrep::new(0)),
             SU2Irrep::from_twice_spin(1)
@@ -413,9 +429,15 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
     // Dual SU2 codomain: the forward factor is χθ=-1.
     check!(SU2FusionRule, SU2Irrep::from_twice_spin(1), 0, false, false);
     check!(
-        FermionParityFusionRule
-            .product(U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule
+            )
+            .unwrap(),
+            SU2FusionRule
+        )
+        .unwrap(),
         product_sector(
             product_sector(Z2Irrep::ODD, U1Irrep::new(0)),
             SU2Irrep::from_twice_spin(1)
@@ -465,14 +487,21 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
     check!(CU1FusionRule, CU1Irrep::from_twice_charge(1));
     check!(FermionParityFusionRule, Z2Irrep::ODD);
     check!(
-        FermionParityFusionRule.product(U1FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
         product_sector(Z2Irrep::ODD, U1Irrep::new(1))
     );
     check!(SU2FusionRule, SU2Irrep::from_twice_spin(1));
     check!(
-        FermionParityFusionRule
-            .product(U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule
+            )
+            .unwrap(),
+            SU2FusionRule
+        )
+        .unwrap(),
         product_sector(
             product_sector(Z2Irrep::ODD, U1Irrep::new(1)),
             SU2Irrep::from_twice_spin(1)

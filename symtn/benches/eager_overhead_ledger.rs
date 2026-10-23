@@ -396,7 +396,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<Vec<_>>()
     };
     let su2 = |n: usize| (0..n).map(SU2Irrep::from_twice_spin).collect::<Vec<_>>();
-    let fz2u1_rule = || Fz2U1::new(FermionParityFusionRule, U1FusionRule);
+    let fz2u1_rule = || Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
 
     ledger!(&config, &runtime, "U1", U1FusionRule, f64, "f64", u1, 1.0);
     ledger!(

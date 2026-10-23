@@ -28,9 +28,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
-use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, U1FusionRule, U1Irrep, Z2Irrep,
-};
+use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
 use symtn::typed::{
     ContractPlan, ContractSpec, ContractWorkspace, CudaStorage, Direction, Error, GradedSpace,
     Runtime, StackedTensorMap, TensorMap,
@@ -328,7 +326,13 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
         }
     }
     let odd = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+        ),
         [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
@@ -365,7 +369,10 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
 #[ignore = "requires a real CUDA device"]
 fn signed_core_zeroes_inactive_blocks_after_poisoning() {
     let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
@@ -1019,7 +1026,13 @@ fn invalid_bindings_preserve_poisoned_destination() {
 fn negative_only_signed_core_matches_literal_twist() {
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let odd = symtn::typed::GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+        Arc::new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+        ),
         [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();

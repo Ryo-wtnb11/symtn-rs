@@ -66,8 +66,9 @@ The provider traits are sealed: they are the bounds generic code names, not
 an extension point. Z2, Z_N, U(1), fermion parity, CU(1), `TableRule`,
 `SU2FusionRule` and `SUNFusionRule` implement them through the same category
 adapter as `CategoryRule`, with private codecs that keep their labels, ids,
-identities and checked errors. Native implementations remain only for
-`ProductFusionRule` and, under `testing`, for fixtures that implement
+identities and checked errors. `ProductFusionRule` uses the same adapter over
+fusion-symbols' `Product`. Native implementations remain under `testing` for
+fixtures that implement
 `symtn_sectors::testing::Provider` (re-exported as
 `symtn_core::testing::Provider`) to inject failures or instrument queries.
 
@@ -210,9 +211,9 @@ scalar and Generic, exist only for fixtures in unit tests or under `testing`.
 
 `has_trivial_associator_gauge()` selects direct permutation only when every
 allowed F coefficient is exactly the scalar unit. It defaults to false;
-`CategoryRule` forwards the category certificate. `TableRule` always withholds
-it and reports every braided table `Anyonic`, even if the category certifies
-a trivial associator. Symmetric braiding alone does not prove this property.
+`CategoryRule`, `TableRule` and products forward the category certificate.
+`TableRule` also forwards the category's braiding style. Symmetric braiding
+alone does not prove a trivial associator.
 
 `CanonicalUnitFusionRule` asserts the vacuum is self-dual,
 that `1 ⊗ a -> a` and `a ⊗ 1 -> a` are the only channels involved, and that
@@ -260,17 +261,43 @@ See [backend policy](backend_policy.md) for device bounds.
 
 ## Products
 
-`ProductFusionRule<Left, Right, Codec>` is itself a provider, so products nest.
-It composes component symbols in symtn, including A/B, rather than using
-fusion-symbols' product category.
-The product's coefficient scalar is the promotion of its components'
-(`PromoteCoefficientScalar`), following TensorKitSectors'
-`fusionscalartype(ProductSector)`: components need not agree, and a complex
-component widens the product. `TensorKitProductCodec`, the Cantor-pairing codec,
-is the default type parameter. Use `PackedProductCodec` explicitly when you
-need its fixed-width layout. Component order and association
-are part of the Rust type and of the `ProductSector` label; `U(1) ⊠ fZ2` and
-`fZ2 ⊠ U(1)` are different providers, never automatically equivalent.
+`ProductFusionRule<Left, Right, Codec>` adapts
+`fusion_symbols::product::Product<(Left::Category, Right::Category)>`.
+Construct it with `ProductFusionRule::try_new(left, right)`; construction
+requires the category's canonical-unit certificate. Every built-in rule,
+`CategoryRule` and product implements the sealed `CategoryProvider` interface,
+so products nest. Factor access and component-id packing remain in symtn.
+
+One codec handles all four admission-mode pairs. `ProductAdmission` selects
+multiplicity-free admission and `FusionAlgebraError` for two multiplicity-free
+factors; any checked-Generic factor selects checked-Generic admission and
+`ProductFusionRuleError`. Outer ids are decoded before the left factor's
+operation-specific admission, then the right factor's. Generic errors retain
+left/right factor errors and their sources, codec errors and unrepresentable
+dimensions. Product category failures retain the original fusion-symbols
+error as a `CategoryFailure` source, including multiplicity overflow and
+malformed symbol data.
+
+All product mathematics, including A/B, dimensions and scalar promotion,
+comes from fusion-symbols. Fusion channels vary the first factor fastest in
+the factors' native category order, including generated Lie categories; they
+are never sorted by packed ids. Each F/R/A/B multiplicity axis varies the last
+factor fastest, with row-major storage. No cross-factor fermionic sign is
+added. Tensor operations use the factors' `SectorOrderKey`s for TensorKit
+sector order independently of channel enumeration.
+
+`TensorKitProductCodec` (Cantor pairing) is the default; use
+`PackedProductCodec` for a fixed-width layout. Component order and association
+are part of the Rust type, `ProductSector` label and `RuleIdentity`;
+`U(1) ⊠ fZ2` and `fZ2 ⊠ U(1)` are different providers. Unlike TensorKit's flat
+products, symtn retains explicit nesting.
+
+Product construction clones factor category values; queries reconstruct objects
+without a product-object cache. Generic F/R/A/B materialization allocates
+product storage in fusion-symbols and copies its entries into symtn's owned
+checked blocks. Scalar promotion does not widen tensor backend support:
+checked-Generic tensor execution remains Host-only with `f64` coefficients.
+Products gain no physical-dense expansion capability.
 
 ## Current typed API boundaries
 

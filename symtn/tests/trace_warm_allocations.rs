@@ -35,7 +35,7 @@ fn fz2u1_leg(charges: i32) -> GradedSpace<Fz2U1> {
         ProductSector::new(parity, U1Irrep::new(q))
     };
     GradedSpace::try_new(
-        Arc::new(Fz2U1::new(FermionParityFusionRule, U1FusionRule)),
+        Arc::new(Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap()),
         (-charges..=charges).map(|q| (sector(q), 2)),
     )
     .unwrap()

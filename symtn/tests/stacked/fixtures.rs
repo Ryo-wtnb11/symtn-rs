@@ -109,7 +109,7 @@ macro_rules! for_each_symmetry {
             .unwrap()
         });
         $check!("fZ2xU1", |variant: usize| {
-            let rule = Arc::new(Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule));
+            let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
             let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
             let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
             GradedSpace::try_new(rule, [(even(0), 3), (odd(1), 1 + variant), (odd(-1), 2)]).unwrap()

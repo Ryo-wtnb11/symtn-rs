@@ -19,7 +19,7 @@ use std::sync::Arc;
 use symtn::typed::Direction;
 
 use common::permute_dense;
-use symtn::sector::{ProductFusionRuleExt, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 #[path = "../../tests/support/numerics.rs"]
@@ -471,7 +471,13 @@ fn a_fermionic_twist_only_ever_keeps_or_negates_an_entry() {
     );
 
     // fZ2 x U(1).
-    let rule = Arc::new(symtn::sector::FermionParityFusionRule.product(U1FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::FermionParityFusionRule,
+            U1FusionRule,
+        )
+        .unwrap(),
+    );
     let leg_u1 = GradedSpace::try_new(
         Arc::clone(&rule),
         [
@@ -500,7 +506,13 @@ fn a_fermionic_twist_only_ever_keeps_or_negates_an_entry() {
     );
 
     // fZ2 (x) SU(2): the same sign domain with non-Abelian degeneracies.
-    let rule = Arc::new(symtn::sector::FermionParityFusionRule.product(SU2FusionRule));
+    let rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn::sector::FermionParityFusionRule,
+            SU2FusionRule,
+        )
+        .unwrap(),
+    );
     let leg_su2 = GradedSpace::try_new(
         Arc::clone(&rule),
         [

@@ -180,7 +180,8 @@ fn sun_errors_are_typed_and_checked_left_right_coupled() {
 #[test]
 fn product_errors_follow_outer_decode_then_left_factor_then_right_factor() {
     // Cantor (2, 3) = 17: both components invalid for Z2; the left factor wins.
-    let z2_z2 = Z2FusionRule.product(Z2FusionRule);
+    let z2_z2 =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, Z2FusionRule).unwrap();
     assert_eq!(z2_z2.try_nsymbol(s(17), s(0), s(0)), invalid(2));
     assert_eq!(
         z2_z2.try_fusion_channels(s(17), s(0)),
@@ -201,7 +202,8 @@ fn product_errors_follow_outer_decode_then_left_factor_then_right_factor() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn product_left_factor_overflow_beats_right_factor_domain_error() {
-    let u1_z2 = U1FusionRule.product(Z2FusionRule);
+    let u1_z2 =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap();
     // Cantor (zigzag(i32::MAX), 3) = 9223372047592194047; Cantor (zigzag(1), 0) = 5.
     assert_eq!(
         u1_z2.try_nsymbol(s(9_223_372_047_592_194_047), s(5), s(0)),
@@ -220,7 +222,7 @@ fn product_codec_decode_beats_factor_errors() {
         FermionParityFusionRule,
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
     >;
-    let rule = U1Fz2::default();
+    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     let bad_u1 = s(u32::MAX as usize);
     assert_eq!(
         rule.try_nsymbol(bad_u1, s(0), s(1 << 33)),
@@ -240,7 +242,8 @@ fn product_codec_decode_beats_factor_errors() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn product_fusion_reports_an_unpairable_channel_after_both_factors() {
-    let u1_u1 = U1FusionRule.product(U1FusionRule);
+    let u1_u1 =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
     let q = 3 << 28;
     let x = u1_u1
         .encode_sector(&product_sector(U1Irrep::new(q), U1Irrep::new(q)))
@@ -258,9 +261,11 @@ fn product_fusion_reports_an_unpairable_channel_after_both_factors() {
 
 #[test]
 fn product_with_a_fusion_only_factor_panics_with_the_table_message() {
-    let rule = TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c")
-        .unwrap()
-        .product(Z2FusionRule);
+    let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap(),
+        Z2FusionRule,
+    )
+    .unwrap();
     assert_eq!(rule.braiding_style(), BraidingStyleKind::NoBraiding);
     let message = panic::catch_unwind(AssertUnwindSafe(|| {
         rule.r_symbol_scalar(s(0), s(0), s(0));

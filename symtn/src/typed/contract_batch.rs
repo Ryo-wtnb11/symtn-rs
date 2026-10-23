@@ -712,7 +712,7 @@ mod failure_tests {
 mod fermionic_unit_tests {
     use super::*;
     use crate::sector::{
-        product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
+        product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
         U1FusionRule, U1Irrep, Z2Irrep,
     };
     use crate::typed::GradedSpace;
@@ -768,7 +768,9 @@ mod fermionic_unit_tests {
     fn fermionic_unit_routes_submit_one_member_expanded_core_batch() {
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         let u1 = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            ),
             [
                 (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
                 (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
@@ -777,7 +779,9 @@ mod fermionic_unit_tests {
         )
         .unwrap();
         let su2 = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(SU2FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule).unwrap(),
+            ),
             [
                 (
                     product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
@@ -871,7 +875,9 @@ mod fermionic_unit_tests {
     fn signed_direct_submits_one_batch_per_present_sign_class() {
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         let u1 = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            ),
             [
                 (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
                 (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
@@ -880,7 +886,9 @@ mod fermionic_unit_tests {
         )
         .unwrap();
         let u1_full = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            ),
             [
                 (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
                 (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
@@ -890,7 +898,9 @@ mod fermionic_unit_tests {
         )
         .unwrap();
         let su2 = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(SU2FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule).unwrap(),
+            ),
             [
                 (
                     product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
@@ -908,7 +918,9 @@ mod fermionic_unit_tests {
         )
         .unwrap();
         let odd_only = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            ),
             [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
         )
         .unwrap();
@@ -924,7 +936,9 @@ mod fermionic_unit_tests {
     #[test]
     fn signed_direct_can_leave_inactive_destination_blocks() {
         let runtime = Runtime::builder().build().unwrap();
-        let rule = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+        let rule = Arc::new(
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        );
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
             [
@@ -1061,7 +1075,9 @@ mod fermionic_unit_tests {
             assert!(admitted.unwrap() > 0, "{name}");
         }
         let f = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule.product(U1FusionRule)),
+            Arc::new(
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            ),
             [
                 (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
                 (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),

@@ -663,10 +663,11 @@ mod cache_tests {
     use crate::tests::TestTensor;
 
     fn triple_rule() -> TripleRule {
-        TripleRule::new(
-            Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+        TripleRule::try_new(
+            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
             SU2FusionRule,
         )
+        .unwrap()
     }
 
     fn triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {

@@ -1337,10 +1337,11 @@ fn product_resolution_compiles_distinct_degeneracy_shapes() {
 #[test]
 fn tree_transform_execution_context_replays_product_tree_pair_transforms() {
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
-    let equivalent_rule = FpU1Su2Rule::new(
-        FpU1Rule::new(FermionParityFusionRule, U1FusionRule),
+    let equivalent_rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
-    );
+    )
+    .unwrap();
     type RuleKey = <FpU1Su2Rule as TreeTransformRuleCacheKey>::Key;
     let operation = TreeTransformOperation::permute([1, 0], [2]);
     let mut src =

@@ -155,10 +155,11 @@ fn warmed_prepared_rank4_fusion_replay_allocates_nothing() {
         ],
     );
     assert_replay_allocates_nothing(
-        &ProductFusionRule::<U1FusionRule, FermionParityFusionRule>::new(
+        &ProductFusionRule::<U1FusionRule, FermionParityFusionRule>::try_new(
             U1FusionRule,
             FermionParityFusionRule,
-        ),
+        )
+        .unwrap(),
         &product_sectors(),
     );
 }

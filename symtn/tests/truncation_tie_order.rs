@@ -23,8 +23,8 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2FusionRule, Z2Irrep, ZNFusionRule,
 };
 use symtn::sector::{CheckedGenericFusion, FusionRule, SectorOrderKey};
 use symtn::typed::{Eigh, GradedSpace, SectorSpectrum, Svd};
@@ -134,7 +134,8 @@ fn u1_tie_inside_and_across_sectors_follows_the_flat_order() {
 #[test]
 fn u1_x_z2_opposite_charge_tie_follows_the_product_order() {
     // Product isless over findindex - 1: (+1, 0) -> (3, 0), (-1, 0) -> (4, 0).
-    let rule = || U1FusionRule.product(Z2FusionRule);
+    let rule =
+        || symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap();
     let sector = |charge| product_sector(u1(charge), Z2Irrep::EVEN);
     let rank = kept!(
         rule(),
@@ -157,7 +158,7 @@ fn u1_x_u1_tie_uses_tensorkit_positions_not_integer_ranks() {
     // charges alone (+1 -> 1, -1 -> 2) would tie the degrees at 2 and put
     // (+1, +1) first.
     let kept = kept!(
-        U1FusionRule.product(U1FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap(),
         [
             (product_sector(u1(1), u1(1)), [1.0]),
             (product_sector(u1(-1), u1(0)), [1.0]),
@@ -174,9 +175,12 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
     // lexicographically first. Comparing the nested pair ((fP, SU2), fP) would
     // put (odd, 0, odd) first. The spin-1 sector weighs 3, so rank 3 keeps
     // exactly the sector that comes first.
-    let rule = FermionParityFusionRule
-        .product(SU2FusionRule)
-        .product(FermionParityFusionRule);
+    let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            .unwrap(),
+        FermionParityFusionRule,
+    )
+    .unwrap();
     let kept = kept!(
         rule,
         [

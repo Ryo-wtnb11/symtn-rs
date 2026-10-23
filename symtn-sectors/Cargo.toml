@@ -24,7 +24,7 @@ testing = []
 smallvec = { version = "1", features = ["const_generics", "union"] }
 num-complex = "0.4"
 num-traits = { version = "0.2", optional = true }
-fusion-symbols = { version = "0.7.0", default-features = false }
+fusion-symbols = { version = "0.8.0", default-features = false }
 
 [dev-dependencies]
 # Enables `testing` for this crate's own integration tests.

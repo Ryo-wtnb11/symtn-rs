@@ -40,8 +40,8 @@ use symtn::typed::HermitianTol;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::{
     Eigh, GradedSpace, LegSelection, SectorSpectrum, SpectrumMagnitude, Svd, TruncatedSelection,
@@ -419,7 +419,10 @@ fn fermionic_svd_composition_matches_the_oracle_for_every_policy() {
 
 #[test]
 fn fermionic_u1_product_svd_composition_matches_the_oracle_for_every_policy() {
-    let provider = Arc::new(FermionParityFusionRule.product(U1FusionRule));
+    let provider = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+    );
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [

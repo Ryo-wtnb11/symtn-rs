@@ -87,7 +87,10 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
         .unwrap();
     assert_direct_contract_and_compose(&su2_lhs, &su2_rhs);
 
-    let product_rule = Arc::new(U1FusionRule.product(FermionParityFusionRule));
+    let product_rule = Arc::new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            .unwrap(),
+    );
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [

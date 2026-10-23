@@ -198,10 +198,15 @@ fn product_sector_api_exposes_only_generic_composition() {
     assert_eq!(pair.left(), &z2_odd());
     assert_eq!(pair.right(), &u1(2));
 
-    let left_rule = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
-    let chained_rule = FermionParityFusionRule
-        .product(U1FusionRule)
-        .product(SU2FusionRule);
+    let left_rule =
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
+    let chained_rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
     let chained_sector = |parity, charge, twice_spin| {
         chained_rule.encode_component_ids(left_sector(parity, charge), su2(twice_spin))
@@ -220,7 +225,7 @@ fn product_sector_api_exposes_only_generic_composition() {
 #[test]
 fn product_fusion_rule_combines_fermion_parity_and_u1_componentwise() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = FpU1Rule::default();
+    let rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let sector = |parity, charge| rule.encode_component_ids(parity, u1(charge));
     let odd_two = sector(z2_odd(), 2);
     let odd_minus_five = sector(z2_odd(), -5);
@@ -246,8 +251,12 @@ fn product_fusion_rule_combines_fermion_parity_and_u1_componentwise() {
 fn product_fusion_rule_nested_fz2_u1_su2_channels_and_symbols_match_tensorkit() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::default();
-    let rule = FpU1Su2Rule::default();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Su2Rule::try_new(
+        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        SU2FusionRule,
+    )
+    .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(left_sector(parity, charge), su2(twice_spin))
@@ -281,7 +290,7 @@ fn product_fusion_rule_nested_fz2_u1_su2_channels_and_symbols_match_tensorkit() 
 #[should_panic(expected = "invalid fusion sector SectorId(2)")]
 fn product_fusion_rule_panics_on_an_invalid_component_sector() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = FpU1Rule::default();
+    let rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let invalid_left_component = rule.encode_component_ids(SectorId::new(2), u1(0));
     let valid = rule.encode_component_ids(z2_even(), u1(0));
 

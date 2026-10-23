@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, ProductFusionRuleExt,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime};
 
@@ -248,9 +248,15 @@ pub type FermionSu2Rule = ProductFusionRule<FermionU1Rule, SU2FusionRule>;
 
 pub fn fermion_su2_provider() -> Arc<FermionSu2Rule> {
     Arc::new(
-        FermionParityFusionRule
-            .product(U1FusionRule)
-            .product(SU2FusionRule),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule,
+                U1FusionRule,
+            )
+            .unwrap(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     )
 }
 

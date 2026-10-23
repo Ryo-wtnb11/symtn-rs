@@ -7,9 +7,7 @@ use crate::category_rule::{
     fusion_algebra_error, AdapterAccess, CanonicalUnitAdmission, CategoryAdapterError,
     CategoryCodec,
 };
-use crate::{
-    BraidingStyleKind, FusionAlgebraError, MultiplicityFreeAdmissionMode, RuleIdentity, SectorId,
-};
+use crate::{FusionAlgebraError, MultiplicityFreeAdmissionMode, RuleIdentity, SectorId};
 
 /// A multiplicity-free unitary fusion category from the pinned AnyonWiki
 /// tables of `fusion-symbols` (database commit `badbfe2`), as a symtn fusion
@@ -31,21 +29,10 @@ use crate::{
 ///
 /// [`FusionRule::fusion_style`](crate::FusionRule::fusion_style) is `Unique` when every fusion has exactly
 /// one channel (read from the exact `N`), otherwise `Simple`.
-/// [`FusionRule::braiding_style`](crate::FusionRule::braiding_style) is `NoBraiding` for a fusion-only entry
-/// and `Anyonic` for every braided one.
-///
-/// Why not report a symmetric table braiding as `Bosonic`/`Fermionic`, as
-/// TensorKit would for a symmetric category: the tables carry no symmetry
-/// flag, and deciding `R^{ab}_c R^{ba}_c = 1` from rounded floats is a
-/// tolerance heuristic, not a proved invariant. `Anyonic` is stricter than
-/// TensorKit there (general-axes `permute`, `contract` and `tr` are
-/// rejected; `braid` with levels works); the symmetric group categories
-/// have exact closed-form rules (`ZNFusionRule`, `Z2FusionRule`, ...).
-///
-/// [`has_trivial_associator_gauge`](crate::MultiplicityFreeFusionSymbols::has_trivial_associator_gauge) is
-/// `false` for every entry, even where the table's own certificate holds,
-/// as conservatively as the `Anyonic` braiding: no table takes the direct
-/// Unique symmetric permutation path.
+/// [`FusionRule::braiding_style`](crate::FusionRule::braiding_style) and
+/// [`has_trivial_associator_gauge`](crate::MultiplicityFreeFusionSymbols::has_trivial_associator_gauge)
+/// report the table category's style and certificate directly. The category
+/// authority owns their interpretation and the symbol gauge.
 ///
 /// On a `NoBraiding` rule every braiding operation is rejected by symtn
 /// before it asks for an R-symbol or a twist, as in TensorKit. The
@@ -265,22 +252,6 @@ impl AdapterAccess for TableRule {
     }
     fn vacuum_id(&self) -> SectorId {
         SectorId::new(0)
-    }
-
-    /// `Anyonic` for every braided entry; see the type's "Styles".
-    fn braiding_policy(&self) -> BraidingStyleKind {
-        if self.category.is_braided() {
-            BraidingStyleKind::Anyonic
-        } else {
-            BraidingStyleKind::NoBraiding
-        }
-    }
-
-    /// Never certified: with the braiding reported `Anyonic`, no table takes
-    /// the Unique symmetric permutation path the certificate serves, and the
-    /// certificate is kept as conservative as that braiding policy.
-    fn trivial_associator_policy(&self) -> bool {
-        false
     }
 }
 

@@ -176,7 +176,7 @@ fn conjugated_dyn_contract_builds_no_adjoint_structure() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let fz2_u1 = || Fz2U1::new(FermionParityFusionRule, U1FusionRule);
+    let fz2_u1 = || Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     assert_conjugated_contract_builds_no_adjoint::<_, f64>(U1FusionRule, &u1_legs());
     assert_conjugated_contract_builds_no_adjoint::<_, Complex64>(U1FusionRule, &u1_legs());
     assert_conjugated_contract_builds_no_adjoint::<_, f64>(SU2FusionRule, &su2_legs());

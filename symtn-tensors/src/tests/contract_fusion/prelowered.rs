@@ -390,10 +390,11 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
     type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
     type TripleRuleKey = <TripleRule as TreeTransformRuleCacheKey>::Key;
 
-    let rule = TripleRule::new(
-        Fz2U1Rule::new(FermionParityFusionRule, U1FusionRule),
+    let rule = TripleRule::try_new(
+        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         SU2FusionRule,
-    );
+    )
+    .unwrap();
     let sector = |parity: u8, charge: i32, twice_spin: usize| {
         TripleCodec::encode(
             Fz2U1Codec::encode(

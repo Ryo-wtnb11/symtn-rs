@@ -1248,14 +1248,16 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
         &FermionParityFusionRule,
         &[SectorId::new(0), SectorId::new(1)],
     );
-    let product = product_fusion_rule(FermionParityFusionRule, U1FusionRule);
+    let product =
+        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
     ];
     assert_eigh_reconstructs_rule(&product, &product_sectors);
 
-    let nested = product_fusion_rule(product, SU2FusionRule);
+    let nested = symtn_core::ProductFusionRule::<_, _>::try_new(product, SU2FusionRule).unwrap();
     let nested_sectors = [
         nested.encode_component_ids(product_sectors[0], SU2Irrep::from_twice_spin(0).sector_id()),
         nested.encode_component_ids(product_sectors[1], SU2Irrep::from_twice_spin(1).sector_id()),

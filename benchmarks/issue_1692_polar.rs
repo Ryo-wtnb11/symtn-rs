@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRuleExt, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::{GradedSpace, LinalgBackend, Runtime, SectorSpectrum, TensorMap};
 
@@ -146,7 +146,11 @@ fn main() {
                 $name,
                 $value,
                 "U1xF",
-                U1FusionRule.product(FermionParityFusionRule),
+                symtn::sector::ProductFusionRule::<_, _>::try_new(
+                    U1FusionRule,
+                    FermionParityFusionRule
+                )
+                .unwrap(),
                 |c: i32, dual| product_sector(
                     U1Irrep::new(if dual { -c } else { c }),
                     if c % 2 == 0 {

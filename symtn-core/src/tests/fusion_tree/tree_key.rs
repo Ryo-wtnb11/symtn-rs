@@ -133,11 +133,11 @@ fn checked_recursive_product_preserves_channel_order_and_valid_multiplicity() {
     type Pair = ProductFusionRule<TableRule, TableRule>;
     type Triple = ProductFusionRule<Pair, TableRule>;
 
-    let pair = Pair::new(TableRule::fibonacci(), TableRule::fibonacci());
+    let pair = Pair::try_new(TableRule::fibonacci(), TableRule::fibonacci()).unwrap();
     let pair_tau = pair
         .try_encode_component_ids(SectorId::new(1), SectorId::new(1))
         .unwrap();
-    let triple = Triple::new(pair, TableRule::fibonacci());
+    let triple = Triple::try_new(pair, TableRule::fibonacci()).unwrap();
     let input = triple
         .try_encode_component_ids(pair_tau, SectorId::new(1))
         .unwrap();
@@ -187,7 +187,7 @@ fn checked_sector_leg_dual_rejects_a_malformed_id_transactionally() {
     #[cfg(target_pointer_width = "64")]
     {
         type Rule = ProductFusionRule<U1FusionRule, Z2FusionRule, TensorKitProductCodec>;
-        let rule = Rule::new(U1FusionRule, Z2FusionRule);
+        let rule = Rule::try_new(U1FusionRule, Z2FusionRule).unwrap();
         let min = TensorKitProductCodec::encode(excluded_u1_id(), z2_odd());
         let product = SectorLeg::new([(min, 1)], false);
         assert_eq!(
