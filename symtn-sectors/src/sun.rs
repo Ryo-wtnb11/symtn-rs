@@ -528,6 +528,19 @@ impl AdapterAccess for SUNFusionRule {
     fn codec(&self) -> &SunCodec {
         &self.codec
     }
+    fn admit_vertex_move(
+        &self,
+        operation: crate::CategoryOperation,
+        ids: [SectorId; 3],
+    ) -> Result<crate::category_rule::AdmittedObjects<LieIrrep, 3>, SUNFusionRuleError> {
+        crate::category_rule::admit_in_order_with_dual(
+            &self.codec,
+            || self.category(),
+            &self.identity,
+            operation,
+            ids,
+        )
+    }
     fn identity(&self) -> &RuleIdentity {
         &self.identity
     }
@@ -678,8 +691,10 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         let cols = if rows == 0 {
             0
         } else {
+            let dual_id = CheckedGenericFusion::try_dual(self, ids[0])?;
+            let dual = self.codec.object(|| self.category(), dual_id)?;
             self.category()
-                .try_nsymbol(&self.category().dual(&a), &c, &b)
+                .try_nsymbol(&dual, &c, &b)
                 .map_err(racah_error)? as usize
         };
         let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
@@ -704,8 +719,10 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         let cols = if rows == 0 {
             0
         } else {
+            let dual_id = CheckedGenericFusion::try_dual(self, ids[1])?;
+            let dual = self.codec.object(|| self.category(), dual_id)?;
             self.category()
-                .try_nsymbol(&c, &self.category().dual(&b), &a)
+                .try_nsymbol(&c, &dual, &a)
                 .map_err(racah_error)? as usize
         };
         let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();

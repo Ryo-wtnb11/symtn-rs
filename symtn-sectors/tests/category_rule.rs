@@ -5,9 +5,9 @@
 //! merged-admission tests compare against the literals the built-in providers
 //! are frozen to in `tests/provider_contracts/errors.rs`.
 
+use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use fusion_symbols::category::{
@@ -2165,7 +2165,9 @@ fn admission_expresses_the_compact_su2_schedule_and_r_zero_shortcut() {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Watched;
 
-static WATCHED_TOUCHES: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static WATCHED_TOUCHES: Cell<usize> = const { Cell::new(0) };
+}
 
 impl FusionCategory for Watched {
     type Object = u8;
@@ -2185,7 +2187,7 @@ impl FusionCategory for Watched {
         0
     }
     fn contains(&self, a: &u8) -> bool {
-        WATCHED_TOUCHES.fetch_add(1, Ordering::Relaxed);
+        WATCHED_TOUCHES.set(WATCHED_TOUCHES.get() + 1);
         *a == 0
     }
     fn dual(&self, a: &u8) -> u8 {
@@ -2280,10 +2282,26 @@ impl CategoryCodec<Watched> for LabelsFirst {
 #[test]
 fn admission_can_reject_labels_before_touching_the_category() {
     let rule = CategoryRule::try_new(Watched, LabelsFirst).unwrap();
-    let before = WATCHED_TOUCHES.load(Ordering::Relaxed);
+    let before = WATCHED_TOUCHES.get();
     assert_eq!(rule.try_nsymbol(s(1), s(0), s(0)), invalid(1));
     assert_eq!(rule.try_dual_sector(s(3)), invalid(3));
-    assert_eq!(WATCHED_TOUCHES.load(Ordering::Relaxed), before);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.a_symbol_scalar(
+            s(1),
+            s(0),
+            s(0)
+        )))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.b_symbol_scalar(
+            s(1),
+            s(0),
+            s(0)
+        )))
+        .is_err()
+    );
+    assert_eq!(WATCHED_TOUCHES.get(), before);
 }
 
 /// `Z2 ⊠ Z2` under Cantor pairing, admitted as `ProductFusionRule` does:

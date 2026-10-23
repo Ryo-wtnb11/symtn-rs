@@ -42,6 +42,8 @@ pub enum CategoryOperation {
     Dimension,
 }
 
+pub(crate) type AdmittedObjects<O, const N: usize> = ([O; N], Option<O>);
+
 /// Requests constructor-validated canonical-unit admission: [`CategoryRule::try_new`]
 /// requires the category's `has_canonical_unit` certificate, and the rule
 /// then implements [`CanonicalUnitFusionRule`] or
@@ -370,16 +372,32 @@ where
     C::Error: Send + Sync + 'static,
     K: CategoryCodec<C> + ?Sized,
 {
+    admit_in_order_with_dual(codec, category, rule, operation, ids).map(|(objects, _)| objects)
+}
+
+pub(crate) fn admit_in_order_with_dual<'a, C, K, const N: usize>(
+    codec: &K,
+    category: impl Fn() -> &'a C + Copy,
+    rule: &RuleIdentity,
+    operation: CategoryOperation,
+    ids: [SectorId; N],
+) -> Result<AdmittedObjects<C::Object, N>, K::Error>
+where
+    C: FusionCategory + 'static,
+    C::Error: Send + Sync + 'static,
+    K: CategoryCodec<C> + ?Sized,
+{
     let objects = try_map_array(ids, |id| member_object(codec, category, id))?;
     let dualized = match operation {
         CategoryOperation::A => objects.first(),
         CategoryOperation::B => objects.get(1),
         _ => None,
     };
-    if let Some(object) = dualized {
-        codec.sector_id(category, rule, &category().dual(object))?;
+    let dual = dualized.map(|object| category().dual(object));
+    if let Some(dual) = &dual {
+        codec.sector_id(category, rule, dual)?;
     }
-    Ok(objects)
+    Ok((objects, dual))
 }
 
 /// `N`'s inputs decoded once each, the coupled (last) sector first and then
@@ -845,6 +863,21 @@ pub(crate) trait AdapterAccess: crate::seal::Provider + 'static {
     fn identity(&self) -> &RuleIdentity;
     /// The id the codec gives the category's unit.
     fn vacuum_id(&self) -> SectorId;
+
+    #[allow(clippy::type_complexity)]
+    fn admit_vertex_move(
+        &self,
+        operation: CategoryOperation,
+        ids: [SectorId; 3],
+    ) -> Result<
+        AdmittedObjects<<Self::Category as FusionCategory>::Object, 3>,
+        <Self::Codec as CategoryCodec<Self::Category>>::Error,
+    > {
+        let objects = self
+            .codec()
+            .admit(|| self.category(), self.identity(), operation, ids)?;
+        Ok((objects, None))
+    }
 }
 
 impl<C, K> AdapterAccess for CategoryRule<C, K>
@@ -875,12 +908,38 @@ where
 
 impl<C, K> crate::seal::Provider for CategoryRule<C, K> {}
 
+pub(crate) trait VertexMoveAdmission<C: FusionCategory, E> {
+    fn admit_vertex_move(
+        &self,
+        operation: CategoryOperation,
+        ids: [SectorId; 3],
+    ) -> Result<AdmittedObjects<C::Object, 3>, E>;
+}
+
+impl<A: AdapterAccess>
+    VertexMoveAdmission<A::Category, <A::Codec as CategoryCodec<A::Category>>::Error> for A
+{
+    fn admit_vertex_move(
+        &self,
+        operation: CategoryOperation,
+        ids: [SectorId; 3],
+    ) -> Result<
+        AdmittedObjects<<A::Category as FusionCategory>::Object, 3>,
+        <A::Codec as CategoryCodec<A::Category>>::Error,
+    > {
+        AdapterAccess::admit_vertex_move(self, operation, ids)
+    }
+}
+
 /// A provider backed by a `fusion_symbols` category: every built-in rule,
 /// every [`CategoryRule`], and every product of them.
 ///
 /// Sealed. A product reaches its factors' categories and object conversion
 /// through this trait; it never sees their codecs.
-pub trait CategoryProvider: TypedSectorAdmission {
+#[allow(private_bounds)]
+pub trait CategoryProvider:
+    TypedSectorAdmission + VertexMoveAdmission<Self::Category, Self::Error>
+{
     /// The category this provider answers from.
     type Category: FusionCategory<Error: Send + Sync + 'static> + 'static;
 
@@ -1324,8 +1383,8 @@ pub(crate) mod forward {
         rule: &A,
         operation: CategoryOperation,
         ids: [SectorId; 3],
-    ) -> Result<[Object<A>; 3], Error<A>> {
-        let objects = admit(rule, operation, ids)?;
+    ) -> Result<AdmittedObjects<Object<A>, 3>, Error<A>> {
+        let (objects, dual) = AdapterAccess::admit_vertex_move(rule, operation, ids)?;
         for (object, sector) in objects.iter().zip(ids) {
             let dim = rule.category().dim(object);
             if !(dim.is_finite() && dim > 0.0) {
@@ -1336,7 +1395,7 @@ pub(crate) mod forward {
                 ));
             }
         }
-        Ok(objects)
+        Ok((objects, dual))
     }
 
     /// An A or B block, shaped `[N(a,b,c), N(column vertex)]` from the
@@ -1360,13 +1419,13 @@ pub(crate) mod forward {
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<GenericRMatrix<Value<A>>, Error<A>> {
-        let objects = admit_vertex_move(rule, CategoryOperation::A, ids)?;
+        let (objects, a_dual) = admit_vertex_move(rule, CategoryOperation::A, ids)?;
         let [a, b, c] = &objects;
         let block = rule
             .category()
             .a_symbol(a, b, c)
             .map_err(provider(rule, ids))?;
-        let a_dual = rule.category().dual(a);
+        let a_dual = a_dual.unwrap_or_else(|| rule.category().dual(a));
         vertex_move_block(rule, ids, &objects, [&a_dual, c, b], block)
     }
 
@@ -1374,13 +1433,13 @@ pub(crate) mod forward {
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<GenericRMatrix<Value<A>>, Error<A>> {
-        let objects = admit_vertex_move(rule, CategoryOperation::B, ids)?;
+        let (objects, b_dual) = admit_vertex_move(rule, CategoryOperation::B, ids)?;
         let [a, b, c] = &objects;
         let block = rule
             .category()
             .b_symbol(a, b, c)
             .map_err(provider(rule, ids))?;
-        let b_dual = rule.category().dual(b);
+        let b_dual = b_dual.unwrap_or_else(|| rule.category().dual(b));
         vertex_move_block(rule, ids, &objects, [c, &b_dual, a], block)
     }
 
@@ -1388,13 +1447,13 @@ pub(crate) mod forward {
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<Value<A>, Error<A>> {
-        let [a, b, c] = admit_vertex_move(rule, CategoryOperation::A, ids)?;
+        let ([a, b, c], a_dual) = admit_vertex_move(rule, CategoryOperation::A, ids)?;
         let block = rule
             .category()
             .a_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
         let rows = multiplicity(rule, ids, &a, &b, &c)?;
-        let a_dual = rule.category().dual(&a);
+        let a_dual = a_dual.unwrap_or_else(|| rule.category().dual(&a));
         let cols = multiplicity(rule, ids, &a_dual, &c, &b)?;
         single(rule, &ids, &block, [rows, cols])
     }
@@ -1403,13 +1462,13 @@ pub(crate) mod forward {
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<Value<A>, Error<A>> {
-        let [a, b, c] = admit_vertex_move(rule, CategoryOperation::B, ids)?;
+        let ([a, b, c], b_dual) = admit_vertex_move(rule, CategoryOperation::B, ids)?;
         let block = rule
             .category()
             .b_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
         let rows = multiplicity(rule, ids, &a, &b, &c)?;
-        let b_dual = rule.category().dual(&b);
+        let b_dual = b_dual.unwrap_or_else(|| rule.category().dual(&b));
         let cols = multiplicity(rule, ids, &c, &b_dual, &a)?;
         single(rule, &ids, &block, [rows, cols])
     }

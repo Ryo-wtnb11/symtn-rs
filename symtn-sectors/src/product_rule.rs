@@ -183,6 +183,27 @@ pub(crate) struct ProductCodec<L, R, P> {
     packing: PhantomData<P>,
 }
 
+impl<L, R, P> ProductCodec<L, R, P>
+where
+    L: CategoryProvider,
+    R: CategoryProvider,
+    (L::Mode, R::Mode): ProductAdmission<L::Error, R::Error>,
+    P: crate::ProductSectorCodec,
+{
+    fn decode_ids<const N: usize>(
+        &self,
+        ids: [SectorId; N],
+    ) -> Result<([SectorId; N], [SectorId; N]), ErrorOf<L, R>> {
+        let mut left = [SectorId::new(0); N];
+        let mut right = [SectorId::new(0); N];
+        for (k, id) in ids.into_iter().enumerate() {
+            (left[k], right[k]) = P::decode_checked(id)
+                .map_err(<Pair<L, R> as ProductAdmission<L::Error, R::Error>>::codec)?;
+        }
+        Ok((left, right))
+    }
+}
+
 impl<L, R, P> CategoryCodec<ProductCategory<L, R>> for ProductCodec<L, R, P>
 where
     L: CategoryProvider,
@@ -276,14 +297,7 @@ where
         ids: [SectorId; N],
     ) -> Result<[<ProductCategory<L, R> as FusionCategory>::Object; N], Self::Error> {
         type A<L, R> = Pair<L, R>;
-        let mut left_ids = [SectorId::new(0); N];
-        let mut right_ids = [SectorId::new(0); N];
-        for (k, id) in ids.into_iter().enumerate() {
-            let (l, r) = P::decode_checked(id)
-                .map_err(<A<L, R> as ProductAdmission<L::Error, R::Error>>::codec)?;
-            left_ids[k] = l;
-            right_ids[k] = r;
-        }
+        let (left_ids, right_ids) = self.decode_ids(ids)?;
         let left = self
             .left
             .admit(operation, left_ids)
@@ -515,6 +529,34 @@ where
     }
     fn vacuum_id(&self) -> SectorId {
         self.vacuum
+    }
+
+    fn admit_vertex_move(
+        &self,
+        operation: crate::CategoryOperation,
+        ids: [SectorId; 3],
+    ) -> Result<
+        crate::category_rule::AdmittedObjects<<Self::Category as FusionCategory>::Object, 3>,
+        ErrorOf<L, R>,
+    > {
+        let (left_ids, right_ids) = self.codec.decode_ids(ids)?;
+        let (left, left_dual) = crate::category_rule::VertexMoveAdmission::admit_vertex_move(
+            &self.codec.left,
+            operation,
+            left_ids,
+        )
+        .map_err(<Pair<L, R> as ProductAdmission<L::Error, R::Error>>::left)?;
+        let (right, right_dual) = crate::category_rule::VertexMoveAdmission::admit_vertex_move(
+            &self.codec.right,
+            operation,
+            right_ids,
+        )
+        .map_err(<Pair<L, R> as ProductAdmission<L::Error, R::Error>>::right)?;
+        let mut right = right.into_iter();
+        Ok((
+            left.map(|l| (l, right.next().expect("same length"))),
+            left_dual.zip(right_dual),
+        ))
     }
 }
 

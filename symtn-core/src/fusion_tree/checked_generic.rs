@@ -370,9 +370,13 @@ impl<P: CheckedGenericRigidSymbols> GenericRigidAccess for P {
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, CheckedGenericSymbolError<Self::Error>> {
         let provider = CheckedGenericSymbolError::Provider;
-        let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
-        let dual_b = CheckedGenericFusion::try_dual(self, b).map_err(provider)?;
-        let _cols = CheckedGenericFusion::try_nsymbol(self, c, dual_b, a).map_err(provider)?;
+        #[cfg(any(test, feature = "testing"))]
+        let (_rows, _cols) = {
+            let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
+            let dual_b = CheckedGenericFusion::try_dual(self, b).map_err(provider)?;
+            let _cols = CheckedGenericFusion::try_nsymbol(self, c, dual_b, a).map_err(provider)?;
+            (_rows, _cols)
+        };
         let symbol =
             CheckedGenericRigidSymbols::try_b_symbol_generic(self, a, b, c).map_err(provider)?;
         #[cfg(any(test, feature = "testing"))]
@@ -394,9 +398,13 @@ impl<P: CheckedGenericRigidSymbols> GenericRigidAccess for P {
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, CheckedGenericSymbolError<Self::Error>> {
         let provider = CheckedGenericSymbolError::Provider;
-        let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
-        let dual_a = CheckedGenericFusion::try_dual(self, a).map_err(provider)?;
-        let _cols = CheckedGenericFusion::try_nsymbol(self, dual_a, c, b).map_err(provider)?;
+        #[cfg(any(test, feature = "testing"))]
+        let (_rows, _cols) = {
+            let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
+            let dual_a = CheckedGenericFusion::try_dual(self, a).map_err(provider)?;
+            let _cols = CheckedGenericFusion::try_nsymbol(self, dual_a, c, b).map_err(provider)?;
+            (_rows, _cols)
+        };
         let symbol =
             CheckedGenericRigidSymbols::try_a_symbol_generic(self, a, b, c).map_err(provider)?;
         #[cfg(any(test, feature = "testing"))]

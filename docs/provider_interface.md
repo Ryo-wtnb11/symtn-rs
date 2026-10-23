@@ -244,12 +244,17 @@ Successful multiplicity-free validation borrows the block without allocating.
 finite dimension or an encoded derived dual. The tensor engine consumes the
 category authority's A/B blocks through `try_a_symbol_generic` and
 `try_b_symbol_generic`; it retains the dimension and Frobenius–Schur factors
-of tree bends and folds. An A/B accessor queries the row N, dual, and column N
-before delegating to the provider. Failures in that prefix take precedence;
-provider A/B failures then propagate directly without core F or rigidity
-queries. Adapters own production symbol validation. Core repeats categorical
-shape checks only in unit tests or under `testing`, where native synthetic
-providers can bypass adapters; public tree and index guards always apply.
+of tree bends and folds. Production A/B accessors delegate directly to the
+provider, whose admission owns error precedence and whose errors propagate
+without core N, dual, F or rigidity queries. SUN reuses its interned dual for
+the column N; all-SUN product admission retains the factors' derived dual
+objects for that query. A custom `CategoryCodec::admit` override still runs unchanged;
+its returned inputs require a separate dual calculation. Adapters own
+production symbol validation. Only in unit tests or under `testing`, core
+queries the row N, dual, and column N before the provider and repeats the
+categorical shape check, so failures in that prefix take precedence for
+native synthetic providers that can bypass adapters. Public tree and index
+guards always apply.
 `CheckedGenericRigidSymbols::try_dim_scalar` defaults to
 `try_sqrt_dim_scalar²`; override it when `dim` is known exactly (SU(N) does),
 because truncation budgets and quantum-dimension-weighted norms compare

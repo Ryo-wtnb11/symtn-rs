@@ -374,7 +374,9 @@ fn checked_generic_b_and_a_reject_equal_volume_malformed_shapes() {
 }
 
 #[test]
-fn checked_generic_a_and_b_preserve_admission_then_delegated_error_precedence() {
+fn testing_a_and_b_shape_checks_preserve_prefix_then_provider_error_precedence() {
+    // Native test providers retain the N/dual/N shape-check prefix; production
+    // accessors delegate admission and its error precedence to the provider.
     let t = a4_three();
     for a_symbol in [true, false] {
         for (fail_n, fail_dual, expected, counts) in [
