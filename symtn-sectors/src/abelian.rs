@@ -1,58 +1,32 @@
 //! Z2, Z_N, U(1) and fermion parity as symtn fusion rules.
 //!
-//! Every symbol (dual, fusion, N, F, R, dim, twist, Frobenius–Schur phase)
-//! comes from fusion-symbols categories, which follow TensorKitSectors
-//! 0.3.9; this module owns only symtn's labels, `SectorId` codecs, styles,
-//! identities and checked error contracts. An inadmissible F or R is `0.0`,
-//! as in TensorKitSectors. A `SectorId` outside the rule's domain panics in
-//! the infallible symbols, as in the other providers.
+//! Each rule is a fusion-symbols category (`ZN`, `FermionParity`, `U1`)
+//! behind the shared category adapter, which supplies every symbol (dual,
+//! fusion, N, F, R, A, B, dims, twist, Frobenius–Schur phase) in
+//! TensorKitSectors 0.3.9's conventions. This module owns only symtn's
+//! labels, `SectorId` codecs, identities, and checked error contracts. An
+//! inadmissible F or R is `0.0`, as in TensorKitSectors. A `SectorId`
+//! outside the rule's domain panics in the infallible symbols, as in the
+//! other providers.
+
+use std::sync::LazyLock;
 
 use fusion_symbols::{
-    category::FusionCategory,
+    category::{FusionCategory, GroupRepresentations},
     fermion::{FermionParity, FermionParityIrrep},
     finite::{ZNIrrep as FsZNIrrep, ZN},
-    lie::{U1Irrep as FsU1Irrep, U1},
+    lie::{U1Error, U1Irrep as FsU1Irrep, U1},
 };
 
+use crate::category_rule::{
+    admit_coupled_first, admit_in_order, fusion_algebra_error, AdapterAccess,
+    CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec, CategoryFailure,
+    CategoryOperation,
+};
 use crate::{
-    BraidingStyleKind, CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError,
-    FusionRule, FusionStyleKind, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, PhysicalBasisError, PhysicalFusionBasis, RuleIdentity,
-    SectorCodec, SectorId, SectorOrderKey, SectorVec,
+    CheckedFusionAlgebra, FusionAlgebraError, MultiplicityFreeAdmissionMode, PhysicalBasisError,
+    PhysicalFusionBasis, RuleIdentity, SectorId, SectorOrderKey,
 };
-
-/// Decodes a label for an infallible symbol; out of domain is a caller bug.
-fn or_panic<T>(label: Result<T, FusionAlgebraError>) -> T {
-    label.unwrap_or_else(|error| panic!("{error}"))
-}
-
-/// The rigid symbols of a rule whose `fn label(&self, SectorId)` returns a
-/// fusion-symbols label. The inverse and square-root forms are derived from
-/// `dim` exactly as the fusion-symbols golden records them.
-macro_rules! rigid_symbols_from_labels {
-    ($rule:ty, $this:ident, $category:expr) => {
-        impl MultiplicityFreeRigidSymbols for $rule {
-            fn dim_scalar(&$this, sector: SectorId) -> f64 {
-                $category.dim(&$this.label(sector))
-            }
-            fn inv_dim_scalar(&self, sector: SectorId) -> f64 {
-                1.0 / self.dim_scalar(sector)
-            }
-            fn sqrt_dim_scalar(&self, sector: SectorId) -> f64 {
-                self.dim_scalar(sector).sqrt()
-            }
-            fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> f64 {
-                1.0 / self.sqrt_dim_scalar(sector)
-            }
-            fn twist_scalar(&$this, sector: SectorId) -> f64 {
-                $category.twist(&$this.label(sector))
-            }
-            fn frobenius_schur_phase_scalar(&$this, sector: SectorId) -> f64 {
-                $category.frobenius_schur_phase(&$this.label(sector))
-            }
-        }
-    };
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Z2Irrep {
@@ -83,183 +57,150 @@ impl From<ZNIrrep> for SectorId {
 
 #[derive(Clone, Debug)]
 pub struct ZNFusionRule {
-    modulus: std::num::NonZeroU32,
+    category: ZN,
     identity: RuleIdentity,
 }
 
 impl PartialEq for ZNFusionRule {
     fn eq(&self, other: &Self) -> bool {
-        self.modulus == other.modulus
+        self.category == other.category
     }
 }
 impl Eq for ZNFusionRule {}
 impl std::hash::Hash for ZNFusionRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.modulus.hash(state);
+        self.modulus().hash(state);
     }
 }
 
 impl ZNFusionRule {
     pub fn new(modulus: u32) -> Result<Self, FusionAlgebraError> {
-        let Some(modulus) = std::num::NonZeroU32::new(modulus) else {
+        let Ok(category) = ZN::new(modulus) else {
             return Err(FusionAlgebraError::UnrepresentableSectorLabel {
                 rule: RuleIdentity::of_type::<Self>(),
                 label: "Z_N modulus must be nonzero".into(),
             });
         };
-        let bytes: std::sync::Arc<[u8]> = modulus.get().to_le_bytes().to_vec().into();
+        let bytes: std::sync::Arc<[u8]> = modulus.to_le_bytes().to_vec().into();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&modulus.get(), &mut hasher);
+        std::hash::Hash::hash(&modulus, &mut hasher);
         let identity =
             RuleIdentity::from_canonical_bytes::<Self>(std::hash::Hasher::finish(&hasher), bytes);
-        Ok(Self { modulus, identity })
+        Ok(Self { category, identity })
     }
 
     pub const fn modulus(&self) -> u32 {
-        self.modulus.get()
+        self.category.modulus()
     }
 
     pub fn irrep(&self, charge: i64) -> ZNIrrep {
+        let label = FsZNIrrep::new(charge, self.modulus())
+            .expect("the category's modulus is nonzero, so ZeroModulus cannot occur");
         ZNIrrep {
-            charge: self.fs_irrep(charge).charge(),
+            charge: label.charge(),
+        }
+    }
+}
+
+/// `ZNIrrep` labels and charge ids over `ZN`; `N` checks the coupled sector
+/// before the other two.
+#[derive(Debug)]
+pub struct ZnCodec;
+
+impl CategoryCodec<ZN> for ZnCodec {
+    type Sector = ZNIrrep;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        _rule: &RuleIdentity,
+        label: &ZNIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        if label.charge < category().modulus() {
+            Ok(label.sector_id())
+        } else {
+            Err(FusionAlgebraError::InvalidSector {
+                sector: label.sector_id(),
+            })
         }
     }
 
-    fn fs_irrep(&self, charge: i64) -> FsZNIrrep {
-        FsZNIrrep::new(charge, self.modulus())
-            .expect("the modulus is a NonZeroU32, so ZeroModulus cannot occur")
+    fn decode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        id: SectorId,
+    ) -> Result<ZNIrrep, FusionAlgebraError> {
+        self.object(category, id).map(|label| ZNIrrep {
+            charge: label.charge(),
+        })
     }
 
-    fn checked(&self, sector: SectorId) -> Result<FsZNIrrep, FusionAlgebraError> {
-        let charge = u32::try_from(sector.id()).ok();
-        match charge.filter(|&charge| charge < self.modulus()) {
-            Some(charge) => Ok(self.fs_irrep(i64::from(charge))),
-            None => Err(FusionAlgebraError::InvalidSector { sector }),
+    fn object<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        id: SectorId,
+    ) -> Result<FsZNIrrep, FusionAlgebraError> {
+        u32::try_from(id.id())
+            .ok()
+            .and_then(|charge| FsZNIrrep::from_canonical(charge, category().modulus()).ok())
+            .ok_or(FusionAlgebraError::InvalidSector { sector: id })
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _category: impl Fn() -> &'a ZN + Copy,
+        _rule: &RuleIdentity,
+        object: &FsZNIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(SectorId::new(object.charge() as usize))
+    }
+
+    fn admit<'a, const N: usize>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        rule: &RuleIdentity,
+        operation: CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[FsZNIrrep; N], FusionAlgebraError> {
+        if operation == CategoryOperation::N {
+            return admit_coupled_first(self, category, ids);
         }
+        admit_in_order(self, category, rule, operation, ids)
     }
 
-    fn label(&self, sector: SectorId) -> FsZNIrrep {
-        or_panic(self.checked(sector))
-    }
-
-    fn sector(label: FsZNIrrep) -> SectorId {
-        SectorId::new(label.charge() as usize)
+    fn map_error(
+        &self,
+        _inputs: &[SectorId],
+        error: CategoryAdapterError<std::convert::Infallible>,
+    ) -> FusionAlgebraError {
+        fusion_algebra_error(error)
     }
 }
 
 impl crate::seal::Provider for ZNFusionRule {}
 
-crate::algebra::multiplicity_free_typed_admission!(ZNFusionRule);
+crate::category_rule::multiplicity_free_adapter_impls!(ZNFusionRule, ZNIrrep, f64);
 
-impl FusionRule for ZNFusionRule {
-    fn rule_identity(&self) -> RuleIdentity {
-        self.identity.clone()
+impl AdapterAccess for ZNFusionRule {
+    type Category = ZN;
+    type Codec = ZnCodec;
+
+    fn category(&self) -> &ZN {
+        &self.category
     }
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
+    fn codec(&self) -> &ZnCodec {
+        &ZnCodec
     }
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Bosonic
+    fn identity(&self) -> &RuleIdentity {
+        &self.identity
     }
-    fn vacuum(&self) -> SectorId {
-        self.irrep(0).into()
-    }
-    fn dual(&self, sector: SectorId) -> SectorId {
-        self.dual_or_panic(sector)
-    }
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        self.fusion_channels_or_panic(left, right)
-    }
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        self.nsymbol_or_panic(left, right, coupled)
+    fn vacuum_id(&self) -> SectorId {
+        SectorId::new(0)
     }
 }
-
-impl CheckedFusionAlgebra for ZNFusionRule {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        Ok(Self::sector(
-            ZN::new(self.modulus())
-                .unwrap()
-                .dual(&self.checked(sector)?),
-        ))
-    }
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        let left = self.checked(left)?;
-        let right = self.checked(right)?;
-        Ok(ZN::new(self.modulus())
-            .unwrap()
-            .fusion(&left, &right)
-            .unwrap()
-            .map(Self::sector)
-            .collect())
-    }
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        let coupled = self.checked(coupled)?;
-        let left = self.checked(left)?;
-        let right = self.checked(right)?;
-        Ok(ZN::new(self.modulus())
-            .unwrap()
-            .nsymbol(&left, &right, &coupled) as usize)
-    }
-}
-
-impl SectorCodec for ZNFusionRule {
-    type Sector = ZNIrrep;
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        if value.charge < self.modulus() {
-            Ok((*value).into())
-        } else {
-            Err(FusionAlgebraError::InvalidSector {
-                sector: value.sector_id(),
-            })
-        }
-    }
-    fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        self.checked(id).map(|label| ZNIrrep {
-            charge: label.charge(),
-        })
-    }
-}
-
-impl MultiplicityFreeFusionRule for ZNFusionRule {}
-impl CanonicalUnitFusionRule for ZNFusionRule {}
-impl MultiplicityFreeFusionSymbols for ZNFusionRule {
-    type Scalar = f64;
-    fn has_trivial_associator_gauge(&self) -> bool {
-        true
-    }
-    fn f_symbol_scalar(
-        &self,
-        a: SectorId,
-        b: SectorId,
-        c: SectorId,
-        d: SectorId,
-        e: SectorId,
-        f: SectorId,
-    ) -> Self::Scalar {
-        let [a, b, c, d, e, f] = [a, b, c, d, e, f].map(|sector| self.label(sector));
-        ZN::new(self.modulus())
-            .unwrap()
-            .f_symbol(&a, &b, &c, &d, &e, &f)
-            .unwrap()
-    }
-    fn r_symbol_scalar(&self, a: SectorId, b: SectorId, c: SectorId) -> Self::Scalar {
-        ZN::new(self.modulus())
-            .unwrap()
-            .r_symbol(&self.label(a), &self.label(b), &self.label(c))
-            .unwrap()
-    }
-}
-rigid_symbols_from_labels!(ZNFusionRule, self, ZN::new(self.modulus()).unwrap());
 
 impl Z2Irrep {
     pub const EVEN: Self = Self { parity: 0 };
@@ -305,261 +246,135 @@ fn checked_z2_irrep(sector: SectorId) -> Result<Z2Irrep, FusionAlgebraError> {
     }
 }
 
-fn checked_z2(sector: SectorId) -> Result<FsZNIrrep, FusionAlgebraError> {
-    checked_z2_irrep(sector)
-        .map(|irrep| FsZNIrrep::from_canonical(u32::from(irrep.is_odd()), 2).unwrap())
+/// Parity labels and ids over a two-object category: `Z2Codec` over `ZN`
+/// with modulus 2, `Fz2Codec` over `FermionParity`.
+macro_rules! parity_codec {
+    ($codec:ident, $category:ty, $object:ty, $to_object:expr, $is_odd:expr) => {
+        #[derive(Debug)]
+        pub struct $codec;
+
+        impl CategoryCodec<$category> for $codec {
+            type Sector = Z2Irrep;
+            type Error = FusionAlgebraError;
+            type Mode = MultiplicityFreeAdmissionMode;
+            type Unit = CanonicalUnitAdmission;
+
+            fn encode_label<'a>(
+                &self,
+                _category: impl Fn() -> &'a $category + Copy,
+                _rule: &RuleIdentity,
+                label: &Z2Irrep,
+            ) -> Result<SectorId, FusionAlgebraError> {
+                Ok(label.sector_id())
+            }
+
+            fn decode_label<'a>(
+                &self,
+                _category: impl Fn() -> &'a $category + Copy,
+                id: SectorId,
+            ) -> Result<Z2Irrep, FusionAlgebraError> {
+                checked_z2_irrep(id)
+            }
+
+            fn object<'a>(
+                &self,
+                _category: impl Fn() -> &'a $category + Copy,
+                id: SectorId,
+            ) -> Result<$object, FusionAlgebraError> {
+                checked_z2_irrep(id).map(|irrep| $to_object(irrep.is_odd()))
+            }
+
+            fn sector_id<'a>(
+                &self,
+                _category: impl Fn() -> &'a $category + Copy,
+                _rule: &RuleIdentity,
+                object: &$object,
+            ) -> Result<SectorId, FusionAlgebraError> {
+                Ok(Z2Irrep::new(u8::from($is_odd(object))).sector_id())
+            }
+
+            fn map_error(
+                &self,
+                _inputs: &[SectorId],
+                error: CategoryAdapterError<std::convert::Infallible>,
+            ) -> FusionAlgebraError {
+                fusion_algebra_error(error)
+            }
+        }
+    };
 }
 
-fn checked_fermion(sector: SectorId) -> Result<FermionParityIrrep, FusionAlgebraError> {
-    checked_z2_irrep(sector).map(|irrep| FermionParityIrrep::new(irrep.is_odd()))
-}
-
-fn parity_sector(odd: bool) -> SectorId {
-    Z2Irrep::new(u8::from(odd)).sector_id()
-}
+parity_codec!(
+    Z2Codec,
+    ZN,
+    FsZNIrrep,
+    |odd: bool| FsZNIrrep::from_canonical(u32::from(odd), 2)
+        .expect("a parity is a canonical charge modulo 2"),
+    |object: &FsZNIrrep| object.charge() == 1
+);
+parity_codec!(
+    Fz2Codec,
+    FermionParity,
+    FermionParityIrrep,
+    FermionParityIrrep::new,
+    |object: &FermionParityIrrep| object.is_odd()
+);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Z2FusionRule;
 
-impl Z2FusionRule {
-    fn label(&self, sector: SectorId) -> FsZNIrrep {
-        or_panic(checked_z2(sector))
-    }
-}
+static Z2: LazyLock<ZN> = LazyLock::new(|| ZN::new(2).expect("2 is a nonzero modulus"));
+static Z2_IDENTITY: LazyLock<RuleIdentity> = LazyLock::new(RuleIdentity::of_type::<Z2FusionRule>);
 
 impl crate::seal::Provider for Z2FusionRule {}
 
-crate::algebra::multiplicity_free_typed_admission!(Z2FusionRule);
+crate::category_rule::multiplicity_free_adapter_impls!(Z2FusionRule, Z2Irrep, f64);
 
-impl FusionRule for Z2FusionRule {
-    fn rule_identity(&self) -> RuleIdentity {
-        RuleIdentity::of_type::<Self>()
+impl AdapterAccess for Z2FusionRule {
+    type Category = ZN;
+    type Codec = Z2Codec;
+
+    fn category(&self) -> &ZN {
+        &Z2
     }
-
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
+    fn codec(&self) -> &Z2Codec {
+        &Z2Codec
     }
-
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Bosonic
+    fn identity(&self) -> &RuleIdentity {
+        &Z2_IDENTITY
     }
-
-    fn vacuum(&self) -> SectorId {
-        Z2Irrep::EVEN.into()
-    }
-
-    fn dual(&self, sector: SectorId) -> SectorId {
-        self.dual_or_panic(sector)
-    }
-
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        self.fusion_channels_or_panic(left, right)
-    }
-
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        self.nsymbol_or_panic(left, right, coupled)
+    fn vacuum_id(&self) -> SectorId {
+        Z2Irrep::EVEN.sector_id()
     }
 }
-
-impl CheckedFusionAlgebra for Z2FusionRule {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        Ok(parity_sector(
-            ZN::new(2).unwrap().dual(&checked_z2(sector)?).charge() == 1,
-        ))
-    }
-
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        Ok(ZN::new(2)
-            .unwrap()
-            .fusion(&checked_z2(left)?, &checked_z2(right)?)
-            .unwrap()
-            .map(|label| parity_sector(label.charge() == 1))
-            .collect())
-    }
-
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        let (left, right) = (checked_z2(left)?, checked_z2(right)?);
-        Ok(ZN::new(2)
-            .unwrap()
-            .nsymbol(&left, &right, &checked_z2(coupled)?) as usize)
-    }
-}
-
-impl SectorCodec for Z2FusionRule {
-    type Sector = Z2Irrep;
-
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        Ok(value.sector_id())
-    }
-
-    fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        checked_z2_irrep(id)
-    }
-}
-
-impl MultiplicityFreeFusionRule for Z2FusionRule {}
-
-impl CanonicalUnitFusionRule for Z2FusionRule {}
-
-impl MultiplicityFreeFusionSymbols for Z2FusionRule {
-    type Scalar = f64;
-
-    fn has_trivial_associator_gauge(&self) -> bool {
-        true
-    }
-
-    fn f_symbol_scalar(
-        &self,
-        a: SectorId,
-        b: SectorId,
-        c: SectorId,
-        d: SectorId,
-        e: SectorId,
-        f: SectorId,
-    ) -> Self::Scalar {
-        let [a, b, c, d, e, f] = [a, b, c, d, e, f].map(|sector| self.label(sector));
-        ZN::new(2)
-            .unwrap()
-            .f_symbol(&a, &b, &c, &d, &e, &f)
-            .unwrap()
-    }
-
-    fn r_symbol_scalar(&self, a: SectorId, b: SectorId, c: SectorId) -> Self::Scalar {
-        ZN::new(2)
-            .unwrap()
-            .r_symbol(&self.label(a), &self.label(b), &self.label(c))
-            .unwrap()
-    }
-}
-
-rigid_symbols_from_labels!(Z2FusionRule, self, ZN::new(2).unwrap());
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub struct FermionParityFusionRule;
 
-impl FermionParityFusionRule {
-    fn label(&self, sector: SectorId) -> FermionParityIrrep {
-        or_panic(checked_fermion(sector))
-    }
-}
+static FERMION_PARITY_IDENTITY: LazyLock<RuleIdentity> =
+    LazyLock::new(RuleIdentity::of_type::<FermionParityFusionRule>);
 
 impl crate::seal::Provider for FermionParityFusionRule {}
 
-crate::algebra::multiplicity_free_typed_admission!(FermionParityFusionRule);
+crate::category_rule::multiplicity_free_adapter_impls!(FermionParityFusionRule, Z2Irrep, f64);
 
-impl FusionRule for FermionParityFusionRule {
-    fn rule_identity(&self) -> RuleIdentity {
-        RuleIdentity::of_type::<Self>()
+impl AdapterAccess for FermionParityFusionRule {
+    type Category = FermionParity;
+    type Codec = Fz2Codec;
+
+    fn category(&self) -> &FermionParity {
+        &FermionParity
     }
-
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
+    fn codec(&self) -> &Fz2Codec {
+        &Fz2Codec
     }
-
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Fermionic
+    fn identity(&self) -> &RuleIdentity {
+        &FERMION_PARITY_IDENTITY
     }
-
-    fn vacuum(&self) -> SectorId {
-        Z2Irrep::EVEN.into()
-    }
-
-    fn dual(&self, sector: SectorId) -> SectorId {
-        self.dual_or_panic(sector)
-    }
-
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        self.fusion_channels_or_panic(left, right)
-    }
-
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        self.nsymbol_or_panic(left, right, coupled)
+    fn vacuum_id(&self) -> SectorId {
+        Z2Irrep::EVEN.sector_id()
     }
 }
-
-impl CheckedFusionAlgebra for FermionParityFusionRule {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        Ok(parity_sector(
-            FermionParity.dual(&checked_fermion(sector)?).is_odd(),
-        ))
-    }
-
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        Ok(FermionParity
-            .fusion(&checked_fermion(left)?, &checked_fermion(right)?)
-            .unwrap()
-            .map(|label| parity_sector(label.is_odd()))
-            .collect())
-    }
-
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        let (left, right) = (checked_fermion(left)?, checked_fermion(right)?);
-        Ok(FermionParity.nsymbol(&left, &right, &checked_fermion(coupled)?) as usize)
-    }
-}
-
-impl SectorCodec for FermionParityFusionRule {
-    type Sector = Z2Irrep;
-
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        Ok(value.sector_id())
-    }
-
-    fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        checked_z2_irrep(id)
-    }
-}
-
-impl MultiplicityFreeFusionRule for FermionParityFusionRule {}
-
-impl CanonicalUnitFusionRule for FermionParityFusionRule {}
-
-impl MultiplicityFreeFusionSymbols for FermionParityFusionRule {
-    type Scalar = f64;
-
-    fn has_trivial_associator_gauge(&self) -> bool {
-        true
-    }
-
-    fn f_symbol_scalar(
-        &self,
-        a: SectorId,
-        b: SectorId,
-        c: SectorId,
-        d: SectorId,
-        e: SectorId,
-        f: SectorId,
-    ) -> Self::Scalar {
-        let [a, b, c, d, e, f] = [a, b, c, d, e, f].map(|sector| self.label(sector));
-        FermionParity.f_symbol(&a, &b, &c, &d, &e, &f).unwrap()
-    }
-
-    fn r_symbol_scalar(&self, a: SectorId, b: SectorId, c: SectorId) -> Self::Scalar {
-        FermionParity
-            .r_symbol(&self.label(a), &self.label(b), &self.label(c))
-            .unwrap()
-    }
-}
-
-rigid_symbols_from_labels!(FermionParityFusionRule, self, FermionParity);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct U1Irrep {
@@ -649,43 +464,71 @@ impl From<U1Irrep> for SectorId {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub struct U1FusionRule;
 
-impl U1FusionRule {
-    fn label(&self, sector: SectorId) -> FsU1Irrep {
-        or_panic(checked_u1_irrep(sector)).fs()
+static U1_IDENTITY: LazyLock<RuleIdentity> = LazyLock::new(RuleIdentity::of_type::<U1FusionRule>);
+
+/// `U1Irrep` labels and zigzag ids over `U1`.
+///
+/// Why `N` also checks the fusion: symtn's checked algebra reports a sum
+/// outside the label range as `U1FusionOverflow` (stricter than
+/// TensorKitSectors' `0`), so a caller that enumerates channels and one that
+/// asks for `N` fail alike.
+#[derive(Debug)]
+pub struct U1Codec;
+
+impl U1Codec {
+    fn overflow(left: &FsU1Irrep, right: &FsU1Irrep) -> FusionAlgebraError {
+        FusionAlgebraError::U1FusionOverflow {
+            left: left.charge(),
+            right: right.charge(),
+        }
     }
 }
 
-impl crate::seal::Provider for U1FusionRule {}
+impl CategoryCodec<U1> for U1Codec {
+    type Sector = U1Irrep;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
 
-crate::algebra::multiplicity_free_typed_admission!(U1FusionRule);
-
-impl FusionRule for U1FusionRule {
-    fn rule_identity(&self) -> RuleIdentity {
-        RuleIdentity::of_type::<Self>()
+    fn encode_label<'a>(
+        &self,
+        _category: impl Fn() -> &'a U1 + Copy,
+        rule: &RuleIdentity,
+        label: &U1Irrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        if U1Irrep::try_new(label.charge()).is_some() {
+            Ok(label.sector_id())
+        } else {
+            Err(FusionAlgebraError::UnrepresentableSectorLabel {
+                rule: rule.clone(),
+                label: label.charge().to_string(),
+            })
+        }
     }
 
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
+    fn decode_label<'a>(
+        &self,
+        _category: impl Fn() -> &'a U1 + Copy,
+        id: SectorId,
+    ) -> Result<U1Irrep, FusionAlgebraError> {
+        checked_u1_irrep(id)
     }
 
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Bosonic
+    fn object<'a>(
+        &self,
+        _category: impl Fn() -> &'a U1 + Copy,
+        id: SectorId,
+    ) -> Result<FsU1Irrep, FusionAlgebraError> {
+        checked_u1_irrep(id).map(U1Irrep::fs)
     }
 
-    fn vacuum(&self) -> SectorId {
-        U1Irrep::new(0).into()
-    }
-
-    fn dual(&self, sector: SectorId) -> SectorId {
-        self.dual_or_panic(sector)
-    }
-
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        self.fusion_channels_or_panic(left, right)
-    }
-
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        self.nsymbol_or_panic(left, right, coupled)
+    fn sector_id<'a>(
+        &self,
+        _category: impl Fn() -> &'a U1 + Copy,
+        _rule: &RuleIdentity,
+        object: &FsU1Irrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(U1Irrep::from_fs(*object).sector_id())
     }
 
     /// TensorKitSectors 0.3.9 `findindex(::SectorValues{U1Irrep}, c)`
@@ -701,64 +544,62 @@ impl FusionRule for U1FusionRule {
         };
         SectorOrderKey::position(4 * u64::from(charge.unsigned_abs()) - u64::from(charge > 0))
     }
-}
 
-impl CheckedFusionAlgebra for U1FusionRule {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        let irrep = checked_u1_irrep(sector)?;
-        Ok(U1Irrep::from_fs(U1.dual(&irrep.fs())).into())
-    }
-
-    fn try_fusion_channels(
+    fn admit<'a, const N: usize>(
         &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        let left = checked_u1_irrep(left)?;
-        let right = checked_u1_irrep(right)?;
-        Ok(core::iter::once(left.checked_fuse(right)?.into()).collect())
-    }
-
-    /// Why not fusion-symbols' exact `U1.nsymbol` alone: symtn's checked
-    /// algebra reports a sum outside the label range as
-    /// `U1FusionOverflow` (stricter than TensorKitSectors' `0`), so a caller
-    /// that enumerates channels and one that asks for `N` fail alike.
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        let left = checked_u1_irrep(left)?;
-        let right = checked_u1_irrep(right)?;
-        let coupled = checked_u1_irrep(coupled)?;
-        left.checked_fuse(right)?;
-        Ok(U1.nsymbol(&left.fs(), &right.fs(), &coupled.fs()) as usize)
-    }
-}
-
-impl SectorCodec for U1FusionRule {
-    type Sector = U1Irrep;
-
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        if Self::Sector::try_new(value.charge()).is_some() {
-            Ok(value.sector_id())
-        } else {
-            Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: self.rule_identity(),
-                label: value.charge().to_string(),
-            })
+        category: impl Fn() -> &'a U1 + Copy,
+        rule: &RuleIdentity,
+        operation: CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[FsU1Irrep; N], FusionAlgebraError> {
+        let objects = admit_in_order(self, category, rule, operation, ids)?;
+        if let (CategoryOperation::N, [left, right, ..]) = (operation, objects.as_slice()) {
+            if category().fusion(left, right).is_err() {
+                return Err(Self::overflow(left, right));
+            }
         }
+        Ok(objects)
     }
 
-    fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        checked_u1_irrep(id)
+    fn map_error(
+        &self,
+        inputs: &[SectorId],
+        error: CategoryAdapterError<U1Error>,
+    ) -> FusionAlgebraError {
+        // The only U(1) failure is a fusion leaving the charge range.
+        if let (CategoryAdapterError::Provider(_), &[left, right]) = (&error, inputs) {
+            if let (Some(left), Some(right)) = (
+                U1Irrep::from_sector_id(left),
+                U1Irrep::from_sector_id(right),
+            ) {
+                return Self::overflow(&left.fs(), &right.fs());
+            }
+        }
+        fusion_algebra_error(error)
     }
 }
 
-impl MultiplicityFreeFusionRule for U1FusionRule {}
+impl crate::seal::Provider for U1FusionRule {}
 
-impl CanonicalUnitFusionRule for U1FusionRule {}
+crate::category_rule::multiplicity_free_adapter_impls!(U1FusionRule, U1Irrep, f64);
+
+impl AdapterAccess for U1FusionRule {
+    type Category = U1;
+    type Codec = U1Codec;
+
+    fn category(&self) -> &U1 {
+        &U1
+    }
+    fn codec(&self) -> &U1Codec {
+        &U1Codec
+    }
+    fn identity(&self) -> &RuleIdentity {
+        &U1_IDENTITY
+    }
+    fn vacuum_id(&self) -> SectorId {
+        U1Irrep::new(0).sector_id()
+    }
+}
 
 impl PhysicalFusionBasis for U1FusionRule {
     type Scalar = f64;
@@ -802,37 +643,19 @@ impl PhysicalFusionBasis for U1FusionRule {
                 });
             }
         }
-        Ok(1.0)
+        // `try_nsymbol` admitted all three labels.
+        let [left, right, coupled] = [left, right, coupled].map(|sector| {
+            U1Irrep::from_sector_id(sector)
+                .expect("admitted by try_nsymbol")
+                .fs()
+        });
+        U1.cgc(&left, &right, &coupled).map_err(|error| {
+            PhysicalBasisError::FusionAlgebra(FusionAlgebraError::CategoryFailure(
+                CategoryFailure::new(error),
+            ))
+        })
     }
 }
-
-impl MultiplicityFreeFusionSymbols for U1FusionRule {
-    type Scalar = f64;
-
-    fn has_trivial_associator_gauge(&self) -> bool {
-        true
-    }
-
-    fn f_symbol_scalar(
-        &self,
-        a: SectorId,
-        b: SectorId,
-        c: SectorId,
-        d: SectorId,
-        e: SectorId,
-        f: SectorId,
-    ) -> Self::Scalar {
-        let [a, b, c, d, e, f] = [a, b, c, d, e, f].map(|sector| self.label(sector));
-        U1.f_symbol(&a, &b, &c, &d, &e, &f).unwrap()
-    }
-
-    fn r_symbol_scalar(&self, a: SectorId, b: SectorId, c: SectorId) -> Self::Scalar {
-        U1.r_symbol(&self.label(a), &self.label(b), &self.label(c))
-            .unwrap()
-    }
-}
-
-rigid_symbols_from_labels!(U1FusionRule, self, U1);
 
 #[cfg(test)]
 mod tests {
@@ -992,6 +815,37 @@ mod tests {
                 dimension: 0,
             })
         );
+    }
+
+    #[test]
+    fn u1_physical_coefficient_is_the_fusion_symbols_cgc() {
+        // What: the one-dimensional U(1) coefficient comes from
+        // fusion-symbols' group representations, after symtn's validation.
+        use fusion_symbols::{category::GroupRepresentations, lie};
+        let fs = |charge| lie::U1Irrep::new(charge).unwrap();
+        for (left, right) in [
+            (0, 0),
+            (2, -1),
+            (-7, 3),
+            (i32::MAX, 0),
+            (i32::MIN + 1, i32::MAX),
+        ] {
+            let coupled = left + right;
+            let expected = lie::U1.cgc(&fs(left), &fs(right), &fs(coupled)).unwrap();
+            assert_eq!(expected, 1.0);
+            assert_eq!(
+                U1FusionRule.try_fusion_tensor_element(
+                    U1Irrep::new(left).into(),
+                    U1Irrep::new(right).into(),
+                    U1Irrep::new(coupled).into(),
+                    0,
+                    0,
+                    0,
+                    0,
+                ),
+                Ok(expected)
+            );
+        }
     }
 
     #[test]

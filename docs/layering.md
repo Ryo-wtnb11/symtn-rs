@@ -66,8 +66,8 @@ shaped around one consumer's call pattern.
 | Crate | Owns |
 | --- | --- |
 | `fusion-symbols` (formerly `racah`), module `lie` | Lie-group coefficients. SU(2) symbols are exact. Behind `lie-generated` it generates CGC, F and R: SU(N), N ≥ 3, in the SUNRepresentations gauge, and B/C/D (SO(N)/Sp(2N)) in fusion-symbols' QSpace-derived sweep gauge (`docs/gauge_soN.md`). |
-| `fusion-symbols`, module `table` | The pinned AnyonWiki tables (unitary, rank ≤ 4) behind `TableRule`, Fibonacci included (#2016, #2277). |
-| `fusion-symbols`, modules `finite`, `fermion`, `lie` | Z2, Z_N, U(1), fermion parity and CU(1): every symbol behind `Z2FusionRule`, `ZNFusionRule`, `U1FusionRule`, `FermionParityFusionRule` and `CU1FusionRule` (#2278). symtn keeps their labels, codecs, identities and checked errors. |
+| `fusion-symbols`, module `table` | The pinned AnyonWiki tables (unitary, rank ≤ 4) behind `TableRule`, Fibonacci included (#2016, #2277), through the category adapter. |
+| `fusion-symbols`, modules `finite`, `fermion`, `lie` | Z2, Z_N, U(1), fermion parity and CU(1): every symbol, including A, B and U(1)'s CGC, behind `Z2FusionRule`, `ZNFusionRule`, `U1FusionRule`, `FermionParityFusionRule` and `CU1FusionRule`, through the category adapter (#2016, #2278). symtn keeps their labels, codecs, identities and checked errors. |
 | `fusion-symbols`, module `product` | Deligne products; symtn still composes its own `ProductFusionRule` symbols pending #2016. |
 
 **Target: one provider shape across crates.** Every crate should answer N,

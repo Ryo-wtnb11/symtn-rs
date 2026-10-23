@@ -72,6 +72,28 @@ fn every_shipped_entry_constructs_with_its_own_identity() {
 }
 
 #[test]
+fn every_shipped_entry_has_a_certified_unit_and_an_uncertified_associator() {
+    // What: `TableRule`'s canonical-unit marker rests on the table's own
+    // certificate for every shipped entry, while the trivial-associator
+    // certificate stays withheld even where the table grants it, as
+    // conservatively as the reported `Anyonic` braiding.
+    use fusion_symbols::category::FusionCategory;
+    let mut granted_by_the_table = 0;
+    for uuid in TableCategory::shipped_uuids() {
+        let category = TableCategory::by_uuid(uuid).unwrap();
+        assert!(category.has_canonical_unit(), "{uuid}");
+        granted_by_the_table += usize::from(category.has_trivial_associator_gauge());
+        assert!(
+            !TableRule::by_uuid(uuid)
+                .unwrap()
+                .has_trivial_associator_gauge(),
+            "{uuid}"
+        );
+    }
+    assert!(granted_by_the_table > 0);
+}
+
+#[test]
 fn unknown_and_unsupported_uuids_are_opaque_errors() {
     for uuid in ["not-a-uuid", NON_UNITARY, NOT_SHIPPED] {
         let error = TableRule::by_uuid(uuid).unwrap_err();
