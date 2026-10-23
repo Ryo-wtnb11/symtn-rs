@@ -49,6 +49,18 @@ fn fermions_in_different_factors_have_no_cross_braid() {
     );
 }
 
+#[test]
+#[should_panic(expected = "MultiplicityFreeFusionSymbols::r_symbol_scalar")]
+fn zero_left_r_still_rejects_an_invalid_right_mf_sector() {
+    let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, Z2FusionRule).unwrap();
+    let vacuum = rule.encode_component_ids(s(0), s(0));
+    let absent = rule.encode_component_ids(s(2), s(0));
+    // Negative control: a valid right factor preserves the absent SU(2) channel.
+    assert_eq!(rule.r_symbol_scalar(vacuum, vacuum, absent), 0.0);
+    let invalid = rule.encode_component_ids(s(0), s(2));
+    rule.r_symbol_scalar(invalid, vacuum, absent);
+}
+
 #[cfg(feature = "cgc-gen")]
 mod generated {
     use super::*;
@@ -85,6 +97,29 @@ mod generated {
     // The largest exported representation here is (2,3), dimension 42.
     // Allow the roundoff of two independent dense physical-CGC contractions.
     const CGC_TERMS: usize = 2 * 42 * 42 * 42;
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn zero_left_r_still_rejects_an_invalid_right_generic_sector() {
+        let rule =
+            ProductFusionRule::<_, _>::try_new(SU2FusionRule, SUNFusionRule::new(2).unwrap())
+                .unwrap();
+        let vacuum = rule.encode_component_ids(s(0), s(0));
+        let absent = rule.encode_component_ids(s(2), s(0));
+        // Negative control: a valid right factor preserves the absent SU(2) channel.
+        let zero = rule.try_r_symbol_generic(vacuum, vacuum, absent).unwrap();
+        assert_eq!(zero.shape(), (0, 0));
+        assert!(zero.data().is_empty());
+        let invalid = rule.encode_component_ids(s(0), s(u32::MAX as usize + 1));
+        assert!(matches!(
+            rule.try_nsymbol(invalid, vacuum, absent),
+            Err(ProductFusionRuleError::Right(_))
+        ));
+        assert!(matches!(
+            rule.try_r_symbol_generic(invalid, vacuum, absent),
+            Err(ProductFusionRuleError::Right(_))
+        ));
+    }
 
     #[test]
     fn su3_u1_keeps_the_full_octet_blocks_and_nonselfdual_phase() {

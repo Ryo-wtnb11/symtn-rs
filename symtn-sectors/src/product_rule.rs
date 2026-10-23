@@ -310,20 +310,15 @@ where
             left_ids[k] = l;
             right_ids[k] = r;
         }
-        // A factor's known-zero R makes the product R zero; the left factor
-        // is still checked first, as in admit.
-        let Some(left) = self
+        let left = self
             .left
             .admit_r(left_ids)
-            .map_err(<A<L, R> as ProductAdmission<L::Error, R::Error>>::left)?
-        else {
-            return Ok(None);
-        };
-        let Some(right) = self
+            .map_err(<A<L, R> as ProductAdmission<L::Error, R::Error>>::left)?;
+        let right = self
             .right
             .admit_r(right_ids)
-            .map_err(<A<L, R> as ProductAdmission<L::Error, R::Error>>::right)?
-        else {
+            .map_err(<A<L, R> as ProductAdmission<L::Error, R::Error>>::right)?;
+        let (Some(left), Some(right)) = (left, right) else {
             return Ok(None);
         };
         let mut right = right.into_iter();
@@ -596,7 +591,7 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        self.braiding_policy()
+        forward::braiding_style_kind(AdapterAccess::category(self).braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {
@@ -703,7 +698,7 @@ where
     type Scalar = <ProductCategory<L, R> as FusionCategory>::Scalar;
 
     fn has_trivial_associator_gauge(&self) -> bool {
-        self.trivial_associator_policy()
+        AdapterAccess::category(self).has_trivial_associator_gauge()
     }
 
     fn f_symbol_scalar(
@@ -849,7 +844,7 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        self.braiding_policy()
+        forward::braiding_style_kind(AdapterAccess::category(self).braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {

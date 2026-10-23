@@ -835,18 +835,6 @@ pub(crate) trait AdapterAccess: crate::seal::Provider + 'static {
     fn identity(&self) -> &RuleIdentity;
     /// The id the codec gives the category's unit.
     fn vacuum_id(&self) -> SectorId;
-
-    /// The reported braiding style: the category's, unless the rule keeps a
-    /// more conservative execution policy.
-    fn braiding_policy(&self) -> BraidingStyleKind {
-        forward::braiding_style_kind(self.category().braiding_style())
-    }
-
-    /// The category's trivial-associator certificate, unless the rule keeps
-    /// a more conservative execution policy.
-    fn trivial_associator_policy(&self) -> bool {
-        self.category().has_trivial_associator_gauge()
-    }
 }
 
 impl<C, K> AdapterAccess for CategoryRule<C, K>
@@ -1449,7 +1437,7 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        self.braiding_policy()
+        forward::braiding_style_kind(self.category().braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {
@@ -1536,7 +1524,7 @@ where
     type Scalar = C::Scalar;
 
     fn has_trivial_associator_gauge(&self) -> bool {
-        self.trivial_associator_policy()
+        self.category().has_trivial_associator_gauge()
     }
 
     fn f_symbol_scalar(
@@ -1670,7 +1658,7 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        self.braiding_policy()
+        forward::braiding_style_kind(self.category().braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {
@@ -1853,7 +1841,7 @@ macro_rules! multiplicity_free_adapter_impls {
                     forward::multiplicity_free_style(self)
                 }
                 fn braiding_style(&self) -> BraidingStyleKind {
-                    self.braiding_policy()
+                    forward::braiding_style_kind(self.category().braiding_style())
                 }
                 fn vacuum(&self) -> SectorId {
                     self.vacuum_id()
@@ -1914,7 +1902,7 @@ macro_rules! multiplicity_free_adapter_impls {
                 type Scalar = $scalar;
 
                 fn has_trivial_associator_gauge(&self) -> bool {
-                    self.trivial_associator_policy()
+                    self.category().has_trivial_associator_gauge()
                 }
                 fn f_symbol_scalar(
                     &self,
