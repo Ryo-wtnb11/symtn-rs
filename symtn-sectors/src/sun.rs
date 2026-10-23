@@ -6,25 +6,34 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, OnceLock, PoisonError, RwLock};
 
-use num_traits::ToPrimitive;
-
+use crate::category_rule::{forward, AdapterAccess};
 use crate::{
-    BraidingStyleKind, CheckedCanonicalUnitFusionRule, CheckedGenericAdmissionMode,
-    CheckedGenericFusion, CheckedGenericPivotal, CheckedGenericRigidSymbols, FusionStyleKind,
-    GenericFArray, GenericRMatrix, RuleIdentity, SectorId, SectorVec, SymbolShapeError,
-    TypedSectorAdmission,
+    BraidingStyleKind, CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec,
+    CheckedCanonicalUnitFusionRule, CheckedGenericAdmissionMode, CheckedGenericFusion,
+    CheckedGenericPivotal, CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray,
+    GenericRMatrix, RuleIdentity, SectorId, SectorVec, SymbolShapeError, TypedSectorAdmission,
 };
 
 const CODEC_VERSION: &[u8] = b"symtn:sun:dynkin:graded-total-then-lex:v1";
 const IDENTITY_SCHEMA: u64 = 0x5355_4e5f_434f_4445;
 
-/// Checked Racah-backed SU(N) structural fusion adapter.
+/// Checked SU(N) rule over the fusion-symbols category adapter.
+///
+/// The private Dynkin codec retains graded-total-then-lex ids, encoded-id
+/// channel ordering, bounded interning and lazy category construction.
+/// Every rank, including SU(2), uses checked Generic admission; no physical
+/// expansion is provided.
 #[derive(Clone, Debug)]
 pub struct SUNFusionRule {
-    n: usize,
+    codec: SunCodec,
     identity: RuleIdentity,
-    irreps: Arc<IrrepTable>,
     category: Arc<OnceLock<LieGroup>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SunCodec {
+    n: usize,
+    irreps: Arc<IrrepTable>,
 }
 
 /// Most sectors one rule interns. A full table still answers every query:
@@ -100,13 +109,13 @@ impl IrrepTable {
 // hashing ignore them.
 impl PartialEq for SUNFusionRule {
     fn eq(&self, other: &Self) -> bool {
-        self.n == other.n
+        self.rank() == other.rank()
     }
 }
 impl Eq for SUNFusionRule {}
 impl std::hash::Hash for SUNFusionRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.n.hash(state);
+        self.rank().hash(state);
     }
 }
 
@@ -235,29 +244,55 @@ impl SUNFusionRule {
             std::hash::Hasher::finish(&hasher),
             Self::identity_bytes(n),
         );
-        Ok(Self {
+        let codec = SunCodec {
             n,
-            identity,
             irreps: Arc::default(),
+        };
+        Ok(Self {
+            codec,
+            identity,
             category: Arc::default(),
         })
     }
 
     fn category(&self) -> &LieGroup {
         self.category
-            .get_or_init(|| LieGroup::new(GroupId::su(self.n).unwrap()).unwrap())
+            .get_or_init(|| LieGroup::new(GroupId::su(self.rank()).unwrap()).unwrap())
     }
 
     pub const fn rank(&self) -> usize {
-        self.n
+        self.codec.n
     }
 
     /// Encodes nonnegative length `N - 1` Dynkin labels by total grade then lexicographic order.
     /// For SU(2), the single Dynkin label must be at most `u32::MAX`.
     pub fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, SUNFusionRuleError> {
-        self.encode_dynkin_iter(|| labels.iter().copied())
+        self.codec.encode_dynkin_iter(|| labels.iter().copied())
     }
 
+    /// Decodes a `SectorId` with bounded binary searches over the grade and each label.
+    /// SU(2) ids above `u32::MAX` are unrepresentable.
+    pub fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, SUNFusionRuleError> {
+        self.codec.decode_dynkin(sector)
+    }
+
+    fn identity_bytes(n: usize) -> Arc<[u8]> {
+        // Fingerprints are shared within A1 / higher A; do not allocate rank-sized provider state here.
+        let category = LieGroup::new(GroupId::su(if n == 2 { 2 } else { 3 }).unwrap()).unwrap();
+        let mut bytes = Vec::with_capacity(category.authority_fingerprint().len() + 32);
+        bytes.extend_from_slice(CODEC_VERSION);
+        bytes.extend_from_slice(&(usize::BITS).to_le_bytes());
+        bytes.extend_from_slice(&n.to_le_bytes());
+        bytes.extend_from_slice(b":generic:bosonic:racah-sun");
+        bytes.extend_from_slice(
+            b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
+        );
+        bytes.extend_from_slice(category.authority_fingerprint());
+        Arc::from(bytes)
+    }
+}
+
+impl SunCodec {
     // Validate, then compute the grade and lexicographic rank without materializing labels.
     fn encode_dynkin_iter<I: ExactSizeIterator<Item = i64>>(
         &self,
@@ -291,7 +326,7 @@ impl SUNFusionRule {
 
     /// Decodes a `SectorId` with bounded binary searches over the grade and each label.
     /// SU(2) ids above `u32::MAX` are unrepresentable.
-    pub fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, SUNFusionRuleError> {
+    fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, SUNFusionRuleError> {
         let id = sector.id();
         let r = self.n - 1;
         let mut low = 0usize;
@@ -368,27 +403,16 @@ impl SUNFusionRule {
         Ok(())
     }
 
-    fn identity_bytes(n: usize) -> Arc<[u8]> {
-        // Fingerprints are shared within A1 / higher A; do not allocate rank-sized provider state here.
-        let category = LieGroup::new(GroupId::su(if n == 2 { 2 } else { 3 }).unwrap()).unwrap();
-        let mut bytes = Vec::with_capacity(category.authority_fingerprint().len() + 32);
-        bytes.extend_from_slice(CODEC_VERSION);
-        bytes.extend_from_slice(&(usize::BITS).to_le_bytes());
-        bytes.extend_from_slice(&n.to_le_bytes());
-        bytes.extend_from_slice(b":generic:bosonic:racah-sun");
-        bytes.extend_from_slice(
-            b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
-        );
-        bytes.extend_from_slice(category.authority_fingerprint());
-        Arc::from(bytes)
-    }
-
-    fn irrep(&self, sector: SectorId) -> Result<Arc<LieIrrep>, SUNFusionRuleError> {
+    fn irrep<'a>(
+        &self,
+        category: impl Fn() -> &'a LieGroup,
+        sector: SectorId,
+    ) -> Result<Arc<LieIrrep>, SUNFusionRuleError> {
         if let Some(irrep) = self.irreps.by_id(sector) {
             return Ok(irrep);
         }
         let labels = self.decode_dynkin(sector)?;
-        let irrep = self.category().irrep(&labels).map_err(racah_error)?;
+        let irrep = category().irrep(&labels).map_err(racah_error)?;
         Ok(self.irreps.insert(sector, Arc::new(irrep)))
     }
 
@@ -400,13 +424,102 @@ impl SUNFusionRule {
         self.irreps.insert(sector, Arc::new(irrep.clone()));
         Ok(sector)
     }
+}
 
-    fn dim_scalar(&self, sector: SectorId) -> Result<f64, SUNFusionRuleError> {
-        self.irrep(sector)?
-            .dim_exact()
-            .to_f64()
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .ok_or(SUNFusionRuleError::DimensionNotRepresentable { sector })
+impl CategoryCodec<LieGroup> for SunCodec {
+    type Sector = Vec<i64>;
+    type Error = SUNFusionRuleError;
+    type Mode = CheckedGenericAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        _category: impl Fn() -> &'a LieGroup + Copy,
+        _rule: &RuleIdentity,
+        label: &Vec<i64>,
+    ) -> Result<SectorId, SUNFusionRuleError> {
+        self.encode_dynkin_iter(|| label.iter().copied())
+    }
+
+    fn decode_label<'a>(
+        &self,
+        _category: impl Fn() -> &'a LieGroup + Copy,
+        id: SectorId,
+    ) -> Result<Vec<i64>, SUNFusionRuleError> {
+        self.decode_dynkin(id)
+    }
+
+    fn object<'a>(
+        &self,
+        category: impl Fn() -> &'a LieGroup + Copy,
+        id: SectorId,
+    ) -> Result<LieIrrep, SUNFusionRuleError> {
+        self.irrep(category, id).map(|irrep| (*irrep).clone())
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _category: impl Fn() -> &'a LieGroup + Copy,
+        _rule: &RuleIdentity,
+        object: &LieIrrep,
+    ) -> Result<SectorId, SUNFusionRuleError> {
+        self.sector(object)
+    }
+
+    fn encode_channels(
+        &self,
+        _category: &LieGroup,
+        _rule: &RuleIdentity,
+        _inputs: [SectorId; 2],
+        outcomes: impl Iterator<Item = LieIrrep>,
+    ) -> Result<SectorVec, SUNFusionRuleError> {
+        let mut channels: SectorVec = outcomes
+            .map(|irrep| self.sector(&irrep))
+            .collect::<Result<_, _>>()?;
+        channels.sort_unstable();
+        Ok(channels)
+    }
+
+    fn map_error(
+        &self,
+        _inputs: &[SectorId],
+        error: CategoryAdapterError<fusion_symbols::lie::LieError>,
+    ) -> SUNFusionRuleError {
+        match error {
+            CategoryAdapterError::Provider(error) => racah_error(error),
+            CategoryAdapterError::DimensionNotRepresentable { sector } => {
+                SUNFusionRuleError::DimensionNotRepresentable { sector }
+            }
+            CategoryAdapterError::MalformedSymbolData(error) => {
+                SUNFusionRuleError::MalformedSymbolData(error)
+            }
+            CategoryAdapterError::ForeignObject { .. } => {
+                racah_error(fusion_symbols::lie::LieError::InvalidLabel)
+            }
+            CategoryAdapterError::NoBraiding => {
+                racah_error(fusion_symbols::lie::LieError::Unsupported {
+                    requires: "braiding",
+                })
+            }
+        }
+    }
+}
+
+impl AdapterAccess for SUNFusionRule {
+    type Category = LieGroup;
+    type Codec = SunCodec;
+
+    fn category(&self) -> &LieGroup {
+        self.category()
+    }
+    fn codec(&self) -> &SunCodec {
+        &self.codec
+    }
+    fn identity(&self) -> &RuleIdentity {
+        &self.identity
+    }
+    fn vacuum_id(&self) -> SectorId {
+        SectorId::new(0)
     }
 }
 
@@ -430,12 +543,11 @@ impl CheckedGenericFusion for SUNFusionRule {
     }
 
     fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
-        if let Some(dual) = self.irreps.dual(sector) {
+        if let Some(dual) = self.codec.irreps.dual(sector) {
             return Ok(dual);
         }
-        let irrep = self.irrep(sector)?;
-        let dual = self.sector(&self.category().dual(&irrep))?;
-        self.irreps.insert_dual(sector, dual);
+        let dual = forward::dual(self, sector)?;
+        self.codec.irreps.insert_dual(sector, dual);
         Ok(dual)
     }
 
@@ -444,13 +556,7 @@ impl CheckedGenericFusion for SUNFusionRule {
         left: SectorId,
         right: SectorId,
     ) -> Result<SectorVec, Self::Error> {
-        let (left, right) = (self.irrep(left)?, self.irrep(right)?);
-        let product = self.category().fusion(&left, &right).map_err(racah_error)?;
-        let mut channels: SectorVec = product
-            .map(|irrep| self.sector(&irrep))
-            .collect::<Result<_, _>>()?;
-        channels.sort_unstable();
-        Ok(channels)
+        forward::fusion_channels(self, left, right)
     }
 
     fn try_fusion_channels_in_table(
@@ -467,8 +573,7 @@ impl CheckedGenericFusion for SUNFusionRule {
         right: SectorId,
         coupled: SectorId,
     ) -> Result<usize, Self::Error> {
-        let (left, right, coupled) = (self.irrep(left)?, self.irrep(right)?, self.irrep(coupled)?);
-        Ok(self.category().nsymbol(&left, &right, &coupled) as usize)
+        forward::nsymbol(self, left, right, coupled)
     }
 }
 
@@ -500,29 +605,24 @@ impl TypedSectorAdmission for SUNFusionRule {
 impl CheckedGenericRigidSymbols for SUNFusionRule {
     type Scalar = f64;
 
-    /// The Weyl dimension, exact below `2^53`, rounded once above it, and
-    /// [`SUNFusionRuleError::DimensionNotRepresentable`] past `f64::MAX`.
+    /// The provider's Weyl dimension, exact below `2^53`, rounded once above
+    /// it, and [`SUNFusionRuleError::DimensionNotRepresentable`] past `f64::MAX`.
     fn try_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        self.dim_scalar(sector)
+        forward::dimension(self, sector, FusionCategory::dim)
     }
 
     fn try_sqrt_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        Ok(self.dim_scalar(sector)?.sqrt())
+        forward::dimension(self, sector, FusionCategory::sqrt_dim)
     }
 
     fn try_inv_sqrt_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        Ok(self.dim_scalar(sector)?.sqrt().recip())
+        forward::dimension(self, sector, FusionCategory::inv_sqrt_dim)
     }
 
     fn try_frobenius_schur_phase_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        let irrep = self.irrep(sector)?;
-        Ok(self.category().frobenius_schur_phase(&irrep))
+        forward::frobenius_schur_phase(self, sector)
     }
 
-    // Why no N-shape check here: the block's shape against the fusion
-    // multiplicities is validated once, at the symtn-core checked boundary
-    // (`checked_generic_f_symbol` / `checked_generic_r_symbol`) every
-    // consumer of these symbols goes through (#2014).
     fn try_f_symbol_generic(
         &self,
         a: SectorId,
@@ -532,21 +632,7 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         e: SectorId,
         f: SectorId,
     ) -> Result<GenericFArray<f64>, Self::Error> {
-        let (a, b, c, d, e, f) = (
-            self.irrep(a)?,
-            self.irrep(b)?,
-            self.irrep(c)?,
-            self.irrep(d)?,
-            self.irrep(e)?,
-            self.irrep(f)?,
-        );
-        let block = self
-            .category()
-            .f_symbol(&a, &b, &c, &d, &e, &f)
-            .map_err(racah_error)?;
-        let [mu, nu, kappa, lambda] = block.dims();
-        GenericFArray::try_new(block.data().to_vec(), (mu, nu, kappa, lambda))
-            .map_err(SUNFusionRuleError::MalformedSymbolData)
+        forward::f_block(self, [a, b, c, d, e, f])
     }
 
     fn try_r_symbol_generic(
@@ -555,19 +641,21 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<f64>, Self::Error> {
-        let (a, b, c) = (self.irrep(a)?, self.irrep(b)?, self.irrep(c)?);
-        let block = self.category().r_symbol(&a, &b, &c).map_err(racah_error)?;
-        GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
-            .map_err(SUNFusionRuleError::MalformedSymbolData)
+        forward::r_block(self, [a, b, c])
     }
 
+    // SUN's existing boundary accepts empty moves before the provider needs
+    // dimensions or a dual object; neither must fit an additional symtn id.
+    // Keep the provider's shaped block rather than strengthen that admission.
     fn try_a_symbol_generic(
         &self,
         a: SectorId,
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<f64>, Self::Error> {
-        let (a, b, c) = (self.irrep(a)?, self.irrep(b)?, self.irrep(c)?);
+        let [a, b, c] = crate::category_rule::try_map_array([a, b, c], |id| {
+            self.codec.object(|| self.category(), id)
+        })?;
         let block = self.category().a_symbol(&a, &b, &c).map_err(racah_error)?;
         GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
             .map_err(SUNFusionRuleError::MalformedSymbolData)
@@ -579,7 +667,9 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<f64>, Self::Error> {
-        let (a, b, c) = (self.irrep(a)?, self.irrep(b)?, self.irrep(c)?);
+        let [a, b, c] = crate::category_rule::try_map_array([a, b, c], |id| {
+            self.codec.object(|| self.category(), id)
+        })?;
         let block = self.category().b_symbol(&a, &b, &c).map_err(racah_error)?;
         GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
             .map_err(SUNFusionRuleError::MalformedSymbolData)
@@ -588,8 +678,7 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
 
 impl CheckedGenericPivotal for SUNFusionRule {
     fn try_twist_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        let irrep = self.irrep(sector)?;
-        Ok(self.category().twist(&irrep))
+        forward::twist(self, sector)
     }
 }
 
@@ -905,24 +994,38 @@ mod tests {
         let rule = SUNFusionRule::new(3).unwrap();
         let three = rule.encode_dynkin(&[1, 0]).unwrap();
         let eight = rule.encode_dynkin(&[1, 1]).unwrap();
-        let first = rule.irrep(three).unwrap();
-        assert!(Arc::ptr_eq(&first, &rule.irrep(three).unwrap()));
-        assert!(Arc::ptr_eq(&first, &rule.clone().irrep(three).unwrap()));
+        let first = rule.codec.irrep(|| rule.category(), three).unwrap();
+        assert!(Arc::ptr_eq(
+            &first,
+            &rule.codec.irrep(|| rule.category(), three).unwrap()
+        ));
+        let cloned_rule = rule.clone();
+        assert!(Arc::ptr_eq(
+            &first,
+            &cloned_rule
+                .codec
+                .irrep(|| cloned_rule.category(), three)
+                .unwrap()
+        ));
         assert_eq!(*first, rule.category().irrep(&[1, 0]).unwrap());
-        assert_ne!(*rule.irrep(eight).unwrap(), *first);
-        assert_eq!(rule.sector(&first).unwrap(), three);
+        assert_ne!(
+            *rule.codec.irrep(|| rule.category(), eight).unwrap(),
+            *first
+        );
+        assert_eq!(rule.codec.sector(&first).unwrap(), three);
 
         let anti_three = rule.encode_dynkin(&[0, 1]).unwrap();
-        assert_eq!(rule.irreps.dual(three), None);
+        assert_eq!(rule.codec.irreps.dual(three), None);
         assert_eq!(rule.try_dual(three).unwrap(), anti_three);
-        assert_eq!(rule.irreps.dual(three), Some(anti_three));
-        assert_eq!(rule.irreps.dual(anti_three), Some(three));
+        assert_eq!(rule.codec.irreps.dual(three), Some(anti_three));
+        assert_eq!(rule.codec.irreps.dual(anti_three), Some(three));
 
         // Failed conversions are not interned.
         let su2 = SUNFusionRule::new(2).unwrap();
-        let wide = SUNFusionRule::new(4).unwrap().irrep(three).unwrap();
-        assert!(su2.sector(&wide).is_err());
-        assert!(su2.sector(&wide).is_err());
+        let su4 = SUNFusionRule::new(4).unwrap();
+        let wide = su4.codec.irrep(|| su4.category(), three).unwrap();
+        assert!(su2.codec.sector(&wide).is_err());
+        assert!(su2.codec.sector(&wide).is_err());
     }
 
     #[test]
@@ -1057,7 +1160,7 @@ mod tests {
     fn su4_adjoint_rigid_shape_smoke() {
         let rule = SUNFusionRule::new(4).unwrap();
         let adjoint = rule.encode_dynkin(&[1, 0, 1]).unwrap();
-        assert_eq!(rule.dim_scalar(adjoint).unwrap(), 15.0);
+        assert_eq!(rule.try_dim_scalar(adjoint).unwrap(), 15.0);
         assert_eq!(
             rule.try_f_symbol_generic(adjoint, adjoint, adjoint, adjoint, adjoint, adjoint)
                 .unwrap()

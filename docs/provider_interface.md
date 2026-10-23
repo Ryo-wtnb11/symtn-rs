@@ -80,10 +80,10 @@ unit the codec cannot encode or round-trip; an invalid mode, error, or marker
 combination does not compile.
 
 The provider traits are sealed: they are the bounds generic code names, not
-an extension point. Z2, Z_N, U(1), fermion parity, CU(1) and `TableRule`
-implement them through the same category adapter as `CategoryRule`, with
-private codecs that keep their labels, ids, identities and checked errors.
-Native implementations exist only for `SU2FusionRule`, `SUNFusionRule` and
+an extension point. Z2, Z_N, U(1), fermion parity, CU(1), `TableRule`,
+`SU2FusionRule` and `SUNFusionRule` implement them through the same category
+adapter as `CategoryRule`, with private codecs that keep their labels, ids,
+identities and checked errors. Native implementations remain only for
 `ProductFusionRule` and, under the `testing` feature, for test fixtures that implement
 `symtn_sectors::testing::Provider` (re-exported as
 `symtn_core::testing::Provider`) to inject failures or instrument queries.
@@ -110,14 +110,24 @@ The built-in rules keep their own types, labels, and identities:
 table of `fusion_symbols::table::TableCategory` (Fibonacci, Ising, and
 fusion-only categories such as Rep(S₃)), whose `RuleIdentity` is built from
 the table's authority fingerprint; `symtn-sectors/src/abelian.rs` has the
-abelian ones; `symtn-sectors/src/su2.rs` delegates its coefficients to
-fusion-symbols. fusion-symbols 0.7.0 supplies mathematics through
-`category::FusionCategory`; symtn validates sector ids before constructing
-objects in their owning category and uses `frobenius_schur_phase`.
-`SUNFusionRule` accepts shaped empty F/R blocks for absent channels. Its SU(2)
-Dynkin label is restricted to `0..=u32::MAX` and uses the provider's exact A1
-authority; `SU2FusionRule` retains its compact `0..=254` codec and descending
-magnetic basis. SU(N) codecs and identities for N >= 3 are unchanged.
+abelian ones; `symtn-sectors/src/su2.rs` and `symtn-sectors/src/sun.rs` wrap
+`fusion_symbols::lie::LieGroup` through the category adapter. fusion-symbols
+0.7.0 supplies mathematics through `category::FusionCategory`; symtn validates
+sector ids before constructing objects in their owning category and uses
+`frobenius_schur_phase`.
+
+| Lie wrapper | symtn codec and admission | mathematical authority |
+| --- | --- | --- |
+| `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
+| `SUNFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, SU(2) labels `0..=u32::MAX`; no physical expansion | SU(N) `LieGroup`, including exact A1 for `new(2)` |
+
+Both retain their identities, sector order, typed errors and validation order.
+`SUNFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
+nonfinite dimensions. It defers category construction until a successfully
+decoded query needs it and reuses its bounded irrep interner: a warm hit clones
+the provider's allocation-free handle, without a Dynkin-label `Vec`. No adapter
+object cache is added. Provider generation and returned symbol/channel storage
+have their own allocation costs; Generic blocks still copy provider data.
 
 ## 1. `FusionRule`
 
@@ -263,10 +273,9 @@ inherit the contract: they are defined for `N(left,right,coupled) != 0`.
 
 `MultiplicityFreeRigidSymbols` adds `dim_scalar`, `inv_dim_scalar`,
 `sqrt_dim_scalar`, `inv_sqrt_dim_scalar`, `twist_scalar`, and
-`frobenius_schur_phase_scalar`. `a_symbol_scalar`
-and `b_symbol_scalar` have correct default bodies derived from F; a
-`CategoryRule`, and every built-in rule backed by the category adapter,
-forwards the category's A and B instead.
+`frobenius_schur_phase_scalar`. `a_symbol_scalar` and `b_symbol_scalar`
+forward the category's A and B; their F-derived fallback exists only for
+native test fixtures under `testing`.
 
 One capability flag, defaulting to the conservative answer (a `CategoryRule`
 forwards the category's certificate; `TableRule` withholds it, as it reports
@@ -293,21 +302,24 @@ while reporting unavailable data as an error. F, R, A, and B become dense
 blocks (`GenericFArray`, `GenericRMatrix`) indexed by one-based vertex labels;
 a `CategoryRule` takes each block's shape from the checked N symbols, so the
 single zero fusion-symbols stores for an absent vertex becomes an empty block,
-and a nonzero entry where N admits none is an error. The tensor engine
-derives its A/B moves from the validated F and rigidity data;
-`try_a_symbol_generic` and `try_b_symbol_generic` expose the authority's A
-and B blocks.
+and a nonzero entry where N admits none is an error. `SUNFusionRule` preserves
+its existing A/B boundary: it copies the authority's shaped block, admitting
+an absent vertex before requiring a finite dimension or an encoded derived
+dual. The tensor engine still derives Generic A/B moves from validated F
+and rigidity data; `try_a_symbol_generic` and `try_b_symbol_generic` expose
+the authority's blocks.
 `CheckedGenericRigidSymbols::try_dim_scalar` defaults to
 `try_sqrt_dim_scalar²`; override it when `dim` is known exactly (SU(N) does),
 because truncation budgets and quantum-dimension-weighted norms compare
 `dim(c)` exactly, as TensorKit's integer dimensions do.
 
-`InfallibleGeneric<'a, R>` adapts an existing infallible
-provider to the checked interface; see `symtn-sectors/src/sun.rs` for a
-catalog-bounded provider. Its `try_dim_scalar` is the testing-tier
-`GenericRigidSymbols::dim_scalar`, which likewise defaults to
-`sqrt_dim_scalar²`: override it for any integer dimension that is not a
-perfect square.
+`InfallibleGeneric<'a, R>` adapts infallible structural `FusionRule` queries
+to the checked interface. Under `testing`, its rigid-symbol implementation
+uses `GenericRigidSymbols::dim_scalar` for `try_dim_scalar`, which likewise
+defaults to `sqrt_dim_scalar²`: override it for any integer dimension that is
+not a perfect square. `SUNFusionRule` instead implements the checked Generic
+traits directly; its bounded interner falls back to per-call conversion when
+full.
 
 Current checked Generic coverage is defined by the public bounds and executable
 tests at this revision. It is a Host path; CUDA typed execution is
