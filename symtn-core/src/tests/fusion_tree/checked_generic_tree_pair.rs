@@ -135,6 +135,43 @@ fn checked_generic_exchange_on_a_multiplicity_channel_has_eigenvalues_plus_and_m
     }
 }
 
+#[test]
+fn checked_su3_octet_duality_maps_match_tensorkit_literals() {
+    // TensorKit 0.17.1 f87ca7f: bendright/foldright on
+    // FusionTreeBlock{SU3Irrep}(((o,o),(o,)),((false,false),(false,))),
+    // o = SU3Irrep(1,1), exports I₂. Repartition 2→1 is this one bendright.
+    let rule = sun3();
+    let eight = irrep(&rule, [1, 1]);
+    let expected = [[1.0_f64, 0.0], [0.0, 1.0]];
+    for mu in 1..=2 {
+        let source = codomain_pair(eight, eight, mu);
+        validate_generic_fusion_tree_pair_checked(&rule, &source).unwrap();
+        for operation in 0..3 {
+            let terms = match operation {
+                0 => generic_bendright_tree_pair_checked(&rule, &source),
+                1 => generic_foldright_tree_pair_result(&rule, &source),
+                _ => generic_repartition_tree_pair_checked(&rule, &source, 1),
+            }
+            .unwrap();
+            let mut actual = [0.0; 2];
+            for (destination, coefficient) in terms {
+                assert_eq!(destination.codomain_tree(), source.domain_tree());
+                let domain = destination.domain_tree();
+                assert_eq!(domain.uncoupled(), &[eight, eight]);
+                assert_eq!(domain.coupled(), eight);
+                assert_eq!(domain.is_dual(), &[operation == 1, operation != 1]);
+                assert!(domain.innerlines().is_empty());
+                assert_eq!(domain.vertices().len(), 1);
+                actual[domain.vertices()[0].get() - 1] += coefficient;
+            }
+            for nu in 0..2 {
+                assert!((actual[nu] - expected[mu - 1][nu]).abs() < TOL);
+            }
+            assert!((actual[mu - 1] - actual[2 - mu]).abs() > 0.5);
+        }
+    }
+}
+
 /// SU(3) behind a provider that counts and can fail `N` queries, with a
 /// configurable braiding style.
 struct SunProbe {

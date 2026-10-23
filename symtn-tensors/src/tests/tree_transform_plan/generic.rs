@@ -415,11 +415,13 @@ enum MeasurementProviderCall {
     F,
     R,
     Dim,
+    A,
+    B,
 }
 
 #[cfg(feature = "cgc-gen")]
 impl MeasurementProviderCall {
-    const COUNT: usize = 9;
+    const COUNT: usize = 11;
 
     fn index(self) -> usize {
         self as usize
@@ -557,6 +559,26 @@ impl<P: CheckedGenericRigidSymbols> CheckedGenericRigidSymbols for MeasurementPr
     ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
         self.hit(MeasurementProviderCall::R);
         self.inner.try_r_symbol_generic(a, b, c)
+    }
+
+    fn try_a_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
+        self.hit(MeasurementProviderCall::A);
+        self.inner.try_a_symbol_generic(a, b, c)
+    }
+
+    fn try_b_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
+        self.hit(MeasurementProviderCall::B);
+        self.inner.try_b_symbol_generic(a, b, c)
     }
 }
 
@@ -1333,6 +1355,71 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
 }
 
 #[cfg(feature = "cgc-gen")]
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn retained_su3_vertex_move_replay_queries_no_symbols() {
+    let inner = symtn_sectors::SUNFusionRule::new(3).unwrap();
+    let octet = inner.encode_dynkin(&[1, 1]).unwrap();
+    let provider = Arc::new(MeasurementProvider::new(inner));
+    let leg = |n| SectorLeg::new([(octet, n)], false);
+    let source = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
+        Arc::clone(&provider),
+        FusionTreeHomSpace::new(
+            FusionProductSpace::new([leg(2), leg(3)]),
+            FusionProductSpace::new([leg(5)]),
+        ),
+    )
+    .unwrap();
+    let operation = TreeTransformOperation::transpose([0], [2, 1]);
+    let prepared = source
+        .space()
+        .prepare_transformed_generic_checked(provider.as_ref(), &operation)
+        .unwrap();
+    provider.reset_calls();
+    let plan = build_checked_generic_tree_pair_transform_group_plan(
+        provider.as_ref(),
+        operation,
+        source.space().structure(),
+    )
+    .unwrap();
+    let calls = provider.calls.get();
+    assert!(
+        calls[MeasurementProviderCall::A.index()] + calls[MeasurementProviderCall::B.index()] > 0
+    );
+    let replay = plan
+        .compile_structures(prepared.structure(), source.space().structure())
+        .unwrap();
+    let destination = Arc::new(prepared.structure().clone());
+    let input = (1..=source.space().required_len().unwrap())
+        .map(|i| i as f64)
+        .collect::<Vec<_>>();
+    let mut output = vec![0.0; prepared.required_len()];
+    let mut backend = DenseTreeTransformOperations::default();
+    let mut workspace = TreeTransformWorkspace::<f64>::default();
+    provider.reset_calls();
+    for _ in 0..2 {
+        backend
+            .tree_transform_structure_into_raw(
+                &mut workspace,
+                &replay,
+                &destination,
+                source.space().structure(),
+                &mut output,
+                &input,
+                1.0,
+                0.0,
+            )
+            .unwrap();
+    }
+    assert_eq!(provider.calls.get(), [0; MeasurementProviderCall::COUNT]);
+    // Negative control: direct symbol access must be visible to the same ledger.
+    provider.try_a_symbol_generic(octet, octet, octet).unwrap();
+    provider.try_b_symbol_generic(octet, octet, octet).unwrap();
+    assert_eq!(provider.calls.get()[MeasurementProviderCall::A.index()], 1);
+    assert_eq!(provider.calls.get()[MeasurementProviderCall::B.index()], 1);
+}
+
+#[cfg(feature = "cgc-gen")]
 fn measured_provider_phase<T>(
     provider: &MeasurementProvider<symtn_sectors::SUNFusionRule>,
     case: &str,
@@ -1567,7 +1654,7 @@ fn measure_checked_generic_transform_case(
 #[test]
 #[ignore = "benchmark: run via benchmarks.yml"]
 fn measure_checked_generic_transform_phases() {
-    println!("call_order=channels,dual,n,sqrt_dim,inv_sqrt_dim,frobenius_schur,f,r,dim");
+    println!("call_order=channels,dual,n,sqrt_dim,inv_sqrt_dim,frobenius_schur,f,r,dim,a,b");
     println!("spy_instrumented_phase_timings_auxiliary_only=true");
     for (n, adjoint_labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
         for (operation_name, operation) in [

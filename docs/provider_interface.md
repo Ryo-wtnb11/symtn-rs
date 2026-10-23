@@ -229,15 +229,27 @@ the operations, and `TypedSectorAdmission` with
 selects that mode. These traits are deliberately independent of `FusionRule`
 so that a provider with a finite generated catalog can use the checked path
 while reporting unavailable data as an error. F, R, A, and B become dense
-blocks (`GenericFArray`, `GenericRMatrix`) indexed by one-based vertex labels;
-a `CategoryRule` takes each block's shape from the checked N symbols, so the
-single zero fusion-symbols stores for an absent vertex becomes an empty block,
-and a nonzero entry where N admits none is an error. `SUNFusionRule` copies
-the authority's shaped A/B blocks, admitting an absent vertex before requiring
-a finite dimension or an encoded derived
-dual. The tensor engine derives Generic A/B moves from validated F
-and rigidity data; `try_a_symbol_generic` and `try_b_symbol_generic` expose
-the authority's blocks.
+blocks (`GenericFArray`, `GenericRMatrix`) indexed by one-based vertex labels.
+The sectors adapter validates returned F/R/A/B storage against logical axes
+from checked N symbols on both admission paths. Wrong lengths produce
+`CategoryAdapterError::MalformedSymbolData`; equal-volume wrong axes produce
+`CategoryAdapterError::MalformedSymbolAxes { expected, actual }`. The codec
+maps these to the provider's error type; SUN exposes the corresponding
+`SUNFusionRuleError` variants. An absent vertex may use empty storage or a
+single zero, which becomes scalar zero or an empty Generic block. Empty
+storage for a live vertex and nonzero storage for an absent vertex are errors.
+Successful multiplicity-free validation borrows the block without allocating.
+
+`SUNFusionRule` preserves its absent-channel admission before requiring a
+finite dimension or an encoded derived dual. The tensor engine consumes the
+category authority's A/B blocks through `try_a_symbol_generic` and
+`try_b_symbol_generic`; it retains the dimension and Frobenius–Schur factors
+of tree bends and folds. An A/B accessor queries the row N, dual, and column N
+before delegating to the provider. Failures in that prefix take precedence;
+provider A/B failures then propagate directly without core F or rigidity
+queries. Adapters own production symbol validation. Core repeats categorical
+shape checks only in unit tests or under `testing`, where native synthetic
+providers can bypass adapters; public tree and index guards always apply.
 `CheckedGenericRigidSymbols::try_dim_scalar` defaults to
 `try_sqrt_dim_scalar²`; override it when `dim` is known exactly (SU(N) does),
 because truncation budgets and quantum-dimension-weighted norms compare
@@ -331,7 +343,7 @@ symtn validates representability and structural shapes; it does not prove
 the pentagon and hexagon coherence laws. Use fusion-symbols’
 `pentagon_residual` and `hexagon_residual` for those checks.
 
-- validate F/R/dimension/twist coefficients against an independent reference,
+- validate F/R/A/B/dimension/twist coefficients against an independent reference,
   and record the source, gauge, and convention used;
 - use exact comparisons only under the [numerical policy](testing_numerics.md);
 - cover invalid IDs at every checked entry point using the provider’s typed

@@ -105,17 +105,12 @@ fn generic_braid_tree_pair_rejects_r_symbol_shape_mismatch() {
 }
 
 #[test]
-fn generic_repartition_rejects_bend_f_symbol_shape_mismatch() {
-    // What: B is derived from F(3,3,3,3,3,1), shape (2,2,1,1) for N(3,3,3) = 2;
-    // a 1x1x1x1 block is a typed malformed-input error, not a panic.
+fn generic_repartition_rejects_default_b_symbol_shape_mismatch() {
+    // What: the native testing default reshapes this truncated F into a 1×1 B;
+    // core rejects that B against N(3,3,3) = 2 before indexing.
     let rule = TruncatedSymbolRule {
         truncate_bend_f: true,
     };
     let error = generic_repartition_tree_pair(&rule, &a4_pair_rank2(2), 1).unwrap_err();
-    assert_eq!(
-        error,
-        CoreError::MalformedFusionTree {
-            message: "Generic F-symbol shape mismatch",
-        }
-    );
+    assert_eq!(error, shape_mismatch());
 }

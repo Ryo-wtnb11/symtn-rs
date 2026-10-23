@@ -203,7 +203,7 @@ where
     generic_cycle_tree_pair_unchecked(rule, tree_pair.key, PreparedCycleDirection::Anticlockwise)
 }
 
-pub(super) fn generic_foldright_tree_pair_result<C>(
+pub(crate) fn generic_foldright_tree_pair_result<C>(
     rule: &C,
     tree_pair: &FusionTreePairKey,
 ) -> Result<GenericTreePairTerms<C::Scalar>, CheckedGenericSymbolError<C::Error>>

@@ -1,5 +1,92 @@
 use super::*;
 
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
+    use symtn::sector::SUNFusionRule;
+
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let legs =
+        [2, 3, 5].map(|n| GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], n)]).unwrap());
+    let source = TensorMap::<_, f64>::from_subblock_fn(
+        &runtime,
+        [&legs[0], &legs[1]],
+        [&legs[2]],
+        |trees, i| {
+            100.0 * trees.codomain_vertices()[0].get() as f64
+                + (15 * i[0] + 5 * i[1] + i[2] + 1) as f64
+        },
+    )
+    .unwrap();
+    // TensorKit 0.17.1 bendright/foldright(FusionTreeBlock) exported I₂.
+    // Its repartition wrapper failed on Julia 1.12; these dense literals compose
+    // those exported maps with indexmanipulations.jl's explicit axis permutation.
+    let bend = [
+        101., 106., 111., 102., 107., 112., 103., 108., 113., 104., 109., 114., 105., 110., 115.,
+        116., 121., 126., 117., 122., 127., 118., 123., 128., 119., 124., 129., 120., 125., 130.,
+    ];
+    let fold = [
+        101., 102., 103., 104., 105., 116., 117., 118., 119., 120., 106., 107., 108., 109., 110.,
+        121., 122., 123., 124., 125., 111., 112., 113., 114., 115., 126., 127., 128., 129., 130.,
+    ];
+    for (output, shape, dual, literal) in [
+        (
+            source.transpose(&[0], &[2, 1]).unwrap(),
+            [2, 5, 3],
+            [false, true],
+            bend,
+        ),
+        (
+            source.repartition(1).unwrap(),
+            [2, 5, 3],
+            [false, true],
+            bend,
+        ),
+        (
+            source.transpose(&[1], &[0, 2]).unwrap(),
+            [3, 2, 5],
+            [true, false],
+            fold,
+        ),
+    ] {
+        assert_eq!(output.subblock_count(), 2);
+        assert_eq!(
+            output
+                .domain()
+                .iter()
+                .map(|leg| leg.is_dual())
+                .collect::<Vec<_>>(),
+            dual
+        );
+        for b in 0..output.subblock_count() {
+            let mu = output.subblock_fusion_trees(b).unwrap().domain_vertices()[0].get();
+            let block = output.subblock(b).unwrap();
+            assert_eq!(block.shape(), shape);
+            let actual = (0..30)
+                .map(|linear| {
+                    let i = [
+                        linear / (shape[1] * shape[2]),
+                        linear / shape[2] % shape[1],
+                        linear % shape[2],
+                    ];
+                    let offset = block.offset()
+                        + i.iter()
+                            .zip(block.strides())
+                            .map(|(i, s)| i * s)
+                            .sum::<usize>();
+                    output.dense_data().unwrap()[offset]
+                })
+                .collect::<Vec<_>>();
+            let expected = literal.map(|x| x + 100.0 * (mu - 1) as f64);
+            // A linear transform has at most source.len() terms per entry.
+            numerics::assert_slices_close("SU3 vertex move", &actual, &expected, 60);
+            assert!(expected.windows(2).any(|pair| pair[1] != pair[0] + 1.0));
+            assert!((actual[0] - (literal[0] + 100.0 * (2 - mu) as f64)).abs() > 50.0);
+        }
+    }
+}
+
 /// #1449: like TensorKit `adjoint(::DiagonalTensorMap)` and the
 /// multiplicity-free path, the checked-Generic adjoint of a compact diagonal is
 /// the owned conjugated diagonal, and its unstored zeros stay `+0 + 0i`.

@@ -1902,6 +1902,8 @@ pub(super) enum RigidSpyError {
     Dual,
     N,
     F,
+    A,
+    B,
     Sqrt,
     InvSqrt,
     Fs,
@@ -1919,17 +1921,21 @@ pub(super) struct CheckedA4Spy {
     pub(super) dual_calls: std::cell::Cell<usize>,
     pub(super) n_calls: std::cell::Cell<usize>,
     pub(super) f_calls: std::cell::Cell<usize>,
+    pub(super) a_calls: std::cell::Cell<usize>,
+    pub(super) b_calls: std::cell::Cell<usize>,
     pub(super) sqrt_calls: std::cell::Cell<usize>,
     pub(super) inv_sqrt_calls: std::cell::Cell<usize>,
     pub(super) fs_calls: std::cell::Cell<usize>,
     pub(super) fail_dual: Option<usize>,
     pub(super) fail_n: Option<usize>,
     pub(super) fail_f: Option<usize>,
+    pub(super) fail_a: Option<usize>,
+    pub(super) fail_b: Option<usize>,
     pub(super) fail_sqrt: Option<usize>,
     pub(super) fail_inv_sqrt: Option<usize>,
     pub(super) fail_fs: Option<usize>,
-    pub(super) bad_b_f: bool,
-    pub(super) bad_a_f: bool,
+    pub(super) bad_b: bool,
+    pub(super) bad_a: bool,
     pub(super) non_diagonal_b: bool,
 }
 
@@ -1939,17 +1945,21 @@ impl CheckedA4Spy {
             dual_calls: std::cell::Cell::new(0),
             n_calls: std::cell::Cell::new(0),
             f_calls: std::cell::Cell::new(0),
+            a_calls: std::cell::Cell::new(0),
+            b_calls: std::cell::Cell::new(0),
             sqrt_calls: std::cell::Cell::new(0),
             inv_sqrt_calls: std::cell::Cell::new(0),
             fs_calls: std::cell::Cell::new(0),
             fail_dual: None,
             fail_n: None,
             fail_f: None,
+            fail_a: None,
+            fail_b: None,
             fail_sqrt: None,
             fail_inv_sqrt: None,
             fail_fs: None,
-            bad_b_f: false,
-            bad_a_f: false,
+            bad_b: false,
+            bad_a: false,
             non_diagonal_b: false,
         }
     }
@@ -2067,22 +2077,15 @@ impl CheckedGenericRigidSymbols for CheckedA4Spy {
         f: SectorId,
     ) -> Result<GenericFArray<Self::Scalar>, Self::Error> {
         Self::trip(&self.f_calls, self.fail_f, RigidSpyError::F)?;
-        let symbol = GenericFusionSymbols::f_symbol_generic(&A4BendRule, a, b, c, d, e, f);
-        if self.non_diagonal_b
-            && (a.id(), b.id(), c.id(), d.id(), e.id(), f.id()) == (3, 3, 3, 3, 3, 0)
-        {
-            Ok(GenericFArray::new(vec![0.3, 0.7, 0.9, 0.1], (2, 2, 1, 1)))
-        } else if self.bad_b_f
-            && (a.id(), b.id(), c.id(), d.id(), e.id(), f.id()) == (3, 3, 3, 3, 3, 0)
-        {
-            Ok(GenericFArray::new(symbol.data().to_vec(), (1, 4, 1, 1)))
-        } else if self.bad_a_f
-            && (a.id(), b.id(), c.id(), d.id(), e.id(), f.id()) == (3, 3, 3, 3, 0, 3)
-        {
-            Ok(GenericFArray::new(symbol.data().to_vec(), (1, 1, 1, 4)))
-        } else {
-            Ok(symbol)
-        }
+        Ok(GenericFusionSymbols::f_symbol_generic(
+            &A4BendRule,
+            a,
+            b,
+            c,
+            d,
+            e,
+            f,
+        ))
     }
 
     fn try_r_symbol_generic(
@@ -2092,6 +2095,40 @@ impl CheckedGenericRigidSymbols for CheckedA4Spy {
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
         Ok(GenericFusionSymbols::r_symbol_generic(&A4BendRule, a, b, c))
+    }
+
+    fn try_a_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
+        Self::trip(&self.a_calls, self.fail_a, RigidSpyError::A)?;
+        let symbol =
+            CheckedGenericRigidSymbols::try_a_symbol_generic(&A4BendRule, a, b, c).unwrap();
+        if self.bad_a {
+            Ok(GenericRMatrix::new(symbol.data().to_vec(), 1, 4))
+        } else {
+            Ok(symbol)
+        }
+    }
+
+    fn try_b_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<Self::Scalar>, Self::Error> {
+        Self::trip(&self.b_calls, self.fail_b, RigidSpyError::B)?;
+        let symbol =
+            CheckedGenericRigidSymbols::try_b_symbol_generic(&A4BendRule, a, b, c).unwrap();
+        if self.bad_b {
+            Ok(GenericRMatrix::new(symbol.data().to_vec(), 1, 4))
+        } else if self.non_diagonal_b {
+            Ok(GenericRMatrix::new(vec![0.3, 0.7, 0.9, 0.1], 2, 2))
+        } else {
+            Ok(symbol)
+        }
     }
 }
 

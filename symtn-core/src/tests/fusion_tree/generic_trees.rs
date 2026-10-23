@@ -322,25 +322,103 @@ fn checked_generic_artin_rejects_categorical_symbol_shapes_before_indexing() {
 }
 
 #[test]
-fn checked_generic_b_and_a_reject_malformed_categorical_f_shapes() {
+fn checked_generic_b_and_a_forward_explicit_symbols_without_f() {
+    let rule = CheckedA4Spy {
+        fail_f: Some(1),
+        fail_sqrt: Some(1),
+        fail_inv_sqrt: Some(1),
+        fail_fs: Some(1),
+        ..CheckedA4Spy::new()
+    };
+    let t = a4_three();
+    for symbol in [
+        GenericRigidAccess::try_a_symbol_generic(&rule, t, t, t).unwrap(),
+        GenericRigidAccess::try_b_symbol_generic(&rule, t, t, t).unwrap(),
+    ] {
+        assert_eq!(symbol.shape(), (2, 2));
+        for (actual, expected) in symbol.data().iter().zip([1.0, 0.0, 0.0, 1.0]) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+    }
+    assert_eq!((rule.a_calls.get(), rule.b_calls.get()), (1, 1));
+    assert_eq!((rule.n_calls.get(), rule.dual_calls.get()), (4, 2));
+    assert_eq!(rule.f_calls.get(), 0);
+    assert_eq!(
+        rule.sqrt_calls.get() + rule.inv_sqrt_calls.get() + rule.fs_calls.get(),
+        0
+    );
+}
+
+#[test]
+fn checked_generic_b_and_a_reject_equal_volume_malformed_shapes() {
     let bad_b = CheckedA4Spy {
-        bad_b_f: true,
+        bad_b: true,
         ..CheckedA4Spy::new()
     };
     assert!(matches!(
         generic_bendright_tree_pair_checked(&bad_b, &a4_pair_rank2(1)),
-        Err(CheckedGenericSymbolError::Shape { symbol: "F", .. })
+        Err(CheckedGenericSymbolError::Shape { symbol: "B", expected, actual })
+            if expected == [2, 2] && actual == [1, 4]
     ));
 
     let bad_a = CheckedA4Spy {
-        bad_a_f: true,
+        bad_a: true,
         ..CheckedA4Spy::new()
     };
     let t = a4_three();
     assert!(matches!(
         GenericRigidAccess::try_a_symbol_generic(&bad_a, t, t, t),
-        Err(CheckedGenericSymbolError::Shape { symbol: "F", .. })
+        Err(CheckedGenericSymbolError::Shape { symbol: "A", expected, actual })
+            if expected == [2, 2] && actual == [1, 4]
     ));
+}
+
+#[test]
+fn checked_generic_a_and_b_preserve_admission_then_delegated_error_precedence() {
+    let t = a4_three();
+    for a_symbol in [true, false] {
+        for (fail_n, fail_dual, expected, counts) in [
+            (Some(1), Some(1), RigidSpyError::N, (1, 0, 0)),
+            (Some(2), Some(1), RigidSpyError::Dual, (1, 1, 0)),
+            (Some(2), None, RigidSpyError::N, (2, 1, 0)),
+            (
+                None,
+                None,
+                if a_symbol {
+                    RigidSpyError::A
+                } else {
+                    RigidSpyError::B
+                },
+                (2, 1, 1),
+            ),
+        ] {
+            let rule = CheckedA4Spy {
+                fail_n,
+                fail_dual,
+                fail_a: Some(1),
+                fail_b: Some(1),
+                fail_f: Some(1),
+                bad_a: true,
+                bad_b: true,
+                ..CheckedA4Spy::new()
+            };
+            let result = if a_symbol {
+                GenericRigidAccess::try_a_symbol_generic(&rule, t, t, t)
+            } else {
+                GenericRigidAccess::try_b_symbol_generic(&rule, t, t, t)
+            };
+            assert_rigid_provider_error(result.unwrap_err(), expected);
+            assert_eq!(
+                (
+                    rule.n_calls.get(),
+                    rule.dual_calls.get(),
+                    rule.a_calls.get() + rule.b_calls.get()
+                ),
+                counts
+            );
+            assert_eq!(rule.f_calls.get(), 0);
+        }
+    }
 }
 
 #[test]
@@ -640,21 +718,21 @@ fn generic_full_key_block_composition_matches_per_source_replay() {
 fn checked_generic_cyclic_transpose_preserves_provider_and_shape_errors() {
     let pair = a4_pair_rank2(1);
     let provider_error = CheckedA4Spy {
-        fail_f: Some(1),
+        fail_a: Some(1),
         ..CheckedA4Spy::new()
     };
     assert_rigid_provider_error(
         generic_transpose_tree_pair_checked(&provider_error, &pair, &[1, 2], &[0]).unwrap_err(),
-        RigidSpyError::F,
+        RigidSpyError::A,
     );
 
     let malformed = CheckedA4Spy {
-        bad_a_f: true,
+        bad_a: true,
         ..CheckedA4Spy::new()
     };
     assert!(matches!(
         generic_transpose_tree_pair_checked(&malformed, &pair, &[1, 2], &[0]),
-        Err(CheckedGenericSymbolError::Shape { symbol: "F", .. })
+        Err(CheckedGenericSymbolError::Shape { symbol: "A", .. })
     ));
 }
 

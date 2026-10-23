@@ -35,7 +35,8 @@ impl<E: std::error::Error + 'static> std::error::Error for CheckedGenericStructu
 }
 
 /// Fallible Generic-symbol access error used internally by checked row
-/// lowering.  A shape mismatch is symtn validation, not a provider failure.
+/// lowering. Native testing providers bypass the production adapters, so
+/// their categorical shape failures remain distinct from provider failures.
 #[doc(hidden)]
 #[derive(Debug)]
 pub enum CheckedGenericSymbolError<E> {
@@ -368,7 +369,22 @@ impl<P: CheckedGenericRigidSymbols> GenericRigidAccess for P {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, CheckedGenericSymbolError<Self::Error>> {
-        checked_generic_b_symbol(self, a, b, c)
+        let provider = CheckedGenericSymbolError::Provider;
+        let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
+        let dual_b = CheckedGenericFusion::try_dual(self, b).map_err(provider)?;
+        let _cols = CheckedGenericFusion::try_nsymbol(self, c, dual_b, a).map_err(provider)?;
+        let symbol =
+            CheckedGenericRigidSymbols::try_b_symbol_generic(self, a, b, c).map_err(provider)?;
+        #[cfg(any(test, feature = "testing"))]
+        if symbol.shape() != (_rows, _cols) {
+            let (rows, cols) = symbol.shape();
+            return Err(CheckedGenericSymbolError::Shape {
+                symbol: "B",
+                expected: vec![_rows, _cols],
+                actual: vec![rows, cols],
+            });
+        }
+        Ok(symbol)
     }
 
     fn try_a_symbol_generic(
@@ -377,7 +393,22 @@ impl<P: CheckedGenericRigidSymbols> GenericRigidAccess for P {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, CheckedGenericSymbolError<Self::Error>> {
-        checked_generic_a_symbol(self, a, b, c)
+        let provider = CheckedGenericSymbolError::Provider;
+        let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
+        let dual_a = CheckedGenericFusion::try_dual(self, a).map_err(provider)?;
+        let _cols = CheckedGenericFusion::try_nsymbol(self, dual_a, c, b).map_err(provider)?;
+        let symbol =
+            CheckedGenericRigidSymbols::try_a_symbol_generic(self, a, b, c).map_err(provider)?;
+        #[cfg(any(test, feature = "testing"))]
+        if symbol.shape() != (_rows, _cols) {
+            let (rows, cols) = symbol.shape();
+            return Err(CheckedGenericSymbolError::Shape {
+                symbol: "A",
+                expected: vec![_rows, _cols],
+                actual: vec![rows, cols],
+            });
+        }
+        Ok(symbol)
     }
 }
 
@@ -460,6 +491,7 @@ where
     C: GenericFRAccess,
 {
     let provider = CheckedGenericSymbolError::Provider;
+    #[cfg(any(test, feature = "testing"))]
     let expected = [
         rule.try_nsymbol(a, b, e).map_err(provider)?,
         rule.try_nsymbol(e, c, d).map_err(provider)?,
@@ -469,14 +501,17 @@ where
     let symbol = rule
         .try_f_symbol_generic(a, b, c, d, e, f)
         .map_err(provider)?;
-    let (mu, nu, kappa, lambda) = symbol.shape();
-    let actual = [mu, nu, kappa, lambda];
-    if actual != expected {
-        return Err(CheckedGenericSymbolError::Shape {
-            symbol: "F",
-            expected: expected.to_vec(),
-            actual: actual.to_vec(),
-        });
+    #[cfg(any(test, feature = "testing"))]
+    {
+        let (mu, nu, kappa, lambda) = symbol.shape();
+        let actual = [mu, nu, kappa, lambda];
+        if actual != expected {
+            return Err(CheckedGenericSymbolError::Shape {
+                symbol: "F",
+                expected: expected.to_vec(),
+                actual: actual.to_vec(),
+            });
+        }
     }
     Ok(symbol)
 }
@@ -490,6 +525,7 @@ pub(super) fn checked_generic_r_symbol<C>(
 where
     C: GenericFRAccess,
 {
+    #[cfg(any(test, feature = "testing"))]
     let expected = [rule.try_nsymbol(a, b, c), rule.try_nsymbol(b, a, c)]
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
@@ -497,22 +533,26 @@ where
     let symbol = rule
         .try_r_symbol_generic(a, b, c)
         .map_err(CheckedGenericSymbolError::Provider)?;
-    let (rows, cols) = symbol.shape();
-    let actual = vec![rows, cols];
-    if actual != expected {
-        return Err(CheckedGenericSymbolError::Shape {
-            symbol: "R",
-            expected,
-            actual,
-        });
+    #[cfg(any(test, feature = "testing"))]
+    {
+        let (rows, cols) = symbol.shape();
+        let actual = vec![rows, cols];
+        if actual != expected {
+            return Err(CheckedGenericSymbolError::Shape {
+                symbol: "R",
+                expected,
+                actual,
+            });
+        }
     }
     Ok(symbol)
 }
 
-/// `B^{ab}_c[μ,ν] = √d_a·√d_b/√d_c · F(a,b,b̄,a,c,1)[μ,ν,0,0]`, the only
-/// Generic B authority: TensorKitSectors `Bsymbol_from_Fsymbol`
+/// `B^{ab}_c[μ,ν] = √d_a·√d_b/√d_c · F(a,b,b̄,a,c,1)[μ,ν,0,0]`,
+/// testing oracle: TensorKitSectors `Bsymbol_from_Fsymbol`
 /// (`sectors.jl:543-552`, v0.3.6). The reshape drops the trailing `F` axes
 /// because `N(b,b̄,1) = N(a,1,a) = 1`; F is shape-validated first.
+#[cfg(any(test, feature = "testing"))]
 fn checked_generic_b_symbol<C>(
     rule: &C,
     a: SectorId,
@@ -552,8 +592,9 @@ where
 }
 
 /// `A^{ab}_c[κ,λ] = √d_a·√d_b/√d_c · conj(κ_a · F(ā,a,b,b,1,c)[0,0,κ,λ])`,
-/// the only Generic A authority: TensorKitSectors `Asymbol_from_Fsymbol`
+/// testing oracle: TensorKitSectors `Asymbol_from_Fsymbol`
 /// (`sectors.jl:501-511`, v0.3.6). Here the leading `F` axes are singletons.
+#[cfg(any(test, feature = "testing"))]
 fn checked_generic_a_symbol<C>(
     rule: &C,
     a: SectorId,

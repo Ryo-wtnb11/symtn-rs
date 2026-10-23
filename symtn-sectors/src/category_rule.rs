@@ -132,6 +132,12 @@ pub enum CategoryAdapterError<E> {
     DimensionNotRepresentable { sector: SectorId },
     /// Returned symbol storage disagrees with its fusion multiplicities.
     MalformedSymbolData(SymbolShapeError),
+    /// Returned symbol axes disagree with the fusion multiplicities, even
+    /// when the storage length matches.
+    MalformedSymbolAxes {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
     /// The operation requires a braiding the category does not have.
     NoBraiding,
 }
@@ -155,6 +161,10 @@ impl<E: fmt::Display> fmt::Display for CategoryAdapterError<E> {
             Self::MalformedSymbolData(_) => {
                 formatter.write_str("symbol storage disagrees with its fusion multiplicities")
             }
+            Self::MalformedSymbolAxes { expected, actual } => write!(
+                formatter,
+                "symbol axes {actual:?} disagree with the fusion multiplicities {expected:?}"
+            ),
             Self::NoBraiding => formatter.write_str("the category has no braiding"),
         }
     }
@@ -1159,17 +1169,17 @@ pub(crate) mod forward {
         Ok(rule.category().twist(&object))
     }
 
-    /// The one entry of a multiplicity-free block; fusion-symbols stores an
-    /// absent vertex either as empty storage or as a bare zero.
-    fn single<A: AdapterAccess>(
+    /// The one logical entry of a multiplicity-free block, without allocating.
+    fn single<A: AdapterAccess, const RANK: usize>(
         rule: &A,
         inputs: &[SectorId],
-        data: &[Value<A>],
+        block: &impl SymbolBlock<RANK, Scalar = Value<A>>,
+        axes: [usize; RANK],
     ) -> Result<Value<A>, Error<A>> {
-        match data {
+        match shaped(rule, inputs, block, axes)? {
             [] => Ok(Value::<A>::zero()),
             [value] => Ok(*value),
-            _ => Err(adapter(
+            data => Err(adapter(
                 rule,
                 inputs,
                 CategoryAdapterError::MalformedSymbolData(SymbolShapeError {
@@ -1180,43 +1190,69 @@ pub(crate) mod forward {
         }
     }
 
-    /// Storage of a block whose logical shape has `expected` entries.
-    ///
-    /// Why the shape comes from N rather than the storage: a bare scalar
-    /// stores an absent vertex as one zero, while its logical block is empty.
-    /// A nonzero entry where N admits none is malformed, never dropped.
-    fn shaped<A: AdapterAccess>(
+    /// Validates borrowed fs storage against logical N axes. Only an empty
+    /// slice or a bare scalar zero can represent a logically absent block.
+    pub(crate) fn shaped<'b, A: AdapterAccess, const RANK: usize>(
         rule: &A,
         inputs: &[SectorId],
-        data: &[Value<A>],
-        expected: Option<usize>,
-    ) -> Result<Vec<Value<A>>, Error<A>> {
-        if expected == Some(data.len()) {
-            Ok(data.to_vec())
-        } else if expected == Some(0) && data.iter().all(|value| value.abs() == 0.0) {
-            Ok(Vec::new())
-        } else {
-            Err(adapter(
+        block: &'b impl SymbolBlock<RANK, Scalar = Value<A>>,
+        axes: [usize; RANK],
+    ) -> Result<&'b [Value<A>], Error<A>> {
+        let data = block.as_slice();
+        let expected = axes.iter().try_fold(1usize, |n, &axis| n.checked_mul(axis));
+        if expected == Some(0) && (data.is_empty() || matches!(data, [value] if value.abs() == 0.0))
+        {
+            return Ok(&data[..0]);
+        }
+        if expected != Some(data.len()) {
+            return Err(adapter(
                 rule,
                 inputs,
                 CategoryAdapterError::MalformedSymbolData(SymbolShapeError {
                     actual_len: data.len(),
                     expected_len: expected,
                 }),
-            ))
+            ));
         }
+        let actual = block.dims();
+        if axes != actual {
+            return Err(adapter(
+                rule,
+                inputs,
+                CategoryAdapterError::MalformedSymbolAxes {
+                    expected: axes.to_vec(),
+                    actual: actual.to_vec(),
+                },
+            ));
+        }
+        Ok(data)
+    }
+
+    fn f_axes<A: AdapterAccess>(
+        rule: &A,
+        ids: [SectorId; 6],
+        [a, b, c, d, e, f]: &[Object<A>; 6],
+    ) -> Result<[usize; 4], Error<A>> {
+        Ok([
+            multiplicity(rule, ids, a, b, e)?,
+            multiplicity(rule, ids, e, c, d)?,
+            multiplicity(rule, ids, b, c, f)?,
+            multiplicity(rule, ids, a, f, d)?,
+        ])
     }
 
     pub(crate) fn f_scalar<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 6],
     ) -> Result<Value<A>, Error<A>> {
-        let [a, b, c, d, e, f] = admit(rule, CategoryOperation::F, ids)?;
+        let objects = admit(rule, CategoryOperation::F, ids)?;
+        let axes = f_axes(rule, ids, &objects)?;
+        let [a, b, c, d, e, f] = objects;
         let block = rule
             .category()
             .f_symbol(&a, &b, &c, &d, &e, &f)
             .map_err(provider(rule, ids))?;
-        single(rule, &ids, block.as_slice())
+        single(rule, &ids, &block, axes)
     }
 
     pub(crate) fn r_scalar<A: AdapterAccess>(
@@ -1230,36 +1266,34 @@ pub(crate) mod forward {
             return Ok(Value::<A>::zero());
         };
         require_braiding(rule, &ids)?;
+        let axes = [
+            multiplicity(rule, ids, &a, &b, &c)?,
+            multiplicity(rule, ids, &b, &a, &c)?,
+        ];
         let block = rule
             .category()
             .r_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
-        single(rule, &ids, block.as_slice())
+        single(rule, &ids, &block, axes)
     }
 
     pub(crate) fn f_block<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 6],
     ) -> Result<GenericFArray<Value<A>>, Error<A>> {
-        let [a, b, c, d, e, f] = admit(rule, CategoryOperation::F, ids)?;
-        let shape = (
-            multiplicity(rule, ids, &a, &b, &e)?,
-            multiplicity(rule, ids, &e, &c, &d)?,
-            multiplicity(rule, ids, &b, &c, &f)?,
-            multiplicity(rule, ids, &a, &f, &d)?,
-        );
-        let expected = shape
-            .0
-            .checked_mul(shape.1)
-            .and_then(|n| n.checked_mul(shape.2))
-            .and_then(|n| n.checked_mul(shape.3));
+        let objects = admit(rule, CategoryOperation::F, ids)?;
+        let axes = f_axes(rule, ids, &objects)?;
+        let [a, b, c, d, e, f] = objects;
         let block = rule
             .category()
             .f_symbol(&a, &b, &c, &d, &e, &f)
             .map_err(provider(rule, ids))?;
-        let data = shaped(rule, &ids, block.as_slice(), expected)?;
+        let data = shaped(rule, &ids, &block, axes)?.to_vec();
         // `shaped` established the length.
-        Ok(GenericFArray::new(data, shape))
+        Ok(GenericFArray::new(
+            data,
+            (axes[0], axes[1], axes[2], axes[3]),
+        ))
     }
 
     pub(crate) fn r_block<A: AdapterAccess>(
@@ -1279,7 +1313,7 @@ pub(crate) mod forward {
             .category()
             .r_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
-        let data = shaped(rule, &ids, block.as_slice(), rows.checked_mul(cols))?;
+        let data = shaped(rule, &ids, &block, [rows, cols])?.to_vec();
         // `shaped` established the length.
         Ok(GenericRMatrix::new(data, rows, cols))
     }
@@ -1317,7 +1351,7 @@ pub(crate) mod forward {
         let [a, b, c] = objects;
         let rows = multiplicity(rule, ids, a, b, c)?;
         let cols = multiplicity(rule, ids, column[0], column[1], column[2])?;
-        let data = shaped(rule, &ids, block.data(), rows.checked_mul(cols))?;
+        let data = shaped(rule, &ids, &block, [rows, cols])?.to_vec();
         // `shaped` established the length.
         Ok(GenericRMatrix::new(data, rows, cols))
     }
@@ -1359,7 +1393,10 @@ pub(crate) mod forward {
             .category()
             .a_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
-        single(rule, &ids, block.data())
+        let rows = multiplicity(rule, ids, &a, &b, &c)?;
+        let a_dual = rule.category().dual(&a);
+        let cols = multiplicity(rule, ids, &a_dual, &c, &b)?;
+        single(rule, &ids, &block, [rows, cols])
     }
 
     pub(crate) fn b_scalar<A: AdapterAccess>(
@@ -1371,7 +1408,10 @@ pub(crate) mod forward {
             .category()
             .b_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
-        single(rule, &ids, block.data())
+        let rows = multiplicity(rule, ids, &a, &b, &c)?;
+        let b_dual = rule.category().dual(&b);
+        let cols = multiplicity(rule, ids, &c, &b_dual, &a)?;
+        single(rule, &ids, &block, [rows, cols])
     }
 }
 
