@@ -736,8 +736,16 @@ pub trait MultiplicityFreeRigidSymbols: MultiplicityFreeFusionSymbols + Sync {
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar;
 
-    /// Defined only for `N(left, right, coupled) != 0`; the default body
-    /// is an `F` evaluation, so see [`MultiplicityFreeFusionSymbols::f_symbol_scalar`].
+    /// Defined only for `N(left, right, coupled) != 0`. Production providers
+    /// obtain A from the category authority; the `testing` feature keeps an
+    /// F-derived default for synthetic fixtures.
+    #[cfg(not(any(test, feature = "testing")))]
+    fn a_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar
+    where
+        Self::Scalar: Mul<Output = Self::Scalar>;
+
+    /// F-derived default for synthetic test providers.
+    #[cfg(any(test, feature = "testing"))]
     fn a_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar
     where
         Self::Scalar: Mul<Output = Self::Scalar>,
@@ -750,8 +758,16 @@ pub trait MultiplicityFreeRigidSymbols: MultiplicityFreeFusionSymbols + Sync {
         factor * symbol.conj()
     }
 
-    /// Defined only for `N(left, right, coupled) != 0`; the default body
-    /// is an `F` evaluation, so see [`MultiplicityFreeFusionSymbols::f_symbol_scalar`].
+    /// Defined only for `N(left, right, coupled) != 0`. Production providers
+    /// obtain B from the category authority; the `testing` feature keeps an
+    /// F-derived default for synthetic fixtures.
+    #[cfg(not(any(test, feature = "testing")))]
+    fn b_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar
+    where
+        Self::Scalar: Mul<Output = Self::Scalar>;
+
+    /// F-derived default for synthetic test providers.
+    #[cfg(any(test, feature = "testing"))]
     fn b_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar
     where
         Self::Scalar: Mul<Output = Self::Scalar>,
@@ -988,46 +1004,6 @@ pub struct MultiplicityFreeAdmissionMode;
 /// Layout mode for checked Generic providers.
 #[doc(hidden)]
 pub struct CheckedGenericAdmissionMode;
-
-/// Implements multiplicity-free typed admission by forwarding to the
-/// provider's [`SectorCodec`] and [`CheckedFusionAlgebra`].
-///
-/// Why explicit impls rather than the former blanket over
-/// `CheckedFusionAlgebra + SectorCodec`: the blanket overlapped every other
-/// admission impl, so [`CategoryRule`](crate::CategoryRule) could not choose
-/// its mode from its codec.
-macro_rules! multiplicity_free_typed_admission {
-    ($($rule:ty),+ $(,)?) => {$(
-        impl $crate::TypedSectorAdmission for $rule {
-            type Sector = <$rule as $crate::SectorCodec>::Sector;
-            type Error = $crate::FusionAlgebraError;
-            type Mode = $crate::MultiplicityFreeAdmissionMode;
-
-            fn typed_rule_identity(&self) -> $crate::RuleIdentity {
-                $crate::FusionRule::rule_identity(self)
-            }
-
-            fn try_encode_label(
-                &self,
-                sector: &Self::Sector,
-            ) -> Result<$crate::SectorId, Self::Error> {
-                $crate::SectorCodec::encode_sector(self, sector)
-            }
-
-            fn try_decode_label(
-                &self,
-                sector: $crate::SectorId,
-            ) -> Result<Self::Sector, Self::Error> {
-                $crate::SectorCodec::decode_sector(self, sector)
-            }
-
-            fn try_dual_id(&self, sector: $crate::SectorId) -> Result<$crate::SectorId, Self::Error> {
-                $crate::CheckedFusionAlgebra::try_dual_sector(self, sector)
-            }
-        }
-    )+};
-}
-pub(crate) use multiplicity_free_typed_admission;
 
 /// Fallible categorical symbol access for Generic-fusion plan lowering.
 ///
