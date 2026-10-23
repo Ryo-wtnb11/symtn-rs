@@ -80,8 +80,11 @@ unit the codec cannot encode or round-trip; an invalid mode, error, or marker
 combination does not compile.
 
 The provider traits are sealed: they are the bounds generic code names, not
-an extension point. Native implementations exist only for the built-in rules
-and, under the `testing` feature, for test fixtures that implement
+an extension point. Z2, Z_N, U(1), fermion parity, CU(1) and `TableRule`
+implement them through the same category adapter as `CategoryRule`, with
+private codecs that keep their labels, ids, identities and checked errors.
+Native implementations exist only for `SU2FusionRule`, `SUNFusionRule` and
+`ProductFusionRule` and, under the `testing` feature, for test fixtures that implement
 `symtn_sectors::testing::Provider` (re-exported as
 `symtn_core::testing::Provider`) to inject failures or instrument queries.
 
@@ -262,10 +265,12 @@ inherit the contract: they are defined for `N(left,right,coupled) != 0`.
 `sqrt_dim_scalar`, `inv_sqrt_dim_scalar`, `twist_scalar`, and
 `frobenius_schur_phase_scalar`. `a_symbol_scalar`
 and `b_symbol_scalar` have correct default bodies derived from F; a
-`CategoryRule` forwards the category's A and B instead.
+`CategoryRule`, and every built-in rule backed by the category adapter,
+forwards the category's A and B instead.
 
 One capability flag, defaulting to the conservative answer (a `CategoryRule`
-forwards the category's certificate):
+forwards the category's certificate; `TableRule` withholds it, as it reports
+every braided table `Anyonic`):
 
 - `has_trivial_associator_gauge()` — return `true` only if
   *every* allowed F coefficient in your gauge is exactly the scalar unit. It

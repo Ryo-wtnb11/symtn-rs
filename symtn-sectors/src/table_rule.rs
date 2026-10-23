@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use fusion_symbols::category::FusionCategory;
 use fusion_symbols::table::{TableCategory, TableError, TableObject};
-use num_complex::Complex64;
 
+use crate::category_rule::{
+    fusion_algebra_error, AdapterAccess, CanonicalUnitAdmission, CategoryAdapterError,
+    CategoryCodec,
+};
 use crate::{
-    BraidingStyleKind, CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError,
-    FusionRule, FusionStyleKind, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, RuleIdentity, SectorCodec, SectorId, SectorVec,
+    BraidingStyleKind, FusionAlgebraError, MultiplicityFreeAdmissionMode, RuleIdentity, SectorId,
 };
 
 /// A multiplicity-free unitary fusion category from the pinned AnyonWiki
@@ -28,9 +29,9 @@ use crate::{
 ///
 /// # Styles
 ///
-/// [`FusionRule::fusion_style`] is `Unique` when every fusion has exactly
+/// [`FusionRule::fusion_style`](crate::FusionRule::fusion_style) is `Unique` when every fusion has exactly
 /// one channel (read from the exact `N`), otherwise `Simple`.
-/// [`FusionRule::braiding_style`] is `NoBraiding` for a fusion-only entry
+/// [`FusionRule::braiding_style`](crate::FusionRule::braiding_style) is `NoBraiding` for a fusion-only entry
 /// and `Anyonic` for every braided one.
 ///
 /// Why not report a symmetric table braiding as `Bosonic`/`Fermionic`, as
@@ -41,10 +42,15 @@ use crate::{
 /// rejected; `braid` with levels works); the symmetric group categories
 /// have exact closed-form rules (`ZNFusionRule`, `Z2FusionRule`, ...).
 ///
+/// [`has_trivial_associator_gauge`](crate::MultiplicityFreeFusionSymbols::has_trivial_associator_gauge) is
+/// `false` for every entry, even where the table's own certificate holds,
+/// as conservatively as the `Anyonic` braiding: no table takes the direct
+/// Unique symmetric permutation path.
+///
 /// On a `NoBraiding` rule every braiding operation is rejected by symtn
 /// before it asks for an R-symbol or a twist, as in TensorKit. The
-/// infallible [`r_symbol_scalar`](MultiplicityFreeFusionSymbols::r_symbol_scalar)
-/// and [`twist_scalar`](MultiplicityFreeRigidSymbols::twist_scalar) panic
+/// infallible [`r_symbol_scalar`](crate::MultiplicityFreeFusionSymbols::r_symbol_scalar)
+/// and [`twist_scalar`](crate::MultiplicityFreeRigidSymbols::twist_scalar) panic
 /// there, as for an out-of-domain label.
 ///
 /// # Identity
@@ -72,7 +78,6 @@ use crate::{
 pub struct TableRule {
     category: TableCategory,
     identity: RuleIdentity,
-    fusion_style: FusionStyleKind,
 }
 
 /// A simple object of a [`TableRule`]: the database's one-based object
@@ -144,21 +149,7 @@ impl TableRule {
     fn from_category(category: TableCategory) -> Self {
         let bytes = category.authority_fingerprint();
         let identity = RuleIdentity::from_canonical_bytes::<Self>(fnv1a64(bytes), Arc::from(bytes));
-        let pointed = category.objects().all(|a| {
-            category
-                .objects()
-                .all(|b| category.fusion(&a, &b).unwrap().count() == 1)
-        });
-        let fusion_style = if pointed {
-            FusionStyleKind::Unique
-        } else {
-            FusionStyleKind::Simple
-        };
-        Self {
-            category,
-            identity,
-            fusion_style,
-        }
+        Self { category, identity }
     }
 
     /// The AnyonWiki uuid of this category.
@@ -169,23 +160,6 @@ impl TableRule {
     /// Number of simple objects.
     pub fn rank(&self) -> usize {
         self.category.rank()
-    }
-
-    fn index(&self, sector: SectorId) -> Result<TableObject, FusionAlgebraError> {
-        (sector.id() < self.rank())
-            .then(|| self.category.object(sector.id() as u16 + 1).unwrap())
-            .ok_or(FusionAlgebraError::InvalidSector { sector })
-    }
-
-    /// The infallible symbols' domain check (#1737): an out-of-domain id
-    /// panics with the typed error instead of reaching the table.
-    fn object(&self, method: &str, sector: SectorId) -> TableObject {
-        self.index(sector)
-            .unwrap_or_else(|error| panic!("{method} precondition violated: {error}"))
-    }
-
-    fn sector_id(object: TableObject) -> SectorId {
-        SectorId::new(usize::from(object.index()) - 1)
     }
 }
 
@@ -199,20 +173,102 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     })
 }
 
+/// One-based `TableSector` labels and zero-based ids over a table.
+#[derive(Debug)]
+pub struct TableCodec;
+
+impl CategoryCodec<TableCategory> for TableCodec {
+    type Sector = TableSector;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    // Every shipped entry carries the table's canonical-unit certificate
+    // (`tests/table_rule.rs`), which reads the stored unitor associators.
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a TableCategory + Copy,
+        rule: &RuleIdentity,
+        label: &TableSector,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        let rank = category().rank();
+        let label = usize::from(label.label());
+        if (1..=rank).contains(&label) {
+            Ok(SectorId::new(label - 1))
+        } else {
+            Err(FusionAlgebraError::UnrepresentableSectorLabel {
+                rule: rule.clone(),
+                label: format!("table object {label} (rank {rank})"),
+            })
+        }
+    }
+
+    fn decode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a TableCategory + Copy,
+        id: SectorId,
+    ) -> Result<TableSector, FusionAlgebraError> {
+        self.object(category, id)
+            .map(|object| TableSector(object.index()))
+    }
+
+    fn object<'a>(
+        &self,
+        category: impl Fn() -> &'a TableCategory + Copy,
+        id: SectorId,
+    ) -> Result<TableObject, FusionAlgebraError> {
+        u16::try_from(id.id())
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .and_then(|label| category().object(label).ok())
+            .ok_or(FusionAlgebraError::InvalidSector { sector: id })
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _category: impl Fn() -> &'a TableCategory + Copy,
+        _rule: &RuleIdentity,
+        object: &TableObject,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(SectorId::new(usize::from(object.index()) - 1))
+    }
+
+    fn map_error(
+        &self,
+        _inputs: &[SectorId],
+        error: CategoryAdapterError<TableError>,
+    ) -> FusionAlgebraError {
+        fusion_algebra_error(error)
+    }
+}
+
 impl crate::seal::Provider for TableRule {}
 
-crate::algebra::multiplicity_free_typed_admission!(TableRule);
+crate::category_rule::multiplicity_free_adapter_impls!(
+    TableRule,
+    TableSector,
+    num_complex::Complex64
+);
 
-impl FusionRule for TableRule {
-    fn rule_identity(&self) -> RuleIdentity {
-        self.identity.clone()
+impl AdapterAccess for TableRule {
+    type Category = TableCategory;
+    type Codec = TableCodec;
+
+    fn category(&self) -> &TableCategory {
+        &self.category
+    }
+    fn codec(&self) -> &TableCodec {
+        &TableCodec
+    }
+    fn identity(&self) -> &RuleIdentity {
+        &self.identity
+    }
+    fn vacuum_id(&self) -> SectorId {
+        SectorId::new(0)
     }
 
-    fn fusion_style(&self) -> FusionStyleKind {
-        self.fusion_style
-    }
-
-    fn braiding_style(&self) -> BraidingStyleKind {
+    /// `Anyonic` for every braided entry; see the type's "Styles".
+    fn braiding_policy(&self) -> BraidingStyleKind {
         if self.category.is_braided() {
             BraidingStyleKind::Anyonic
         } else {
@@ -220,167 +276,18 @@ impl FusionRule for TableRule {
         }
     }
 
-    fn vacuum(&self) -> SectorId {
-        Self::sector_id(self.category.unit())
-    }
-
-    fn dual(&self, sector: SectorId) -> SectorId {
-        self.dual_or_panic(sector)
-    }
-
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        self.fusion_channels_or_panic(left, right)
-    }
-
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        self.nsymbol_or_panic(left, right, coupled)
-    }
-}
-
-impl CheckedFusionAlgebra for TableRule {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        Ok(Self::sector_id(self.category.dual(&self.index(sector)?)))
-    }
-
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        let (left, right) = (self.index(left)?, self.index(right)?);
-        Ok(self
-            .category
-            .fusion(&left, &right)
-            .unwrap()
-            .map(Self::sector_id)
-            .collect())
-    }
-
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        let (left, right, coupled) = (self.index(left)?, self.index(right)?, self.index(coupled)?);
-        Ok(self.category.nsymbol(&left, &right, &coupled) as usize)
-    }
-}
-
-impl SectorCodec for TableRule {
-    type Sector = TableSector;
-
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        let label = usize::from(value.label());
-        if (1..=self.rank()).contains(&label) {
-            Ok(SectorId::new(label - 1))
-        } else {
-            Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: self.identity.clone(),
-                label: format!("table object {label} (rank {})", self.rank()),
-            })
-        }
-    }
-
-    fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        Ok(TableSector(self.index(id)?.index()))
-    }
-}
-
-impl MultiplicityFreeFusionRule for TableRule {}
-
-// The unit fusion laws are checked exactly at construction; the unitor
-// associators are asserted bitwise `1 + 0i` for every shipped entry by the
-// tables' own tests.
-impl CanonicalUnitFusionRule for TableRule {}
-
-impl MultiplicityFreeFusionSymbols for TableRule {
-    type Scalar = Complex64;
-
-    fn f_symbol_scalar(
-        &self,
-        left: SectorId,
-        middle: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-        left_coupled: SectorId,
-        right_coupled: SectorId,
-    ) -> Self::Scalar {
-        let o = |sector| self.object("f_symbol_scalar", sector);
-        self.category
-            .f_symbol(
-                &o(left),
-                &o(middle),
-                &o(right),
-                &o(coupled),
-                &o(left_coupled),
-                &o(right_coupled),
-            )
-            .unwrap()
-    }
-
-    fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
-        let o = |sector| self.object("r_symbol_scalar", sector);
-        if !self.category.is_braided() {
-            std::panic::panic_any(
-                "r_symbol precondition violated: the category has no braiding".to_owned(),
-            );
-        }
-        self.category
-            .r_symbol(&o(left), &o(right), &o(coupled))
-            .unwrap()
-    }
-}
-
-impl MultiplicityFreeRigidSymbols for TableRule {
-    fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Complex64::new(self.category.dim(&self.object("dim_scalar", sector)), 0.0)
-    }
-
-    fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Complex64::new(
-            1.0 / self.category.dim(&self.object("inv_dim_scalar", sector)),
-            0.0,
-        )
-    }
-
-    fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Complex64::new(
-            self.category
-                .dim(&self.object("sqrt_dim_scalar", sector))
-                .sqrt(),
-            0.0,
-        )
-    }
-
-    fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Complex64::new(
-            1.0 / self
-                .category
-                .dim(&self.object("inv_sqrt_dim_scalar", sector))
-                .sqrt(),
-            0.0,
-        )
-    }
-
-    fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        if !self.category.is_braided() {
-            std::panic::panic_any(
-                "twist precondition violated: the category has no braiding".to_owned(),
-            );
-        }
-        self.category.twist(&self.object("twist_scalar", sector))
-    }
-
-    fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        self.category
-            .frobenius_schur_phase(&self.object("frobenius_schur_phase_scalar", sector))
+    /// Never certified: with the braiding reported `Anyonic`, no table takes
+    /// the Unique symmetric permutation path the certificate serves, and the
+    /// certificate is kept as conservative as that braiding policy.
+    fn trivial_associator_policy(&self) -> bool {
+        false
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FusionRule;
 
     #[test]
     fn fnv1a64_matches_the_published_reference_vectors() {

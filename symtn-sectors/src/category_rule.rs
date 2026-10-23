@@ -303,16 +303,7 @@ where
         operation: CategoryOperation,
         ids: [SectorId; N],
     ) -> Result<[C::Object; N], Self::Error> {
-        let objects = try_map_array(ids, |id| member_object(self, category, id))?;
-        let dualized = match operation {
-            CategoryOperation::A => objects.first(),
-            CategoryOperation::B => objects.get(1),
-            _ => None,
-        };
-        if let Some(object) = dualized {
-            self.sector_id(category, rule, &category().dual(object))?;
-        }
-        Ok(objects)
+        admit_in_order(self, category, rule, operation, ids)
     }
 
     /// Admits R's inputs; `None` admits an R block known to be zero without
@@ -354,8 +345,56 @@ where
     fn map_error(&self, inputs: &[SectorId], error: CategoryAdapterError<C::Error>) -> Self::Error;
 }
 
+/// [`CategoryCodec::admit`]'s default: the ids in argument order, then for
+/// `A` and `B` the id of the dualized input; a codec that checks one input
+/// earlier keeps this for the rest.
+pub(crate) fn admit_in_order<'a, C, K, const N: usize>(
+    codec: &K,
+    category: impl Fn() -> &'a C + Copy,
+    rule: &RuleIdentity,
+    operation: CategoryOperation,
+    ids: [SectorId; N],
+) -> Result<[C::Object; N], K::Error>
+where
+    C: FusionCategory + 'static,
+    C::Error: Send + Sync + 'static,
+    K: CategoryCodec<C> + ?Sized,
+{
+    let objects = try_map_array(ids, |id| member_object(codec, category, id))?;
+    let dualized = match operation {
+        CategoryOperation::A => objects.first(),
+        CategoryOperation::B => objects.get(1),
+        _ => None,
+    };
+    if let Some(object) = dualized {
+        codec.sector_id(category, rule, &category().dual(object))?;
+    }
+    Ok(objects)
+}
+
+/// `N`'s inputs decoded once each, the coupled (last) sector first and then
+/// the others in argument order, returned in argument order.
+pub(crate) fn admit_coupled_first<'a, C, K, const N: usize>(
+    codec: &K,
+    category: impl Fn() -> &'a C + Copy,
+    ids: [SectorId; N],
+) -> Result<[C::Object; N], K::Error>
+where
+    C: FusionCategory + 'static,
+    C::Error: Send + Sync + 'static,
+    K: CategoryCodec<C> + ?Sized,
+{
+    let mut objects: [Option<C::Object>; N] = core::array::from_fn(|_| None);
+    for step in 0..N {
+        let position = (step + N - 1) % N;
+        objects[position] = Some(member_object(codec, category, ids[position])?);
+    }
+    // The loop visits every position once.
+    Ok(objects.map(|object| object.expect("every input was decoded")))
+}
+
 /// The object `id` names, rejected if it is not a member of the category.
-fn member_object<'a, C, K>(
+pub(crate) fn member_object<'a, C, K>(
     codec: &K,
     category: impl Fn() -> &'a C + Copy,
     id: SectorId,
@@ -377,7 +416,7 @@ where
 }
 
 /// `items.map(f)`, stopping at the first error.
-fn try_map_array<T, U, E, const N: usize>(
+pub(crate) fn try_map_array<T, U, E, const N: usize>(
     items: [T; N],
     mut f: impl FnMut(T) -> Result<U, E>,
 ) -> Result<[U; N], E> {
@@ -554,15 +593,24 @@ where
         _inputs: &[SectorId],
         error: CategoryAdapterError<C::Error>,
     ) -> Self::Error {
-        match error {
-            CategoryAdapterError::Provider(error) => {
-                FusionAlgebraError::CategoryFailure(CategoryFailure::new(error))
-            }
-            CategoryAdapterError::ForeignObject {
-                sector: Some(sector),
-            } => FusionAlgebraError::InvalidSector { sector },
-            other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
+        fusion_algebra_error(error)
+    }
+}
+
+/// The multiplicity-free translation of an adapter failure: a foreign id is
+/// `InvalidSector`, and everything else a `CategoryFailure` keeping its source.
+pub(crate) fn fusion_algebra_error<E>(error: CategoryAdapterError<E>) -> FusionAlgebraError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    match error {
+        CategoryAdapterError::Provider(error) => {
+            FusionAlgebraError::CategoryFailure(CategoryFailure::new(error))
         }
+        CategoryAdapterError::ForeignObject {
+            sector: Some(sector),
+        } => FusionAlgebraError::InvalidSector { sector },
+        other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
     }
 }
 
@@ -775,15 +823,30 @@ where
 }
 
 /// Borrowed ingredients of a category-backed rule, so that one set of
-/// forwarding helpers serves [`CategoryRule`] and, as they migrate, the
-/// built-in rules that keep their own public types.
-trait AdapterAccess {
+/// provider implementations serves [`CategoryRule`] and the built-in rules
+/// that keep their own public types (their identities, constructors, and
+/// `Copy`/`const` forms).
+pub(crate) trait AdapterAccess: crate::seal::Provider + 'static {
     type Category: FusionCategory<Error: Send + Sync + 'static> + 'static;
     type Codec: CategoryCodec<Self::Category>;
 
     fn category(&self) -> &Self::Category;
     fn codec(&self) -> &Self::Codec;
     fn identity(&self) -> &RuleIdentity;
+    /// The id the codec gives the category's unit.
+    fn vacuum_id(&self) -> SectorId;
+
+    /// The reported braiding style: the category's, unless the rule keeps a
+    /// more conservative execution policy.
+    fn braiding_policy(&self) -> BraidingStyleKind {
+        forward::braiding_style_kind(self.category().braiding_style())
+    }
+
+    /// The category's trivial-associator certificate, unless the rule keeps
+    /// a more conservative execution policy.
+    fn trivial_associator_policy(&self) -> bool {
+        self.category().has_trivial_associator_gauge()
+    }
 }
 
 impl<C, K> AdapterAccess for CategoryRule<C, K>
@@ -806,11 +869,15 @@ where
     fn identity(&self) -> &RuleIdentity {
         &self.identity
     }
+
+    fn vacuum_id(&self) -> SectorId {
+        self.vacuum
+    }
 }
 
 impl<C, K> crate::seal::Provider for CategoryRule<C, K> {}
 
-mod forward {
+pub(crate) mod forward {
     //! The category operations of an [`AdapterAccess`] rule, each admitted by
     //! its codec before the category is asked.
 
@@ -820,7 +887,7 @@ mod forward {
     type Category<A> = <A as AdapterAccess>::Category;
     type Object<A> = <Category<A> as FusionCategory>::Object;
     type Value<A> = <Category<A> as FusionCategory>::Scalar;
-    pub(super) type Error<A> = <<A as AdapterAccess>::Codec as CategoryCodec<Category<A>>>::Error;
+    pub(crate) type Error<A> = <<A as AdapterAccess>::Codec as CategoryCodec<Category<A>>>::Error;
 
     fn admit<A: AdapterAccess, const N: usize>(
         rule: &A,
@@ -854,7 +921,17 @@ mod forward {
         }
     }
 
-    pub(super) fn braiding_style_kind(style: BraidingStyle) -> BraidingStyleKind {
+    /// The style of a multiplicity-free admitted category, which admission
+    /// guarantees is not Generic.
+    pub(crate) fn multiplicity_free_style<A: AdapterAccess>(rule: &A) -> FusionStyleKind {
+        if rule.category().fusion_style() == FusionStyle::Unique {
+            FusionStyleKind::Unique
+        } else {
+            FusionStyleKind::Simple
+        }
+    }
+
+    pub(crate) fn braiding_style_kind(style: BraidingStyle) -> BraidingStyleKind {
         match style {
             BraidingStyle::None => BraidingStyleKind::NoBraiding,
             BraidingStyle::Bosonic => BraidingStyleKind::Bosonic,
@@ -863,14 +940,14 @@ mod forward {
         }
     }
 
-    pub(super) fn dual<A: AdapterAccess>(rule: &A, sector: SectorId) -> Result<SectorId, Error<A>> {
+    pub(crate) fn dual<A: AdapterAccess>(rule: &A, sector: SectorId) -> Result<SectorId, Error<A>> {
         let [object] = admit(rule, CategoryOperation::Dual, [sector])?;
         let dual = rule.category().dual(&object);
         rule.codec()
             .sector_id(|| rule.category(), rule.identity(), &dual)
     }
 
-    pub(super) fn fusion_channels<A: AdapterAccess>(
+    pub(crate) fn fusion_channels<A: AdapterAccess>(
         rule: &A,
         left: SectorId,
         right: SectorId,
@@ -884,7 +961,7 @@ mod forward {
             .encode_channels(rule.category(), rule.identity(), [left, right], outcomes)
     }
 
-    pub(super) fn nsymbol<A: AdapterAccess>(
+    pub(crate) fn nsymbol<A: AdapterAccess>(
         rule: &A,
         left: SectorId,
         right: SectorId,
@@ -911,7 +988,7 @@ mod forward {
     }
 
     /// A dimension-like value of `sector`, rejected unless finite and positive.
-    pub(super) fn dimension<A: AdapterAccess>(
+    pub(crate) fn dimension<A: AdapterAccess>(
         rule: &A,
         sector: SectorId,
         value: impl FnOnce(&Category<A>, &Object<A>) -> f64,
@@ -933,7 +1010,7 @@ mod forward {
         member_object(rule.codec(), || rule.category(), sector)
     }
 
-    pub(super) fn frobenius_schur_phase<A: AdapterAccess>(
+    pub(crate) fn frobenius_schur_phase<A: AdapterAccess>(
         rule: &A,
         sector: SectorId,
     ) -> Result<Value<A>, Error<A>> {
@@ -941,7 +1018,7 @@ mod forward {
         Ok(rule.category().frobenius_schur_phase(&object))
     }
 
-    pub(super) fn twist<A: AdapterAccess>(
+    pub(crate) fn twist<A: AdapterAccess>(
         rule: &A,
         sector: SectorId,
     ) -> Result<Value<A>, Error<A>> {
@@ -998,7 +1075,7 @@ mod forward {
         }
     }
 
-    pub(super) fn f_scalar<A: AdapterAccess>(
+    pub(crate) fn f_scalar<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 6],
     ) -> Result<Value<A>, Error<A>> {
@@ -1010,7 +1087,7 @@ mod forward {
         single(rule, &ids, block.as_slice())
     }
 
-    pub(super) fn r_scalar<A: AdapterAccess>(
+    pub(crate) fn r_scalar<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<Value<A>, Error<A>> {
@@ -1028,7 +1105,7 @@ mod forward {
         single(rule, &ids, block.as_slice())
     }
 
-    pub(super) fn f_block<A: AdapterAccess>(
+    pub(crate) fn f_block<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 6],
     ) -> Result<GenericFArray<Value<A>>, Error<A>> {
@@ -1053,7 +1130,7 @@ mod forward {
         Ok(GenericFArray::new(data, shape))
     }
 
-    pub(super) fn r_block<A: AdapterAccess>(
+    pub(crate) fn r_block<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<GenericRMatrix<Value<A>>, Error<A>> {
@@ -1113,7 +1190,7 @@ mod forward {
         Ok(GenericRMatrix::new(data, rows, cols))
     }
 
-    pub(super) fn a_block<A: AdapterAccess>(
+    pub(crate) fn a_block<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<GenericRMatrix<Value<A>>, Error<A>> {
@@ -1127,7 +1204,7 @@ mod forward {
         vertex_move_block(rule, ids, &objects, [&a_dual, c, b], block)
     }
 
-    pub(super) fn b_block<A: AdapterAccess>(
+    pub(crate) fn b_block<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<GenericRMatrix<Value<A>>, Error<A>> {
@@ -1141,7 +1218,7 @@ mod forward {
         vertex_move_block(rule, ids, &objects, [c, &b_dual, a], block)
     }
 
-    pub(super) fn a_scalar<A: AdapterAccess>(
+    pub(crate) fn a_scalar<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<Value<A>, Error<A>> {
@@ -1153,7 +1230,7 @@ mod forward {
         single(rule, &ids, block.data())
     }
 
-    pub(super) fn b_scalar<A: AdapterAccess>(
+    pub(crate) fn b_scalar<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 3],
     ) -> Result<Value<A>, Error<A>> {
@@ -1167,8 +1244,22 @@ mod forward {
 }
 
 /// An infallible multiplicity-free query outside the rule's domain.
-fn violated<T>(operation: &str, result: Result<T, FusionAlgebraError>) -> T {
+pub(crate) fn violated<T>(operation: &str, result: Result<T, FusionAlgebraError>) -> T {
     result.unwrap_or_else(|error| panic!("{operation} precondition violated: {error}"))
+}
+
+// `CategoryRule`'s provider traits. The built-in wrappers implement the
+// multiplicity-free family through `multiplicity_free_adapter_impls!`, over
+// the same `forward` helpers, so their impls name concrete types.
+
+/// `R` or a twist on a category without braiding; checked before the inputs,
+/// as a caller bug distinct from an out-of-domain label.
+pub(crate) fn require_braiding_or_panic<A: AdapterAccess>(rule: &A, what: &str) {
+    if rule.category().braiding_style() == BraidingStyle::None {
+        std::panic::panic_any(format!(
+            "{what} precondition violated: the category has no braiding"
+        ));
+    }
 }
 
 impl<C, K> TypedSectorAdmission for CategoryRule<C, K>
@@ -1182,16 +1273,16 @@ where
     type Mode = K::Mode;
 
     fn typed_rule_identity(&self) -> RuleIdentity {
-        self.identity.clone()
+        self.identity().clone()
     }
 
     fn try_encode_label(&self, sector: &Self::Sector) -> Result<SectorId, Self::Error> {
-        self.codec
-            .encode_label(|| &*self.category, &self.identity, sector)
+        self.codec()
+            .encode_label(|| self.category(), self.identity(), sector)
     }
 
     fn try_decode_label(&self, sector: SectorId) -> Result<Self::Sector, Self::Error> {
-        self.codec.decode_label(|| &*self.category, sector)
+        self.codec().decode_label(|| self.category(), sector)
     }
 
     fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
@@ -1206,24 +1297,19 @@ where
     K: CategoryCodec<C, Mode = MultiplicityFreeAdmissionMode, Error = FusionAlgebraError>,
 {
     fn rule_identity(&self) -> RuleIdentity {
-        self.identity.clone()
+        self.identity().clone()
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        // `try_new` refused Generic fusion for multiplicity-free admission.
-        if self.category.fusion_style() == FusionStyle::Unique {
-            FusionStyleKind::Unique
-        } else {
-            FusionStyleKind::Simple
-        }
+        forward::multiplicity_free_style(self)
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        forward::braiding_style_kind(self.category.braiding_style())
+        self.braiding_policy()
     }
 
     fn vacuum(&self) -> SectorId {
-        self.vacuum
+        self.vacuum_id()
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
@@ -1239,7 +1325,7 @@ where
     }
 
     fn sector_order_key(&self, sector: SectorId) -> SectorOrderKey {
-        self.codec.sector_order_key(sector)
+        self.codec().sector_order_key(sector)
     }
 }
 
@@ -1306,7 +1392,7 @@ where
     type Scalar = C::Scalar;
 
     fn has_trivial_associator_gauge(&self) -> bool {
-        self.category.has_trivial_associator_gauge()
+        self.trivial_associator_policy()
     }
 
     fn f_symbol_scalar(
@@ -1328,6 +1414,7 @@ where
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
+        require_braiding_or_panic(self, "r_symbol");
         violated(
             "MultiplicityFreeFusionSymbols::r_symbol_scalar",
             forward::r_scalar(self, [left, right, coupled]),
@@ -1339,38 +1426,40 @@ impl<C, K> MultiplicityFreeRigidSymbols for CategoryRule<C, K>
 where
     C: FusionCategory + Send + Sync + 'static,
     C::Error: Send + Sync + 'static,
+    K: Sync,
     C::Scalar: CategoricalScalar + Send + Sync,
-    K: CategoryCodec<C, Mode = MultiplicityFreeAdmissionMode, Error = FusionAlgebraError> + Sync,
+    K: CategoryCodec<C, Mode = MultiplicityFreeAdmissionMode, Error = FusionAlgebraError>,
 {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         violated(
             "MultiplicityFreeRigidSymbols::dim_scalar",
-            forward::dimension(self, sector, C::dim),
+            forward::dimension(self, sector, FusionCategory::dim),
         )
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         violated(
             "MultiplicityFreeRigidSymbols::inv_dim_scalar",
-            forward::dimension(self, sector, C::inv_dim),
+            forward::dimension(self, sector, FusionCategory::inv_dim),
         )
     }
 
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         violated(
             "MultiplicityFreeRigidSymbols::sqrt_dim_scalar",
-            forward::dimension(self, sector, C::sqrt_dim),
+            forward::dimension(self, sector, FusionCategory::sqrt_dim),
         )
     }
 
     fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         violated(
             "MultiplicityFreeRigidSymbols::inv_sqrt_dim_scalar",
-            forward::dimension(self, sector, C::inv_sqrt_dim),
+            forward::dimension(self, sector, FusionCategory::inv_sqrt_dim),
         )
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
+        require_braiding_or_panic(self, "twist");
         violated(
             "MultiplicityFreeRigidSymbols::twist_scalar",
             forward::twist(self, sector),
@@ -1427,7 +1516,7 @@ where
     type Error = K::Error;
 
     fn rule_identity(&self) -> RuleIdentity {
-        self.identity.clone()
+        self.identity().clone()
     }
 
     /// Always `Generic`: checked Generic admission executes every category on
@@ -1437,11 +1526,11 @@ where
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        forward::braiding_style_kind(self.category.braiding_style())
+        self.braiding_policy()
     }
 
     fn vacuum(&self) -> SectorId {
-        self.vacuum
+        self.vacuum_id()
     }
 
     fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
@@ -1476,7 +1565,7 @@ where
     }
 
     fn sector_order_key(&self, sector: SectorId) -> SectorOrderKey {
-        self.codec.sector_order_key(sector)
+        self.codec().sector_order_key(sector)
     }
 }
 
@@ -1490,15 +1579,15 @@ where
     type Scalar = C::Scalar;
 
     fn try_dim_scalar(&self, sector: SectorId) -> Result<Self::Scalar, Self::Error> {
-        forward::dimension(self, sector, C::dim)
+        forward::dimension(self, sector, FusionCategory::dim)
     }
 
     fn try_sqrt_dim_scalar(&self, sector: SectorId) -> Result<Self::Scalar, Self::Error> {
-        forward::dimension(self, sector, C::sqrt_dim)
+        forward::dimension(self, sector, FusionCategory::sqrt_dim)
     }
 
     fn try_inv_sqrt_dim_scalar(&self, sector: SectorId) -> Result<Self::Scalar, Self::Error> {
-        forward::dimension(self, sector, C::inv_sqrt_dim)
+        forward::dimension(self, sector, FusionCategory::inv_sqrt_dim)
     }
 
     fn try_frobenius_schur_phase_scalar(
@@ -1567,3 +1656,215 @@ where
     K: CategoryCodec<C, Mode = CheckedGenericAdmissionMode, Unit = CanonicalUnitAdmission>,
 {
 }
+
+/// The multiplicity-free provider traits of a built-in rule backed by the
+/// category adapter: the same `forward` helpers as [`CategoryRule`]'s impls,
+/// written per rule so that its impls name its concrete `Sector` and
+/// `Scalar` (a blanket impl over [`AdapterAccess`] would leak that private
+/// machinery into every public bound). The rule's codec must select
+/// multiplicity-free, canonical-unit admission with [`FusionAlgebraError`].
+macro_rules! multiplicity_free_adapter_impls {
+    ($rule:ty, $sector:ty, $scalar:ty) => {
+        const _: () = {
+            use fusion_symbols::category::FusionCategory;
+            use $crate::category_rule::{
+                forward, require_braiding_or_panic, violated, AdapterAccess,
+            };
+            use $crate::{
+                BraidingStyleKind, CategoryCodec, CheckedFusionAlgebra, FusionAlgebraError,
+                FusionRule, FusionStyleKind, RuleIdentity, SectorId, SectorOrderKey, SectorVec,
+            };
+
+            impl $crate::TypedSectorAdmission for $rule {
+                type Sector = $sector;
+                type Error = FusionAlgebraError;
+                type Mode = $crate::MultiplicityFreeAdmissionMode;
+
+                fn typed_rule_identity(&self) -> RuleIdentity {
+                    self.identity().clone()
+                }
+                fn try_encode_label(
+                    &self,
+                    sector: &$sector,
+                ) -> Result<SectorId, FusionAlgebraError> {
+                    self.codec()
+                        .encode_label(|| self.category(), self.identity(), sector)
+                }
+                fn try_decode_label(
+                    &self,
+                    sector: SectorId,
+                ) -> Result<$sector, FusionAlgebraError> {
+                    self.codec().decode_label(|| self.category(), sector)
+                }
+                fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
+                    forward::dual(self, sector)
+                }
+            }
+
+            impl FusionRule for $rule {
+                fn rule_identity(&self) -> RuleIdentity {
+                    self.identity().clone()
+                }
+                fn fusion_style(&self) -> FusionStyleKind {
+                    forward::multiplicity_free_style(self)
+                }
+                fn braiding_style(&self) -> BraidingStyleKind {
+                    self.braiding_policy()
+                }
+                fn vacuum(&self) -> SectorId {
+                    self.vacuum_id()
+                }
+                fn dual(&self, sector: SectorId) -> SectorId {
+                    self.dual_or_panic(sector)
+                }
+                fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
+                    self.fusion_channels_or_panic(left, right)
+                }
+                fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
+                    self.nsymbol_or_panic(left, right, coupled)
+                }
+                fn sector_order_key(&self, sector: SectorId) -> SectorOrderKey {
+                    self.codec().sector_order_key(sector)
+                }
+            }
+
+            impl CheckedFusionAlgebra for $rule {
+                fn try_dual_sector(
+                    &self,
+                    sector: SectorId,
+                ) -> Result<SectorId, FusionAlgebraError> {
+                    forward::dual(self, sector)
+                }
+                fn try_fusion_channels(
+                    &self,
+                    left: SectorId,
+                    right: SectorId,
+                ) -> Result<SectorVec, FusionAlgebraError> {
+                    forward::fusion_channels(self, left, right)
+                }
+                fn try_nsymbol(
+                    &self,
+                    left: SectorId,
+                    right: SectorId,
+                    coupled: SectorId,
+                ) -> Result<usize, FusionAlgebraError> {
+                    forward::nsymbol(self, left, right, coupled)
+                }
+            }
+
+            impl $crate::SectorCodec for $rule {
+                type Sector = $sector;
+
+                fn encode_sector(&self, value: &$sector) -> Result<SectorId, FusionAlgebraError> {
+                    $crate::TypedSectorAdmission::try_encode_label(self, value)
+                }
+                fn decode_sector(&self, id: SectorId) -> Result<$sector, FusionAlgebraError> {
+                    $crate::TypedSectorAdmission::try_decode_label(self, id)
+                }
+            }
+
+            impl $crate::MultiplicityFreeFusionRule for $rule {}
+            impl $crate::CanonicalUnitFusionRule for $rule {}
+
+            impl $crate::MultiplicityFreeFusionSymbols for $rule {
+                type Scalar = $scalar;
+
+                fn has_trivial_associator_gauge(&self) -> bool {
+                    self.trivial_associator_policy()
+                }
+                fn f_symbol_scalar(
+                    &self,
+                    left: SectorId,
+                    middle: SectorId,
+                    right: SectorId,
+                    coupled: SectorId,
+                    left_coupled: SectorId,
+                    right_coupled: SectorId,
+                ) -> $scalar {
+                    violated(
+                        "MultiplicityFreeFusionSymbols::f_symbol_scalar",
+                        forward::f_scalar(
+                            self,
+                            [left, middle, right, coupled, left_coupled, right_coupled],
+                        ),
+                    )
+                }
+                fn r_symbol_scalar(
+                    &self,
+                    left: SectorId,
+                    right: SectorId,
+                    coupled: SectorId,
+                ) -> $scalar {
+                    require_braiding_or_panic(self, "r_symbol");
+                    violated(
+                        "MultiplicityFreeFusionSymbols::r_symbol_scalar",
+                        forward::r_scalar(self, [left, right, coupled]),
+                    )
+                }
+            }
+
+            impl $crate::MultiplicityFreeRigidSymbols for $rule {
+                fn dim_scalar(&self, sector: SectorId) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::dim_scalar",
+                        forward::dimension(self, sector, FusionCategory::dim),
+                    )
+                }
+                fn inv_dim_scalar(&self, sector: SectorId) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::inv_dim_scalar",
+                        forward::dimension(self, sector, FusionCategory::inv_dim),
+                    )
+                }
+                fn sqrt_dim_scalar(&self, sector: SectorId) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::sqrt_dim_scalar",
+                        forward::dimension(self, sector, FusionCategory::sqrt_dim),
+                    )
+                }
+                fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::inv_sqrt_dim_scalar",
+                        forward::dimension(self, sector, FusionCategory::inv_sqrt_dim),
+                    )
+                }
+                fn twist_scalar(&self, sector: SectorId) -> $scalar {
+                    require_braiding_or_panic(self, "twist");
+                    violated(
+                        "MultiplicityFreeRigidSymbols::twist_scalar",
+                        forward::twist(self, sector),
+                    )
+                }
+                fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::frobenius_schur_phase_scalar",
+                        forward::frobenius_schur_phase(self, sector),
+                    )
+                }
+                fn a_symbol_scalar(
+                    &self,
+                    left: SectorId,
+                    right: SectorId,
+                    coupled: SectorId,
+                ) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::a_symbol_scalar",
+                        forward::a_scalar(self, [left, right, coupled]),
+                    )
+                }
+                fn b_symbol_scalar(
+                    &self,
+                    left: SectorId,
+                    right: SectorId,
+                    coupled: SectorId,
+                ) -> $scalar {
+                    violated(
+                        "MultiplicityFreeRigidSymbols::b_symbol_scalar",
+                        forward::b_scalar(self, [left, right, coupled]),
+                    )
+                }
+            }
+        };
+    };
+}
+pub(crate) use multiplicity_free_adapter_impls;
