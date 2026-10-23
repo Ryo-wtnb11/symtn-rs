@@ -44,7 +44,7 @@ impl CompactFactorRoute {
 ///
 /// Reference map (TensorKit `initialize_output` + `foreachblock`, QSpace
 /// `EigenSymmetric` / `blockSVD`), what was ported and the Rust differences:
-/// `docs/audit/issue-1774-shared-compact-factor-plan.md`.
+/// `docs/design.md#factorization`.
 ///
 /// Why not `Arc` the plan or its source half: nothing shares it beyond the
 /// one call that builds it, so the wrappers were two heap allocations per

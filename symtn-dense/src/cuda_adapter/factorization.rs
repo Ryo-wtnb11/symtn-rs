@@ -19,7 +19,7 @@ fn with_cuda_linalg<R: Send>(
 /// [`CudaDenseStorage`] does, and every consumer rejects a context on another
 /// device before any submission (#1766). Reference provenance — TensorKit,
 /// TensorOperations and QSpace have no explicit device-admission path to
-/// port — is recorded in `docs/audit/issue-1766-cuda-spectrum-device.md`.
+/// port — is recorded in `docs/backend_policy.md#device-validation`.
 pub struct CudaSpectrum {
     pub(super) tensor: Tensor,
     pub(super) device: usize,

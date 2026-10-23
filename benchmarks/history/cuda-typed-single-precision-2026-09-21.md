@@ -4,7 +4,7 @@ Device evidence for admitting `f32` and `Complex32` to `tenet`'s device payload
 marker `CudaPayload`, and for closing the device factorization family behind
 the new sealed marker `CudaFactorizationPayload`.
 
-Audit note `docs/audit/issue-1336-single-precision-device-payload.md`; survey
+Audit note [historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1336-single-precision-device-payload.md); survey
 `reviews/gpu-phase-20260920/single-precision-survey.md` (row C2); adapter leaf
 `benchmarks/history/cuda-scalar-single-precision-2026-09-21.md` (#1326, C1);
 probe `benchmarks/history/cuda-single-precision-probe-2026-09-20.md` (#1303,

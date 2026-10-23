@@ -111,7 +111,7 @@ pub(crate) enum TreeTransformAdmissionError {
 /// `checked_fused_index_len` report `ElementCountOverflow`. Only the
 /// placement, context, capability, region, aliasing, workspace and readiness
 /// verdicts are opaque-executor-only and have no Host category to keep.
-/// Design record: `docs/audit/issue-1763-typed-admission-errors.md`.
+/// Design record: `docs/backend_policy.md#device-validation`.
 impl From<TreeTransformAdmissionError> for OperationError {
     fn from(error: TreeTransformAdmissionError) -> Self {
         let message = match error {

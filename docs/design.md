@@ -1,106 +1,111 @@
 # symtn design
 
-symtn supplies symmetric tensor primitives from which applications build their
-own algorithms. Its public API exposes tensor maps, spaces, categorical
-providers, and mathematical operations. It does not prescribe an MPS, PEPS,
-VMC, or device-transfer schedule. This makes the same small operations usable
-in code written by a person or a coding agent.
+symtn supplies symmetric tensor primitives. Applications own their algorithm
+and operation schedule; symtn owns categorical semantics and reduced-block
+structure. [Layering](layering.md) records the crate and dependency boundaries.
 
 ## Public model
 
-A `TensorMap<R, D, S>` is a map `codomain <- domain`: `R` supplies the fusion
-rule, `D` is the payload scalar, and `S` is the storage type. Tensor rank,
-sector content, and leg dimensions are runtime values. `GradedSpace<R>`
-describes a leg. `Runtime` owns the resources needed to execute operations.
-The ordinary eager methods are the first API to use; prepared state and
-destination methods are explicit options for repeated work.
+`TensorMap<R, D, S>` is a map `codomain <- domain`: `R` is the provider,
+`D` the payload scalar, and `S` the storage (Host by default). Rank, sectors
+and degeneracy dimensions are runtime values. A `GradedSpace<R>` describes
+one leg by sector labels, degeneracies and duality.
 
-TensorKit supplies the reference for mathematical conventions and public
-behavior. QSpace supplies applicable reduced-block, runtime-rank, and
-contiguous-dataflow techniques. symtn implements the selected semantics with
-Rust ownership and checked errors. See [the mathematics](../symtn/src/mathematics.md)
-and [provider interface](provider_interface.md) for the precise conventions
-and trait bounds.
+Only symmetry-allowed reduced blocks are stored. Physical dimensions include
+quantum-dimension weights; degeneracies count stored degrees of freedom.
+Axes are zero-based, codomain first and domain second. Moving a leg across
+that split dualizes it. See [TensorKit's manual](https://docs.juliahub.com/General/TensorKit/stable/)
+for the tensor-map and fusion-category theory.
+
+A tensor carries a shared `Runtime` handle. Operations reuse its execution
+resources; cloning the runtime shares those resources. Storage selects Host
+or CUDA kernels through sealed operation-family traits, independently of the
+provider's multiplicity-free or checked Generic admission mode. See
+[`symtn::typed`](../symtn/src/typed.rs) for dispatch and per-operation bounds.
 
 ## One operation's path
 
 ```text
-TensorMap operation and checked arguments
-  -> provider data, fusion trees, sectors, and reduced-block structure
-  -> exact block layouts, transforms, and dense jobs
-  -> Tenferro/Strided kernels on the selected storage
-  -> checked result or caller-provided destination
+TensorMap method and argument validation
+  -> provider admission, fusion trees and reduced-block layout
+  -> structural transforms and dense jobs
+  -> symtn-dense -> Tenferro, or structural movement through Strided
+  -> result tensor or validated destination
 ```
 
-The fusion-rule provider owns categorical labels and coefficients. symtn owns
-fusion-tree semantics, recoupling, signs, block layouts, structural pack and
-scatter decisions, and result validation. fusion-symbols generates SU(2) coefficient
-data; symtn does not mirror its tables. Tenferro owns dense kernels,
-factorizations, provider execution resources, and backend scheduling. Strided
-owns applicable strided traversal and movement primitives.
-
 `FusionTreeKey` identifies a basis state by uncoupled sectors, coupled sector,
-dual flags, inner lines, and vertex multiplicities. All five fields participate
-in equality and ordering; a cached hash only avoids recomputing the hash during
-lookups. A key is a handle into an immutable tree arena owned by its holder: a
-sector structure or a composed-coefficient cache entry owns one arena for all
-of its trees, so a held key keeps that arena alive. `BlockStructure` keeps sector/tree identity alongside degeneracy
-shapes, strides, and offsets. An owned dense tensor's reduced payload uses
-that checked layout; compact diagonal and lazy-adjoint representations retain
-their own structure instead of pretending to be dense storage.
+dual flags, inner lines and vertex multiplicities. Equality checks all five;
+a cached hash does not replace identity. Keys retain their immutable tree
+arena. `BlockStructure` combines tree identities with degeneracy shapes,
+strides and offsets. Equal element counts alone do not imply equal layouts.
 
-Tree transforms compile source and destination identities, layout moves, and
-recoupling coefficients into `TreeTransformStructure`. The structure contains
-no tensor payload. Replay applies its Single moves, inactive destination fills,
-and Multi pack/GEMM/scatter work to bound storage. General contraction can
-also require source transforms and a destination transform around its core
-block contraction. These are semantic steps, not extra user-visible operations.
+`TreeTransformStructure` contains layout moves and recoupling coefficients,
+without tensor payload. Replay performs direct moves or pack/GEMM/scatter.
+Contraction may need operand and output transforms around its block product.
+These steps stay inside one public operation.
 
-This boundary lets symtn group small dense jobs *within* an operation. The
-application chooses the sequence of operations and may design an
-algorithm-specific fusion or batch. symtn does not run a second CPU scheduler
-around concurrent Tenferro calls. A new fused public operation needs a
-concrete measured cost and an explicit semantic contract.
+## Factorization
+
+Dense factorization groups the tensor into coupled-sector matrices and
+delegates the dense problems to Tenferro. The multiplicity-free Host
+direct-region and CUDA routes for dense compact QR/SVD and full EIGH use
+`CompactFactorPlan` as the per-call, placement-neutral authority for bond
+spaces, factor layouts and sector routes. For sector matrix shape `(m, n)`,
+the compact bond has `min(m, n)` degeneracy; zero-rank routes are skipped.
+Host direct output requires matching tree order; other layouts scatter by
+tree identity. Checked Generic QR builds factors through its own checked
+staging path.
+
+This is the output-initialization/per-block split of TensorKit
+`src/factorizations/matrixalgebrakit.jl:initialize_output` and `foreachblock`;
+QSpace's `Source/mpsortho.cc:SVD_Data::blockSVD` and
+`Source/QSpace.cc:EigenSymmetric` provide the grouped SVD/EIGH counterparts.
+QSpace has no symmetric-tensor QR counterpart. See
+[references](../symtn/references.md) and the
+[cross-storage factor-space test](../symtn/tests/typed_cuda_single_precision_factorizations.rs).
+
+An owned Host compact diagonal on `V <- V` bypasses the plan and dense
+executor for QR, returning both factors in compact storage with `W = V`,
+including dual orientation, for multiplicity-free and checked Generic
+providers; see the [`qr_compact` rustdoc](../symtn/src/typed/factorize/api.rs#L184-L198).
+
+Truncation is a separate composition: factorize, inspect the spectrum with
+`diagview`, select with `GradedSpace::find_truncated`, then `restrict_leg`.
+The application chooses the error budget and retained space.
 
 ## Reuse and placement
 
-Where a split plan/workspace API exists, the immutable plan contains reusable
-mathematical and layout structure. The mutable workspace owns execution
-scratch and, where documented, an output buffer. Bindings and destinations
-are checked per call. Batch size may affect workspace capacity or backend
-artifacts; it does not define a structural plan's semantic identity.
-`ContractPlan` and `ComposePlan` implement this split for stacked contraction
-and composition; both execute with a `ContractWorkspace`, the executor state
-the two operations share.
-`EighFullPlan` / `EighFullWorkspace` implement it for stacked real Hermitian
-eigendecomposition.
+Ordinary eager methods are the primary API. A compact diagonal stores its
+spectrum; a lazy adjoint retains its parent. Methods either exploit that
+representation, take their documented materialization route, or reject it.
+`dense_data` does not silently expand a compact diagonal: use `materialize`.
+See the [complexity policy](complexity_parity_policy.md).
 
-`StackedTensorMap` is an expert fixed-stride representation for homogeneous
-members. It is not a required batch type for ordinary tensor operations.
-General member-batched contract is not public API
-([#1506](https://github.com/Ryo-wtnb11/symtn-rs/issues/1506)). Public prepared
-APIs remain operation-specific; there is no general public work graph or
-mandatory logical batch type.
+Destination methods expose output reuse and validate layout, aliasing and
+ownership. They do not provide general transactional rollback after execution
+starts; each method documents its error guarantees.
 
-Host is the broadest execution path. CUDA is explicit: a runtime attaches a
-device, and `to_cuda()` / `to_host()` transfer tensor payloads. A device
-operation either follows its supported path or reports an unsupported
-capability; it does not silently execute through Host storage. The caller
-chooses transfers between operations. See [backend policy](backend_policy.md)
-for the current selection and resource contract.
+Prepared APIs are operation-specific. `ContractPlan` and `ComposePlan` share
+`ContractWorkspace`; `EighFullPlan` has `EighFullWorkspace`. Immutable plans
+hold structural assumptions; workspaces hold execution scratch and output
+buffers where documented. Bindings are checked per call. `StackedTensorMap`
+is an expert fixed-stride representation of homogeneous members, not a
+required container for ordinary operations. There is no general public work
+graph or symtn-owned second CPU scheduler.
+
+Host/CUDA transfers are explicit `to_cuda` / `to_host` calls. Unsupported
+combinations fail through trait bounds or typed errors. Placement and
+resource costs are in the [backend policy](backend_policy.md).
 
 ## Source map
 
-| Concern | Current source |
+| Concern | Source |
 | --- | --- |
-| Public tensor API and operation dispatch | [`symtn/src/typed.rs`](../symtn/src/typed.rs) and its `typed/` modules |
-| Symmetry providers | [`symtn-sectors`](../symtn-sectors/) |
-| Fusion-tree spaces and block structure | [`symtn-core`](../symtn-core/) |
-| Structural operations and replay | [`symtn-operations`](../symtn-operations/) and [`symtn-tensors`](../symtn-tensors/) |
-| Dense backend boundary | [`symtn-dense`](../symtn-dense/) |
-| Network planning and contraction | [`symtn-network`](../symtn-network/) |
-
-This page describes the ownership boundary, not a claim that every operation
-works for every provider, scalar, or placement. The current API, method docs,
-and tests decide supported combinations. [Documentation index](README.md)
-separates these standing design rules from revision-pinned evidence.
+| Public operations and dispatch | [`symtn/src/typed.rs`](../symtn/src/typed.rs) and its `typed/` modules |
+| Execution resources | [`symtn/src/runtime.rs`](../symtn/src/runtime.rs) |
+| Providers | [`symtn-sectors`](../symtn-sectors/) |
+| Spaces, trees and block layouts | [`symtn-core`](../symtn-core/) |
+| Transform and contraction execution | [`symtn-operations`](../symtn-operations/), [`symtn-tensors`](../symtn-tensors/) |
+| Factor-space authority | [`symtn-matrixalgebra`](../symtn-matrixalgebra/) |
+| Dense adapter | [`symtn-dense`](../symtn-dense/) |
+| Network planning and execution | [`symtn-network`](../symtn-network/) |

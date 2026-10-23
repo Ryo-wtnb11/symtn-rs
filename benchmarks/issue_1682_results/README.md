@@ -72,4 +72,4 @@ subnormals, nonfinite and unrepresentable fallback, serialization, and compact
 readback/materialization. Direct materialization and solver counters are zero.
 Dense/lazy/checked Generic/CUDA retain their existing routes; no CUDA runtime
 performance claim is made. Reference correspondence is in
-[`docs/audit/issue-1682-compact-full-svd.md`](../../docs/audit/issue-1682-compact-full-svd.md).
+[historical reference correspondence](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1682-compact-full-svd.md).
