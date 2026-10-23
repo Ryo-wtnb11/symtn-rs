@@ -25,13 +25,13 @@ freezes one accumulation order and is weaker evidence than an oracle.
 
 ## Tolerance
 
-Use `tests/support/numerics.rs`, included with
+Use [`tests/support/numerics.rs`](../tests/support/numerics.rs), included with
 `#[path = "<relative path>/tests/support/numerics.rs"] mod numerics;` from a
 module that has `Complex32` and `Complex64` in scope. It applies
 
     K * sqrt(terms) * eps(dtype) * max(1, scale),    K = 32,
 
-the rule of `symtn/tests/single_precision_oracle/mod.rs`:
+as implemented by the shared helper:
 
 - `eps` is `f32::EPSILON` for `f32`/`Complex32` and `f64::EPSILON` for
   `f64`/`Complex64`; complex values are compared by the modulus of the error;

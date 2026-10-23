@@ -15,7 +15,7 @@
 //! the platform, the allocator and the core count — the CPU context sizes its
 //! pool from the available parallelism — so a number measured on one machine
 //! is evidence, not a contract. The measured figures live in
-//! `docs/audit/issue-1315-single-precision-base.md`.
+//! [historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1315-single-precision-base.md).
 
 use std::hint::black_box;
 

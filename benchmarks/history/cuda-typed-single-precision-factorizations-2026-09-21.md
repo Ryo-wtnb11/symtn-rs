@@ -5,10 +5,10 @@ factorization marker `CudaFactorizationPayload` (`svd_compact`, `eigh_full`)
 and `f32` to the new device QR marker `CudaQrPayload`, and for keeping both
 complex payloads out of device QR as a compile-time boundary.
 
-Audit note `docs/audit/issue-1341-single-precision-device-factorizations.md`;
-predecessors `docs/audit/issue-1336-single-precision-device-payload.md` (C2),
+Audit note [historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1341-single-precision-device-factorizations.md);
+predecessors [historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1336-single-precision-device-payload.md) (C2),
 `benchmarks/history/cuda-scalar-single-precision-2026-09-21.md` (#1326, C1),
-`docs/audit/issue-1324-single-precision-factorizations.md` (host).
+[historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1324-single-precision-factorizations.md) (host).
 
 No dependency change.
 
