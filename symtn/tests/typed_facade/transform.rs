@@ -10,7 +10,7 @@ fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
     // buffer is a rearrangement of the source, never a rescaling).
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     // The source is `[wide, narrow] <- [wide', narrow']`; this order sends one
@@ -52,7 +52,7 @@ fn permute_round_trips_back_to_the_source_layout() {
     // pins where each element landed.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let there = tensor.permute(&[1, 3], &[0, 2]).unwrap();
@@ -74,9 +74,9 @@ fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
     // SU(2) recoupling coefficients reach a `Complex64` payload.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
-    let tensor: TensorMap<ExternalSu2, Complex64> =
+    let tensor: TensorMap<ExternalSu2Rule, Complex64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |sectors, indices| {
             Complex64::new(
                 sectors.coupled().twice_spin() as f64 + 1.0,
@@ -103,7 +103,7 @@ fn permute_rejects_malformed_axes_without_panicking() {
     // axis, a repeated axis and a wrong-length axis list all come back as `Err`.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     assert!(
@@ -123,7 +123,7 @@ fn braid_rejects_a_wrong_length_levels_list() {
     // both directions.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let short = tensor.braid(&[1, 2], &[3, 0], &[0, 1, 2]).unwrap_err();
@@ -144,7 +144,7 @@ fn transpose_twice_returns_the_source_layout() {
     // block order and bytes exactly.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let once = full_transpose!(tensor).unwrap();
@@ -169,7 +169,7 @@ fn transpose_rejects_malformed_axes_without_panicking() {
     // silently braid) all come back as `Err`.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     assert!(
@@ -195,7 +195,7 @@ fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
     // split.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     for num_codomain in 0..=4 {
@@ -225,7 +225,7 @@ fn repartition_rejects_a_split_beyond_the_rank() {
     // rejected rather than clamped.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let error = tensor.repartition(5).unwrap_err();
@@ -647,15 +647,15 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
     // concatenated or absorbed and report `RuleMismatch`.
     let _guard = cache_lock();
     let runtime = runtime();
-    let build = |provider: &Arc<ExternalZ3>| {
+    let build = |provider: &Arc<ExternalZ3Rule>| {
         let leg = GradedSpace::try_new(Arc::clone(provider), [(Z3Charge(0), 1), (Z3Charge(1), 1)])
             .unwrap();
-        let tensor: TensorMap<ExternalZ3, f64> =
+        let tensor: TensorMap<ExternalZ3Rule, f64> =
             TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
         tensor
     };
-    let ours = build(&Arc::new(ExternalZ3::new()));
-    let theirs = build(&Arc::new(ExternalZ3::tagged(7)));
+    let ours = build(&Arc::new(external_z3()));
+    let theirs = build(&Arc::new(external_z3_tagged(7)));
     for error in [
         ours.cat(&theirs, Side::Domain).unwrap_err(),
         ours.cat(&theirs, Side::Codomain).unwrap_err(),
@@ -665,10 +665,10 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
     }
 
     let other_runtime = Runtime::builder().build().unwrap();
-    let foreign = Arc::new(ExternalZ3::tagged(7));
+    let foreign = Arc::new(external_z3_tagged(7));
     let foreign_leg =
         GradedSpace::try_new(Arc::clone(&foreign), [(Z3Charge(0), 1), (Z3Charge(1), 1)]).unwrap();
-    let foreign_runtime: TensorMap<ExternalZ3, f64> =
+    let foreign_runtime: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::from_subblock_fn(&other_runtime, [&foreign_leg], [&foreign_leg], |_, _| 1.0)
             .unwrap();
     assert!(matches!(
@@ -676,7 +676,7 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
         symtn::typed::Error::RuleMismatch
     ));
 
-    let foreign_bad_rank: TensorMap<ExternalZ3, f64> = TensorMap::from_subblock_fn(
+    let foreign_bad_rank: TensorMap<ExternalZ3Rule, f64> = TensorMap::from_subblock_fn(
         &other_runtime,
         [&foreign_leg, &foreign_leg],
         [&foreign_leg],
@@ -696,25 +696,25 @@ fn external_z3_cat_and_absorb_hold_by_value() {
     // facade.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let w =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 1), (Z3Charge(1), 1)]).unwrap();
     let v1 =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 1), (Z3Charge(1), 1)]).unwrap();
     let v2 =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(1), 1), (Z3Charge(2), 1)]).unwrap();
-    let a: TensorMap<ExternalZ3, f64> =
+    let a: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&w], [&v1], |sectors, _| {
             1.0 + f64::from(sectors.coupled().0)
         })
         .unwrap();
-    let b: TensorMap<ExternalZ3, f64> =
+    let b: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&w], [&v2], |sectors, _| {
             10.0 + f64::from(sectors.coupled().0)
         })
         .unwrap();
 
-    let joined: TensorMap<ExternalZ3, f64> = a.cat(&b, Side::Domain).unwrap();
+    let joined: TensorMap<ExternalZ3Rule, f64> = a.cat(&b, Side::Domain).unwrap();
     // Blocks in coupled-sector order: charge 0 holds only the lhs value, the
     // shared charge 1 holds the lhs column then the rhs column; charge 2 has
     // no codomain sector, so the merged leg carries it without a block.
@@ -729,12 +729,12 @@ fn external_z3_cat_and_absorb_hold_by_value() {
     // shared charge-0 and charge-1 blocks are overwritten; nothing else
     // exists. Then a non-shared key: absorb from a tensor whose only block is
     // charge 1.
-    let c: TensorMap<ExternalZ3, f64> =
+    let c: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&w], [&v2], |sectors, _| {
             100.0 + f64::from(sectors.coupled().0)
         })
         .unwrap();
-    let absorbed: TensorMap<ExternalZ3, f64> = a.absorb(&c).unwrap();
+    let absorbed: TensorMap<ExternalZ3Rule, f64> = a.absorb(&c).unwrap();
     // a's blocks: charge 0 -> 1.0, charge 1 -> 2.0; c has only charge 1
     // (value 101.0). The non-shared charge-0 block is untouched.
     assert_eq!(absorbed.dense_data().unwrap(), &[1.0, 101.0]);
@@ -994,7 +994,7 @@ fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
     // Fibonacci tests above pin genuinely anyonic level values.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let braided = tensor.braid(&[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap();

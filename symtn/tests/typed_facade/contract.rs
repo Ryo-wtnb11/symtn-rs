@@ -8,7 +8,7 @@ fn contract_matches_a_hand_computed_product_with_a_reordered_output() {
     // pass the axes and the output order through unaltered.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let (rows, shared, columns) = (
         z3_dense_leg(&provider, 2),
         z3_dense_leg(&provider, 3),
@@ -45,7 +45,7 @@ fn contract_with_the_default_output_order_keeps_the_open_axes_in_place() {
     // comes back untransposed.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let (rows, shared, columns) = (
         z3_dense_leg(&provider, 2),
         z3_dense_leg(&provider, 3),
@@ -77,12 +77,12 @@ fn contract_carries_a_simple_fusion_provider_with_a_complex_payload() {
     // What: the contraction seam is neither abelian- nor real-specific.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let mut next = Complex64::new(0.0, 0.0);
     let build = |next: &mut Complex64| {
         let mut step = *next;
-        let tensor: TensorMap<ExternalSu2, Complex64> =
+        let tensor: TensorMap<ExternalSu2Rule, Complex64> =
             TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, _| {
                 step += Complex64::new(1.0, 0.5);
                 step
@@ -123,7 +123,7 @@ fn contract_rejects_operands_from_different_runtimes() {
     let _guard = cache_lock();
     let first = runtime();
     let second = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let (rows, shared, columns) = (
         z3_dense_leg(&provider, 2),
         z3_dense_leg(&provider, 3),
@@ -155,8 +155,8 @@ fn contract_accepts_separately_allocated_equal_identity_providers() {
     // does.
     let _guard = cache_lock();
     let runtime = runtime();
-    let first = Arc::new(ExternalZ3::new());
-    let second = Arc::new(ExternalZ3::new());
+    let first = Arc::new(external_z3());
+    let second = Arc::new(external_z3());
     assert!(!Arc::ptr_eq(&first, &second));
     let lhs = counting_z3(
         &runtime,
@@ -196,8 +196,8 @@ fn contract_rejects_operands_with_distinct_rule_identities() {
     // why the facade does not pre-check it.
     let _guard = cache_lock();
     let runtime = runtime();
-    let first = Arc::new(ExternalZ3::tagged(0));
-    let second = Arc::new(ExternalZ3::tagged(1));
+    let first = Arc::new(external_z3_tagged(0));
+    let second = Arc::new(external_z3_tagged(1));
     let lhs = counting_z3(
         &runtime,
         &z3_dense_leg(&first, 2),
@@ -232,7 +232,7 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
     let _guard = cache_lock();
     let first = runtime();
     let second = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let lhs = counting_z3(
         &first,
         &z3_dense_leg(&provider, 2),
@@ -250,7 +250,7 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
         symtn::typed::Error::RuntimeMismatch
     ));
 
-    let other_rule = Arc::new(ExternalZ3::tagged(1));
+    let other_rule = Arc::new(external_z3_tagged(1));
     let other_rule = counting_z3(
         &first,
         &z3_dense_leg(&other_rule, 2),
@@ -272,7 +272,7 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
     // NoBraiding boundary; the monoidal merge succeeds without an R symbol.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(PlanarTrivial);
+    let provider = Arc::new(planar_trivial());
     let lhs_cod = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
     let lhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 3)])
         .and_then(|space| space.try_dual())
@@ -281,17 +281,17 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
         .and_then(|space| space.try_dual())
         .unwrap();
     let rhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
-    let lhs: TensorMap<PlanarTrivial, f64> =
+    let lhs: TensorMap<PlanarTrivialRule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&lhs_cod], [&lhs_dom], |_, indices| {
             (1 + indices[0] + 10 * indices[1]) as f64
         })
         .unwrap();
-    let rhs: TensorMap<PlanarTrivial, f64> =
+    let rhs: TensorMap<PlanarTrivialRule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&rhs_cod], [&rhs_dom], |_, indices| {
             (2 + indices[0] + 10 * indices[1]) as f64
         })
         .unwrap();
-    let expected: TensorMap<PlanarTrivial, f64> = TensorMap::from_subblock_fn(
+    let expected: TensorMap<PlanarTrivialRule, f64> = TensorMap::from_subblock_fn(
         &runtime,
         [&lhs_cod, &rhs_cod],
         [&lhs_dom, &rhs_dom],
@@ -433,7 +433,7 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
 fn typed_deligne_product_rejects_a_component_identity_mismatch() {
     let _guard = cache_lock();
     let runtime = runtime();
-    let lhs_rule = Arc::new(ExternalZ3::tagged(0));
+    let lhs_rule = Arc::new(external_z3_tagged(0));
     let lhs = counting_z3(
         &runtime,
         &z3_dense_leg(&lhs_rule, 1),
@@ -444,7 +444,7 @@ fn typed_deligne_product_rejects_a_component_identity_mismatch() {
     let u1 =
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(0), 1)]).unwrap();
     let rhs = TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, _| 3.0).unwrap();
-    let wrong = Arc::new(ExternalZ3::tagged(1).product(symtn::sector::U1FusionRule));
+    let wrong = Arc::new(external_z3_tagged(1).product(symtn::sector::U1FusionRule));
 
     assert!(matches!(
         lhs.deligne_product(&rhs, wrong).unwrap_err(),
@@ -457,8 +457,8 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
     let _guard = cache_lock();
     let first = runtime();
     let second = runtime();
-    let left_rule = Arc::new(ExternalZ3::tagged(0));
-    let right_rule = Arc::new(ExternalZ3::tagged(2));
+    let left_rule = Arc::new(external_z3_tagged(0));
+    let right_rule = Arc::new(external_z3_tagged(2));
     let lhs = counting_z3(
         &first,
         &z3_dense_leg(&left_rule, 1),
@@ -471,7 +471,7 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
         &z3_dense_leg(&right_rule, 1),
         3.0,
     );
-    let wrong_both = Arc::new(ExternalZ3::tagged(1).product(ExternalZ3::tagged(3)));
+    let wrong_both = Arc::new(external_z3_tagged(1).product(external_z3_tagged(3)));
 
     assert!(matches!(
         lhs.deligne_product(&rhs, wrong_both).unwrap_err(),
@@ -484,7 +484,7 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
         &z3_dense_leg(&right_rule, 1),
         3.0,
     );
-    let wrong_right = Arc::new(ExternalZ3::tagged(0).product(ExternalZ3::tagged(3)));
+    let wrong_right = Arc::new(external_z3_tagged(0).product(external_z3_tagged(3)));
     assert!(matches!(
         lhs.deligne_product(&rhs, wrong_right).unwrap_err(),
         symtn::typed::Error::RuleMismatch
@@ -938,8 +938,8 @@ fn contract_error_classes_and_their_both_defect_precedence() {
 
     // Rule-identity mismatch stays the expert layer's rejection through the
     // canonical name too.
-    let first = Arc::new(ExternalZ3::tagged(0));
-    let second_rule = Arc::new(ExternalZ3::tagged(1));
+    let first = Arc::new(external_z3_tagged(0));
+    let second_rule = Arc::new(external_z3_tagged(1));
     let lhs = counting_z3(
         &runtime,
         &z3_dense_leg(&first, 2),

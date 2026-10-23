@@ -54,7 +54,11 @@ fn truncated_svd<R>(
     truncation: &Truncation,
 ) -> Result<(TensorMap<R, f64>, f64), Error>
 where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
 {

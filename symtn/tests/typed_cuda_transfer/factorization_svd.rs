@@ -6,7 +6,13 @@ fn host_svd_trunc<R, D>(
     to_f64: impl Fn(D) -> f64,
 ) -> HostSvdTrunc<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::FactorizationScalar + symtn::typed::SpectrumMagnitude,
 {
     let Svd { u, s, vh } = source
@@ -37,7 +43,13 @@ fn assert_typed_cuda_svd_trunc_composition_matches_host<R>(
     source: &TensorMap<R, f64>,
     truncation: &Truncation,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let provider = source.provider() as *const R;
     let runtime = symtn::typed::__network::runtime_identity(source.runtime());
@@ -486,7 +498,13 @@ fn assert_c64_svd_trunc_composition_matches_host<R>(
     source: &TensorMap<R, Complex64>,
     truncation: &Truncation,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let source_data = source.dense_data().unwrap().to_vec();
     let expected = host_svd_trunc(source, truncation, |value: Complex64| value.re);

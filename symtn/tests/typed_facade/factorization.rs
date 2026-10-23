@@ -237,13 +237,14 @@ fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
     // is the only input to these methods a caller can actually malform.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::with(Quirk::NarrowDecode));
+    let provider = Arc::new(external_z3_with(Quirk::NarrowDecode));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 1), (Z3Charge(1), 2)]).unwrap();
     // Two charge-1 codomain legs couple to charge 2, the id this codec refuses.
     // `zeros` never decodes, so the tensor builds and the failure lands in the
     // spectrum decode.
-    let tensor = TensorMap::<ExternalZ3, f64>::zeros(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
+    let tensor =
+        TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
 
     assert!(matches!(
         tensor.svd_vals(&[0, 1], &[2, 3]).unwrap_err(),
@@ -308,7 +309,7 @@ fn svd_vals_sorts_by_label_where_that_differs_from_the_id_order() {
     // and only the facade's own sort puts it right.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::with(Quirk::ReversedLabels));
+    let provider = Arc::new(external_z3_with(Quirk::ReversedLabels));
     let tensor = z3_rank_four(&runtime, &provider);
 
     let labels: Vec<u8> = tensor
@@ -469,7 +470,7 @@ fn decompositions_carry_an_external_provider_with_its_own_labels() {
     // back in its own labels rather than raw ids.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
     let spectrum = tensor.svd_vals(&[0, 1], &[2, 3]).unwrap();
@@ -1070,7 +1071,7 @@ fn typed_polar_carries_an_external_provider() {
     // external provider reaches through `multiplicity_free_lane`.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     // Same legs on both sides (no duals): every coupled-sector matrix is
     // square, so both polars are defined. `z3_rank_four`'s dual domain is not
     // usable here — a dual flips each charge, so some coupled sectors come out
@@ -1078,7 +1079,7 @@ fn typed_polar_carries_an_external_provider() {
     let wide = z3_leg(&provider, false);
     let narrow = z3_other_leg(&provider, false);
     let mut counter = 0.0;
-    let tensor: TensorMap<ExternalZ3, f64> =
+    let tensor: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&wide, &narrow], [&wide, &narrow], |_, _| {
             counter += 1.0;
             counter
@@ -1091,7 +1092,7 @@ fn typed_polar_carries_an_external_provider() {
         tensor.dense_data().unwrap(),
     );
     let gram = w.adjoint().unwrap().compose(&w).unwrap();
-    let id: TensorMap<ExternalZ3, f64> =
+    let id: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::isomorphism(&runtime, [&wide, &narrow], [&wide, &narrow]).unwrap();
     assert_data_close_f64(gram.dense_data().unwrap(), id.dense_data().unwrap());
 }

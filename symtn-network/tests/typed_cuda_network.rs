@@ -39,8 +39,11 @@ fn pair_network() -> Network {
 
 fn cuda_pair<R>(runtime: &Runtime, space: &GradedSpace<R>, seed: u64)
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + Send
@@ -822,8 +825,11 @@ where
 
 fn cuda_chain_reuse_matches_returning<R>(runtime: &Runtime, space: &GradedSpace<R>, seed: u64)
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + Send
@@ -1190,8 +1196,11 @@ fn single_precision_device_chains_match_the_host_and_reuse_their_destinations() 
 
     fn assert_chain<R, D>(runtime: &Runtime, space: &GradedSpace<R>, seed: u64, tolerance: f64)
     where
-        R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-            + MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + Send
@@ -1485,8 +1494,11 @@ fn general_networks<R, D>(
     TensorMap<R, D, CudaStorage<D>>,
 )>
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + Send
@@ -1603,8 +1615,11 @@ fn assert_general_networks_match_host<R, D>(
     epsilon: f64,
     provider: &str,
 ) where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + Send
@@ -1707,8 +1722,11 @@ fn assert_dense_oracle<R>(
     seed: u64,
     provider: &str,
 ) where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
@@ -2080,8 +2098,11 @@ fn device_state(runtime: &Runtime) -> DeviceState {
 fn warm_general_cuda_networks_transfer_only_the_returned_output() {
     fn warm<R, D>(runtime: &Runtime, spaces: [&GradedSpace<R>; 3], seed: u64, what: &str)
     where
-        R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-            + MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + Send

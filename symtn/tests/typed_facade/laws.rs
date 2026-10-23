@@ -83,7 +83,13 @@ fn assert_contract_compose_compact_laws_hold<R>(
     nontrivial_twist: bool,
     typed: (&TensorMap<R, f64>, &TensorMap<R, f64>),
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let shapes = typed_leg_shapes(typed.0);
     assert_ne!(shapes[0], shapes[1], "{what}: p and q must differ");
@@ -420,7 +426,13 @@ fn assert_reductions_and_factorizations_hold<R>(
     dimension_weighted: bool,
     typed: (&TensorMap<R, f64>, &TensorMap<R, f64>),
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     // Neither coefficient is 1 and they differ in sign, so dropping or
     // swapping one moves the buffer.

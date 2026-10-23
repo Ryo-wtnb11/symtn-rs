@@ -15,6 +15,8 @@ impl Z2xZ3PointedRule {
     }
 }
 
+impl symtn_sectors::testing::Provider for Z2xZ3PointedRule {}
+
 impl FusionRule for Z2xZ3PointedRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

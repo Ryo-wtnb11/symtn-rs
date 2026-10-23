@@ -89,6 +89,8 @@ impl CrossIncompatibleGenericRule {
     const Q: usize = 9;
 }
 
+impl symtn_sectors::testing::Provider for CrossIncompatibleGenericRule {}
+
 impl FusionRule for CrossIncompatibleGenericRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -425,6 +427,8 @@ struct Coeff2ConjRule;
 fn c2c_w() -> Complex64 {
     Complex64::new(0.6, 0.8) // |w| = 1, genuinely complex
 }
+
+impl symtn_sectors::testing::Provider for Coeff2ConjRule {}
 
 impl FusionRule for Coeff2ConjRule {
     fn rule_identity(&self) -> RuleIdentity {

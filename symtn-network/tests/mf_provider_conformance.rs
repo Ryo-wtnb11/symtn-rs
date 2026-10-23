@@ -64,8 +64,11 @@ fn assert_same<R>(
 
 fn ordinary_network_and_workspace_reuse<R>(runtime: &Runtime, space: &GradedSpace<R>, seed: u64)
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + Send,

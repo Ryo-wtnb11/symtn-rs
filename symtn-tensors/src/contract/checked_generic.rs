@@ -772,6 +772,8 @@ mod tests {
         }
     }
 
+    impl symtn_core::testing::Provider for CheckedGenericSpy {}
+
     impl CheckedGenericFusion for CheckedGenericSpy {
         type Error = SpyError;
 

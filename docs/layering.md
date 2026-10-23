@@ -10,7 +10,7 @@ The split follows TensorKit's ecosystem:
 
 | Concern | TensorKit ecosystem | This stack |
 | --- | --- | --- |
-| Elementary categorical data | WignerSymbols.jl, SUNRepresentations.jl, TensorKitSectors.jl, CategoryData.jl | the [`fusion-symbols`](https://github.com/Ryo-wtnb11/fusion-symbols) crate (formerly `racah`), 0.6.0 |
+| Elementary categorical data | WignerSymbols.jl, SUNRepresentations.jl, TensorKitSectors.jl, CategoryData.jl | the [`fusion-symbols`](https://github.com/Ryo-wtnb11/fusion-symbols) crate (formerly `racah`), 0.7.0 |
 | Symmetric tensors, fusion trees, structure, transforms | TensorKit.jl | symtn |
 | Dense arrays, linear algebra, devices | LinearAlgebra, TensorOperations.jl | tenferro |
 | Strided data movement | Strided.jl | strided-rs (`strided-kernel`) |
@@ -48,7 +48,7 @@ fusion-tree concept.
 ### 1. Symbol layer (`fusion-symbols` crate)
 
 The symbol layer is the published `fusion-symbols` crate (formerly `racah`),
-which symtn depends on at 0.6.0.
+which symtn depends on at 0.7.0.
 
 **Target ownership.** For each group or category, the symbol layer owns the
 elementary data a fusion category needs:
@@ -77,7 +77,9 @@ consumer adapts every crate the same way.
 **Current:** fusion-symbols categories implement `category::FusionCategory`;
 CGCs additionally use `category::GroupRepresentations`. SU(2), including
 `SUNFusionRule::new(2)`, uses the exact A1 path. symtn preserves its own codecs,
-sector ordering, admission and braided-table `Anyonic` policy.
+sector ordering, admission and braided-table `Anyonic` policy. A category
+outside the built-in rules enters through `CategoryRule`, whose codec holds
+only numbering, labels, identity, admission and error translation.
 
 **Contracts.**
 - **References.** Each function documents the reference `file:symbol` it

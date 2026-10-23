@@ -25,7 +25,13 @@ use trace_cases::{
 
 fn check_identity<R, D>(case: &TraceCase<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     if let Some(identity) = &case.identity {
@@ -47,7 +53,11 @@ where
 
 fn check_dense<R, D>(case: &TraceCase<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,

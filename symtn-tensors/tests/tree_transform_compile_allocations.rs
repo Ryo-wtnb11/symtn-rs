@@ -122,6 +122,8 @@ struct AdmissionCountingSu2Rule {
     nsymbol_calls: Arc<AtomicUsize>,
 }
 
+impl symtn_core::testing::Provider for AdmissionCountingSu2Rule {}
+
 impl FusionRule for AdmissionCountingSu2Rule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         SU2FusionRule.rule_identity()

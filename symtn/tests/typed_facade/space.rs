@@ -479,7 +479,7 @@ fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
 fn graded_space_drops_zero_degeneracy_sectors() {
     // What: the leg invariant (a zero-degeneracy sector is absent) reaches the
     // typed surface unchanged.
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let space = GradedSpace::try_new(provider, [(Z3Charge(0), 2), (Z3Charge(1), 0)]).unwrap();
 
     assert_eq!(space.sectors().unwrap(), vec![Z3Charge(0)]);
@@ -665,7 +665,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
 fn graded_space_rejects_a_duplicate_label_by_name() {
     // What: the duplicate is reported as the caller's own label, which needs
     // the check to run before the label is encoded away into a `SectorId`.
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let error = GradedSpace::try_new(provider, [(Z3Charge(1), 2), (Z3Charge(1), 3)]).unwrap_err();
 
     let message = error.to_string();
@@ -678,7 +678,7 @@ fn graded_space_reports_aliased_labels_as_a_codec_law_violation() {
     // What: two distinct labels encoding to one id is the provider breaking
     // codec injectivity, not the caller declaring a sector twice, and the two
     // cases must not be conflated in the diagnosis.
-    let provider = Arc::new(ExternalZ3::with(Quirk::AliasLabels));
+    let provider = Arc::new(external_z3_with(Quirk::AliasLabels));
     let error = GradedSpace::try_new(provider, [(Z3Charge(0), 2), (Z3Charge(1), 3)]).unwrap_err();
 
     let message = error.to_string();
@@ -690,11 +690,11 @@ fn graded_space_reports_aliased_labels_as_a_codec_law_violation() {
 #[test]
 fn graded_space_reports_an_unrepresentable_label() {
     // What: an out-of-domain label surfaces the provider's own encode error.
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let error = GradedSpace::try_new(provider, [(Z3Charge(7), 2)]).unwrap_err();
 
     assert!(error.report().contains("Z3 charge 7"), "{error}");
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let space = z3_leg(&provider, false);
     assert!(space.degeneracy(&Z3Charge(7)).is_err());
 }
@@ -703,7 +703,7 @@ fn graded_space_reports_an_unrepresentable_label() {
 fn graded_space_dual_flips_the_leg_and_dualizes_non_self_dual_labels() {
     // What: `try_dual` uses the provider's checked dual, so Z3's charge 1 and
     // charge 2 swap (with their degeneracies) and the dual flag flips.
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let space = z3_leg(&provider, false);
     let dual = space.try_dual().unwrap();
 
@@ -724,7 +724,7 @@ fn graded_space_dual_flips_the_leg_and_dualizes_non_self_dual_labels() {
 fn graded_space_dual_surfaces_a_failing_checked_dual() {
     // What: a provider that cannot dual a sector reports its own typed error
     // rather than producing a partially dualized leg.
-    let provider = Arc::new(ExternalZ3::with(Quirk::FailDual));
+    let provider = Arc::new(external_z3_with(Quirk::FailDual));
     let space = z3_leg(&provider, false);
 
     assert!(space.try_dual().is_err());
@@ -736,7 +736,7 @@ fn graded_space_dual_reports_a_non_injective_dual_instead_of_panicking() {
     // broken rigidity structure. The leg cannot hold the result, and the
     // failure must come back as a typed error, not a panic inside this
     // `Result`-returning API.
-    let provider = Arc::new(ExternalZ3::with(Quirk::CollapsingDual));
+    let provider = Arc::new(external_z3_with(Quirk::CollapsingDual));
     let space = z3_leg(&provider, false);
 
     let error = space.try_dual().unwrap_err();
@@ -762,7 +762,7 @@ fn graded_space_carries_a_simple_fusion_provider_too() {
         return;
     }
     // What: nothing in the typed space is abelian-specific.
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let space = su2_leg(&provider, true);
 
     assert_eq!(space.sectors().unwrap(), vec![SU2Irrep::from_twice_spin(1)]);
@@ -778,7 +778,7 @@ fn graded_space_carries_a_simple_fusion_provider_too() {
 fn graded_space_reports_labels_in_provider_sector_id_order() {
     // What: `sectors()` decodes back to the caller's labels, ordered by the
     // provider's sector id (not by label order), with degeneracies parallel.
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         [(Z3Charge(2), 1), (Z3Charge(0), 2), (Z3Charge(1), 3)],

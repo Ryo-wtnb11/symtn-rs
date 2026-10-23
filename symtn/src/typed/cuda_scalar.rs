@@ -31,7 +31,13 @@ use super::*;
 /// ```
 impl<R, D> TensorMap<R, D, CudaStorage<D>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaPayload,
 {
     fn cuda_zeros_owned(
@@ -220,7 +226,13 @@ where
 
 impl<R, D> ReduceExec<R, D> for CudaStorage<D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaPayload,
 {
     fn dense_norm(_: ExecToken, t: &TensorMap<R, D, Self>, p: f64) -> Result<f64, Error> {
@@ -248,7 +260,13 @@ where
 
 impl<R, D> ElementwiseExec<R, D> for CudaStorage<D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn_core::TypedSectorAdmission<
+            Sector = <R as symtn_core::SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: CudaPayload,
 {
     fn zeros(_: ExecToken, t: &TensorMap<R, D, Self>) -> Result<TensorMap<R, D, Self>, Error> {

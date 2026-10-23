@@ -1258,8 +1258,11 @@ fn assert_asymmetric_cuda_plan_parity<R>(
     z1: &GradedSpace<R>,
     seed: u64,
 ) where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
 {

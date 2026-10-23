@@ -11,10 +11,11 @@
 //! through the symmetry **rule provider** owned by its
 //! [`typed::GradedSpace`]s. The provider, scalar and storage are concrete type
 //! parameters, while tensor rank and sector content remain runtime values. A
-//! fusion rule defined outside this workspace therefore uses the same ordinary
+//! category defined outside this workspace enters as a `fusion_symbols`
+//! category under [`sector::CategoryRule`] and therefore uses the same ordinary
 //! tensor API as the built-in U(1), Z2, fZ2, SU(2), and product providers when
-//! they satisfy the required admission and operation capability bounds; the
-//! traits it implements and the bounds generic code names are in [`sector`].
+//! its admission satisfies the operation's capability bounds; those bounds,
+//! the sealed provider traits generic code names, are in [`sector`].
 //!
 //! A [`typed::Runtime`] owns the shared execution state: the per-rule
 //! contraction/tree-transform contexts, the dense backend (selectable per

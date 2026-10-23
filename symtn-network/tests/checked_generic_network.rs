@@ -462,6 +462,8 @@ impl InjectedGeneric {
     }
 }
 
+impl symtn_core::testing::Provider for InjectedGeneric {}
+
 impl CheckedGenericFusion for InjectedGeneric {
     type Error = InjectedError;
 

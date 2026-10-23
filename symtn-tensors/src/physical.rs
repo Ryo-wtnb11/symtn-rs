@@ -1015,6 +1015,8 @@ mod tests {
         fail: bool,
     }
 
+    impl symtn_core::testing::Provider for FailingPhysicalU1 {}
+
     impl FusionRule for FailingPhysicalU1 {
         fn rule_identity(&self) -> RuleIdentity {
             U1FusionRule.rule_identity()

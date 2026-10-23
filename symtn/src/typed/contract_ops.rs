@@ -760,8 +760,16 @@ where
         product: Arc<ProductFusionRule<R, R2, C>>,
     ) -> Result<TensorMap<ProductFusionRule<R, R2, C>, D>, Error>
     where
-        R: CanonicalUnitFusionRule,
-        R2: MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: TypedSectorAdmission<
+                Sector = <R as SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + CanonicalUnitFusionRule,
+        R2: TypedSectorAdmission<
+                Sector = <R2 as SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec
             + CanonicalUnitFusionRule,

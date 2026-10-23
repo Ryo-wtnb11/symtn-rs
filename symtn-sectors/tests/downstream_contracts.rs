@@ -9,6 +9,8 @@ use symtn_sectors::{
 #[derive(Clone, Copy)]
 struct CheckedMultiplicityFreeRule;
 
+impl symtn_sectors::testing::Provider for CheckedMultiplicityFreeRule {}
+
 impl FusionRule for CheckedMultiplicityFreeRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -87,6 +89,8 @@ impl MultiplicityFreeFusionSymbols for CheckedMultiplicityFreeRule {
 
 #[derive(Clone, Copy)]
 struct GenericRule;
+
+impl symtn_sectors::testing::Provider for GenericRule {}
 
 impl FusionRule for GenericRule {
     fn rule_identity(&self) -> RuleIdentity {

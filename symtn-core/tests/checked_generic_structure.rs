@@ -68,6 +68,8 @@ fn checked_generic_late_nsymbol_failure_propagates() {
         CheckedGenericStructureError::Provider(ToyError(Failure::Multiplicity))
     ));
 }
+impl symtn_core::testing::Provider for Toy {}
+
 impl CheckedGenericFusion for Toy {
     type Error = ToyError;
     fn rule_identity(&self) -> RuleIdentity {
@@ -115,6 +117,8 @@ impl CheckedGenericFusion for Toy {
 }
 
 struct DefaultFoldToy(Toy);
+impl symtn_core::testing::Provider for DefaultFoldToy {}
+
 impl CheckedGenericFusion for DefaultFoldToy {
     type Error = ToyError;
     fn rule_identity(&self) -> RuleIdentity {
@@ -148,6 +152,8 @@ impl CheckedGenericFusion for DefaultFoldToy {
 }
 
 struct TaintedFoldToy(Toy);
+impl symtn_core::testing::Provider for TaintedFoldToy {}
+
 impl CheckedGenericFusion for TaintedFoldToy {
     type Error = ToyError;
     fn rule_identity(&self) -> RuleIdentity {

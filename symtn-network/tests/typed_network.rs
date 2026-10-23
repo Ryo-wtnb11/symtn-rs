@@ -35,8 +35,11 @@ fn pair_network() -> Network {
 
 fn plan_accepts_storage<R, D, S>(network: &Network, tensors: &[&TensorMap<R, D, S>])
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: TensorScalar,
@@ -47,8 +50,11 @@ where
 
 fn pair_case<R, D>(space: &GradedSpace<R>)
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: TensorScalar + numerics::Numeric,
@@ -246,8 +252,11 @@ fn assert_chain_case<R, D>(
     tensors: [&TensorMap<R, D>; 3],
 ) -> TensorMap<R, D>
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: OracleScalar,
@@ -264,8 +273,11 @@ fn run_shape_reuse_sequence<R, D>(
     make_space: impl Fn(&Arc<R>, &[(i32, usize)]) -> GradedSpace<R>,
     sector_tag: impl Fn(&<R as TypedSectorAdmission>::Sector) -> f64,
 ) where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
     D: OracleScalar,
@@ -503,8 +515,11 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
         z1: &GradedSpace<R>,
         seed: u64,
     ) where
-        R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-            + MultiplicityFreeRigidSymbols<Scalar = f64>
+        R: TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
             + CheckedFusionAlgebra
             + SectorCodec,
     {

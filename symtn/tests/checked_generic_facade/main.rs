@@ -369,6 +369,8 @@ fn assert_no_provider_queries(provider: &CheckedOnlyToy) {
     assert_eq!(provider.queries_since_reset.load(Ordering::Relaxed), 0);
 }
 
+impl symtn_core::testing::Provider for CheckedOnlyToy {}
+
 impl CheckedGenericFusion for CheckedOnlyToy {
     type Error = ToyError;
 

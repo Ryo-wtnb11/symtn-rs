@@ -147,7 +147,13 @@ where
 
 impl<R, D> Case<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     /// The longest sum an output entry combines: the contracted physical
@@ -182,7 +188,13 @@ fn tensor<R, D>(
     salt: usize,
 ) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     TensorMap::from_subblock_fn(
@@ -320,7 +332,13 @@ pub fn candidate_core_probes<R, D>(
     v: &GradedSpace<R>,
 ) -> Vec<(Case<R, D>, &'static str)>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let a: TensorMap<R, D> = tensor(runtime, &[v, v], &[v, v], 61);
@@ -370,7 +388,13 @@ where
 ///   (owned sort and swap).
 pub fn copy_c_probes<R, D>(runtime: &Runtime, v: &GradedSpace<R>) -> Vec<(Case<R, D>, bool)>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let tensor = |salt| tensor::<R, D>(runtime, &[v, v], &[v, v], salt);
@@ -402,7 +426,13 @@ where
 /// buffer `contract_into` must rewrite element by element.
 pub fn poisoned_destination<R, D>(case: &Case<R, D>) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     case.host().scale(D::entry(f64::NAN, f64::NAN)).unwrap()
@@ -454,7 +484,13 @@ pub fn u1_inactive_cases<D: Payload>(runtime: &Runtime) -> [Case<U1FusionRule, D
 /// adjoint over `L`'s payload.
 pub fn lazy_cases<R, D>(lhs: &TensorMap<R, D>, name: &'static str) -> [Case<R, D>; 2]
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let nout = lhs.codomain_rank();
@@ -500,7 +536,13 @@ pub fn identity_adjoint_cases<R, D>(
     v: &GradedSpace<R>,
 ) -> [(Case<R, D>, bool); 3]
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let t: TensorMap<R, D> = tensor(runtime, &[v, v], &[v], 61);
@@ -604,7 +646,13 @@ pub fn fermionic_general<R, D>(
     salt: usize,
 ) -> Case<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let v_dual = v.try_dual().unwrap();
@@ -631,7 +679,13 @@ pub fn fermionic_canonical_nonuniform<R, D>(
     salt: usize,
 ) -> Case<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let v_dual = v.try_dual().unwrap();
@@ -658,7 +712,13 @@ pub fn fermionic_canonical_uniform<R, D>(
     salt: usize,
 ) -> Case<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let v_dual = v.try_dual().unwrap();
@@ -692,7 +752,13 @@ pub fn fermionic_twist_roles<R, D>(
     salt: usize,
 ) -> [Case<R, D>; 4]
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let v_dual = v.try_dual().unwrap();
@@ -761,7 +827,13 @@ pub fn fermionic_blas_contract_oracle<R, D>(
     twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D>,
 ) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let split = case.lhs.rank() - case.lhs_axes.len();
@@ -775,7 +847,13 @@ pub fn fermionic_blas_contract_oracle_partitioned<R, D>(
     twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D>,
 ) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let open = |rank: usize, contracted: &[usize]| -> Vec<usize> {
@@ -819,7 +897,13 @@ where
 /// TensorKit `blas_contract!` on Host typed operations.
 pub fn blas_contract_oracle<R, D>(case: &Case<R, D>) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let open = |rank: usize, contracted: &[usize]| -> Vec<usize> {

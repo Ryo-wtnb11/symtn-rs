@@ -4,9 +4,10 @@ use std::sync::OnceLock;
 
 use crate::{
     BraidingStyleKind, CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError,
-    FusionRule, FusionStyleKind, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, ProductSector, ProductSectorCodec, PromoteCoefficientScalar,
-    RuleIdentity, SectorCodec, SectorId, SectorOrderKey, SectorVec, TensorKitProductCodec,
+    FusionRule, FusionStyleKind, MultiplicityFreeAdmissionMode, MultiplicityFreeFusionRule,
+    MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, ProductSector, ProductSectorCodec,
+    PromoteCoefficientScalar, RuleIdentity, SectorCodec, SectorId, SectorOrderKey, SectorVec,
+    TensorKitProductCodec, TypedSectorAdmission,
 };
 
 /// The coefficient scalar of `Left ⊠ Right`, promoted from its components'.
@@ -154,8 +155,8 @@ pub const fn product_fusion_rule_with_codec<LeftRule, RightRule, Codec>(
 
 /// `⊠` for providers: gives every [`FusionRule`] a `.product(other)` method.
 ///
-/// Blanket-implemented, so it applies to a provider defined outside this
-/// workspace exactly as it applies to a built-in one. Import the trait to use
+/// Blanket-implemented, so it applies to a [`CategoryRule`](crate::CategoryRule)
+/// exactly as it applies to a built-in rule. Import the trait to use
 /// the method (`use symtn::sector::ProductFusionRuleExt;`) — without it in
 /// scope, `.product(…)` resolves to [`Iterator::product`] and the error
 /// message is about iterators.
@@ -221,6 +222,39 @@ where
 {
     fn default() -> Self {
         Self::new(LeftRule::default(), RightRule::default())
+    }
+}
+
+impl<LeftRule, RightRule, Codec> crate::seal::Provider
+    for ProductFusionRule<LeftRule, RightRule, Codec>
+{
+}
+
+impl<LeftRule, RightRule, Codec> TypedSectorAdmission
+    for ProductFusionRule<LeftRule, RightRule, Codec>
+where
+    LeftRule: CheckedFusionAlgebra + SectorCodec,
+    RightRule: CheckedFusionAlgebra + SectorCodec,
+    Codec: ProductSectorCodec + 'static,
+{
+    type Sector = <Self as SectorCodec>::Sector;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+
+    fn typed_rule_identity(&self) -> RuleIdentity {
+        FusionRule::rule_identity(self)
+    }
+
+    fn try_encode_label(&self, sector: &Self::Sector) -> Result<SectorId, Self::Error> {
+        SectorCodec::encode_sector(self, sector)
+    }
+
+    fn try_decode_label(&self, sector: SectorId) -> Result<Self::Sector, Self::Error> {
+        SectorCodec::decode_sector(self, sector)
+    }
+
+    fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
+        CheckedFusionAlgebra::try_dual_sector(self, sector)
     }
 }
 

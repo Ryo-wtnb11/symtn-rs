@@ -78,6 +78,8 @@ fn coupled_layout_embeds_subblocks_into_sector_matrices() {
 #[derive(Clone, Copy, Debug)]
 struct MisreportedGenericMultiplicityFreeRule;
 
+impl symtn_sectors::testing::Provider for MisreportedGenericMultiplicityFreeRule {}
+
 impl FusionRule for MisreportedGenericMultiplicityFreeRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

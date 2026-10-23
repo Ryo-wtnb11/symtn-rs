@@ -1138,7 +1138,11 @@ fn find_truncated_generically<R, D>(
     truncation: &Truncation,
 ) -> TruncatedSelection<R>
 where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
     D: symtn::typed::TensorScalar + SpectrumMagnitude,

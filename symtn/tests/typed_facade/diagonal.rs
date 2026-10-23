@@ -987,7 +987,13 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
 /// fires too widely is caught by the same sweep.
 fn rank_one_reorderings<R, D>(tensor: &TensorMap<R, D>) -> Vec<(&'static str, TensorMap<R, D>)>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
     vec![
@@ -1043,7 +1049,7 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
     let runtime = runtime();
 
     for is_dual in [false, true] {
-        let provider = Arc::new(ExternalZ3::new());
+        let provider = Arc::new(external_z3());
         let leg = z3_leg(&provider, is_dual);
         let mut next = 0.0;
         let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
@@ -1266,7 +1272,13 @@ fn compact_bond_trace<R, D>(
     fill: impl Fn(f64) -> D + Copy,
 ) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::FactorizationScalar + std::fmt::Debug,
 {
     let mut next: f64 = 0.0;
@@ -1287,7 +1299,13 @@ fn assert_compact_trace_matches_forced_dense<R, D>(
     typed: &TensorMap<R, D>,
     widen: impl Fn(D) -> Complex64 + Copy,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
     let dense: TensorMap<R, D> = forced_dense(typed);
@@ -1307,7 +1325,13 @@ fn sweep_compact_trace_variants<R, D>(
     typed_s: &TensorMap<R, D>,
     widen: impl Fn(D) -> Complex64 + Copy,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
     let variants: Vec<(&str, TensorMap<R, D>)> = vec![

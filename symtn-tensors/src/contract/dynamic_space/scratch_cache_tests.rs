@@ -24,6 +24,8 @@ impl CountingRule {
     }
 }
 
+impl symtn_core::testing::Provider for CountingRule {}
+
 impl FusionRule for CountingRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()

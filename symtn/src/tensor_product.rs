@@ -903,6 +903,8 @@ mod tests {
         }
     }
 
+    impl symtn_core::testing::Provider for CheckedTensorProductSpy {}
+
     impl CheckedGenericFusion for CheckedTensorProductSpy {
         type Error = Infallible;
 
@@ -1151,6 +1153,8 @@ mod tests {
     /// Deliberately outside the user-layer rule enum: this exercises the typed
     /// core with a provider an application can define without `LoweredMultiplicityFreeAlgebra`.
     struct ExternalZ2<const R_SCALE: u8>;
+
+    impl<const R_SCALE: u8> symtn_core::testing::Provider for ExternalZ2<R_SCALE> {}
 
     impl<const R_SCALE: u8> FusionRule for ExternalZ2<R_SCALE> {
         fn rule_identity(&self) -> RuleIdentity {

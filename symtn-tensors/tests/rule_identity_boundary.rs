@@ -32,6 +32,8 @@ impl SymbolOnlyRule {
     }
 }
 
+impl symtn_core::testing::Provider for SymbolOnlyRule {}
+
 impl FusionRule for SymbolOnlyRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()

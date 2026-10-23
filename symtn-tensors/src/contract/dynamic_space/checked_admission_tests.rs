@@ -29,6 +29,8 @@ impl ExternalUniqueRule {
     }
 }
 
+impl symtn_core::testing::Provider for ExternalUniqueRule {}
+
 impl FusionRule for ExternalUniqueRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -128,6 +130,8 @@ impl CheckedFusionAlgebra for ExternalUniqueRule {
 // path. Delegation keeps the categorical semantics honest.
 #[derive(Clone, Copy)]
 struct ExternalSimpleRule;
+
+impl symtn_core::testing::Provider for ExternalSimpleRule {}
 
 impl FusionRule for ExternalSimpleRule {
     fn rule_identity(&self) -> RuleIdentity {

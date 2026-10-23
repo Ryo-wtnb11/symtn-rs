@@ -25,6 +25,40 @@ pub struct RealBraidingProbe<const ANYONIC: bool, const R_SCALE: u8 = 0>;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProbeSector;
 
+impl<const ANYONIC: bool, const R_SCALE: u8> symtn_core::testing::Provider
+    for RealBraidingProbe<ANYONIC, R_SCALE>
+{
+}
+
+impl<const ANYONIC: bool, const R_SCALE: u8> symtn::sector::TypedSectorAdmission
+    for RealBraidingProbe<ANYONIC, R_SCALE>
+{
+    type Sector = <Self as symtn::sector::SectorCodec>::Sector;
+    type Error = symtn::typed::FusionAlgebraError;
+    type Mode = symtn::sector::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn::sector::RuleIdentity {
+        symtn::sector::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(
+        &self,
+        sector: &Self::Sector,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<Self::Sector, Self::Error> {
+        symtn::sector::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::CheckedFusionAlgebra::try_dual_sector(self, sector)
+    }
+}
+
 impl<const ANYONIC: bool, const R_SCALE: u8> FusionRule for RealBraidingProbe<ANYONIC, R_SCALE> {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::from_canonical_bytes::<Self>(

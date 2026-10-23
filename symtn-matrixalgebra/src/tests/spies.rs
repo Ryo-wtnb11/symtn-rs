@@ -637,6 +637,8 @@ impl Observer for FullQrInputSpy {
     }
 }
 
+impl symtn_core::testing::Provider for LateGenericSpy {}
+
 impl FusionRule for LateGenericSpy {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()

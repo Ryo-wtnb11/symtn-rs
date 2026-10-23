@@ -465,7 +465,13 @@ fn assert_polar_factors<R, D>(
     expected: &(TensorMap<R, D>, TensorMap<R, D>),
     left: bool,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
     let reconstructed = actual.0.compose(&actual.1).unwrap();

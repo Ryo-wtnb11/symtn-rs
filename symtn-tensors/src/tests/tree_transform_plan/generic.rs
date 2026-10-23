@@ -17,6 +17,8 @@ pub(super) struct ToyGenericRule {
     pub(super) style: FusionStyleKind,
 }
 
+impl symtn_core::testing::Provider for ToyGenericRule {}
+
 impl FusionRule for ToyGenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
         symtn_core::RuleIdentity::of_type::<Self>()
@@ -91,6 +93,8 @@ impl GenericRigidSymbols for ToyGenericRule {
 
 #[derive(Clone, Copy)]
 pub(super) struct DenseGenericRule;
+
+impl symtn_core::testing::Provider for DenseGenericRule {}
 
 impl FusionRule for DenseGenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
@@ -262,6 +266,8 @@ impl<'a, R> CheckedPlanSpy<'a, R> {
 
 /// The rule identity of a [`CheckedPlanSpy`] wrapping `R`.
 struct CheckedPlanSpyIdentity<R>(std::marker::PhantomData<R>);
+
+impl<R: FusionRule + 'static> symtn_core::testing::Provider for CheckedPlanSpy<'_, R> {}
 
 impl<R: FusionRule + 'static> CheckedGenericFusion for CheckedPlanSpy<'_, R> {
     type Error = CheckedPlanSpyError;
@@ -447,6 +453,9 @@ impl<P> MeasurementProvider<P> {
 }
 
 #[cfg(feature = "cgc-gen")]
+impl<P: CheckedGenericFusion> symtn_core::testing::Provider for MeasurementProvider<P> {}
+
+#[cfg(feature = "cgc-gen")]
 impl<P: CheckedGenericFusion> CheckedGenericFusion for MeasurementProvider<P> {
     type Error = P::Error;
 
@@ -569,6 +578,8 @@ impl SynchronizedCheckedGeneric {
     }
 }
 
+impl symtn_core::testing::Provider for SynchronizedCheckedGeneric {}
+
 impl FusionRule for SynchronizedCheckedGeneric {
     fn rule_identity(&self) -> RuleIdentity {
         self.rule.rule_identity()
@@ -684,6 +695,8 @@ impl CheckedGenericRigidSymbols for SynchronizedCheckedGeneric {
 
 #[derive(Clone, Copy)]
 pub(super) struct AnyonicGenericRule;
+
+impl symtn_core::testing::Provider for AnyonicGenericRule {}
 
 impl FusionRule for AnyonicGenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
@@ -1027,6 +1040,8 @@ fn generic_multiplicity_monomial_rows_compile_and_execute_as_direct_singles() {
 // inconsistent user provider of the open `GenericFusionSymbols` trait.
 #[derive(Clone, Copy)]
 struct TruncatedRGenericRule;
+
+impl symtn_core::testing::Provider for TruncatedRGenericRule {}
 
 impl FusionRule for TruncatedRGenericRule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {

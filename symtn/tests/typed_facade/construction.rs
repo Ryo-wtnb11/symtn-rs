@@ -5,11 +5,11 @@ fn tensor_map_zeros_carries_a_complex_payload() {
     // What: the payload dtype is independent of the provider's real
     // categorical coefficient scalar.
     let _guard = cache_lock();
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalSu2, Complex64> =
+    let tensor: TensorMap<ExternalSu2Rule, Complex64> =
         TensorMap::zeros(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
 
     assert!(tensor.subblock_count() >= 2);
@@ -25,12 +25,12 @@ fn tensor_map_accepts_separately_allocated_equal_identity_providers() {
     // What: two independent allocations of one rule interoperate; the facade
     // keys on `RuleIdentity`, never on `Arc` identity.
     let _guard = cache_lock();
-    let first = Arc::new(ExternalZ3::new());
-    let second = Arc::new(ExternalZ3::new());
+    let first = Arc::new(external_z3());
+    let second = Arc::new(external_z3());
     assert!(!Arc::ptr_eq(&first, &second));
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalZ3, f64> =
+    let tensor: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::zeros(&runtime, [&z3_leg(&first, false)], [&z3_leg(&second, true)]).unwrap();
 
     assert!(tensor.subblock_count() >= 1);
@@ -42,8 +42,8 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
     // rule mismatch, reported before any layout is staged — the caches stay
     // exactly as they were.
     let _guard = cache_lock();
-    let first = Arc::new(ExternalZ3::tagged(0));
-    let second = Arc::new(ExternalZ3::tagged(1));
+    let first = Arc::new(external_z3_tagged(0));
+    let second = Arc::new(external_z3_tagged(1));
     assert_ne!(first.rule_identity(), second.rule_identity());
     let runtime = runtime();
     let before = (
@@ -51,7 +51,7 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
         structure_cache_info(StructureCacheKind::DegeneracyStructure),
     );
 
-    let error = TensorMap::<ExternalZ3, f64>::zeros(
+    let error = TensorMap::<ExternalZ3Rule, f64>::zeros(
         &runtime,
         [&z3_leg(&first, false)],
         [&z3_leg(&second, true)],
@@ -69,6 +69,126 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
 }
 
 #[test]
+fn enumerated_rules_share_identity_by_category_value() {
+    // What: a fusion-symbols category under `EnumeratedCodec` is identified by
+    // its value. Two separately built Z3 rules mix, and Z3 and Z5 (whose
+    // fusion-symbols fingerprints are equal) are a rule mismatch.
+    use fusion_symbols::finite::{ZNIrrep, ZN};
+    use symtn::sector::EnumeratedCodec;
+
+    type ZnRule = CategoryRule<ZN, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
+    let _guard = cache_lock();
+    let rule = |modulus| {
+        Arc::new(ZnRule::try_new(ZN::new(modulus).unwrap(), EnumeratedCodec::new()).unwrap())
+    };
+    let leg = |rule: &Arc<ZnRule>, modulus| {
+        GradedSpace::try_new(
+            Arc::clone(rule),
+            [
+                (ZNIrrep::from_canonical(0, modulus).unwrap(), 2),
+                (ZNIrrep::from_canonical(1, modulus).unwrap(), 1),
+            ],
+        )
+        .unwrap()
+    };
+    let runtime = runtime();
+    let (first, second, z5) = (rule(3), rule(3), rule(5));
+    assert!(!Arc::ptr_eq(&first, &second));
+
+    let tensor =
+        TensorMap::<ZnRule, f64>::zeros(&runtime, [&leg(&first, 3)], [&leg(&second, 3)]).unwrap();
+    assert_eq!(tensor.subblock_count(), 2);
+    let error =
+        TensorMap::<ZnRule, f64>::zeros(&runtime, [&leg(&first, 3)], [&leg(&z5, 5)]).unwrap_err();
+    assert!(matches!(error, symtn::typed::Error::RuleMismatch));
+}
+
+#[test]
+fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
+    // What: an expert codec composing `EnumeratedCodec`'s identity before
+    // any rule resolves it must still separate Z3 from Z5. Charges (2, 2)
+    // fuse to 1 in Z3 and to 4 in Z5, so the [2, 2] <- [1] layout has one
+    // block for Z3 and none for Z5, whichever was built first.
+    use fusion_symbols::finite::{ZNIrrep, ZN};
+    use symtn::sector::EnumeratedCodec;
+
+    type Enumerated = EnumeratedCodec<MultiplicityFreeAdmissionMode>;
+
+    #[derive(Clone, Copy, Debug)]
+    struct Wrapped;
+
+    impl CategoryCodec<ZN> for Wrapped {
+        type Sector = ZNIrrep;
+        type Error = FusionAlgebraError;
+        type Mode = MultiplicityFreeAdmissionMode;
+        type Unit = CanonicalUnitAdmission;
+
+        fn encode_label<'a>(
+            &self,
+            category: impl Fn() -> &'a ZN + Copy,
+            rule: &RuleIdentity,
+            label: &ZNIrrep,
+        ) -> Result<SectorId, FusionAlgebraError> {
+            Enumerated::new().encode_label(category, rule, label)
+        }
+        fn decode_label<'a>(
+            &self,
+            category: impl Fn() -> &'a ZN + Copy,
+            id: SectorId,
+        ) -> Result<ZNIrrep, FusionAlgebraError> {
+            Enumerated::new().decode_label(category, id)
+        }
+        fn object<'a>(
+            &self,
+            category: impl Fn() -> &'a ZN + Copy,
+            id: SectorId,
+        ) -> Result<ZNIrrep, FusionAlgebraError> {
+            Enumerated::new().object(category, id)
+        }
+        fn sector_id<'a>(
+            &self,
+            category: impl Fn() -> &'a ZN + Copy,
+            rule: &RuleIdentity,
+            object: &ZNIrrep,
+        ) -> Result<SectorId, FusionAlgebraError> {
+            Enumerated::new().sector_id(category, rule, object)
+        }
+        fn rule_identity(&self, category: &ZN) -> Option<RuleIdentity> {
+            Some(RuleIdentity::compose_with_codec::<Self>(
+                Enumerated::new().rule_identity(category)?,
+                RuleIdentity::of_type::<Self>(),
+            ))
+        }
+        fn map_error(
+            &self,
+            inputs: &[SectorId],
+            error: CategoryAdapterError<core::convert::Infallible>,
+        ) -> FusionAlgebraError {
+            <Enumerated as CategoryCodec<ZN>>::map_error(&Enumerated::new(), inputs, error)
+        }
+    }
+
+    type WrappedRule = CategoryRule<ZN, Wrapped>;
+    let _guard = cache_lock();
+    let runtime = runtime();
+    let blocks = |modulus: u32| {
+        let rule = Arc::new(WrappedRule::try_new(ZN::new(modulus).unwrap(), Wrapped).unwrap());
+        let leg = |charge| {
+            GradedSpace::try_new(
+                Arc::clone(&rule),
+                [(ZNIrrep::from_canonical(charge, modulus).unwrap(), 1)],
+            )
+            .unwrap()
+        };
+        TensorMap::<WrappedRule, f64>::zeros(&runtime, [&leg(2), &leg(2)], [&leg(1)])
+            .unwrap()
+            .subblock_count()
+    };
+    assert_eq!(blocks(3), 1);
+    assert_eq!(blocks(5), 0);
+}
+
+#[test]
 fn checked_construction_failure_publishes_no_cache_state() {
     // Isolated: the completed-transformer counters are process-global.
     if crate::run_isolated_or_return(
@@ -83,9 +203,9 @@ fn checked_construction_failure_publishes_no_cache_state() {
     let _guard = cache_lock();
     // The broken provider must be the layout authority (the first leg's
     // provider), otherwise the staging never calls its failing primitive.
-    let broken = Arc::new(ExternalZ3::with(Quirk::FailDual));
+    let broken = Arc::new(external_z3_with(Quirk::FailDual));
     let codomain = z3_leg(&broken, false);
-    let healthy = Arc::new(ExternalZ3::new());
+    let healthy = Arc::new(external_z3());
     let domain = GradedSpace::try_new(
         healthy,
         [(Z3Charge(0), 2), (Z3Charge(2), 3), (Z3Charge(1), 1)],
@@ -99,7 +219,8 @@ fn checked_construction_failure_publishes_no_cache_state() {
     );
     let runtime_before = crate::completed_transformers();
 
-    let error = TensorMap::<ExternalZ3, f64>::zeros(&runtime, [&codomain], [&domain]).unwrap_err();
+    let error =
+        TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, [&codomain], [&domain]).unwrap_err();
 
     assert!(matches!(
         error,
@@ -125,13 +246,13 @@ fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
     // construction with the provider's own error instead of panicking inside
     // the fill.
     let _guard = cache_lock();
-    let provider = Arc::new(ExternalZ3::with(Quirk::NarrowDecode));
+    let provider = Arc::new(external_z3_with(Quirk::NarrowDecode));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 1), (Z3Charge(1), 2)]).unwrap();
     let runtime = runtime();
 
     // Two charge-1 codomain legs couple to charge 2, the id this codec refuses.
-    let error = TensorMap::<ExternalZ3, f64>::from_subblock_fn(
+    let error = TensorMap::<ExternalZ3Rule, f64>::from_subblock_fn(
         &runtime,
         [&leg, &leg],
         [&leg, &leg],
@@ -148,12 +269,12 @@ fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
     // dual flags intact, and every block reports decoded labels plus a data
     // view consistent with the buffer.
     let _guard = cache_lock();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
     let dual = leg.try_dual().unwrap();
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalZ3, f64> =
+    let tensor: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::zeros(&runtime, [&leg, &leg], [&dual]).unwrap();
 
     let codomain = tensor.codomain();
@@ -277,7 +398,7 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
     // the convention that a tree labels a domain leg with the space's own
     // sector rather than its dual.
     let _guard = cache_lock();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let codomain = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(1), 1)]).unwrap();
     // A dual constructor interprets its key through the orientation, so key
     // charge 1 is stored and reported as the external charge 2.
@@ -290,7 +411,7 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
     );
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalZ3, f64> =
+    let tensor: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::zeros(&runtime, [&codomain, &codomain], [&domain]).unwrap();
 
     assert_eq!(tensor.subblock_count(), 1);
@@ -310,11 +431,11 @@ fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
     // What: the whole phase-2 surface works for a non-abelian (Simple) external
     // provider with a complex payload, not just for the abelian fixture.
     let _guard = cache_lock();
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalSu2, Complex64> =
+    let tensor: TensorMap<ExternalSu2Rule, Complex64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |sectors, indices| {
             Complex64::new(
                 sectors.coupled().twice_spin() as f64,
@@ -438,11 +559,11 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
     // structural isomorphism from the same public vocabulary.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
     let dual = leg.try_dual().unwrap();
 
-    let random: TensorMap<ExternalZ3, f64> =
+    let random: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 0x9E37_79B9_7F4A_7C15).unwrap();
     assert!(random
         .dense_data()
@@ -451,12 +572,12 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
         .any(|&value| value != 0.0));
 
     // The fused non-dual isomorph of the dual leg has the same sector content.
-    let f: TensorMap<ExternalZ3, f64> =
+    let f: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::isomorphism(&runtime, [&leg, &dual], [&dual, &leg]).unwrap();
     let roundtrip = f.adjoint().unwrap().compose(&f).unwrap();
     // Explicit `D`: under cuda,cpu-faer serde_json adds a `PartialEq` impl
     // that makes the `assert_eq!` unable to pin `D` on its own (E0283).
-    let id: TensorMap<ExternalZ3, f64> =
+    let id: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::isomorphism(&runtime, [&dual, &leg], [&dual, &leg]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
 }
@@ -547,10 +668,10 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
     // What: the provider is inferred from the legs, so an empty construction
     // has nothing to infer it from.
     let runtime = runtime();
-    let empty: [&GradedSpace<ExternalZ3>; 0] = [];
+    let empty: [&GradedSpace<ExternalZ3Rule>; 0] = [];
 
-    assert!(TensorMap::<ExternalZ3, f64>::zeros(&runtime, empty, empty).is_err());
-    assert!(TensorMap::<ExternalZ3, f64>::rand_with_seed(
+    assert!(TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, empty, empty).is_err());
+    assert!(TensorMap::<ExternalZ3Rule, f64>::rand_with_seed(
         &runtime,
         empty,
         empty,
@@ -558,10 +679,10 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
     )
     .is_err());
     assert!(matches!(
-        TensorMap::<ExternalZ3, f64>::isomorphism(&runtime, empty, empty).unwrap_err(),
+        TensorMap::<ExternalZ3Rule, f64>::isomorphism(&runtime, empty, empty).unwrap_err(),
         symtn::typed::Error::InvalidArgument(message) if message.contains("at least one leg")
     ));
-    assert!(TensorMap::<ExternalZ3, f64>::isometry(&runtime, empty, empty).is_err());
+    assert!(TensorMap::<ExternalZ3Rule, f64>::isometry(&runtime, empty, empty).is_err());
 }
 
 #[test]
@@ -569,11 +690,11 @@ fn typed_rand_rejects_mismatched_providers_like_zeros() {
     // What: two providers with distinct rule identities are a rule mismatch on
     // the random constructor exactly as on `zeros`.
     let _guard = cache_lock();
-    let first = Arc::new(ExternalZ3::tagged(0));
-    let second = Arc::new(ExternalZ3::tagged(1));
+    let first = Arc::new(external_z3_tagged(0));
+    let second = Arc::new(external_z3_tagged(1));
     let runtime = runtime();
 
-    let error = TensorMap::<ExternalZ3, f64>::rand_with_seed(
+    let error = TensorMap::<ExternalZ3Rule, f64>::rand_with_seed(
         &runtime,
         [&z3_leg(&first, false)],
         [&z3_leg(&second, true)],
@@ -772,15 +893,15 @@ fn typed_su2_isomorphism_satisfies_the_identity_law() {
     // id` through genuinely non-trivial recoupling.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
 
-    let f: TensorMap<ExternalSu2, f64> =
+    let f: TensorMap<ExternalSu2Rule, f64> =
         TensorMap::isomorphism(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
     let roundtrip = f.adjoint().unwrap().compose(&f).unwrap();
     // Explicit `D` for the cuda,cpu-faer feature set (see the ExternalZ3
     // identity-law test above).
-    let id: TensorMap<ExternalSu2, f64> =
+    let id: TensorMap<ExternalSu2Rule, f64> =
         TensorMap::isomorphism(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
 }
@@ -808,9 +929,10 @@ fn typed_leg_dims_carry_an_external_provider_with_nontrivial_dimensions() {
     // external provider rather than a built-in special case.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalSu2);
+    let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
-    let tensor: TensorMap<ExternalSu2, f64> = TensorMap::zeros(&runtime, [&leg], [&leg]).unwrap();
+    let tensor: TensorMap<ExternalSu2Rule, f64> =
+        TensorMap::zeros(&runtime, [&leg], [&leg]).unwrap();
 
     assert_eq!(tensor.leg_dims().unwrap(), vec![4, 4]);
 }
@@ -979,12 +1101,12 @@ fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
     // What: `zeros` admits a runtime-rank multi-block layout through the
     // checked path and returns a zero buffer of exactly the layout's length.
     let _guard = cache_lock();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
     let dual = leg.try_dual().unwrap();
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalZ3, f64> =
+    let tensor: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::zeros(&runtime, [&leg, &leg], [&dual, &dual]).unwrap();
 
     assert!(tensor.subblock_count() >= 2);

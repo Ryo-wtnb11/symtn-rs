@@ -44,7 +44,13 @@ where
 
 impl<R, D> TraceCase<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     pub fn host(&self) -> TensorMap<R, D> {
@@ -67,7 +73,13 @@ fn tensor<R, D>(
     salt: usize,
 ) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     TensorMap::from_subblock_fn(
@@ -89,7 +101,13 @@ fn identity_oracle<R, D>(
     rhs_axes: [usize; 2],
 ) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let identity: TensorMap<R, D> = TensorMap::isomorphism(runtime, [space], [space]).unwrap();
@@ -127,7 +145,13 @@ fn unbent<R, D>(
     salt: usize,
 ) -> [TraceCase<R, D>; 3]
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let rank_five = tensor(runtime, &[v, w, v], &[v, w], salt);
@@ -166,7 +190,13 @@ fn bent<R, D>(
     salt: usize,
 ) -> [TraceCase<R, D>; 2]
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let dual = v.try_dual().unwrap();
@@ -268,7 +298,13 @@ pub fn u1_su2_cases<D: Payload>(
 /// every non-dual traced leg after the first is part of the Host coefficient.
 fn fermionic<R, D>(runtime: &Runtime, f: &GradedSpace<R>, salt: usize) -> Vec<TraceCase<R, D>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     let dual = f.try_dual().unwrap();
@@ -315,7 +351,13 @@ pub fn fermion_su2_cases<D: Payload>(
 /// through its adjoint axes with a conjugated read.
 pub fn lazy<R, D>(cases: Vec<TraceCase<R, D>>) -> Vec<TraceCase<R, D>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: Payload,
 {
     cases

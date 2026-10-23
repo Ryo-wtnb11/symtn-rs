@@ -23,7 +23,13 @@ fn i() -> Complex64 {
 
 fn complexify<R>(re: &TensorMap<R, f64>, im: &TensorMap<R, f64>) -> TensorMap<R, Complex64>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     re.convert::<Complex64>()
         .axpby(one(), &im.convert::<Complex64>(), i())
@@ -42,8 +48,11 @@ fn assert_close(actual: &[Complex64], expected: &[Complex64], tolerance: f64) {
 
 fn assert_complex_contract_identity<R>(runtime: &Runtime, space: &GradedSpace<R>)
 where
-    R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
-        + MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec,
 {

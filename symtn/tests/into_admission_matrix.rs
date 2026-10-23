@@ -1817,6 +1817,35 @@ use symtn::typed::FusionAlgebraError;
 #[derive(Clone, Copy)]
 struct ComplexU1;
 
+impl symtn_core::testing::Provider for ComplexU1 {}
+
+impl symtn::sector::TypedSectorAdmission for ComplexU1 {
+    type Sector = <Self as symtn::sector::SectorCodec>::Sector;
+    type Error = symtn::typed::FusionAlgebraError;
+    type Mode = symtn::sector::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn::sector::RuleIdentity {
+        symtn::sector::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(
+        &self,
+        sector: &Self::Sector,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<Self::Sector, Self::Error> {
+        symtn::sector::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::CheckedFusionAlgebra::try_dual_sector(self, sector)
+    }
+}
+
 impl FusionRule for ComplexU1 {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -1946,6 +1975,35 @@ fn z3_squared_id((a1, a2): (usize, usize)) -> SectorId {
 fn alternating_r((a1, a2): (usize, usize), (b1, b2): (usize, usize)) -> Complex64 {
     let exponent = (a1 * b2 + 2 * a2 * b1) % 3;
     Complex64::from_polar(1.0, 2.0 * std::f64::consts::PI * exponent as f64 / 3.0)
+}
+
+impl symtn_core::testing::Provider for AlternatingZ3Squared {}
+
+impl symtn::sector::TypedSectorAdmission for AlternatingZ3Squared {
+    type Sector = <Self as symtn::sector::SectorCodec>::Sector;
+    type Error = symtn::typed::FusionAlgebraError;
+    type Mode = symtn::sector::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn::sector::RuleIdentity {
+        symtn::sector::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(
+        &self,
+        sector: &Self::Sector,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<Self::Sector, Self::Error> {
+        symtn::sector::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::CheckedFusionAlgebra::try_dual_sector(self, sector)
+    }
 }
 
 impl FusionRule for AlternatingZ3Squared {

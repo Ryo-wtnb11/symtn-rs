@@ -308,7 +308,11 @@ impl<D: Payload + symtn::typed::CudaPayload> DevicePayload for D {}
 /// Symmetry providers the device generic bodies are instantiated over.
 #[cfg(feature = "cuda")]
 pub trait DeviceRule:
-    symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    symtn::sector::TypedSectorAdmission<
+        Sector = <Self as symtn::sector::SectorCodec>::Sector,
+        Error = symtn::typed::FusionAlgebraError,
+        Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+    > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
     + symtn::sector::CheckedFusionAlgebra
     + symtn::sector::SectorCodec
 {
@@ -316,7 +320,11 @@ pub trait DeviceRule:
 
 #[cfg(feature = "cuda")]
 impl<R> DeviceRule for R where
-    R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec
 {

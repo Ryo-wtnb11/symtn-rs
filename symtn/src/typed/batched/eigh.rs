@@ -152,7 +152,13 @@ pub(super) struct EighRoutePlan<R> {
 
 impl<R, D, S> EighFullPlan<R, D, S>
 where
-    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
     S: TensorStorage<D>,
 {
@@ -356,7 +362,13 @@ impl<R: SectorCodec, D, S> EighFullPlan<R, D, S> {
 
 impl<R, D, S> EighFullPlan<R, D, S>
 where
-    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar,
     S: FactorExec<R, D>,
 {
@@ -668,7 +680,13 @@ fn publish_spectra<'v, S: Clone>(
 
 impl<R> EighRoutePlan<R>
 where
-    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     /// Compiles the eager plan from the structure: `eigh_full` keeps every
     /// eigenpair, so each coupled sector's rank is its full `n`.

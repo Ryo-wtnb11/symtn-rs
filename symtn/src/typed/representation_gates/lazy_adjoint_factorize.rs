@@ -52,7 +52,13 @@ fn svd_vals_reads_the_parent_without_materializing_the_adjoint() {
 
 fn assert_compact_svd_reads_parent<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
     let eager = eager_adjoint_oracle(source);
@@ -116,7 +122,13 @@ fn compact_svd_reads_the_parent_without_materializing_the_adjoint() {
 
 fn assert_full_svd_reads_parent<R, D>(source: &TensorMap<R, D>, compare_factor_bytes: bool)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
     let eager = eager_adjoint_oracle(source);
@@ -239,7 +251,13 @@ fn full_svd_late_failure_does_not_publish_the_adjoint_cache() {
 
 fn assert_null_redirect<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
@@ -372,7 +390,13 @@ fn null_space_late_failure_leaves_parent_and_adjoint_cache_unchanged() {
 
 fn assert_polar_redirect<R, D>(source: &TensorMap<R, D>, left: bool)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
@@ -400,7 +424,13 @@ where
 
 fn assert_rank_deficient_polar_support<R, D>(source: &TensorMap<R, D>, left: bool)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: AdvancedLinalgScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
@@ -602,7 +632,13 @@ fn assert_qr_lq_factors<R, D>(
     qr: bool,
     compare_gauge: bool,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
     for (actual, expected) in [(&actual.0, &expected.0), (&actual.1, &expected.1)] {
@@ -643,7 +679,13 @@ fn assert_qr_lq_factors<R, D>(
 
 fn assert_qr_lq_keeps_input_cache_cold<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
@@ -839,7 +881,13 @@ fn full_qr_lq_late_failure_leaves_parent_and_adjoint_cache_unchanged() {
 
 fn assert_truncated_svd_reads_parent<R, D>(source: &TensorMap<R, D>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = FusionAlgebraError,
+            Mode = MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: FactorizationScalar + SpectrumMagnitude + core::fmt::Debug,
 {
     // The truncated SVD is the composition `svd_compact` -> `diagview` ->
@@ -853,7 +901,13 @@ where
     }
     fn truncated<R, D>(tensor: &TensorMap<R, D>, truncation: &Truncation) -> Truncated<R, D>
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: TypedSectorAdmission<
+                Sector = <R as SectorCodec>::Sector,
+                Error = FusionAlgebraError,
+                Mode = MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
         D: FactorizationScalar + SpectrumMagnitude,
     {
         let Svd { u, s, vh } = tensor.svd_compact(&[0], &[1, 2]).unwrap();

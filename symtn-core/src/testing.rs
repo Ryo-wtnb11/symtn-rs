@@ -9,6 +9,8 @@
 
 use super::*;
 
+pub use symtn_sectors::testing::Provider;
+
 pub fn generic_braid_tree_pair<R>(
     rule: &R,
     tree_pair: &FusionTreePairKey,

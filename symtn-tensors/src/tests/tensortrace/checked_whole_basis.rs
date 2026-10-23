@@ -84,6 +84,8 @@ impl Ledger {
     }
 }
 
+impl symtn_core::testing::Provider for Ledger {}
+
 impl CheckedGenericFusion for Ledger {
     type Error = LedgerError;
     fn rule_identity(&self) -> RuleIdentity {

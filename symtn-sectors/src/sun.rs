@@ -410,6 +410,8 @@ impl SUNFusionRule {
     }
 }
 
+impl crate::seal::Provider for SUNFusionRule {}
+
 impl CheckedGenericFusion for SUNFusionRule {
     type Error = SUNFusionRuleError;
 
@@ -555,6 +557,30 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
     ) -> Result<GenericRMatrix<f64>, Self::Error> {
         let (a, b, c) = (self.irrep(a)?, self.irrep(b)?, self.irrep(c)?);
         let block = self.category().r_symbol(&a, &b, &c).map_err(racah_error)?;
+        GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
+            .map_err(SUNFusionRuleError::MalformedSymbolData)
+    }
+
+    fn try_a_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<f64>, Self::Error> {
+        let (a, b, c) = (self.irrep(a)?, self.irrep(b)?, self.irrep(c)?);
+        let block = self.category().a_symbol(&a, &b, &c).map_err(racah_error)?;
+        GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
+            .map_err(SUNFusionRuleError::MalformedSymbolData)
+    }
+
+    fn try_b_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<f64>, Self::Error> {
+        let (a, b, c) = (self.irrep(a)?, self.irrep(b)?, self.irrep(c)?);
+        let block = self.category().b_symbol(&a, &b, &c).map_err(racah_error)?;
         GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
             .map_err(SUNFusionRuleError::MalformedSymbolData)
     }

@@ -12,6 +12,8 @@ impl TwoSectorTable {
     }
 }
 
+impl symtn_sectors::testing::Provider for TwoSectorTable {}
+
 impl FusionRule for TwoSectorTable {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

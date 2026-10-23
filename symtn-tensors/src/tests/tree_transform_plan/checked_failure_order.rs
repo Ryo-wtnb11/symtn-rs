@@ -31,6 +31,8 @@ struct TwoKeyFailures {
     r_calls: RefCell<Vec<[SectorId; 3]>>,
     f_calls: Cell<usize>,
 }
+impl symtn_core::testing::Provider for TwoKeyFailures {}
+
 impl CheckedGenericFusion for TwoKeyFailures {
     type Error = TwoKeyError;
     fn rule_identity(&self) -> RuleIdentity {

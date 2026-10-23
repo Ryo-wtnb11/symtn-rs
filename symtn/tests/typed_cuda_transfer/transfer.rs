@@ -2,7 +2,13 @@ use super::*;
 
 fn assert_roundtrip<R>(source: TensorMap<R, f64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let provider = source.provider() as *const R;
     let runtime = symtn::typed::__network::runtime_identity(source.runtime());
@@ -84,7 +90,13 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
 
 fn assert_c64_roundtrip<R>(source: TensorMap<R, Complex64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let provider = source.provider() as *const R;
     let runtime = symtn::typed::__network::runtime_identity(source.runtime());

@@ -392,6 +392,8 @@ struct CheckedFailRule {
     fail: CheckedFailStage,
 }
 
+impl symtn_sectors::testing::Provider for CheckedFailRule {}
+
 impl FusionRule for CheckedFailRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

@@ -748,6 +748,8 @@ macro_rules! assert_same_tensor {
 #[derive(Clone, Copy)]
 struct LayoutGenericRule;
 
+impl symtn_core::testing::Provider for LayoutGenericRule {}
+
 impl FusionRule for LayoutGenericRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

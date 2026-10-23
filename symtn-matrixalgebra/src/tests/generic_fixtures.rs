@@ -15,6 +15,8 @@ impl IdentityQdimRule {
     }
 }
 
+impl symtn_core::testing::Provider for IdentityQdimRule {}
+
 impl FusionRule for IdentityQdimRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()
@@ -76,6 +78,8 @@ impl MultiplicityFreeRigidSymbols for IdentityQdimRule {
 
 #[derive(Clone, Copy)]
 pub(super) struct FactorGenericRule;
+
+impl symtn_core::testing::Provider for FactorGenericRule {}
 
 impl FusionRule for FactorGenericRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -308,6 +312,8 @@ impl CheckedOnlyFactorRule {
         Ok(value(&FactorGenericRule))
     }
 }
+
+impl symtn_core::testing::Provider for CheckedOnlyFactorRule {}
 
 impl CheckedGenericFusion for CheckedOnlyFactorRule {
     type Error = Infallible;

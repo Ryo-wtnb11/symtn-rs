@@ -92,6 +92,35 @@ impl<B> Base for B where
 {
 }
 
+impl<B: Base, const TILTED: bool> symtn_core::testing::Provider for Embedded<B, TILTED> {}
+
+impl<B: Base, const TILTED: bool> symtn::sector::TypedSectorAdmission for Embedded<B, TILTED> {
+    type Sector = <Self as symtn::sector::SectorCodec>::Sector;
+    type Error = symtn::typed::FusionAlgebraError;
+    type Mode = symtn::sector::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn::sector::RuleIdentity {
+        symtn::sector::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(
+        &self,
+        sector: &Self::Sector,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<Self::Sector, Self::Error> {
+        symtn::sector::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::CheckedFusionAlgebra::try_dual_sector(self, sector)
+    }
+}
+
 impl<B: Base, const TILTED: bool> FusionRule for Embedded<B, TILTED> {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

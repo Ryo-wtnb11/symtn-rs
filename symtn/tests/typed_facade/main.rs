@@ -1,9 +1,10 @@
 //! Gate suite for the provider-typed facade (`symtn::typed`, issue #557).
 //!
-//! Every provider here is built from the public vocabulary alone — no sealed
-//! lowered codec, no crate-internal machinery — so the suite doubles as proof
-//! that a downstream application can drive the typed facade with its own
-//! fusion rule.
+//! Every external provider here is a `fusion_symbols` category with its own
+//! codec in `CategoryRule`, built from the public vocabulary alone — no
+//! provider-trait implementation, no crate-internal machinery — so the suite
+//! doubles as proof that a downstream application can drive the typed facade
+//! with its own category.
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
@@ -32,13 +33,16 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         .find(|info| info.kind() == kind)
         .unwrap()
 }
-use symtn::sector::{
-    BraidingStyleKind, CheckedFusionAlgebra, FusionRule, FusionStyleKind,
-    MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    RuleIdentity, SectorCodec, SectorVec,
-};
+use fusion_symbols::category::{BraidingStyle, FusionCategory, FusionStyle};
+use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep};
 use symtn::sector::{
     CU1FusionRule, CU1Irrep, ProductFusionRuleExt, SU2FusionRule, SU2Irrep, SectorId,
+};
+use symtn::sector::{
+    CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec, CategoryFailure,
+    CategoryOperation, CategoryRule, CheckedFusionAlgebra, FusionRule,
+    MultiplicityFreeAdmissionMode, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
+    RuleIdentity, SectorCodec,
 };
 use symtn::sector::{TableRule, TableSector};
 use symtn::typed::FusionAlgebraError;
@@ -111,7 +115,7 @@ fn run_isolated_or_return(isolated_env: &str, test_path: &str) -> bool {
 /// One deliberately broken behaviour, injected into an otherwise valid
 /// provider. The rule identity is unaffected, matching how the checked
 /// admission tests in `symtn-tensors` inject failures.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Quirk {
     /// Encodes every label to the vacuum id, violating codec injectivity.
     AliasLabels,
@@ -130,165 +134,156 @@ enum Quirk {
     ReversedLabels,
 }
 
-#[derive(Clone, Copy)]
-struct ExternalZ3 {
+/// Z3 as a downstream `fusion_symbols` category: objects are the charges, so
+/// `CategoryRule` reaches the typed facade without any symtn provider impl.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ExternalZ3;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct Z3Charge(u8);
+
+impl FusionCategory for ExternalZ3 {
+    type Object = Z3Charge;
+    type Scalar = f64;
+    type FSymbol = f64;
+    type RSymbol = f64;
+    type Fusion<'a> = core::iter::Once<Z3Charge>;
+    type Error = core::convert::Infallible;
+
+    fn fusion_style(&self) -> FusionStyle {
+        FusionStyle::Unique
+    }
+    fn braiding_style(&self) -> BraidingStyle {
+        BraidingStyle::Bosonic
+    }
+    fn unit(&self) -> Z3Charge {
+        Z3Charge(0)
+    }
+    fn contains(&self, a: &Z3Charge) -> bool {
+        a.0 < 3
+    }
+    fn dual(&self, a: &Z3Charge) -> Z3Charge {
+        Z3Charge((3 - a.0) % 3)
+    }
+    fn dim(&self, _: &Z3Charge) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_phase(&self, _: &Z3Charge) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_indicator(&self, a: &Z3Charge) -> f64 {
+        if a.0 == 0 {
+            1.0
+        } else {
+            0.0
+        }
+    }
+    fn twist(&self, _: &Z3Charge) -> f64 {
+        1.0
+    }
+    fn fusion<'a>(&'a self, a: &Z3Charge, b: &Z3Charge) -> Result<Self::Fusion<'a>, Self::Error> {
+        Ok(core::iter::once(Z3Charge((a.0 + b.0) % 3)))
+    }
+    fn nsymbol(&self, a: &Z3Charge, b: &Z3Charge, c: &Z3Charge) -> u32 {
+        u32::from((a.0 + b.0) % 3 == c.0)
+    }
+    fn has_canonical_unit(&self) -> bool {
+        true
+    }
+    fn f_symbol(
+        &self,
+        a: &Z3Charge,
+        b: &Z3Charge,
+        c: &Z3Charge,
+        d: &Z3Charge,
+        e: &Z3Charge,
+        f: &Z3Charge,
+    ) -> Result<f64, Self::Error> {
+        let admissible = self.nsymbol(a, b, e)
+            * self.nsymbol(e, c, d)
+            * self.nsymbol(b, c, f)
+            * self.nsymbol(a, f, d);
+        Ok(f64::from(admissible))
+    }
+    fn r_symbol(&self, a: &Z3Charge, b: &Z3Charge, c: &Z3Charge) -> Result<f64, Self::Error> {
+        Ok(f64::from(self.nsymbol(a, b, c)))
+    }
+    fn authority_fingerprint(&self) -> &[u8] {
+        b"symtn-typed-facade-external-z3"
+    }
+}
+
+/// The Z3 labels, numbering, identity, and injected faults. A quirk is a
+/// broken codec, not a different fusion algebra, so it keeps the identity of
+/// its tag: the failure-injection tests rely on that.
+#[derive(Clone, Copy, Debug)]
+struct Z3Codec {
     quirk: Option<Quirk>,
     /// Distinguishes two otherwise identical provider values, so the facade's
     /// `RuleIdentity` handling can be tested in both directions with one type.
     identity_tag: u8,
 }
 
-impl ExternalZ3 {
-    fn new() -> Self {
-        Self {
-            quirk: None,
-            identity_tag: 0,
-        }
-    }
+type ExternalZ3Rule = CategoryRule<ExternalZ3, Z3Codec>;
 
-    fn with(quirk: Quirk) -> Self {
-        Self {
-            quirk: Some(quirk),
-            identity_tag: 0,
-        }
-    }
-
-    fn tagged(identity_tag: u8) -> Self {
-        Self {
-            quirk: None,
+fn external_z3_rule(quirk: Option<Quirk>, identity_tag: u8) -> ExternalZ3Rule {
+    CategoryRule::try_new(
+        ExternalZ3,
+        Z3Codec {
+            quirk,
             identity_tag,
-        }
-    }
+        },
+    )
+    .expect("Z3 is admitted")
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct Z3Charge(u8);
-
-impl FusionRule for ExternalZ3 {
-    fn rule_identity(&self) -> RuleIdentity {
-        // Only the tag participates: an injected quirk is a broken provider,
-        // not a different fusion algebra, and the failure-injection tests rely
-        // on it keeping the identity it claims.
-        RuleIdentity::from_canonical_bytes::<Self>(
-            0x5a33_0000_0000_0000,
-            Arc::<[u8]>::from(vec![self.identity_tag]),
-        )
-    }
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
-    }
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Bosonic
-    }
-    fn vacuum(&self) -> SectorId {
-        SectorId::new(0)
-    }
-    fn dual(&self, sector: SectorId) -> SectorId {
-        SectorId::new((3 - sector.id() % 3) % 3)
-    }
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        core::iter::once(SectorId::new((left.id() + right.id()) % 3)).collect()
-    }
+fn external_z3() -> ExternalZ3Rule {
+    external_z3_rule(None, 0)
 }
 
-impl MultiplicityFreeFusionRule for ExternalZ3 {}
-
-impl MultiplicityFreeFusionSymbols for ExternalZ3 {
-    type Scalar = f64;
-    fn f_symbol_scalar(
-        &self,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-    ) -> f64 {
-        1.0
-    }
-    fn r_symbol_scalar(&self, _: SectorId, _: SectorId, _: SectorId) -> f64 {
-        1.0
-    }
+fn external_z3_with(quirk: Quirk) -> ExternalZ3Rule {
+    external_z3_rule(Some(quirk), 0)
 }
 
-impl MultiplicityFreeRigidSymbols for ExternalZ3 {
-    fn dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn inv_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn sqrt_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn inv_sqrt_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn twist_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn frobenius_schur_phase_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
+fn external_z3_tagged(identity_tag: u8) -> ExternalZ3Rule {
+    external_z3_rule(None, identity_tag)
 }
 
-// Opt-in for the typed unit-leg operations: the marker certifies
-// that the vacuum obeys the canonical unit laws, which the Z3 vacuum (charge
-// 0, self-dual, trivial unitors) does. A downstream provider makes the same
-// one-line declaration to unlock `insert_unit`/
-// `remove_unit`.
-impl symtn::sector::CanonicalUnitFusionRule for ExternalZ3 {}
-
-impl CheckedFusionAlgebra for ExternalZ3 {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        if self.quirk == Some(Quirk::FailDual) {
-            return Err(FusionAlgebraError::InvalidSector { sector });
-        }
-        if self.quirk == Some(Quirk::CollapsingDual) {
-            return Ok(SectorId::new(0));
-        }
-        Ok(self.dual(sector))
-    }
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        Ok(self.fusion_channels(left, right))
-    }
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        Ok(self.nsymbol(left, right, coupled))
-    }
-}
-
-impl SectorCodec for ExternalZ3 {
+impl CategoryCodec<ExternalZ3> for Z3Codec {
     type Sector = Z3Charge;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
 
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
+    fn encode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalZ3 + Copy,
+        rule: &RuleIdentity,
+        label: &Z3Charge,
+    ) -> Result<SectorId, FusionAlgebraError> {
         if self.quirk == Some(Quirk::AliasLabels) {
             return Ok(SectorId::new(0));
         }
-        if value.0 < 3 {
+        if label.0 < 3 {
             let id = if self.quirk == Some(Quirk::ReversedLabels) {
-                2 - value.0
+                2 - label.0
             } else {
-                value.0
+                label.0
             };
             Ok(SectorId::new(usize::from(id)))
         } else {
             Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: self.rule_identity(),
-                label: format!("Z3 charge {}", value.0),
+                rule: rule.clone(),
+                label: format!("Z3 charge {}", label.0),
             })
         }
     }
 
-    fn decode_sector(&self, sector: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
+    fn decode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalZ3 + Copy,
+        sector: SectorId,
+    ) -> Result<Z3Charge, FusionAlgebraError> {
         let limit = if self.quirk == Some(Quirk::NarrowDecode) {
             2
         } else {
@@ -306,111 +301,226 @@ impl SectorCodec for ExternalZ3 {
             })
             .ok_or(FusionAlgebraError::InvalidSector { sector })
     }
+
+    fn object<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalZ3 + Copy,
+        sector: SectorId,
+    ) -> Result<Z3Charge, FusionAlgebraError> {
+        u8::try_from(sector.id())
+            .ok()
+            .filter(|&charge| charge < 3)
+            .map(Z3Charge)
+            .ok_or(FusionAlgebraError::InvalidSector { sector })
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalZ3 + Copy,
+        _: &RuleIdentity,
+        object: &Z3Charge,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(SectorId::new(usize::from(object.0)))
+    }
+
+    fn rule_identity(&self, _: &ExternalZ3) -> Option<RuleIdentity> {
+        Some(RuleIdentity::from_canonical_bytes::<ExternalZ3>(
+            0x5a33_0000_0000_0000,
+            Arc::<[u8]>::from(vec![self.identity_tag]),
+        ))
+    }
+
+    fn admit<'a, const N: usize>(
+        &self,
+        category: impl Fn() -> &'a ExternalZ3 + Copy,
+        _: &RuleIdentity,
+        operation: CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[Z3Charge; N], FusionAlgebraError> {
+        if operation == CategoryOperation::Dual {
+            match self.quirk {
+                Some(Quirk::FailDual) => {
+                    return Err(FusionAlgebraError::InvalidSector { sector: ids[0] });
+                }
+                // The dual of every sector is then the vacuum's dual.
+                Some(Quirk::CollapsingDual) => return Ok([Z3Charge(0); N]),
+                _ => {}
+            }
+        }
+        let mut objects = [Z3Charge(0); N];
+        for (object, id) in objects.iter_mut().zip(ids) {
+            *object = self.object(category, id)?;
+        }
+        Ok(objects)
+    }
+
+    fn map_error(
+        &self,
+        _: &[SectorId],
+        error: CategoryAdapterError<core::convert::Infallible>,
+    ) -> FusionAlgebraError {
+        match error {
+            CategoryAdapterError::ForeignObject {
+                sector: Some(sector),
+            } => FusionAlgebraError::InvalidSector { sector },
+            other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
-// External Simple-fusion provider: SU(2) mathematics behind a distinct type
-// that never certifies the sealed lowered codec.
+// External Simple-fusion provider: a downstream category that delegates its
+// SU(2) mathematics to fusion-symbols, with its own compact codec.
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
-struct ExternalSu2;
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ExternalSu2(LieGroup);
 
-impl FusionRule for ExternalSu2 {
-    fn rule_identity(&self) -> RuleIdentity {
-        RuleIdentity::of_type::<Self>()
-    }
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Simple
-    }
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Bosonic
-    }
-    fn vacuum(&self) -> SectorId {
-        SU2FusionRule.vacuum()
-    }
-    fn dual(&self, sector: SectorId) -> SectorId {
-        SU2FusionRule.dual(sector)
-    }
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        SU2FusionRule.fusion_channels(left, right)
-    }
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        SU2FusionRule.nsymbol(left, right, coupled)
-    }
-}
-
-impl MultiplicityFreeFusionRule for ExternalSu2 {}
-
-impl MultiplicityFreeFusionSymbols for ExternalSu2 {
+impl FusionCategory for ExternalSu2 {
+    type Object = LieIrrep;
     type Scalar = f64;
-    fn f_symbol_scalar(
-        &self,
-        l: SectorId,
-        m: SectorId,
-        r: SectorId,
-        c: SectorId,
-        lc: SectorId,
-        rc: SectorId,
-    ) -> f64 {
-        SU2FusionRule.f_symbol_scalar(l, m, r, c, lc, rc)
+    type FSymbol = <LieGroup as FusionCategory>::FSymbol;
+    type RSymbol = <LieGroup as FusionCategory>::RSymbol;
+    type Fusion<'a> = <LieGroup as FusionCategory>::Fusion<'a>;
+    type Error = LieError;
+
+    fn fusion_style(&self) -> FusionStyle {
+        self.0.fusion_style()
     }
-    fn r_symbol_scalar(&self, l: SectorId, r: SectorId, c: SectorId) -> f64 {
-        SU2FusionRule.r_symbol_scalar(l, r, c)
+    fn braiding_style(&self) -> BraidingStyle {
+        self.0.braiding_style()
+    }
+    fn unit(&self) -> LieIrrep {
+        self.0.unit()
+    }
+    fn contains(&self, a: &LieIrrep) -> bool {
+        self.0.contains(a)
+    }
+    fn dual(&self, a: &LieIrrep) -> LieIrrep {
+        self.0.dual(a)
+    }
+    fn dim(&self, a: &LieIrrep) -> f64 {
+        self.0.dim(a)
+    }
+    fn frobenius_schur_phase(&self, a: &LieIrrep) -> f64 {
+        self.0.frobenius_schur_phase(a)
+    }
+    fn frobenius_schur_indicator(&self, a: &LieIrrep) -> f64 {
+        self.0.frobenius_schur_indicator(a)
+    }
+    fn twist(&self, a: &LieIrrep) -> f64 {
+        self.0.twist(a)
+    }
+    fn fusion<'a>(&'a self, a: &LieIrrep, b: &LieIrrep) -> Result<Self::Fusion<'a>, LieError> {
+        self.0.fusion(a, b)
+    }
+    fn nsymbol(&self, a: &LieIrrep, b: &LieIrrep, c: &LieIrrep) -> u32 {
+        self.0.nsymbol(a, b, c)
+    }
+    fn has_canonical_unit(&self) -> bool {
+        self.0.has_canonical_unit()
+    }
+    fn f_symbol(
+        &self,
+        a: &LieIrrep,
+        b: &LieIrrep,
+        c: &LieIrrep,
+        d: &LieIrrep,
+        e: &LieIrrep,
+        f: &LieIrrep,
+    ) -> Result<Self::FSymbol, LieError> {
+        self.0.f_symbol(a, b, c, d, e, f)
+    }
+    fn r_symbol(
+        &self,
+        a: &LieIrrep,
+        b: &LieIrrep,
+        c: &LieIrrep,
+    ) -> Result<Self::RSymbol, LieError> {
+        self.0.r_symbol(a, b, c)
+    }
+    fn authority_fingerprint(&self) -> &[u8] {
+        self.0.authority_fingerprint()
     }
 }
 
-impl MultiplicityFreeRigidSymbols for ExternalSu2 {
-    fn dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.dim_scalar(s)
-    }
-    fn inv_dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.inv_dim_scalar(s)
-    }
-    fn sqrt_dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.sqrt_dim_scalar(s)
-    }
-    fn inv_sqrt_dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.inv_sqrt_dim_scalar(s)
-    }
-    fn twist_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.twist_scalar(s)
-    }
-    fn frobenius_schur_phase_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.frobenius_schur_phase_scalar(s)
-    }
+/// Doubled-spin ids under the built-in `SU2Irrep` labels.
+#[derive(Clone, Copy, Debug)]
+struct Su2Codec;
+
+type ExternalSu2Rule = CategoryRule<ExternalSu2, Su2Codec>;
+
+fn external_su2() -> ExternalSu2Rule {
+    let group = LieGroup::new(GroupId::su(2).unwrap()).unwrap();
+    CategoryRule::try_new(ExternalSu2(group), Su2Codec).expect("SU(2) is admitted")
 }
 
-impl CheckedFusionAlgebra for ExternalSu2 {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        SU2FusionRule.try_dual_sector(sector)
-    }
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        SU2FusionRule.try_fusion_channels(left, right)
-    }
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        SU2FusionRule.try_nsymbol(left, right, coupled)
-    }
-}
-
-impl SectorCodec for ExternalSu2 {
+impl CategoryCodec<ExternalSu2> for Su2Codec {
     type Sector = SU2Irrep;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
 
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        SU2FusionRule.encode_sector(value)
+    fn encode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalSu2 + Copy,
+        _: &RuleIdentity,
+        label: &SU2Irrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        SU2FusionRule.encode_sector(label)
     }
 
-    fn decode_sector(&self, sector: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
+    fn decode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalSu2 + Copy,
+        sector: SectorId,
+    ) -> Result<SU2Irrep, FusionAlgebraError> {
         SectorCodec::decode_sector(&SU2FusionRule, sector)
+    }
+
+    fn object<'a>(
+        &self,
+        category: impl Fn() -> &'a ExternalSu2 + Copy,
+        sector: SectorId,
+    ) -> Result<LieIrrep, FusionAlgebraError> {
+        i64::try_from(sector.id())
+            .ok()
+            .and_then(|twice_spin| category().0.irrep(&[twice_spin]).ok())
+            .ok_or(FusionAlgebraError::InvalidSector { sector })
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _: impl Fn() -> &'a ExternalSu2 + Copy,
+        rule: &RuleIdentity,
+        object: &LieIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        object
+            .dynkin_labels()
+            .next()
+            .and_then(|twice_spin| usize::try_from(twice_spin).ok())
+            .map(SectorId::new)
+            .ok_or_else(|| FusionAlgebraError::UnrepresentableSectorLabel {
+                rule: rule.clone(),
+                label: format!("{object:?}"),
+            })
+    }
+
+    fn rule_identity(&self, _: &ExternalSu2) -> Option<RuleIdentity> {
+        Some(RuleIdentity::of_type::<ExternalSu2>())
+    }
+
+    fn map_error(
+        &self,
+        _: &[SectorId],
+        error: CategoryAdapterError<LieError>,
+    ) -> FusionAlgebraError {
+        match error {
+            CategoryAdapterError::ForeignObject {
+                sector: Some(sector),
+            } => FusionAlgebraError::InvalidSector { sector },
+            other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
+        }
     }
 }
 
@@ -418,7 +528,7 @@ impl SectorCodec for ExternalSu2 {
 // Fixtures.
 // ---------------------------------------------------------------------------
 
-fn z3_leg(provider: &Arc<ExternalZ3>, is_dual: bool) -> GradedSpace<ExternalZ3> {
+fn z3_leg(provider: &Arc<ExternalZ3Rule>, is_dual: bool) -> GradedSpace<ExternalZ3Rule> {
     GradedSpace::try_new(
         Arc::clone(provider),
         [(Z3Charge(0), 2), (Z3Charge(1), 3), (Z3Charge(2), 1)],
@@ -427,7 +537,7 @@ fn z3_leg(provider: &Arc<ExternalZ3>, is_dual: bool) -> GradedSpace<ExternalZ3> 
     .expect("Z3 leg is well formed")
 }
 
-fn su2_leg(provider: &Arc<ExternalSu2>, is_dual: bool) -> GradedSpace<ExternalSu2> {
+fn su2_leg(provider: &Arc<ExternalSu2Rule>, is_dual: bool) -> GradedSpace<ExternalSu2Rule> {
     GradedSpace::try_new(Arc::clone(provider), [(SU2Irrep::from_twice_spin(1), 2)])
         .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
         .expect("SU(2) leg is well formed")
@@ -468,7 +578,7 @@ fn typed_fill_value(
 /// The second Z3 leg shape, deliberately unlike [`z3_leg`]'s: with four legs of
 /// two distinct degeneracy patterns, a permuted leg can be identified by its
 /// degeneracies, which a uniform fixture could not distinguish.
-fn z3_other_leg(provider: &Arc<ExternalZ3>, is_dual: bool) -> GradedSpace<ExternalZ3> {
+fn z3_other_leg(provider: &Arc<ExternalZ3Rule>, is_dual: bool) -> GradedSpace<ExternalZ3Rule> {
     GradedSpace::try_new(
         Arc::clone(provider),
         [(Z3Charge(0), 1), (Z3Charge(1), 2), (Z3Charge(2), 4)],
@@ -480,7 +590,10 @@ fn z3_other_leg(provider: &Arc<ExternalZ3>, is_dual: bool) -> GradedSpace<Extern
 /// A rank-4 Z3 tensor map whose elements are all distinct, so any leg, block or
 /// element reordering is visible in the buffer. The layout is
 /// `[wide, narrow] <- [wide', narrow']`, so no two axes share a shape.
-fn z3_rank_four(runtime: &Runtime, provider: &Arc<ExternalZ3>) -> TensorMap<ExternalZ3, f64> {
+fn z3_rank_four(
+    runtime: &Runtime,
+    provider: &Arc<ExternalZ3Rule>,
+) -> TensorMap<ExternalZ3Rule, f64> {
     let wide = z3_leg(provider, false);
     let narrow = z3_other_leg(provider, false);
     let wide_dual = wide.try_dual().unwrap();
@@ -555,7 +668,7 @@ fn z2_complex_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule
 
 /// A single-sector Z3 leg: the whole tensor map is then one dense block, so a
 /// contraction result can be checked against a hand-computed matrix product.
-fn z3_dense_leg(provider: &Arc<ExternalZ3>, degeneracy: usize) -> GradedSpace<ExternalZ3> {
+fn z3_dense_leg(provider: &Arc<ExternalZ3Rule>, degeneracy: usize) -> GradedSpace<ExternalZ3Rule> {
     GradedSpace::try_new(Arc::clone(provider), [(Z3Charge(0), degeneracy)])
         .expect("single-sector Z3 leg is well formed")
 }
@@ -563,10 +676,10 @@ fn z3_dense_leg(provider: &Arc<ExternalZ3>, degeneracy: usize) -> GradedSpace<Ex
 /// Fills a tensor map's storage with `start, start + 1, ...` in storage order.
 fn counting_z3(
     runtime: &Runtime,
-    codomain: &GradedSpace<ExternalZ3>,
-    domain: &GradedSpace<ExternalZ3>,
+    codomain: &GradedSpace<ExternalZ3Rule>,
+    domain: &GradedSpace<ExternalZ3Rule>,
     start: f64,
-) -> TensorMap<ExternalZ3, f64> {
+) -> TensorMap<ExternalZ3Rule, f64> {
     let mut next = start - 1.0;
     TensorMap::from_subblock_fn(runtime, [codomain], [domain], |_, _| {
         next += 1.0;
@@ -577,113 +690,166 @@ fn counting_z3(
 
 // TensorKitSectors `anyons.jl` PlanarTrivial: one simple object, unique
 // fusion, no braiding, N = F = 1, and the object is the canonical unit.
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct PlanarTrivial;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct PlanarTrivialSector;
 
-impl FusionRule for PlanarTrivial {
-    fn rule_identity(&self) -> RuleIdentity {
-        RuleIdentity::of_type::<Self>()
-    }
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
-    }
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::NoBraiding
-    }
-    fn vacuum(&self) -> SectorId {
-        SectorId::new(0)
-    }
-    fn dual(&self, sector: SectorId) -> SectorId {
-        sector
-    }
-    fn fusion_channels(&self, _: SectorId, _: SectorId) -> SectorVec {
-        core::iter::once(SectorId::new(0)).collect()
+/// The failure of a braiding query on a planar category.
+#[derive(Debug)]
+struct NoBraiding;
+
+impl core::fmt::Display for NoBraiding {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("planar category has no braiding")
     }
 }
 
-impl MultiplicityFreeFusionRule for PlanarTrivial {}
-impl symtn::sector::CanonicalUnitFusionRule for PlanarTrivial {}
+impl std::error::Error for NoBraiding {}
 
-impl MultiplicityFreeFusionSymbols for PlanarTrivial {
+impl FusionCategory for PlanarTrivial {
+    type Object = PlanarTrivialSector;
     type Scalar = f64;
-    fn f_symbol_scalar(
+    type FSymbol = f64;
+    type RSymbol = f64;
+    type Fusion<'a> = core::iter::Once<PlanarTrivialSector>;
+    type Error = NoBraiding;
+
+    fn fusion_style(&self) -> FusionStyle {
+        FusionStyle::Unique
+    }
+    fn braiding_style(&self) -> BraidingStyle {
+        BraidingStyle::None
+    }
+    fn unit(&self) -> PlanarTrivialSector {
+        PlanarTrivialSector
+    }
+    fn dual(&self, _: &PlanarTrivialSector) -> PlanarTrivialSector {
+        PlanarTrivialSector
+    }
+    fn dim(&self, _: &PlanarTrivialSector) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_phase(&self, _: &PlanarTrivialSector) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_indicator(&self, _: &PlanarTrivialSector) -> f64 {
+        1.0
+    }
+    fn twist(&self, _: &PlanarTrivialSector) -> f64 {
+        panic!("PlanarTrivial has no twist")
+    }
+    fn fusion<'a>(
+        &'a self,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+    ) -> Result<Self::Fusion<'a>, NoBraiding> {
+        Ok(core::iter::once(PlanarTrivialSector))
+    }
+    fn nsymbol(
         &self,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-    ) -> f64 {
-        1.0
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+    ) -> u32 {
+        1
     }
-    fn r_symbol_scalar(&self, _: SectorId, _: SectorId, _: SectorId) -> f64 {
-        panic!("PlanarTrivial has no R symbol")
+    fn has_canonical_unit(&self) -> bool {
+        true
     }
-}
-
-impl MultiplicityFreeRigidSymbols for PlanarTrivial {
-    fn dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
+    fn f_symbol(
+        &self,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+    ) -> Result<f64, NoBraiding> {
+        Ok(1.0)
     }
-    fn inv_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
+    fn r_symbol(
+        &self,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+        _: &PlanarTrivialSector,
+    ) -> Result<f64, NoBraiding> {
+        Err(NoBraiding)
     }
-    fn sqrt_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn inv_sqrt_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn twist_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn frobenius_schur_phase_scalar(&self, _: SectorId) -> f64 {
-        1.0
+    fn authority_fingerprint(&self) -> &[u8] {
+        b"symtn-typed-facade-planar-trivial"
     }
 }
 
-impl CheckedFusionAlgebra for PlanarTrivial {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
+#[derive(Clone, Copy, Debug)]
+struct PlanarTrivialCodec;
+
+type PlanarTrivialRule = CategoryRule<PlanarTrivial, PlanarTrivialCodec>;
+
+fn planar_trivial() -> PlanarTrivialRule {
+    CategoryRule::try_new(PlanarTrivial, PlanarTrivialCodec).expect("PlanarTrivial is admitted")
+}
+
+impl CategoryCodec<PlanarTrivial> for PlanarTrivialCodec {
+    type Sector = PlanarTrivialSector;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a PlanarTrivial + Copy,
+        _: &RuleIdentity,
+        _: &PlanarTrivialSector,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(SectorId::new(0))
+    }
+
+    fn decode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a PlanarTrivial + Copy,
+        sector: SectorId,
+    ) -> Result<PlanarTrivialSector, FusionAlgebraError> {
+        self.object(category, sector)
+    }
+
+    fn object<'a>(
+        &self,
+        _: impl Fn() -> &'a PlanarTrivial + Copy,
+        sector: SectorId,
+    ) -> Result<PlanarTrivialSector, FusionAlgebraError> {
         if sector == SectorId::new(0) {
-            Ok(sector)
+            Ok(PlanarTrivialSector)
         } else {
             Err(FusionAlgebraError::InvalidSector { sector })
         }
     }
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        self.try_dual_sector(left)?;
-        self.try_dual_sector(right)?;
-        Ok(self.fusion_channels(left, right))
-    }
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        self.try_dual_sector(left)?;
-        self.try_dual_sector(right)?;
-        self.try_dual_sector(coupled)?;
-        Ok(1)
-    }
-}
 
-impl SectorCodec for PlanarTrivial {
-    type Sector = PlanarTrivialSector;
-    fn encode_sector(&self, _: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
+    fn sector_id<'a>(
+        &self,
+        _: impl Fn() -> &'a PlanarTrivial + Copy,
+        _: &RuleIdentity,
+        _: &PlanarTrivialSector,
+    ) -> Result<SectorId, FusionAlgebraError> {
         Ok(SectorId::new(0))
     }
-    fn decode_sector(&self, sector: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        self.try_dual_sector(sector)?;
-        Ok(PlanarTrivialSector)
+
+    fn rule_identity(&self, _: &PlanarTrivial) -> Option<RuleIdentity> {
+        Some(RuleIdentity::of_type::<PlanarTrivial>())
+    }
+
+    fn map_error(
+        &self,
+        _: &[SectorId],
+        error: CategoryAdapterError<NoBraiding>,
+    ) -> FusionAlgebraError {
+        match error {
+            CategoryAdapterError::ForeignObject {
+                sector: Some(sector),
+            } => FusionAlgebraError::InvalidSector { sector },
+            other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
+        }
     }
 }
 
@@ -713,7 +879,7 @@ fn a_failing_typed_operation_publishes_no_cache_state() {
     // the same transactional guarantee construction gives.
     let _guard = cache_lock();
     let runtime = runtime();
-    let provider = Arc::new(ExternalZ3::new());
+    let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
     let before = (
         structure_cache_info(StructureCacheKind::SectorStructure),
@@ -776,17 +942,17 @@ mod typed_is_self_sufficient {
     use std::sync::Arc;
     use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 
-    use super::{ExternalZ3, Z3Charge};
+    use super::{external_z3, ExternalZ3Rule, Z3Charge};
 
     #[test]
     fn typed_imports_run_an_end_to_end_typed_operation() {
         let _guard = super::cache_lock();
         let runtime: Runtime = Runtime::builder().build().expect("runtime builds");
-        let provider = Arc::new(ExternalZ3::new());
+        let provider = Arc::new(external_z3());
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 2), (Z3Charge(1), 3)])
             .expect("leg is well formed");
 
-        let build = || -> Result<TensorMap<ExternalZ3, f64>, Error> {
+        let build = || -> Result<TensorMap<ExternalZ3Rule, f64>, Error> {
             let mut next = 0.0;
             let tensor = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, _| {
                 next += 1.0;
@@ -973,7 +1139,13 @@ fn spectra<S: Clone, D: Clone>(entries: &[(S, &[D])]) -> Vec<symtn::typed::Secto
 /// values and space while forcing the mixed compact/dense arm.
 fn forced_dense<R, D>(compact: &TensorMap<R, D>) -> TensorMap<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
     let codomain = compact.codomain();
@@ -1063,7 +1235,13 @@ fn counter_oracle<R>(
     first_value: f64,
 ) -> TensorMap<R, f64>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let mut next = first_value - 1.0;
     let typed = TensorMap::from_subblock_fn(
@@ -1189,8 +1367,13 @@ fn assert_data_close_c64(got: &[Complex64], want: &[Complex64]) {
 /// accessors — labels, degeneracies and duality all have to agree.
 fn assert_same_legs<R>(got: &[GradedSpace<R>], want: &[GradedSpace<R>])
 where
-    R: SectorCodec + CheckedFusionAlgebra,
-    R::Sector: std::fmt::Debug + PartialEq,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + SectorCodec
+        + CheckedFusionAlgebra,
+    <R as SectorCodec>::Sector: std::fmt::Debug + PartialEq,
 {
     assert_eq!(got.len(), want.len());
     for (g, w) in got.iter().zip(want) {
@@ -1222,110 +1405,165 @@ fn u1_leg(
 // twist/flip still route through the shared structural preflight.
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct PlanarZ2;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct PlanarParity(u8);
 
-impl FusionRule for PlanarZ2 {
-    fn rule_identity(&self) -> RuleIdentity {
-        RuleIdentity::from_canonical_bytes::<Self>(0x9a2f_0620_0000_0000, Arc::<[u8]>::from(vec![]))
-    }
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Unique
-    }
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::NoBraiding
-    }
-    fn vacuum(&self) -> SectorId {
-        SectorId::new(0)
-    }
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        core::iter::once(SectorId::new(left.id() ^ right.id())).collect()
-    }
-}
-
-impl MultiplicityFreeFusionRule for PlanarZ2 {}
-impl symtn::sector::CanonicalUnitFusionRule for PlanarZ2 {}
-
-impl MultiplicityFreeFusionSymbols for PlanarZ2 {
+impl FusionCategory for PlanarZ2 {
+    type Object = PlanarParity;
     type Scalar = f64;
-    fn f_symbol_scalar(
-        &self,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-        _: SectorId,
-    ) -> f64 {
+    type FSymbol = f64;
+    type RSymbol = f64;
+    type Fusion<'a> = core::iter::Once<PlanarParity>;
+    type Error = NoBraiding;
+
+    fn fusion_style(&self) -> FusionStyle {
+        FusionStyle::Unique
+    }
+    fn braiding_style(&self) -> BraidingStyle {
+        BraidingStyle::None
+    }
+    fn unit(&self) -> PlanarParity {
+        PlanarParity(0)
+    }
+    fn contains(&self, a: &PlanarParity) -> bool {
+        a.0 < 2
+    }
+    fn dual(&self, a: &PlanarParity) -> PlanarParity {
+        *a
+    }
+    fn dim(&self, _: &PlanarParity) -> f64 {
         1.0
     }
-    fn r_symbol_scalar(&self, _: SectorId, _: SectorId, _: SectorId) -> f64 {
+    fn frobenius_schur_phase(&self, _: &PlanarParity) -> f64 {
         1.0
+    }
+    fn frobenius_schur_indicator(&self, _: &PlanarParity) -> f64 {
+        1.0
+    }
+    fn twist(&self, _: &PlanarParity) -> f64 {
+        panic!("PlanarZ2 has no twist")
+    }
+    fn fusion<'a>(
+        &'a self,
+        a: &PlanarParity,
+        b: &PlanarParity,
+    ) -> Result<Self::Fusion<'a>, NoBraiding> {
+        Ok(core::iter::once(PlanarParity(a.0 ^ b.0)))
+    }
+    fn nsymbol(&self, a: &PlanarParity, b: &PlanarParity, c: &PlanarParity) -> u32 {
+        u32::from(a.0 ^ b.0 == c.0)
+    }
+    fn has_canonical_unit(&self) -> bool {
+        true
+    }
+    fn f_symbol(
+        &self,
+        a: &PlanarParity,
+        b: &PlanarParity,
+        c: &PlanarParity,
+        d: &PlanarParity,
+        e: &PlanarParity,
+        f: &PlanarParity,
+    ) -> Result<f64, NoBraiding> {
+        let admissible = self.nsymbol(a, b, e)
+            * self.nsymbol(e, c, d)
+            * self.nsymbol(b, c, f)
+            * self.nsymbol(a, f, d);
+        Ok(f64::from(admissible))
+    }
+    fn r_symbol(
+        &self,
+        _: &PlanarParity,
+        _: &PlanarParity,
+        _: &PlanarParity,
+    ) -> Result<f64, NoBraiding> {
+        Err(NoBraiding)
+    }
+    fn authority_fingerprint(&self) -> &[u8] {
+        b"symtn-typed-facade-planar-z2"
     }
 }
 
-impl MultiplicityFreeRigidSymbols for PlanarZ2 {
-    fn dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn inv_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn sqrt_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn inv_sqrt_dim_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn twist_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
-    fn frobenius_schur_phase_scalar(&self, _: SectorId) -> f64 {
-        1.0
-    }
+#[derive(Clone, Copy, Debug)]
+struct PlanarZ2Codec;
+
+type PlanarZ2Rule = CategoryRule<PlanarZ2, PlanarZ2Codec>;
+
+fn planar_z2() -> PlanarZ2Rule {
+    CategoryRule::try_new(PlanarZ2, PlanarZ2Codec).expect("planar Z2 is admitted")
 }
 
-impl CheckedFusionAlgebra for PlanarZ2 {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        Ok(sector)
-    }
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        Ok(self.fusion_channels(left, right))
-    }
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        Ok(self.nsymbol(left, right, coupled))
-    }
-}
-
-impl SectorCodec for PlanarZ2 {
+impl CategoryCodec<PlanarZ2> for PlanarZ2Codec {
     type Sector = PlanarParity;
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        if value.0 < 2 {
-            Ok(SectorId::new(usize::from(value.0)))
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a PlanarZ2 + Copy,
+        rule: &RuleIdentity,
+        label: &PlanarParity,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        if label.0 < 2 {
+            Ok(SectorId::new(usize::from(label.0)))
         } else {
             Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: self.rule_identity(),
-                label: format!("planar parity {}", value.0),
+                rule: rule.clone(),
+                label: format!("planar parity {}", label.0),
             })
         }
     }
-    fn decode_sector(&self, sector: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
+
+    fn decode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a PlanarZ2 + Copy,
+        sector: SectorId,
+    ) -> Result<PlanarParity, FusionAlgebraError> {
+        self.object(category, sector)
+    }
+
+    fn object<'a>(
+        &self,
+        _: impl Fn() -> &'a PlanarZ2 + Copy,
+        sector: SectorId,
+    ) -> Result<PlanarParity, FusionAlgebraError> {
         if sector.id() < 2 {
             Ok(PlanarParity(sector.id() as u8))
         } else {
             Err(FusionAlgebraError::InvalidSector { sector })
+        }
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _: impl Fn() -> &'a PlanarZ2 + Copy,
+        _: &RuleIdentity,
+        object: &PlanarParity,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(SectorId::new(usize::from(object.0)))
+    }
+
+    fn rule_identity(&self, _: &PlanarZ2) -> Option<RuleIdentity> {
+        Some(RuleIdentity::from_canonical_bytes::<PlanarZ2>(
+            0x9a2f_0620_0000_0000,
+            Arc::<[u8]>::from(vec![]),
+        ))
+    }
+
+    fn map_error(
+        &self,
+        _: &[SectorId],
+        error: CategoryAdapterError<NoBraiding>,
+    ) -> FusionAlgebraError {
+        match error {
+            CategoryAdapterError::ForeignObject {
+                sector: Some(sector),
+            } => FusionAlgebraError::InvalidSector { sector },
+            other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
         }
     }
 }

@@ -14,7 +14,13 @@ fn host_eigh_trunc<R, D>(
     to_f64: impl Fn(D) -> f64,
 ) -> HostEighTrunc<R, D>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: symtn::typed::FactorizationScalar + symtn::typed::SpectrumMagnitude,
 {
     let Eigh { d, v } = source
@@ -41,7 +47,13 @@ where
 
 fn assert_reduction_parity<R>(lhs: &TensorMap<R, f64>, rhs: &TensorMap<R, f64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let expected_inner = lhs.inner(rhs).unwrap();
     let expected_norm = lhs.norm(2.0).unwrap();
@@ -59,7 +71,13 @@ where
 
 fn assert_typed_cuda_qr_matches_host<R>(source: &TensorMap<R, f64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let provider = source.provider() as *const R;
     let runtime = symtn::typed::__network::runtime_identity(source.runtime());
@@ -640,7 +658,13 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
 /// transpose-only admission rule would reject it.
 fn hermitian_c64<R>(source: &TensorMap<R, Complex64>) -> TensorMap<R, Complex64>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let hermitian = source
         .axpby(
@@ -674,7 +698,13 @@ fn assert_c64_eigh_trunc_composition_matches_host<R>(
     source: &TensorMap<R, Complex64>,
     truncation: &Truncation,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let source_data = source.dense_data().unwrap().to_vec();
     let expected = host_eigh_trunc(source, truncation, |value: Complex64| value.re);

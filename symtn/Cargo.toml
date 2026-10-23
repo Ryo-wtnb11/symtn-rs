@@ -47,6 +47,8 @@ symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-fe
 symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features = false }
 
 [dev-dependencies]
+# External categories of the typed-facade extension tests (#2016).
+fusion-symbols = { version = "0.7.0", default-features = false }
 rayon = "1.10"
 # The table-backed Fibonacci provider of the planar workflow test (#2016).
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }

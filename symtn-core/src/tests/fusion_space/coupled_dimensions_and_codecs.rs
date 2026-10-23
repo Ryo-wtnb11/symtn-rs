@@ -56,6 +56,8 @@ fn coupled_sector_dimensions_keep_outward_labels_for_dual_legs() {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BranchingMultiplicityFreeRule;
 
+impl symtn_sectors::testing::Provider for BranchingMultiplicityFreeRule {}
+
 impl FusionRule for BranchingMultiplicityFreeRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -94,6 +96,8 @@ impl MultiplicityFreeFusionRule for BranchingMultiplicityFreeRule {}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct UnsortedFusionIteratorOrderRule;
+
+impl symtn_sectors::testing::Provider for UnsortedFusionIteratorOrderRule {}
 
 impl FusionRule for UnsortedFusionIteratorOrderRule {
     fn rule_identity(&self) -> RuleIdentity {

@@ -18,6 +18,8 @@ impl CheckedTraceToy {
 /// The identity of every `CheckedTraceToy` while its fusion style is wrong.
 struct WrongStyleCheckedTraceToy;
 
+impl symtn_core::testing::Provider for CheckedTraceToy {}
+
 impl symtn_core::CheckedGenericFusion for CheckedTraceToy {
     type Error = std::io::Error;
     fn rule_identity(&self) -> symtn_core::RuleIdentity {

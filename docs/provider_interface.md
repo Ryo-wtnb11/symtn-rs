@@ -1,29 +1,98 @@
-# Writing a symmetry provider
+# Symmetry providers
 
 A symtn *provider* is a Rust value that supplies categorical data: fusion
-channels, duals, F/R symbols, and quantum dimensions. Tensor operations select
-the traits they need, so providers shipped by `symtn-sectors` and providers
-defined in another crate use the same public capability bounds. A provider that
-implements the required traits can use the ordinary `GradedSpace<R>` /
-`TensorMap<R, D, S>` API. Through the `symtn` facade, every trait and type
+channels, duals, F/R/A/B symbols, and quantum dimensions. Tensor operations
+select the provider traits they need, and every provider, built-in or added by
+an application, uses the ordinary `GradedSpace<R>` / `TensorMap<R, D, S>` API
+under the same public bounds. Through the `symtn` facade, every trait and type
 named here is imported from `symtn::sector`.
 
-This document is the contract. It says what you must implement, what each trait
-owns, which laws the engine assumes without checking, and the current typed API
-boundaries.
+This document is the contract. It says how a new symmetry enters symtn, what
+each provider trait owns, which laws the engine assumes without checking, and
+the current typed API boundaries.
 
 Read [`symtn/src/mathematics.md`](../symtn/src/mathematics.md) first if you need
 the tensor-map convention itself (`codomain <- domain`, duality, block layout).
 That document defines the semantics; this one defines the provider interface.
 
-## The shape of the job
+## Adding a symmetry
+
+A symmetry is a `fusion_symbols::category::FusionCategory`: fusion-symbols owns
+its mathematics (fusion, N, F, R, A, B, dimensions, twists, gauge
+certificates). `CategoryRule<C, K>` turns a category `C` into a symtn provider
+under a codec `K: CategoryCodec<C>`, which owns what symtn needs beyond the
+mathematics: public labels, the `SectorId` numbering, `RuleIdentity`, sector
+order, operation-specific representability, error translation, and the
+admission mode. A codec contains no symbol formula.
+
+For a category that provides object enumeration (`object_count`,
+`object_at`, `object_index`), `EnumeratedCodec` is the codec:
+
+```rust
+use fusion_symbols::finite::ZN;
+use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+
+let z3 = CategoryRule::try_new(
+    ZN::new(3)?,
+    EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
+)?;
+```
+
+Its labels are the category's objects, an id is the object's enumeration
+index, fusion channels keep the category's order, and the sector order is the
+enumeration order. Equal category values give equal rule identities, so two
+independently constructed rules that are alive together share caches and mix
+in one tensor. The identity refers to the rule's category weakly: a cache key
+never keeps a dropped rule's category alive, and once every rule over a
+category value is dropped its identity equals no other, so its cache entries
+are only evicted, never reused. The
+fusion-symbols authority fingerprint is never used as identity, because it is
+shared across parameters such as the ZN modulus. Its error is
+`FusionAlgebraError`: an id that names no object is `InvalidSector`, a foreign
+label or one whose index does not fit an id is `UnrepresentableSectorLabel`, a
+fusion outcome that does not fit an id is `FusionNotRepresentable`, and a
+category failure or a category without enumeration is `CategoryFailure`,
+which keeps the source error. A Deligne product
+`fusion_symbols::product::Product<(A, B)>` is itself an enumerable category.
+
+Implement `CategoryCodec` only for labels, numbering, or validation order of
+your own. Its `admit` hook admits an operation's inputs (`CategoryOperation`)
+and may check representability in any order; `admit_r` may admit an R block
+known to be zero without converting every input; `rule_identity` returns a
+complete canonical identity or `None` for a fresh identity per constructed
+rule (shared by its clones).
+
+The codec's type parameters select the admission:
+
+| codec selector | provider traits of the rule |
+| --- | --- |
+| `Mode = MultiplicityFreeAdmissionMode`, `Error = FusionAlgebraError` | `FusionRule`, `CheckedFusionAlgebra`, `SectorCodec`, `MultiplicityFreeFusionRule`, `MultiplicityFreeFusionSymbols`, `MultiplicityFreeRigidSymbols` |
+| `Mode = CheckedGenericAdmissionMode` | `CheckedGenericFusion` (always reporting `Generic` fusion), `CheckedGenericRigidSymbols`, `CheckedGenericPivotal` |
+| `Unit = CanonicalUnitAdmission` | additionally `CanonicalUnitFusionRule` or `CheckedCanonicalUnitFusionRule` |
+
+`EnumeratedCodec<M, U = CanonicalUnitAdmission>` takes the mode and the unit
+selector as `M` and `U`. Every rule implements `TypedSectorAdmission` with its
+codec's labels, error, and mode. `CategoryRule::try_new` refuses
+multiplicity-free admission of a category whose fusion has multiplicity,
+canonical-unit admission of a category without the `has_canonical_unit`
+certificate (`UncertifiedUnitAdmission` admits it without the markers), and a
+unit the codec cannot encode or round-trip; an invalid mode, error, or marker
+combination does not compile.
+
+The provider traits are sealed: they are the bounds generic code names, not
+an extension point. Native implementations exist only for the built-in rules
+and, under the `testing` feature, for test fixtures that implement
+`symtn_sectors::testing::Provider` (re-exported as
+`symtn_core::testing::Provider`) to inject failures or instrument queries.
+
+## The provider traits
 
 The typed API selects one of two admission modes through
 `TypedSectorAdmission::Mode`:
 
 | mode | required provider capabilities | scope |
 | --- | --- | --- |
-| multiplicity-free | `MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec`, plus the coefficient and payload bounds of the operation | ordinary typed construction and multiplicity-free operations |
+| multiplicity-free | `MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec` and `TypedSectorAdmission<Sector = <R as SectorCodec>::Sector, Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>`, plus the coefficient and payload bounds of the operation | ordinary typed construction and multiplicity-free operations |
 | checked Generic | `TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>` plus the checked Generic fusion, rigidity, pivotal, and symbol traits required by each operation | outer multiplicity with fallible provider queries; Host-only |
 
 For the multiplicity-free mode, `FusionRule` supplies the infallible algebra,
@@ -33,13 +102,13 @@ rigidity traits supply F/R coefficients, dimensions, twists, and bends. A
 provider with outer multiplicity (`N_ab^c > 1`) uses the checked Generic traits;
 see [Outer multiplicity](#outer-multiplicity).
 
-`symtn-sectors/src/table_rule.rs` is the smallest complete non-abelian
-categorical example: one provider over every pinned AnyonWiki table of
-`fusion_symbols::table::TableCategory` (Fibonacci, Ising, and fusion-only
-categories such as Rep(S₃)), whose `RuleIdentity` is built from the table's
-authority fingerprint. `symtn-sectors/src/abelian.rs` has the abelian ones;
-`symtn-sectors/src/su2.rs` shows a provider that delegates its coefficients to
-an external crate. fusion-symbols 0.6.0 supplies mathematics through
+The built-in rules keep their own types, labels, and identities:
+`symtn-sectors/src/table_rule.rs` is one provider over every pinned AnyonWiki
+table of `fusion_symbols::table::TableCategory` (Fibonacci, Ising, and
+fusion-only categories such as Rep(S₃)), whose `RuleIdentity` is built from
+the table's authority fingerprint; `symtn-sectors/src/abelian.rs` has the
+abelian ones; `symtn-sectors/src/su2.rs` delegates its coefficients to
+fusion-symbols. fusion-symbols 0.7.0 supplies mathematics through
 `category::FusionCategory`; symtn validates sector ids before constructing
 objects in their owning category and uses `frobenius_schur_phase`.
 `SUNFusionRule` accepts shaped empty F/R blocks for absent channels. Its SU(2)
@@ -92,7 +161,8 @@ coefficients agrees: styles, vacuum, channels, duals, F, R, dimensions, twists,
 bends, and the codec. It is not, by itself, the complete key for every retained
 network plan.
 
-Three constructors, pick by how your provider carries its data:
+A `CategoryCodec` that returns its own identity picks one of three
+constructors by how the rule carries its data:
 
 - `RuleIdentity::of_type::<Self>()` — the provider is a unit struct with no
   data that can change an answer.
@@ -123,10 +193,10 @@ Checked construction runs through these methods. A provider may retain
 successful catalog entries created before a later failure. The failed operation
 still returns no symtn tensor or partial factor tuple.
 
-Both `FusionRule` and `CheckedFusionAlgebra` implementations are required, and
-they must agree. Implement the checked logic once, then forward the infallible
-methods to the `dual_or_panic`, `fusion_channels_or_panic`, and
-`nsymbol_or_panic` helpers.
+Both interfaces must agree. A `CategoryRule` answers both from one admitted
+category query; a native test provider implements the checked logic once and
+forwards the infallible methods to the `dual_or_panic`,
+`fusion_channels_or_panic`, and `nsymbol_or_panic` helpers.
 
 ## 3. `SectorCodec`
 
@@ -191,10 +261,11 @@ inherit the contract: they are defined for `N(left,right,coupled) != 0`.
 `MultiplicityFreeRigidSymbols` adds `dim_scalar`, `inv_dim_scalar`,
 `sqrt_dim_scalar`, `inv_sqrt_dim_scalar`, `twist_scalar`, and
 `frobenius_schur_phase_scalar`. `a_symbol_scalar`
-and `b_symbol_scalar` have correct default bodies derived from F; override only with a
-reference to justify it.
+and `b_symbol_scalar` have correct default bodies derived from F; a
+`CategoryRule` forwards the category's A and B instead.
 
-One capability flag, defaulting to the conservative answer:
+One capability flag, defaulting to the conservative answer (a `CategoryRule`
+forwards the category's certificate):
 
 - `has_trivial_associator_gauge()` — return `true` only if
   *every* allowed F coefficient in your gauge is exactly the scalar unit. It
@@ -207,14 +278,20 @@ providers that still qualify (`symtn-sectors/src/table_rule.rs`).
 
 ## Outer multiplicity
 
-If `N_ab^c` can exceed 1, implement `CheckedGenericFusion`,
+If `N_ab^c` can exceed 1, the provider implements `CheckedGenericFusion`,
 `CheckedGenericRigidSymbols`, the checked pivotal/symbol capabilities needed by
-your operations, and `TypedSectorAdmission` with
-`Mode = CheckedGenericAdmissionMode`. These traits
-are deliberately independent of `FusionRule` so that a provider with a finite
-generated catalog can use the checked path while reporting unavailable data as
-an error. F and R become dense blocks (`GenericFArray`,
-`GenericRMatrix`) indexed by one-based vertex labels.
+the operations, and `TypedSectorAdmission` with
+`Mode = CheckedGenericAdmissionMode`; a `CategoryRule` does so when its codec
+selects that mode. These traits are deliberately independent of `FusionRule`
+so that a provider with a finite generated catalog can use the checked path
+while reporting unavailable data as an error. F, R, A, and B become dense
+blocks (`GenericFArray`, `GenericRMatrix`) indexed by one-based vertex labels;
+a `CategoryRule` takes each block's shape from the checked N symbols, so the
+single zero fusion-symbols stores for an absent vertex becomes an empty block,
+and a nonzero entry where N admits none is an error. The tensor engine
+derives its A/B moves from the validated F and rigidity data;
+`try_a_symbol_generic` and `try_b_symbol_generic` expose the authority's A
+and B blocks.
 `CheckedGenericRigidSymbols::try_dim_scalar` defaults to
 `try_sqrt_dim_scalar²`; override it when `dim` is known exactly (SU(N) does),
 because truncation budgets and quantum-dimension-weighted norms compare
@@ -297,13 +374,14 @@ are part of the Rust type and of the `ProductSector` label; `U(1) ⊠ fZ2` and
 - Multiplicity-free providers still implement overlapping infallible
   `FusionRule` and fallible `CheckedFusionAlgebra` methods.
 
-Shipped providers do not use a private operation capability that external
-providers cannot implement. The same public trait bounds apply to both.
+Shipped providers do not use a private operation capability that a
+`CategoryRule` lacks. The same public trait bounds apply to both.
 
-## Validating your provider
+## Validating a new category
 
 symtn validates representability and structural shapes but does not prove
-categorical coherence laws such as the pentagon and hexagon identities.
+categorical coherence laws such as the pentagon and hexagon identities;
+fusion-symbols provides `pentagon_residual` and `hexagon_residual` for that.
 
 - validate F/R/dimension/twist coefficients against an independent reference,
   and record the source, gauge, and convention used;
@@ -311,8 +389,8 @@ categorical coherence laws such as the pentagon and hexagon identities.
   compares bit patterns, not tolerances);
 - cover the boundary: an unrepresentable id must produce
   `FusionAlgebraError::InvalidSector` from every checked entry point;
-- cover the unit laws if you claim `CanonicalUnitFusionRule`, and the associator
-  gauge if you claim `has_trivial_associator_gauge`;
+- cover the unit laws if the category claims `has_canonical_unit`, and the
+  associator gauge if it claims `has_trivial_associator_gauge`;
 - then run one end-to-end tensor identity — a permute round trip and a
   contraction — because a wrong `fusion_channels` order or a wrong style claim
   survives every per-symbol test.

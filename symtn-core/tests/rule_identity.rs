@@ -20,6 +20,8 @@ impl StatefulPointedRule {
     }
 }
 
+impl symtn_core::testing::Provider for StatefulPointedRule {}
+
 impl FusionRule for StatefulPointedRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()

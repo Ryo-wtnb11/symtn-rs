@@ -724,6 +724,8 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
 #[derive(Clone, Copy, Debug)]
 struct RepeatedChannelRule;
 
+impl symtn_sectors::testing::Provider for RepeatedChannelRule {}
+
 impl FusionRule for RepeatedChannelRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

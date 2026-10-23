@@ -147,6 +147,10 @@ impl CU1FusionRule {
     }
 }
 
+impl crate::seal::Provider for CU1FusionRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(CU1FusionRule);
+
 impl FusionRule for CU1FusionRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

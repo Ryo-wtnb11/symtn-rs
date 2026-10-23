@@ -71,7 +71,13 @@ pub struct ContractWorkspace<R, D, S = Vec<D>> {
 
 impl<R, D, S> ContractPlan<R, D, S>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
     S: PreparedExec<R, D>,
 {
@@ -431,7 +437,13 @@ pub struct ComposePlan<R, D, S = Vec<D>>(ContractPlan<R, D, S>);
 
 impl<R, D, S> ComposePlan<R, D, S>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: TypedSectorAdmission<
+            Sector = <R as SectorCodec>::Sector,
+            Error = symtn_core::FusionAlgebraError,
+            Mode = symtn_core::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
     S: PreparedExec<R, D>,
 {
@@ -788,7 +800,13 @@ mod fermionic_unit_tests {
 
     fn check_routes<R>(runtime: &Runtime, v: &GradedSpace<R>)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: TypedSectorAdmission<
+                Sector = <R as SectorCodec>::Sector,
+                Error = symtn_core::FusionAlgebraError,
+                Mode = symtn_core::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
     {
         let a = TensorMap::<_, f64>::rand_with_seed(runtime, [v, v], [v, v], 61).unwrap();
         let b = TensorMap::<_, f64>::rand_with_seed(runtime, [v, v], [v, v], 62).unwrap();
@@ -964,7 +982,13 @@ mod fermionic_unit_tests {
         output: &[usize],
     ) -> (bool, Result<usize, OperationError>)
     where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: symtn_core::TypedSectorAdmission<
+                Sector = <R as symtn_core::SectorCodec>::Sector,
+                Error = symtn_core::FusionAlgebraError,
+                Mode = symtn_core::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
     {
         let [a, b] = [0, 1].map(|i| {
             TensorMap::<_, f64>::from_subblock_fn(
@@ -1091,7 +1115,13 @@ mod fermionic_unit_tests {
         negative: usize,
         swapped_expected: bool,
     ) where
-        R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+        R: TypedSectorAdmission<
+                Sector = <R as SectorCodec>::Sector,
+                Error = symtn_core::FusionAlgebraError,
+                Mode = symtn_core::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
     {
         let dual = v.try_dual().unwrap();
         let a = TensorMap::<_, f64>::from_subblock_fn(runtime, [v], [&dual], |_, _| 1.0).unwrap();

@@ -147,6 +147,10 @@ impl ZNFusionRule {
     }
 }
 
+impl crate::seal::Provider for ZNFusionRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(ZNFusionRule);
+
 impl FusionRule for ZNFusionRule {
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()
@@ -323,6 +327,10 @@ impl Z2FusionRule {
     }
 }
 
+impl crate::seal::Provider for Z2FusionRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(Z2FusionRule);
+
 impl FusionRule for Z2FusionRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
@@ -443,6 +451,10 @@ impl FermionParityFusionRule {
         or_panic(checked_fermion(sector))
     }
 }
+
+impl crate::seal::Provider for FermionParityFusionRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(FermionParityFusionRule);
 
 impl FusionRule for FermionParityFusionRule {
     fn rule_identity(&self) -> RuleIdentity {
@@ -642,6 +654,10 @@ impl U1FusionRule {
         or_panic(checked_u1_irrep(sector)).fs()
     }
 }
+
+impl crate::seal::Provider for U1FusionRule {}
+
+crate::algebra::multiplicity_free_typed_admission!(U1FusionRule);
 
 impl FusionRule for U1FusionRule {
     fn rule_identity(&self) -> RuleIdentity {

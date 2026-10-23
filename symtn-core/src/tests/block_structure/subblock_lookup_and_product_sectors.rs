@@ -594,6 +594,8 @@ fn fusion_tree_pair_key_external_sectors_restore_visible_domain_sector() {
 #[derive(Clone, Copy, Debug)]
 struct ComplexZ4BendRule;
 
+impl symtn_sectors::testing::Provider for ComplexZ4BendRule {}
+
 impl FusionRule for ComplexZ4BendRule {
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()

@@ -58,9 +58,15 @@ struct HostSvdTrunc<R: SectorCodec, D> {
 fn labelled_f64<R, D>(
     factor: &TensorMap<R, D>,
     to_f64: impl Fn(D) -> f64,
-) -> Vec<symtn::typed::SectorSpectrum<R::Sector, f64>>
+) -> Vec<symtn::typed::SectorSpectrum<<R as SectorCodec>::Sector, f64>>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
 {
     let mut spectra: Vec<_> = factor
@@ -116,6 +122,35 @@ fn device_lease_probe(runtime: &Runtime) {
 struct ReentrantDimensionRule {
     runtime: Runtime,
     calls: Arc<AtomicUsize>,
+}
+
+impl symtn_core::testing::Provider for ReentrantDimensionRule {}
+
+impl symtn::sector::TypedSectorAdmission for ReentrantDimensionRule {
+    type Sector = <Self as symtn::sector::SectorCodec>::Sector;
+    type Error = symtn::typed::FusionAlgebraError;
+    type Mode = symtn::sector::MultiplicityFreeAdmissionMode;
+    fn typed_rule_identity(&self) -> symtn::sector::RuleIdentity {
+        symtn::sector::FusionRule::rule_identity(self)
+    }
+    fn try_encode_label(
+        &self,
+        sector: &Self::Sector,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::SectorCodec::encode_sector(self, sector)
+    }
+    fn try_decode_label(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<Self::Sector, Self::Error> {
+        symtn::sector::SectorCodec::decode_sector(self, sector)
+    }
+    fn try_dual_id(
+        &self,
+        sector: symtn::sector::SectorId,
+    ) -> Result<symtn::sector::SectorId, Self::Error> {
+        symtn::sector::CheckedFusionAlgebra::try_dual_sector(self, sector)
+    }
 }
 
 impl FusionRule for ReentrantDimensionRule {
@@ -233,9 +268,17 @@ impl SectorCodec for ReentrantDimensionRule {
     }
 }
 
-fn structural_snapshot<R, D>(tensor: &TensorMap<R, D>) -> StructuralSnapshot<R::Sector>
+fn structural_snapshot<R, D>(
+    tensor: &TensorMap<R, D>,
+) -> StructuralSnapshot<<R as SectorCodec>::Sector>
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
     D: TensorScalar,
 {
     let leg_snapshot = |leg: GradedSpace<R>| LegSnapshot {
@@ -263,7 +306,13 @@ where
 
 fn assert_typed_cuda_svd_matches_host<R>(source: &TensorMap<R, f64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let source_data = source.dense_data().unwrap().to_vec();
     let source_device = source.to_cuda().unwrap();
@@ -292,7 +341,13 @@ fn assert_cuda_svd_result<R>(
     expected: &HostSvdFactors<R, f64>,
     factors: DeviceSvdFactors<R, f64>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let provider = source.provider() as *const R;
     let runtime = symtn::typed::__network::runtime_identity(source.runtime());
@@ -400,7 +455,13 @@ fn assert_device_factor_handles<R, const N: usize>(
 
 fn assert_c64_svd_matches_host<R>(source: &TensorMap<R, Complex64>)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
 {
     let source_data = source.materialize().unwrap().dense_data().unwrap().to_vec();
     let expected = source

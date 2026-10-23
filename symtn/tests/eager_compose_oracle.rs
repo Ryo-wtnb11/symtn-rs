@@ -36,8 +36,14 @@ fn assert_oracle<R, D>(
     a: &TensorMap<R, D>,
     b: &TensorMap<R, D>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
     let actual = actual.materialize().unwrap();
@@ -58,8 +64,14 @@ fn assert_oracle<R, D>(
 
 fn check<R, D>(label: &str, (v, w): (GradedSpace<R>, GradedSpace<R>), degeneracy_error: bool)
 where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
-    R::Sector: Debug,
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
