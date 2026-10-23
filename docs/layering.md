@@ -32,15 +32,19 @@ symtn disables its default features; `cgc-gen` opts into `lie-generated`.
 
 | Provider data | Boundary |
 | --- | --- |
-| Z2, Z_N, U(1), fermion parity, CU(1), SU(2) | Built-in symtn rules keep labels, codecs, identities and checked errors; elementary symbols come from fusion-symbols. |
-| SU(N) generated data | `SUNFusionRule` keeps catalog admission and codecs; fusion-symbols owns the coefficients. |
-| AnyonWiki categories | `TableRule` adapts pinned tables in their own gauge. |
+| Z2, Z_N, U(1), fermion parity, CU(1) | Built-in rules use the category adapter for every symbol, including A/B and U(1)'s CGC. symtn keeps labels, codecs, identities and checked errors. |
+| SU(2), SU(N) | `SU2FusionRule` and `SUNFusionRule` use the adapter over `LieGroup` for fusion, N, F/R/A/B, dimensions, duals, twists and Frobenius–Schur phases. symtn keeps codecs, identities, ordering and checked admission. |
+| AnyonWiki categories | `TableRule` uses the category adapter over pinned tables in their own gauge. |
 | An application category | `CategoryRule<C, K>` adapts `FusionCategory`; the codec owns labels and admission, not symbol formulas. |
 | Products | `ProductFusionRule` composes its factors' symbols inside symtn. |
 
-Built-in rules remain native provider implementations; sharing the symbol
-source does not make each one a `CategoryRule` alias. See the
-[provider interface](provider_interface.md) for the extension boundary.
+Built-in rules retain their own types over the shared adapter; they are not
+`CategoryRule` aliases. SU2 retains its compact doubled-spin codec and checked
+scalar CGC entries in descending magnetic order. SUN retains its graded
+Dynkin codec, lazy category and bounded irrep interner, and uses checked
+`Generic` admission even for SU(2). Warm interner hits clone allocation-free
+provider handles; returned blocks and channels have separate allocation costs.
+See the [provider interface](provider_interface.md) for admission and error bounds.
 
 Elementary-symbol caches belong to fusion-symbols. Only the application may
 reset or budget them. A fixed gauge constrains numerical values, not their

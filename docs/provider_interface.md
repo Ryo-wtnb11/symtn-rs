@@ -63,8 +63,11 @@ unit the codec cannot encode or round-trip; an invalid mode, error, or marker
 combination does not compile.
 
 The provider traits are sealed: they are the bounds generic code names, not
-an extension point. Native implementations exist only for the built-in rules
-and, under the `testing` feature, for test fixtures that implement
+an extension point. Z2, Z_N, U(1), fermion parity, CU(1), `TableRule`,
+`SU2FusionRule` and `SUNFusionRule` implement them through the same category
+adapter as `CategoryRule`, with private codecs that keep their labels, ids,
+identities and checked errors. Native implementations remain only for
+`ProductFusionRule` and, under `testing`, for fixtures that implement
 `symtn_sectors::testing::Provider` (re-exported as
 `symtn_core::testing::Provider`) to inject failures or instrument queries.
 
@@ -80,10 +83,30 @@ and, under the `testing` feature, for test fixtures that implement
 Each operation adds its coefficient and payload bounds. Outer multiplicity
 (`N_ab^c > 1`) requires the checked Generic path.
 
-Built-in rules keep their own types, labels and identities while delegating
-elementary symbols to fusion-symbols. They are native implementations, not
-`CategoryRule` aliases. `ProductFusionRule` composes its factors' symbols in
-symtn. See [layering](layering.md#1-symbol-layer-fusion-symbols-crate).
+Built-in rules keep their own types over the shared adapter, rather than being
+`CategoryRule` aliases. [`TableRule`](../symtn-sectors/src/table_rule.rs)
+serves every pinned AnyonWiki `TableCategory`, including Fibonacci, Ising and
+fusion-only Rep(S₃), with identity built from the table's authority fingerprint.
+The [abelian](../symtn-sectors/src/abelian.rs) and
+[CU(1)](../symtn-sectors/src/cu1.rs) rules forward every symbol, including A/B;
+U(1)'s physical entries also use the category's CGC.
+The [SU2](../symtn-sectors/src/su2.rs) and
+[SUN](../symtn-sectors/src/sun.rs) wrappers use `LieGroup` through the adapter.
+symtn validates IDs before constructing category objects and queries the
+category's `frobenius_schur_phase`.
+
+| Lie wrapper | symtn codec and admission | mathematical authority |
+| --- | --- | --- |
+| `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
+| `SUNFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, SU(2) labels `0..=u32::MAX`; no physical expansion | SU(N) `LieGroup`, including exact A1 for `new(2)` |
+
+Both keep their identities, sector order, typed errors and validation order.
+`SUNFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
+nonfinite dimensions. It defers category construction until a successfully
+decoded query needs it and reuses its bounded irrep interner: a warm hit clones
+the provider's allocation-free handle, without a Dynkin-label `Vec`. The adapter
+has no separate object cache. Provider generation and returned symbol/channel
+storage have their own allocation costs; Generic blocks copy provider data.
 
 ## 1. `FusionRule`
 
@@ -95,7 +118,8 @@ construction must establish representability first.
 
 **Styles are claims the engine acts on.** `Unique` means every product has
 exactly one channel; `Simple` means several channels but no multiplicity;
-`Generic` means multiplicity. Declaring `Unique` when a product has two channels
+`Generic` admits multiplicity and may also be selected conservatively, as
+`SUNFusionRule::new(2)` does. Declaring `Unique` when a product has two channels
 selects a lowering that silently drops terms. `Bosonic`/`Fermionic` assert
 symmetric braiding; `Anyonic` and
 `NoBraiding` do not, so ordinary `contract` (and network contraction) rejects
@@ -180,14 +204,15 @@ components' preconditions.
 
 `MultiplicityFreeRigidSymbols` adds `dim_scalar`, `inv_dim_scalar`,
 `sqrt_dim_scalar`, `inv_sqrt_dim_scalar`, `twist_scalar`, and
-`frobenius_schur_phase_scalar`. `a_symbol_scalar`
-and `b_symbol_scalar` have correct default bodies derived from F; a
-`CategoryRule` forwards the category's A and B instead.
+`frobenius_schur_phase_scalar`. Adapter-backed rules forward `a_symbol_scalar`
+and `b_symbol_scalar` to the category's A and B. F-derived A/B defaults, both
+scalar and Generic, exist only for fixtures in unit tests or under `testing`.
 
 `has_trivial_associator_gauge()` selects direct permutation only when every
 allowed F coefficient is exactly the scalar unit. It defaults to false;
-`CategoryRule` forwards the category certificate. Symmetric braiding alone
-does not prove this property.
+`CategoryRule` forwards the category certificate. `TableRule` always withholds
+it and reports every braided table `Anyonic`, even if the category certifies
+a trivial associator. Symmetric braiding alone does not prove this property.
 
 `CanonicalUnitFusionRule` asserts the vacuum is self-dual,
 that `1 ⊗ a -> a` and `a ⊗ 1 -> a` are the only channels involved, and that
@@ -206,10 +231,12 @@ while reporting unavailable data as an error. F, R, A, and B become dense
 blocks (`GenericFArray`, `GenericRMatrix`) indexed by one-based vertex labels;
 a `CategoryRule` takes each block's shape from the checked N symbols, so the
 single zero fusion-symbols stores for an absent vertex becomes an empty block,
-and a nonzero entry where N admits none is an error. The tensor engine
-derives its A/B moves from the validated F and rigidity data;
-`try_a_symbol_generic` and `try_b_symbol_generic` expose the authority's A
-and B blocks.
+and a nonzero entry where N admits none is an error. `SUNFusionRule` copies
+the authority's shaped A/B blocks, admitting an absent vertex before requiring
+a finite dimension or an encoded derived
+dual. The tensor engine derives Generic A/B moves from validated F
+and rigidity data; `try_a_symbol_generic` and `try_b_symbol_generic` expose
+the authority's blocks.
 `CheckedGenericRigidSymbols::try_dim_scalar` defaults to
 `try_sqrt_dim_scalar²`; override it when `dim` is known exactly (SU(N) does),
 because truncation budgets and quantum-dimension-weighted norms compare
@@ -217,12 +244,25 @@ because truncation budgets and quantum-dimension-weighted norms compare
 
 A catalog-bounded provider must reject any coupled sector whose complete
 fusion-tree set leaves the catalog; silently keeping only the available trees
-would change the tensor space. Checked Generic execution is Host-only; see
-[backend policy](backend_policy.md) for device bounds.
+would change the tensor space.
+
+`InfallibleGeneric<'a, R>` adapts infallible structural `FusionRule` queries
+to the checked interface. Under `testing`, its rigid-symbol implementation
+uses `GenericRigidSymbols::dim_scalar` for `try_dim_scalar`, which likewise
+defaults to `sqrt_dim_scalar²`: override it for any integer dimension that is
+not a perfect square. `SUNFusionRule` instead implements the checked Generic
+traits directly; its bounded interner falls back to per-call conversion when
+full.
+
+Checked Generic execution is Host-only; CUDA typed execution is limited to
+supported multiplicity-free paths over `f32`, `f64`, `Complex32` and `Complex64`.
+See [backend policy](backend_policy.md) for device bounds.
 
 ## Products
 
 `ProductFusionRule<Left, Right, Codec>` is itself a provider, so products nest.
+It composes component symbols in symtn, including A/B, rather than using
+fusion-symbols' product category.
 The product's coefficient scalar is the promotion of its components'
 (`PromoteCoefficientScalar`), following TensorKitSectors'
 `fusionscalartype(ProductSector)`: components need not agree, and a complex

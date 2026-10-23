@@ -514,8 +514,8 @@ where
     LeftRule: MultiplicityFreeRigidSymbols,
     RightRule: MultiplicityFreeRigidSymbols,
     LeftRule::Scalar: PromoteCoefficientScalar<RightRule::Scalar>,
-    // The A/B overrides below delegate to each component's own default body,
-    // which is stated over that component's scalar.
+    // The A/B overrides delegate to each component's methods over its own
+    // scalar; production leaves obtain these symbols from fusion-symbols.
     LeftRule::Scalar: Mul<Output = LeftRule::Scalar>,
     RightRule::Scalar: Mul<Output = RightRule::Scalar>,
     // Sync via the trait's supertrait; the codec is a PhantomData marker.

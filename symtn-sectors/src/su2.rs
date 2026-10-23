@@ -1,15 +1,22 @@
 use fusion_symbols::{
     category::FusionCategory,
-    lie::{GroupId, LieGroup, LieIrrep},
+    lie::{GroupId, LieError, LieGroup, LieIrrep},
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
+use crate::category_rule::{
+    admit_coupled_first, admit_in_order, fusion_algebra_error, AdapterAccess,
+    CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec, CategoryOperation,
+};
+#[cfg(test)]
 use crate::{
-    BraidingStyleKind, CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError,
-    FusionRule, FusionStyleKind, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, PhysicalBasisError, PhysicalFusionBasis, RuleIdentity,
-    SectorCodec, SectorId, SectorVec,
+    CanonicalUnitFusionRule, FusionRule, MultiplicityFreeFusionSymbols,
+    MultiplicityFreeRigidSymbols, SectorCodec,
+};
+use crate::{
+    CheckedFusionAlgebra, FusionAlgebraError, MultiplicityFreeAdmissionMode, PhysicalBasisError,
+    PhysicalFusionBasis, RuleIdentity, SectorId,
 };
 
 /// Largest doubled spin representable by symtn's compact SU(2) sector encoding.
@@ -65,13 +72,17 @@ impl From<SU2Irrep> for SectorId {
     }
 }
 
-/// SU(2) fusion data in Racah's Condon--Shortley gauge.
+/// SU(2) fusion data from [`fusion_symbols::lie::LieGroup`] through the
+/// shared category adapter, in Racah's Condon--Shortley gauge. This wrapper
+/// keeps symtn's compact doubled-spin codec and closure bound; fusion, N,
+/// F, R, A, B, dimensions, twists and Frobenius–Schur phase come from the
+/// category.
 ///
 /// The physical carrier basis follows the executable convention of
 /// TensorKitSectors 0.3.9: zero-based index `k` has doubled projection
 /// `dm = dj - 2*k`, hence `dm = dj, dj - 2, ..., -dj`. This is descending in
-/// `m`; the convention test below uses an odd-phase channel so reversal cannot
-/// hide.
+/// `m`. Individual physical entries use fusion-symbols' checked scalar CGC
+/// evaluator without constructing a full CGC tensor.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub struct SU2FusionRule;
 
@@ -84,70 +95,153 @@ fn category() -> &'static LieGroup {
     CATEGORY.get_or_init(|| LieGroup::new(GroupId::su(2).unwrap()).unwrap())
 }
 
-fn racah_irrep(irrep: SU2Irrep) -> LieIrrep {
-    category().irrep(&[irrep.twice_spin() as i64]).unwrap()
+fn identity() -> &'static RuleIdentity {
+    static IDENTITY: OnceLock<RuleIdentity> = OnceLock::new();
+    IDENTITY.get_or_init(|| {
+        let mut bytes = Vec::with_capacity(
+            category().authority_fingerprint().len() + SU2_ENCODING_IDENTITY.len(),
+        );
+        bytes.extend_from_slice(category().authority_fingerprint());
+        bytes.extend_from_slice(SU2_ENCODING_IDENTITY);
+        RuleIdentity::from_canonical_bytes::<SU2FusionRule>(
+            SU2_RACAH_IDENTITY_SCHEMA,
+            Arc::<[u8]>::from(bytes),
+        )
+    })
 }
 
 fn checked_irrep(sector: SectorId) -> Result<SU2Irrep, FusionAlgebraError> {
-    match SU2Irrep::try_from_sector_id(sector) {
-        Some(irrep) => Ok(irrep),
-        None => Err(FusionAlgebraError::InvalidSector { sector }),
+    SU2Irrep::try_from_sector_id(sector).ok_or(FusionAlgebraError::InvalidSector { sector })
+}
+
+/// The compact label codec and operation-specific closure admission.
+#[derive(Debug)]
+pub(crate) struct CompactSu2Codec;
+
+impl CompactSu2Codec {
+    fn check_closure(left: SectorId, right: SectorId) -> Result<(), FusionAlgebraError> {
+        if left.id() + right.id() > SU2_MAX_DOUBLED_SPIN {
+            Err(FusionAlgebraError::FusionNotRepresentable { left, right })
+        } else {
+            Ok(())
+        }
     }
 }
 
-fn checked_irreps(
-    left: SectorId,
-    right: SectorId,
-) -> Result<(SU2Irrep, SU2Irrep), FusionAlgebraError> {
-    let left_irrep = checked_irrep(left)?;
-    let right_irrep = checked_irrep(right)?;
-    Ok((left_irrep, right_irrep))
+impl CategoryCodec<LieGroup> for CompactSu2Codec {
+    type Sector = SU2Irrep;
+    type Error = FusionAlgebraError;
+    type Mode = MultiplicityFreeAdmissionMode;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        _category: impl Fn() -> &'a LieGroup + Copy,
+        _rule: &RuleIdentity,
+        label: &SU2Irrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(label.sector_id())
+    }
+
+    fn decode_label<'a>(
+        &self,
+        _category: impl Fn() -> &'a LieGroup + Copy,
+        id: SectorId,
+    ) -> Result<SU2Irrep, FusionAlgebraError> {
+        checked_irrep(id)
+    }
+
+    fn object<'a>(
+        &self,
+        category: impl Fn() -> &'a LieGroup + Copy,
+        id: SectorId,
+    ) -> Result<LieIrrep, FusionAlgebraError> {
+        let label = checked_irrep(id)?;
+        Ok(category()
+            .irrep(&[label.twice_spin() as i64])
+            .expect("symtn SU(2) labels fit fusion-symbols' rank-one labels"))
+    }
+
+    fn sector_id<'a>(
+        &self,
+        _category: impl Fn() -> &'a LieGroup + Copy,
+        _rule: &RuleIdentity,
+        object: &LieIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        let sector = SectorId::new(
+            object
+                .dynkin_labels()
+                .next()
+                .expect("SU(2) labels have rank one") as usize,
+        );
+        checked_irrep(sector).map(SU2Irrep::sector_id)
+    }
+
+    fn admit<'a, const N: usize>(
+        &self,
+        category: impl Fn() -> &'a LieGroup + Copy,
+        rule: &RuleIdentity,
+        operation: CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[LieIrrep; N], FusionAlgebraError> {
+        let objects = if operation == CategoryOperation::N {
+            admit_coupled_first(self, category, ids)?
+        } else {
+            admit_in_order(self, category, rule, operation, ids)?
+        };
+        if matches!(operation, CategoryOperation::Fusion | CategoryOperation::N) {
+            Self::check_closure(ids[0], ids[1])?;
+        }
+        Ok(objects)
+    }
+
+    fn admit_r<'a>(
+        &self,
+        category: impl Fn() -> &'a LieGroup + Copy,
+        _rule: &RuleIdentity,
+        [left, right, coupled]: [SectorId; 3],
+    ) -> Result<Option<[LieIrrep; 3]>, FusionAlgebraError> {
+        let a = self.object(category, left)?;
+        let b = self.object(category, right)?;
+        Self::check_closure(left, right).unwrap_or_else(|_| {
+            panic!("SU(2) fusion closure exceeds the supported maximum doubled spin 254")
+        });
+        // The compact closure makes every out-of-domain coupled id absent.
+        if coupled.id() > SU2_MAX_DOUBLED_SPIN {
+            return Ok(None);
+        }
+        let c = self.object(category, coupled)?;
+        Ok((category().nsymbol(&a, &b, &c) != 0).then_some([a, b, c]))
+    }
+
+    fn map_error(
+        &self,
+        _inputs: &[SectorId],
+        error: CategoryAdapterError<LieError>,
+    ) -> FusionAlgebraError {
+        fusion_algebra_error(error)
+    }
 }
 
 impl crate::seal::Provider for SU2FusionRule {}
 
-crate::algebra::multiplicity_free_typed_admission!(SU2FusionRule);
+crate::category_rule::multiplicity_free_adapter_impls!(SU2FusionRule, SU2Irrep, f64);
 
-impl FusionRule for SU2FusionRule {
-    fn rule_identity(&self) -> RuleIdentity {
-        static IDENTITY: OnceLock<RuleIdentity> = OnceLock::new();
-        IDENTITY
-            .get_or_init(|| {
-                let mut bytes = Vec::with_capacity(
-                    category().authority_fingerprint().len() + SU2_ENCODING_IDENTITY.len(),
-                );
-                bytes.extend_from_slice(category().authority_fingerprint());
-                bytes.extend_from_slice(SU2_ENCODING_IDENTITY);
-                RuleIdentity::from_canonical_bytes::<SU2FusionRule>(
-                    SU2_RACAH_IDENTITY_SCHEMA,
-                    Arc::<[u8]>::from(bytes),
-                )
-            })
-            .clone()
+impl AdapterAccess for SU2FusionRule {
+    type Category = LieGroup;
+    type Codec = CompactSu2Codec;
+
+    fn category(&self) -> &LieGroup {
+        category()
     }
-
-    fn fusion_style(&self) -> FusionStyleKind {
-        FusionStyleKind::Simple
+    fn codec(&self) -> &CompactSu2Codec {
+        &CompactSu2Codec
     }
-
-    fn braiding_style(&self) -> BraidingStyleKind {
-        BraidingStyleKind::Bosonic
+    fn identity(&self) -> &RuleIdentity {
+        identity()
     }
-
-    fn vacuum(&self) -> SectorId {
-        SU2Irrep::from_twice_spin(0).into()
-    }
-
-    fn dual(&self, sector: SectorId) -> SectorId {
-        self.dual_or_panic(sector)
-    }
-
-    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        self.fusion_channels_or_panic(left, right)
-    }
-
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        self.nsymbol_or_panic(left, right, coupled)
+    fn vacuum_id(&self) -> SectorId {
+        SU2Irrep::from_twice_spin(0).sector_id()
     }
 }
 
@@ -159,92 +253,26 @@ impl SU2FusionRule {
         right: SU2Irrep,
         mut emit: impl FnMut(SU2Irrep) -> core::ops::ControlFlow<B>,
     ) -> Result<core::ops::ControlFlow<B>, FusionAlgebraError> {
-        let left_sector = left.sector_id();
-        let right_sector = right.sector_id();
-        if left.twice_spin() + right.twice_spin() > SU2_MAX_DOUBLED_SPIN {
-            return Err(FusionAlgebraError::FusionNotRepresentable {
-                left: left_sector,
-                right: right_sector,
-            });
-        }
+        let [a, b] = self.codec().admit(
+            category,
+            self.identity(),
+            CategoryOperation::Fusion,
+            [left.sector_id(), right.sector_id()],
+        )?;
         for channel in category()
-            .fusion(&racah_irrep(left), &racah_irrep(right))
+            .fusion(&a, &b)
             .expect("symtn SU(2) label range cannot overflow fusion-symbols labels")
         {
-            if let core::ops::ControlFlow::Break(error) = emit(SU2Irrep::from_twice_spin(
-                channel
-                    .dynkin_labels()
-                    .next()
-                    .expect("SU(2) labels have rank one") as usize,
-            )) {
+            let sector = self
+                .codec()
+                .sector_id(category, self.identity(), &channel)?;
+            if let core::ops::ControlFlow::Break(error) = emit(SU2Irrep::from_sector_id(sector)) {
                 return Ok(core::ops::ControlFlow::Break(error));
             }
         }
         Ok(core::ops::ControlFlow::Continue(()))
     }
 }
-
-impl CheckedFusionAlgebra for SU2FusionRule {
-    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        let irrep = checked_irrep(sector)?;
-        Ok(SU2Irrep::from_twice_spin(
-            category()
-                .dual(&racah_irrep(irrep))
-                .dynkin_labels()
-                .next()
-                .expect("SU(2) labels have rank one") as usize,
-        )
-        .into())
-    }
-
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, FusionAlgebraError> {
-        let (left_irrep, right_irrep) = checked_irreps(left, right)?;
-        let mut channels = SectorVec::new();
-        let _ = self.try_for_each_representable_channel(left_irrep, right_irrep, |channel| {
-            channels.push(channel.into());
-            core::ops::ControlFlow::<()>::Continue(())
-        })?;
-        Ok(channels)
-    }
-
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, FusionAlgebraError> {
-        let coupled = checked_irrep(coupled)?;
-        let (left_irrep, right_irrep) = checked_irreps(left, right)?;
-        let mut multiplicity = 0;
-        let _ = self.try_for_each_representable_channel(left_irrep, right_irrep, |channel| {
-            if channel == coupled {
-                multiplicity = 1;
-            }
-            core::ops::ControlFlow::<()>::Continue(())
-        })?;
-        Ok(multiplicity)
-    }
-}
-
-impl SectorCodec for SU2FusionRule {
-    type Sector = SU2Irrep;
-
-    fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        Ok(value.sector_id())
-    }
-
-    fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        checked_irrep(id)
-    }
-}
-
-impl MultiplicityFreeFusionRule for SU2FusionRule {}
-
-impl CanonicalUnitFusionRule for SU2FusionRule {}
 
 /// Failure reported by the SU(2) coupling-coefficient authority.
 ///
@@ -333,80 +361,6 @@ impl PhysicalFusionBasis for SU2FusionRule {
             )) => Ok(0.0),
             Err(error) => Err(PhysicalBasisError::Coefficient(SU2CoefficientError(error))),
         }
-    }
-}
-
-impl MultiplicityFreeFusionSymbols for SU2FusionRule {
-    type Scalar = f64;
-
-    fn f_symbol_scalar(
-        &self,
-        left: SectorId,
-        middle: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-        left_coupled: SectorId,
-        right_coupled: SectorId,
-    ) -> Self::Scalar {
-        let [a, b, c, d, e, f] = [left, middle, right, coupled, left_coupled, right_coupled]
-            .map(|sector| racah_irrep(SU2Irrep::from_sector_id(sector)));
-        let block = category().f_symbol(&a, &b, &c, &d, &e, &f).unwrap();
-        block.data().first().copied().unwrap_or(0.0)
-    }
-
-    fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
-        let left = SU2Irrep::from_sector_id(left);
-        let right = SU2Irrep::from_sector_id(right);
-        let mut admissible = false;
-        let _ = self
-            .try_for_each_representable_channel(left, right, |channel| {
-                if channel.sector_id() == coupled {
-                    admissible = true;
-                    core::ops::ControlFlow::Break(())
-                } else {
-                    core::ops::ControlFlow::Continue(())
-                }
-            })
-            .unwrap_or_else(|_| {
-                panic!("SU(2) fusion closure exceeds the supported maximum doubled spin 254")
-            });
-        if !admissible {
-            return 0.0;
-        }
-        let block = category()
-            .r_symbol(
-                &racah_irrep(left),
-                &racah_irrep(right),
-                &racah_irrep(SU2Irrep::from_sector_id(coupled)),
-            )
-            .unwrap();
-        block.data().first().copied().unwrap_or(0.0)
-    }
-}
-
-impl MultiplicityFreeRigidSymbols for SU2FusionRule {
-    fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        category().dim(&racah_irrep(SU2Irrep::from_sector_id(sector)))
-    }
-
-    fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        1.0 / self.dim_scalar(sector)
-    }
-
-    fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        self.dim_scalar(sector).sqrt()
-    }
-
-    fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        1.0 / self.sqrt_dim_scalar(sector)
-    }
-
-    fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        category().twist(&racah_irrep(SU2Irrep::from_sector_id(sector)))
-    }
-
-    fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        category().frobenius_schur_phase(&racah_irrep(SU2Irrep::from_sector_id(sector)))
     }
 }
 
