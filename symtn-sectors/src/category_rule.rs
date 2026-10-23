@@ -854,14 +854,6 @@ mod forward {
         }
     }
 
-    pub(super) fn fusion_style_kind(style: FusionStyle) -> FusionStyleKind {
-        match style {
-            FusionStyle::Unique => FusionStyleKind::Unique,
-            FusionStyle::Simple => FusionStyleKind::Simple,
-            FusionStyle::Generic => FusionStyleKind::Generic,
-        }
-    }
-
     pub(super) fn braiding_style_kind(style: BraidingStyle) -> BraidingStyleKind {
         match style {
             BraidingStyle::None => BraidingStyleKind::NoBraiding,
@@ -1006,19 +998,6 @@ mod forward {
         }
     }
 
-    fn malformed<'r, A: AdapterAccess, const N: usize>(
-        rule: &'r A,
-        inputs: [SectorId; N],
-    ) -> impl FnOnce(SymbolShapeError) -> Error<A> + 'r {
-        move |error| {
-            adapter(
-                rule,
-                &inputs,
-                CategoryAdapterError::MalformedSymbolData(error),
-            )
-        }
-    }
-
     pub(super) fn f_scalar<A: AdapterAccess>(
         rule: &A,
         ids: [SectorId; 6],
@@ -1070,7 +1049,8 @@ mod forward {
             .f_symbol(&a, &b, &c, &d, &e, &f)
             .map_err(provider(rule, ids))?;
         let data = shaped(rule, &ids, block.as_slice(), expected)?;
-        GenericFArray::try_new(data, shape).map_err(malformed(rule, ids))
+        // `shaped` established the length.
+        Ok(GenericFArray::new(data, shape))
     }
 
     pub(super) fn r_block<A: AdapterAccess>(
@@ -1081,7 +1061,7 @@ mod forward {
             .codec()
             .admit_r(|| rule.category(), rule.identity(), ids)?
         else {
-            return GenericRMatrix::try_new(Vec::new(), 0, 0).map_err(malformed(rule, ids));
+            return Ok(GenericRMatrix::new(Vec::new(), 0, 0));
         };
         require_braiding(rule, &ids)?;
         let rows = multiplicity(rule, ids, &a, &b, &c)?;
@@ -1091,7 +1071,8 @@ mod forward {
             .r_symbol(&a, &b, &c)
             .map_err(provider(rule, ids))?;
         let data = shaped(rule, &ids, block.as_slice(), rows.checked_mul(cols))?;
-        GenericRMatrix::try_new(data, rows, cols).map_err(malformed(rule, ids))
+        // `shaped` established the length.
+        Ok(GenericRMatrix::new(data, rows, cols))
     }
 
     /// Admits A or B inputs and requires finite positive dimensions, which
@@ -1128,7 +1109,8 @@ mod forward {
         let rows = multiplicity(rule, ids, a, b, c)?;
         let cols = multiplicity(rule, ids, column[0], column[1], column[2])?;
         let data = shaped(rule, &ids, block.data(), rows.checked_mul(cols))?;
-        GenericRMatrix::try_new(data, rows, cols).map_err(malformed(rule, ids))
+        // `shaped` established the length.
+        Ok(GenericRMatrix::new(data, rows, cols))
     }
 
     pub(super) fn a_block<A: AdapterAccess>(
@@ -1228,7 +1210,12 @@ where
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        forward::fusion_style_kind(self.category.fusion_style())
+        // `try_new` refused Generic fusion for multiplicity-free admission.
+        if self.category.fusion_style() == FusionStyle::Unique {
+            FusionStyleKind::Unique
+        } else {
+            FusionStyleKind::Simple
+        }
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {

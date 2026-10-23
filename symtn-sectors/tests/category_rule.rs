@@ -1109,10 +1109,11 @@ impl FusionCategory for Faulty {
         1.0
     }
     fn fusion<'a>(&'a self, a: &u8, _: &u8) -> Result<Self::Fusion<'a>, AuthorityFailed> {
-        if *a == 1 {
-            Err(AuthorityFailed)
-        } else {
-            Ok(std::iter::once(0))
+        match a {
+            1 => Err(AuthorityFailed),
+            // An outcome outside the category.
+            2 => Ok(std::iter::once(7)),
+            _ => Ok(std::iter::once(0)),
         }
     }
     fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> u32 {
@@ -1150,9 +1151,10 @@ impl FusionCategory for Faulty {
         Ok(Some(3))
     }
     fn object_at(&self, index: u64) -> Result<u8, EnumerationError> {
+        // Index 3 unranks to an object outside the category.
         u8::try_from(index)
             .ok()
-            .filter(|&object| object < 3)
+            .filter(|&object| object <= 3)
             .ok_or(EnumerationError::OutOfRange)
     }
     fn object_index(&self, a: &u8) -> Result<u64, EnumerationError> {
@@ -1334,11 +1336,16 @@ impl FusionCategory for ForeignUnit {
     }
 }
 
-/// Ids equal to the `u8` objects, with no membership checks of its own.
+/// Ids equal to the `u8` objects, with no membership checks of its own and
+/// every adapter failure kept whole as the source.
 #[derive(Clone, Copy, Debug)]
 struct RawU8;
 
-impl CategoryCodec<ForeignUnit> for RawU8 {
+impl<C> CategoryCodec<C> for RawU8
+where
+    C: FusionCategory<Object = u8> + 'static,
+    C::Error: Send + Sync + 'static,
+{
     type Sector = u8;
     type Error = FusionAlgebraError;
     type Mode = MF;
@@ -1346,7 +1353,7 @@ impl CategoryCodec<ForeignUnit> for RawU8 {
 
     fn encode_label<'a>(
         &self,
-        _: impl Fn() -> &'a ForeignUnit + Copy,
+        _: impl Fn() -> &'a C + Copy,
         _: &RuleIdentity,
         label: &u8,
     ) -> Result<SectorId, FusionAlgebraError> {
@@ -1354,21 +1361,21 @@ impl CategoryCodec<ForeignUnit> for RawU8 {
     }
     fn decode_label<'a>(
         &self,
-        _: impl Fn() -> &'a ForeignUnit + Copy,
+        _: impl Fn() -> &'a C + Copy,
         id: SectorId,
     ) -> Result<u8, FusionAlgebraError> {
         u8::try_from(id.id()).map_err(|_| FusionAlgebraError::InvalidSector { sector: id })
     }
     fn object<'a>(
         &self,
-        category: impl Fn() -> &'a ForeignUnit + Copy,
+        category: impl Fn() -> &'a C + Copy,
         id: SectorId,
     ) -> Result<u8, FusionAlgebraError> {
-        self.decode_label(category, id)
+        <Self as CategoryCodec<C>>::decode_label(self, category, id)
     }
     fn sector_id<'a>(
         &self,
-        _: impl Fn() -> &'a ForeignUnit + Copy,
+        _: impl Fn() -> &'a C + Copy,
         _: &RuleIdentity,
         object: &u8,
     ) -> Result<SectorId, FusionAlgebraError> {
@@ -1377,22 +1384,21 @@ impl CategoryCodec<ForeignUnit> for RawU8 {
     fn map_error(
         &self,
         _: &[SectorId],
-        error: CategoryAdapterError<std::convert::Infallible>,
+        error: CategoryAdapterError<C::Error>,
     ) -> FusionAlgebraError {
-        match error {
-            CategoryAdapterError::ForeignObject {
-                sector: Some(sector),
-            } => FusionAlgebraError::InvalidSector { sector },
-            other => FusionAlgebraError::CategoryFailure(CategoryFailure::new(other)),
-        }
+        FusionAlgebraError::CategoryFailure(CategoryFailure::new(error))
     }
 }
 
 #[test]
 fn a_unit_outside_the_category_is_refused_even_when_it_round_trips() {
+    let error = CategoryRule::try_new(ForeignUnit, RawU8).unwrap_err();
+    let CategoryAdmissionError::Codec(error) = &error else {
+        panic!("expected a codec error, got {error:?}");
+    };
     assert_eq!(
-        CategoryRule::try_new(ForeignUnit, RawU8).unwrap_err(),
-        CategoryAdmissionError::Codec(FusionAlgebraError::InvalidSector { sector: s(0) })
+        adapter_source::<std::convert::Infallible>(error),
+        &CategoryAdapterError::ForeignObject { sector: Some(s(0)) }
     );
 }
 
@@ -1611,10 +1617,11 @@ fn admission_expresses_the_u1_schedule() {
 /// Compact SU(2): doubled spins `0..=254`, N checked coupled, left, right,
 /// then the whole closure, and an R known to be zero before the coupled id
 /// is converted.
-#[derive(Clone, Copy, Debug)]
-struct CompactSu2;
+struct CompactSu2<M>(std::marker::PhantomData<M>);
 
-impl CompactSu2 {
+impl<M> CompactSu2<M> {
+    const NEW: Self = Self(std::marker::PhantomData);
+
     fn checked(id: SectorId) -> Result<i64, FusionAlgebraError> {
         if id.id() <= SU2_MAX_DOUBLED_SPIN {
             Ok(id.id() as i64)
@@ -1624,10 +1631,10 @@ impl CompactSu2 {
     }
 }
 
-impl CategoryCodec<LieGroup> for CompactSu2 {
+impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
     type Sector = SU2Irrep;
     type Error = FusionAlgebraError;
-    type Mode = MF;
+    type Mode = M;
     type Unit = CanonicalUnitAdmission;
 
     fn encode_label<'a>(
@@ -1718,8 +1725,11 @@ impl CategoryCodec<LieGroup> for CompactSu2 {
 
 #[test]
 fn admission_expresses_the_compact_su2_schedule_and_r_zero_shortcut() {
-    let rule =
-        CategoryRule::try_new(LieGroup::new(GroupId::su(2).unwrap()).unwrap(), CompactSu2).unwrap();
+    let rule = CategoryRule::try_new(
+        LieGroup::new(GroupId::su(2).unwrap()).unwrap(),
+        CompactSu2::<MF>::NEW,
+    )
+    .unwrap();
     let closure = Err(FusionAlgebraError::FusionNotRepresentable {
         left: s(128),
         right: s(127),
@@ -1969,4 +1979,530 @@ fn admission_expresses_the_product_schedule() {
         let [a, b, c] = ids.map(s);
         assert_eq!(rule.try_nsymbol(a, b, c), builtin.try_nsymbol(a, b, c));
     }
+}
+
+#[test]
+fn checked_generic_r_of_a_codec_admitted_zero_block_is_empty() {
+    let rule = CategoryRule::try_new(
+        LieGroup::new(GroupId::su(2).unwrap()).unwrap(),
+        CompactSu2::<CG>::NEW,
+    )
+    .unwrap();
+    // 1/2 x 1/2 cannot reach 300; the codec admits a zero block unconverted.
+    let r = rule.try_r_symbol_generic(s(1), s(1), s(300)).unwrap();
+    assert_eq!(r.shape(), (0, 0));
+    assert!(r.data().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// What the error types report.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn admission_errors_report_their_cause_and_keep_the_codec_error_as_source() {
+    use std::error::Error as _;
+
+    let style = CategoryRule::try_new(
+        ClaimsGeneric {
+            canonical_unit: true,
+        },
+        EnumeratedCodec::<MF>::new(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        style.to_string(),
+        "multiplicity-free admission requires a multiplicity-free category, got Generic fusion"
+    );
+    assert!(style.source().is_none());
+
+    let unit = CategoryRule::try_new(
+        ClaimsGeneric {
+            canonical_unit: false,
+        },
+        EnumeratedCodec::<CG>::new(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        unit.to_string(),
+        "canonical-unit admission requires a canonical-unit category"
+    );
+    assert!(unit.source().is_none());
+
+    let codec = CategoryRule::try_new(ForeignUnit, RawU8).unwrap_err();
+    assert_eq!(codec.to_string(), "the category codec rejected the unit");
+    let source = codec.source().unwrap().downcast_ref::<FusionAlgebraError>();
+    assert!(matches!(
+        source,
+        Some(FusionAlgebraError::CategoryFailure(_))
+    ));
+}
+
+#[test]
+fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
+    use std::error::Error as _;
+
+    // The authority's own error, kept whole by an expert codec.
+    let rule = CategoryRule::try_new(Faulty, RawU8).unwrap();
+    let error = rule.try_fusion_channels(s(1), s(0)).unwrap_err();
+    let provider = adapter_source::<AuthorityFailed>(&error);
+    assert_eq!(provider, &CategoryAdapterError::Provider(AuthorityFailed));
+    assert_eq!(provider.to_string(), "the fusion category failed");
+    assert_eq!(provider.source().unwrap().to_string(), "authority failed");
+
+    // A decoded object outside the category (index 3 unranks to 3).
+    let error = rule.try_dual_sector(s(3)).unwrap_err();
+    let foreign = adapter_source::<AuthorityFailed>(&error);
+    assert_eq!(
+        foreign,
+        &CategoryAdapterError::ForeignObject { sector: Some(s(3)) }
+    );
+    assert_eq!(
+        foreign.to_string(),
+        "SectorId(3) names an object outside the category"
+    );
+    assert!(foreign.source().is_none());
+
+    // A fusion outcome outside the category, through the default
+    // `encode_channels`; a member outcome is encoded.
+    let error = rule.try_fusion_channels(s(2), s(0)).unwrap_err();
+    let outcome = adapter_source::<AuthorityFailed>(&error);
+    assert_eq!(
+        outcome,
+        &CategoryAdapterError::ForeignObject { sector: None }
+    );
+    assert_eq!(
+        outcome.to_string(),
+        "the category produced an object outside itself"
+    );
+    assert_eq!(
+        rule.try_fusion_channels(s(0), s(0)).unwrap().as_slice(),
+        &[s(0)]
+    );
+
+    let checked = cg(Faulty);
+    let error = checked.try_dim_scalar(s(2)).unwrap_err();
+    let dimension = adapter_source::<AuthorityFailed>(&error);
+    assert_eq!(
+        dimension.to_string(),
+        "the dimension of SectorId(2) is not a finite positive f64"
+    );
+    assert!(dimension.source().is_none());
+
+    let error = checked
+        .try_f_symbol_generic(s(1), s(1), s(1), s(1), s(1), s(1))
+        .unwrap_err();
+    let storage = adapter_source::<AuthorityFailed>(&error);
+    assert_eq!(
+        storage.to_string(),
+        "symbol storage disagrees with its fusion multiplicities"
+    );
+    assert_eq!(
+        storage.source().unwrap().downcast_ref::<SymbolShapeError>(),
+        Some(&SymbolShapeError {
+            actual_len: 1,
+            expected_len: Some(0),
+        })
+    );
+
+    let rep_s3 = cg(TableCategory::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap());
+    let error = rep_s3.try_twist_scalar(s(1)).unwrap_err();
+    assert_eq!(
+        adapter_source::<fusion_symbols::table::TableError>(&error).to_string(),
+        "the category has no braiding"
+    );
+}
+
+#[test]
+fn a_category_failure_reports_and_exposes_the_failure_it_keeps() {
+    use std::error::Error as _;
+
+    let error = cg(Faulty).try_fusion_channels(s(1), s(0)).unwrap_err();
+    assert_eq!(error.to_string(), "fusion category failed");
+    let failure = error.source().unwrap();
+    // The failure's message and source are the authority's own.
+    assert_eq!(failure.to_string(), "authority failed");
+    assert!(failure
+        .source()
+        .unwrap()
+        .downcast_ref::<AuthorityFailed>()
+        .is_some());
+    let FusionAlgebraError::CategoryFailure(failure) = &error else {
+        unreachable!();
+    };
+    // Equality is identity of the kept failure.
+    assert_eq!(failure.clone(), *failure);
+    assert_ne!(CategoryFailure::new(AuthorityFailed), *failure);
+}
+
+// ---------------------------------------------------------------------------
+// Enumerated codec boundaries.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn enumerated_codec_rejects_foreign_objects_and_reports_missing_enumeration() {
+    let rule = cg(Faulty);
+    // An authority that unranks a foreign object names an invalid sector.
+    assert_eq!(rule.try_dual(s(3)), invalid(3));
+    // A foreign fusion outcome is a category failure, not a filtered channel.
+    let error = rule.try_fusion_channels(s(2), s(0)).unwrap_err();
+    assert_eq!(
+        adapter_source::<AuthorityFailed>(&error),
+        &CategoryAdapterError::ForeignObject { sector: None }
+    );
+
+    // Without enumeration, neither the unit nor any id can be numbered.
+    let error = CategoryRule::try_new(Watched, EnumeratedCodec::<MF>::new()).unwrap_err();
+    let not_enumerable = |error: &FusionAlgebraError| {
+        let FusionAlgebraError::CategoryFailure(failure) = error else {
+            return false;
+        };
+        std::error::Error::source(failure)
+            .and_then(|source| source.downcast_ref::<EnumerationError>())
+            == Some(&EnumerationError::NotEnumerable)
+    };
+    let CategoryAdmissionError::Codec(error) = &error else {
+        panic!("expected a codec error, got {error:?}");
+    };
+    assert!(not_enumerable(error));
+    let codec = EnumeratedCodec::<MF>::new();
+    let decoded = CategoryCodec::<Watched>::object(&codec, || &Watched, s(0)).unwrap_err();
+    assert!(not_enumerable(&decoded));
+}
+
+/// Z3 whose objects or labels are offset from its ids, so that the unit does
+/// not round-trip.
+#[derive(Debug)]
+struct ShiftedZ3 {
+    object: u32,
+    label: usize,
+}
+
+impl CategoryCodec<ZN> for ShiftedZ3 {
+    type Sector = usize;
+    type Error = FusionAlgebraError;
+    type Mode = MF;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a ZN + Copy,
+        _: &RuleIdentity,
+        label: &usize,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(s((label + self.label) % 3))
+    }
+    fn decode_label<'a>(
+        &self,
+        _: impl Fn() -> &'a ZN + Copy,
+        id: SectorId,
+    ) -> Result<usize, FusionAlgebraError> {
+        Ok(id.id())
+    }
+    fn object<'a>(
+        &self,
+        _: impl Fn() -> &'a ZN + Copy,
+        id: SectorId,
+    ) -> Result<ZNIrrep, FusionAlgebraError> {
+        Ok(ZNIrrep::from_canonical((id.id() as u32 + self.object) % 3, 3).unwrap())
+    }
+    fn sector_id<'a>(
+        &self,
+        _: impl Fn() -> &'a ZN + Copy,
+        _: &RuleIdentity,
+        object: &ZNIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Ok(s(object.charge() as usize))
+    }
+    fn map_error(
+        &self,
+        _: &[SectorId],
+        error: CategoryAdapterError<std::convert::Infallible>,
+    ) -> FusionAlgebraError {
+        FusionAlgebraError::CategoryFailure(CategoryFailure::new(error))
+    }
+}
+
+#[test]
+fn construction_refuses_a_unit_that_does_not_round_trip() {
+    let refused = |codec| {
+        let error = CategoryRule::try_new(ZN::new(3).unwrap(), codec).unwrap_err();
+        let CategoryAdmissionError::Codec(error) = &error else {
+            panic!("expected a codec error, got {error:?}");
+        };
+        adapter_source::<std::convert::Infallible>(error).clone()
+    };
+    let unit_mismatch = CategoryAdapterError::ForeignObject { sector: Some(s(0)) };
+    // Id 0 decodes to charge 1, not the unit.
+    assert_eq!(
+        refused(ShiftedZ3 {
+            object: 1,
+            label: 0
+        }),
+        unit_mismatch
+    );
+    // The unit's label encodes to id 1, not 0.
+    assert_eq!(
+        refused(ShiftedZ3 {
+            object: 0,
+            label: 1
+        }),
+        unit_mismatch
+    );
+    assert!(CategoryRule::try_new(
+        ZN::new(3).unwrap(),
+        ShiftedZ3 {
+            object: 0,
+            label: 0
+        }
+    )
+    .is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// Every provider query answers from the category.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_multiplicity_free_rule_answers_every_query_from_its_category() {
+    // SU(2) by doubled spin: 1/2 has dimension 2 and FS phase -1.
+    let su2 = || LieGroup::new(GroupId::su(2).unwrap()).unwrap();
+    let rule = mf(su2());
+    assert_eq!(rule.category(), &su2());
+    assert_eq!(rule.typed_rule_identity(), FusionRule::rule_identity(&rule));
+    assert_eq!(rule.fusion_style(), FusionStyleKind::Simple);
+    assert_eq!(rule.dual(s(1)), s(1));
+    assert_eq!(rule.fusion_channels(s(1), s(1)).as_slice(), &[s(0), s(2)]);
+    assert_eq!(rule.nsymbol(s(1), s(1), s(2)), 1);
+    assert_eq!(rule.nsymbol(s(1), s(1), s(1)), 0);
+    assert!(!rule.has_trivial_associator_gauge());
+    assert_eq!(rule.dim_scalar(s(1)), 2.0);
+    assert_eq!(rule.inv_dim_scalar(s(1)), 0.5);
+    numerics::assert_close("sqrt dim", rule.sqrt_dim_scalar(s(1)), 2f64.sqrt(), 4);
+    numerics::assert_close(
+        "inv sqrt dim",
+        rule.inv_sqrt_dim_scalar(s(1)),
+        0.5f64.sqrt(),
+        4,
+    );
+    assert_eq!(rule.frobenius_schur_phase_scalar(s(1)), -1.0);
+    assert_eq!(rule.twist_scalar(s(1)), 1.0);
+
+    // ZN's associator is the unit; fermion parity braids fermionically.
+    assert!(mf(ZN::new(3).unwrap()).has_trivial_associator_gauge());
+    assert_eq!(
+        mf(fusion_symbols::fermion::FermionParity).braiding_style(),
+        BraidingStyleKind::Fermionic
+    );
+}
+
+#[test]
+fn a_checked_generic_rule_answers_every_query_from_its_category() {
+    let rule = cg(LieGroup::new(GroupId::su(2).unwrap()).unwrap());
+    assert_eq!(
+        CheckedGenericFusion::rule_identity(&rule),
+        rule.typed_rule_identity()
+    );
+    assert_eq!(CheckedGenericFusion::vacuum(&rule), s(0));
+    assert_eq!(rule.try_dual(s(3)), Ok(s(3)));
+    assert_eq!(
+        rule.try_fusion_channels_in_table(s(1), s(2)).unwrap(),
+        rule.try_fusion_channels(s(1), s(2)).unwrap()
+    );
+    assert_eq!(
+        rule.try_fusion_channels(s(1), s(2)).unwrap().as_slice(),
+        &[s(1), s(3)]
+    );
+    assert_eq!(rule.try_nsymbol(s(1), s(2), s(3)), Ok(1));
+    numerics::assert_close(
+        "sqrt dim",
+        rule.try_sqrt_dim_scalar(s(2)).unwrap(),
+        3f64.sqrt(),
+        4,
+    );
+    numerics::assert_close(
+        "inv sqrt dim",
+        rule.try_inv_sqrt_dim_scalar(s(2)).unwrap(),
+        3f64.sqrt().recip(),
+        4,
+    );
+    assert_eq!(rule.try_frobenius_schur_phase_scalar(s(1)), Ok(-1.0));
+    assert_eq!(
+        CheckedGenericFusion::sector_order_key(&rule, s(2)),
+        SectorOrderKey::position(2)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The testing-tier A/B composition of a native probe.
+// ---------------------------------------------------------------------------
+
+/// A native probe that supplies F and rigidity data but no A/B, so it
+/// inherits the testing-only TensorKitSectors composition.
+struct ComposedAb(CategoryRule<LieGroup, EnumeratedCodec<CG>>);
+
+impl symtn_sectors::testing::Provider for ComposedAb {}
+
+impl CheckedGenericFusion for ComposedAb {
+    type Error = FusionAlgebraError;
+    fn rule_identity(&self) -> RuleIdentity {
+        RuleIdentity::of_type::<Self>()
+    }
+    fn fusion_style(&self) -> FusionStyleKind {
+        self.0.fusion_style()
+    }
+    fn braiding_style(&self) -> BraidingStyleKind {
+        CheckedGenericFusion::braiding_style(&self.0)
+    }
+    fn vacuum(&self) -> SectorId {
+        CheckedGenericFusion::vacuum(&self.0)
+    }
+    fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
+        self.0.try_dual(sector)
+    }
+    fn try_fusion_channels(&self, l: SectorId, r: SectorId) -> Result<SectorVec, Self::Error> {
+        self.0.try_fusion_channels(l, r)
+    }
+    fn try_fusion_channels_in_table(
+        &self,
+        l: SectorId,
+        r: SectorId,
+    ) -> Result<SectorVec, Self::Error> {
+        self.0.try_fusion_channels_in_table(l, r)
+    }
+    fn try_nsymbol(&self, a: SectorId, b: SectorId, c: SectorId) -> Result<usize, Self::Error> {
+        CheckedGenericFusion::try_nsymbol(&self.0, a, b, c)
+    }
+}
+
+impl CheckedGenericRigidSymbols for ComposedAb {
+    type Scalar = f64;
+    fn try_sqrt_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
+        self.0.try_sqrt_dim_scalar(sector)
+    }
+    fn try_inv_sqrt_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
+        self.0.try_inv_sqrt_dim_scalar(sector)
+    }
+    fn try_frobenius_schur_phase_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
+        self.0.try_frobenius_schur_phase_scalar(sector)
+    }
+    fn try_f_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+        d: SectorId,
+        e: SectorId,
+        f: SectorId,
+    ) -> Result<GenericFArray<f64>, Self::Error> {
+        self.0.try_f_symbol_generic(a, b, c, d, e, f)
+    }
+    fn try_r_symbol_generic(
+        &self,
+        a: SectorId,
+        b: SectorId,
+        c: SectorId,
+    ) -> Result<GenericRMatrix<f64>, Self::Error> {
+        self.0.try_r_symbol_generic(a, b, c)
+    }
+}
+
+#[test]
+fn the_testing_a_and_b_composition_agrees_with_the_category_authority() {
+    // Independent of the composition: fusion-symbols' own A and B, which
+    // `CategoryRule` forwards, against the TensorKitSectors F-based formula.
+    let authority = cg(LieGroup::new(GroupId::su(2).unwrap()).unwrap());
+    let probe = ComposedAb(cg(LieGroup::new(GroupId::su(2).unwrap()).unwrap()));
+    for (a, b, c) in [
+        (1, 1, 0),
+        (1, 1, 2),
+        (2, 1, 1),
+        (2, 2, 2),
+        (3, 2, 1),
+        (1, 2, 3),
+    ] {
+        let (a, b, c) = (s(a), s(b), s(c));
+        for (composed, forwarded) in [
+            (
+                probe.try_a_symbol_generic(a, b, c).unwrap(),
+                authority.try_a_symbol_generic(a, b, c).unwrap(),
+            ),
+            (
+                probe.try_b_symbol_generic(a, b, c).unwrap(),
+                authority.try_b_symbol_generic(a, b, c).unwrap(),
+            ),
+        ] {
+            assert_eq!(composed.shape(), forwarded.shape());
+            numerics::assert_slices_close("A/B", composed.data(), forwarded.data(), 8);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Identity requests that escape resolution, and identity formatting.
+// ---------------------------------------------------------------------------
+
+/// A codec over ZN that asks for the value identity of another category type.
+#[derive(Clone, Debug)]
+struct MismatchedRequest;
+
+impl CategoryCodec<ZN> for MismatchedRequest {
+    type Sector = ZNIrrep;
+    type Error = FusionAlgebraError;
+    type Mode = MF;
+    type Unit = CanonicalUnitAdmission;
+
+    fn encode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        rule: &RuleIdentity,
+        label: &ZNIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Enumerated::new().encode_label(category, rule, label)
+    }
+    fn decode_label<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        id: SectorId,
+    ) -> Result<ZNIrrep, FusionAlgebraError> {
+        Enumerated::new().decode_label(category, id)
+    }
+    fn object<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        id: SectorId,
+    ) -> Result<ZNIrrep, FusionAlgebraError> {
+        Enumerated::new().object(category, id)
+    }
+    fn sector_id<'a>(
+        &self,
+        category: impl Fn() -> &'a ZN + Copy,
+        rule: &RuleIdentity,
+        object: &ZNIrrep,
+    ) -> Result<SectorId, FusionAlgebraError> {
+        Enumerated::new().sector_id(category, rule, object)
+    }
+    fn rule_identity(&self, _: &ZN) -> Option<RuleIdentity> {
+        CategoryCodec::<U1>::rule_identity(&Enumerated::new(), &U1)
+    }
+    fn map_error(
+        &self,
+        inputs: &[SectorId],
+        error: CategoryAdapterError<std::convert::Infallible>,
+    ) -> FusionAlgebraError {
+        <Enumerated as CategoryCodec<ZN>>::map_error(&Enumerated::new(), inputs, error)
+    }
+}
+
+#[test]
+fn a_request_for_another_category_type_never_aliases() {
+    let first = CategoryRule::try_new(ZN::new(3).unwrap(), MismatchedRequest).unwrap();
+    let second = CategoryRule::try_new(ZN::new(3).unwrap(), MismatchedRequest).unwrap();
+    assert_ne!(
+        FusionRule::rule_identity(&first),
+        FusionRule::rule_identity(&second)
+    );
+    assert_eq!(
+        FusionRule::rule_identity(&first),
+        FusionRule::rule_identity(&first.clone())
+    );
 }
