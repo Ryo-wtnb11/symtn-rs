@@ -11,6 +11,217 @@ fn s(id: usize) -> SectorId {
 }
 
 #[test]
+fn category_rule_factors_preserve_channels_duals_and_factor_errors() {
+    use fusion_symbols::finite::ZN;
+    use std::error::Error;
+    type MF = MultiplicityFreeAdmissionMode;
+    type CG = CheckedGenericAdmissionMode;
+
+    let z3 = CategoryRule::try_new(ZN::new(3).unwrap(), EnumeratedCodec::<MF>::new()).unwrap();
+    let mf = ProductFusionRule::<_, _>::try_new(z3, U1FusionRule).unwrap();
+    let x = mf.encode_component_ids(s(1), U1Irrep::new(2).sector_id());
+    let y = mf.encode_component_ids(s(2), U1Irrep::new(4).sector_id());
+    let dual = mf.encode_component_ids(s(2), U1Irrep::new(-2).sector_id());
+    // (1,2) + (1,2) = (2,4) in Z3 x U1; -(1,2) = (2,-2).
+    assert_eq!(mf.try_fusion_channels(x, x).unwrap().as_slice(), &[y]);
+    assert_eq!(mf.try_nsymbol(x, x, y).unwrap(), 1);
+    assert_eq!(mf.try_dual_sector(x).unwrap(), dual);
+    assert_eq!(mf.r_symbol_scalar(x, x, y), 1.0);
+    assert_eq!(mf.twist_scalar(x), 1.0);
+    assert_eq!(FusionRule::sector_order_key(&mf, x).positions(), &[1, 7]);
+    // Negative controls: the wrong output and a foreign Z3 id stay distinct.
+    assert_eq!(mf.try_nsymbol(x, x, x).unwrap(), 0);
+    let bad = mf.encode_component_ids(s(3), s(0));
+    assert_eq!(
+        mf.try_dual_sector(bad),
+        Err(FusionAlgebraError::InvalidSector { sector: s(3) })
+    );
+
+    let z3 = CategoryRule::try_new(ZN::new(3).unwrap(), EnumeratedCodec::<CG>::new()).unwrap();
+    let left_cg = ProductFusionRule::<_, _>::try_new(z3.clone(), U1FusionRule).unwrap();
+    assert!(matches!(
+        left_cg.try_dual(left_cg.encode_component_ids(s(3), s(0))),
+        Err(ProductFusionRuleError::Left(FusionAlgebraError::InvalidSector { sector }))
+            if sector == s(3)
+    ));
+    let cg = ProductFusionRule::<_, _>::try_new(U1FusionRule, z3).unwrap();
+    assert_eq!(cg.fusion_style(), FusionStyleKind::Generic);
+    let x = cg.encode_component_ids(U1Irrep::new(2).sector_id(), s(1));
+    let y = cg.encode_component_ids(U1Irrep::new(4).sector_id(), s(2));
+    let dual = cg.encode_component_ids(U1Irrep::new(-2).sector_id(), s(2));
+    assert_eq!(cg.try_fusion_channels(x, x).unwrap().as_slice(), &[y]);
+    assert_eq!(
+        cg.try_fusion_channels_in_table(x, x).unwrap().as_slice(),
+        &[y]
+    );
+    assert_eq!(cg.try_nsymbol(x, x, y).unwrap(), 1);
+    assert_eq!(cg.try_dual(x).unwrap(), dual);
+    assert_eq!(cg.try_r_symbol_generic(x, x, y).unwrap().data(), &[1.0]);
+    assert_eq!(cg.try_twist_scalar(x).unwrap(), 1.0);
+    assert_eq!(
+        CheckedGenericFusion::sector_order_key(&cg, x).positions(),
+        &[7, 1]
+    );
+    assert_eq!(cg.try_nsymbol(x, x, x).unwrap(), 0);
+    let bad = cg.encode_component_ids(s(0), s(3));
+    assert!(matches!(
+        cg.try_dual(bad),
+        Err(ProductFusionRuleError::Right(FusionAlgebraError::InvalidSector { sector }))
+            if sector == s(3)
+    ));
+    assert!(matches!(
+        cg.try_r_symbol_generic(x, x, bad),
+        Err(ProductFusionRuleError::Right(FusionAlgebraError::InvalidSector { sector }))
+            if sector == s(3)
+    ));
+    assert!(matches!(
+        cg.try_twist_scalar(bad),
+        Err(ProductFusionRuleError::Right(FusionAlgebraError::InvalidSector { sector }))
+            if sector == s(3)
+    ));
+    let mapped =
+        CategoryProvider::map_error(cg.right_rule(), &[s(1)], CategoryAdapterError::NoBraiding);
+    let FusionAlgebraError::CategoryFailure(failure) = mapped else {
+        panic!("{mapped:?}")
+    };
+    assert_eq!(
+        failure
+            .source()
+            .unwrap()
+            .downcast_ref::<CategoryAdapterError<std::convert::Infallible>>(),
+        Some(&CategoryAdapterError::NoBraiding)
+    );
+}
+
+#[test]
+fn product_errors_display_context_and_retain_each_source() {
+    use std::error::Error;
+    use std::io;
+    type E = ProductFusionRuleError<io::Error, io::Error>;
+
+    for (error, text, source) in [
+        (
+            E::Left(io::Error::other("left probe")),
+            "the left factor rejected its component",
+            Some("left probe"),
+        ),
+        (
+            E::Right(io::Error::other("right probe")),
+            "the right factor rejected its component",
+            Some("right probe"),
+        ),
+        (
+            E::Codec(ProductSectorCodecError::CodecRejected),
+            "the product sector id cannot be packed",
+            Some("product sector codec rejected the value"),
+        ),
+        (
+            E::DimensionNotRepresentable { sector: s(7) },
+            "the dimension of SectorId(7) is not a finite positive f64",
+            None,
+        ),
+        (
+            E::Category(CategoryFailure::new(io::Error::other("category probe"))),
+            "the product category failed",
+            Some("category probe"),
+        ),
+    ] {
+        assert_eq!(error.to_string(), text);
+        assert_eq!(error.source().map(ToString::to_string).as_deref(), source);
+        match &error {
+            E::Left(_) | E::Right(_) => assert!(error.source().unwrap().is::<io::Error>()),
+            E::Codec(_) => assert!(error.source().unwrap().is::<ProductSectorCodecError>()),
+            E::Category(_) => assert!(error.source().unwrap().is::<CategoryFailure>()),
+            // Negative control: a dimension failure has context but no underlying error.
+            E::DimensionNotRepresentable { .. } => assert!(error.source().is_none()),
+            _ => panic!("unexpected product error: {error:?}"),
+        }
+    }
+}
+
+#[test]
+fn product_admission_maps_adapter_errors_without_erasing_sources() {
+    use std::error::Error;
+    type MF = MultiplicityFreeAdmissionMode;
+    type CG = CheckedGenericAdmissionMode;
+    type A = CategoryAdapterError<FusionAlgebraError>;
+    type F = FusionAlgebraError;
+
+    for adapter in [
+        A::DimensionNotRepresentable { sector: s(7) },
+        A::Provider(F::InvalidSector { sector: s(9) }),
+        A::NoBraiding,
+        A::ForeignObject {
+            sector: Some(s(11)),
+        },
+    ] {
+        let mf = <(MF, MF) as ProductAdmission<F, F>>::adapter(adapter.clone());
+        if let A::ForeignObject {
+            sector: Some(sector),
+        } = adapter
+        {
+            // Negative control: foreign ids map to InvalidSector, not CategoryFailure.
+            assert_eq!(mf, F::InvalidSector { sector });
+        } else {
+            let F::CategoryFailure(failure) = mf else {
+                panic!("{mf:?}")
+            };
+            match &adapter {
+                A::Provider(expected) => assert_eq!(
+                    failure.source().unwrap().downcast_ref::<F>(),
+                    Some(expected)
+                ),
+                other => assert_eq!(failure.source().unwrap().downcast_ref::<A>(), Some(other)),
+            }
+        }
+
+        for map in [
+            <(MF, CG) as ProductAdmission<F, F>>::adapter::<F>,
+            <(CG, MF) as ProductAdmission<F, F>>::adapter::<F>,
+            <(CG, CG) as ProductAdmission<F, F>>::adapter::<F>,
+        ] {
+            let error = map(adapter.clone());
+            match &adapter {
+                A::DimensionNotRepresentable { sector: expected } => {
+                    assert!(
+                        matches!(error, ProductFusionRuleError::DimensionNotRepresentable { sector } if sector == *expected)
+                    );
+                    assert!(error.source().is_none());
+                }
+                other => {
+                    let ProductFusionRuleError::Category(failure) = error else {
+                        panic!("{error:?}")
+                    };
+                    match other {
+                        A::Provider(expected) => assert_eq!(
+                            failure.source().unwrap().downcast_ref::<F>(),
+                            Some(expected)
+                        ),
+                        expected => assert_eq!(
+                            failure.source().unwrap().downcast_ref::<A>(),
+                            Some(expected)
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "MultiplicityFreeRigidSymbols::inv_dim_scalar")]
+fn mf_product_inverse_dimension_rejects_a_foreign_factor_id() {
+    // docs/provider_interface.md: infallible queries may panic outside their domain.
+    let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, Z2FusionRule).unwrap();
+    assert_eq!(
+        rule.inv_dim_scalar(rule.encode_component_ids(s(1), s(1))),
+        0.5
+    );
+    // Negative control: the packing is valid, but Z2 has no sector 2.
+    rule.inv_dim_scalar(rule.encode_component_ids(s(1), s(2)));
+}
+
+#[test]
 fn su2_fermion_product_has_the_independent_spin_and_parity_signs() {
     let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, FermionParityFusionRule).unwrap();
     let half_odd = rule.encode_component_ids(s(1), s(1));
@@ -65,6 +276,121 @@ fn zero_left_r_still_rejects_an_invalid_right_mf_sector() {
 mod generated {
     use super::*;
     use fusion_symbols::category::FusionCategory;
+
+    #[test]
+    fn checked_generic_product_surface_preserves_hand_derived_factor_data() {
+        let su3 = SUNFusionRule::new(3).unwrap();
+        let three = su3.encode_dynkin(&[1, 0]).unwrap();
+        let anti_three = su3.encode_dynkin(&[0, 1]).unwrap();
+        let six = su3.encode_dynkin(&[2, 0]).unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, su3.clone()).unwrap();
+        let swapped = ProductFusionRule::<_, _>::try_new(su3, SU2FusionRule).unwrap();
+        assert_eq!(rule.rule_identity(), rule.clone().rule_identity());
+        assert_ne!(rule.rule_identity(), swapped.rule_identity());
+        assert_eq!(rule.fusion_style(), FusionStyleKind::Generic);
+        assert_eq!(rule.braiding_style(), BraidingStyleKind::Bosonic);
+        assert_eq!(rule.vacuum(), s(0));
+        let debug = format!("{rule:?}");
+        assert!(debug.starts_with("ProductFusionRule { left: SU2FusionRule, right: SUNFusionRule"));
+        assert!(debug.contains(&format!("identity: {:?}", rule.rule_identity())));
+        assert_ne!(debug, format!("{swapped:?}"));
+
+        let x = rule.encode_component_ids(s(1), three);
+        let dual = rule.encode_component_ids(s(1), anti_three);
+        assert_eq!(rule.try_dual(x).unwrap(), dual);
+        assert_ne!(dual, x);
+        // (1/2 x 1/2) = 0 + 1; 3 x 3 = bar(3) + 6 (Dynkin order).
+        // fusion-symbols Product enumerates the first factor fastest.
+        let channels = [
+            rule.encode_component_ids(s(0), anti_three),
+            rule.encode_component_ids(s(2), anti_three),
+            rule.encode_component_ids(s(0), six),
+            rule.encode_component_ids(s(2), six),
+        ];
+        assert_eq!(
+            rule.try_fusion_channels(x, x).unwrap().as_slice(),
+            &channels
+        );
+        assert_eq!(
+            rule.try_fusion_channels_in_table(x, x).unwrap().as_slice(),
+            &channels
+        );
+        for output in channels {
+            assert_eq!(rule.try_nsymbol(x, x, output).unwrap(), 1);
+        }
+        assert_eq!(rule.try_dim_scalar(x).unwrap(), 2.0 * 3.0);
+        numerics::assert_close(
+            "sqrt product dimension",
+            rule.try_sqrt_dim_scalar(x).unwrap(),
+            6.0_f64.sqrt(),
+            2,
+        );
+        numerics::assert_close(
+            "inverse sqrt product dimension",
+            rule.try_inv_sqrt_dim_scalar(x).unwrap(),
+            1.0 / 6.0_f64.sqrt(),
+            2,
+        );
+        assert_eq!(rule.try_frobenius_schur_phase_scalar(x).unwrap(), -1.0);
+        assert_eq!(rule.try_twist_scalar(x).unwrap(), 1.0);
+        // Negative control: neither the input nor the unit is in x tensor x.
+        assert_eq!(rule.try_nsymbol(x, x, x).unwrap(), 0);
+        assert_eq!(rule.try_nsymbol(x, x, rule.vacuum()).unwrap(), 0);
+        let invalid = rule.encode_component_ids(s(255), three);
+        for error in [
+            rule.try_dual(invalid).unwrap_err(),
+            rule.try_fusion_channels(invalid, x).unwrap_err(),
+            rule.try_fusion_channels_in_table(invalid, x).unwrap_err(),
+            rule.try_nsymbol(invalid, x, channels[0]).unwrap_err(),
+            rule.try_dim_scalar(invalid).unwrap_err(),
+            rule.try_sqrt_dim_scalar(invalid).unwrap_err(),
+            rule.try_inv_sqrt_dim_scalar(invalid).unwrap_err(),
+            rule.try_frobenius_schur_phase_scalar(invalid).unwrap_err(),
+            rule.try_twist_scalar(invalid).unwrap_err(),
+        ] {
+            assert!(matches!(error,
+                ProductFusionRuleError::Left(FusionAlgebraError::InvalidSector { sector })
+                    if sector == s(255)
+            ));
+        }
+
+        let nested = ProductFusionRule::<_, _>::try_new(rule, FermionParityFusionRule).unwrap();
+        assert_ne!(nested.rule_identity(), nested.left_rule().rule_identity());
+        let odd = nested.encode_component_ids(x, s(1));
+        let odd_dual = nested.encode_component_ids(dual, s(1));
+        assert_eq!(nested.fusion_style(), FusionStyleKind::Generic);
+        assert_eq!(nested.braiding_style(), BraidingStyleKind::Fermionic);
+        assert_eq!(nested.vacuum(), s(0));
+        assert_eq!(nested.try_dual(odd).unwrap(), odd_dual);
+        let even_channels = channels.map(|id| nested.encode_component_ids(id, s(0)));
+        assert_eq!(
+            nested.try_fusion_channels(odd, odd).unwrap().as_slice(),
+            &even_channels
+        );
+        assert_eq!(
+            nested
+                .try_fusion_channels_in_table(odd, odd)
+                .unwrap()
+                .as_slice(),
+            &even_channels
+        );
+        assert_eq!(nested.try_nsymbol(odd, odd, even_channels[0]).unwrap(), 1);
+        assert_eq!(nested.try_dim_scalar(odd).unwrap(), 6.0);
+        assert_eq!(nested.try_twist_scalar(odd).unwrap(), -1.0);
+        // Negative control: odd x odd has even parity, and removing parity removes its twist.
+        assert_eq!(
+            nested
+                .try_nsymbol(odd, odd, nested.encode_component_ids(channels[0], s(1)))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            nested
+                .try_twist_scalar(nested.encode_component_ids(x, s(0)))
+                .unwrap(),
+            1.0
+        );
+    }
 
     // TensorKitSectors 0.3.9 / SUNRepresentations 0.4.0:
     // o = SUNIrrep{3}(1,1); Fsymbol(o,o,o,o,o,o), Rsymbol(o,o,o).
@@ -391,7 +717,7 @@ mod storage {
     // A storage probe, not a physical category oracle: nonidentity, unequal
     // multiplicity matrices expose permutations that the SU3 identity A/B hide.
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-    struct Symbols(u32);
+    struct Symbols(u32, bool);
 
     impl FusionCategory for Symbols {
         type Object = u8;
@@ -429,7 +755,7 @@ mod storage {
             1.0
         }
         fn has_canonical_unit(&self) -> bool {
-            true
+            self.1
         }
         fn fusion<'a>(&'a self, a: &u8, b: &u8) -> Result<Self::Fusion<'a>, Infallible> {
             Ok(if *a == 0 {
@@ -519,8 +845,36 @@ mod storage {
     }
 
     #[test]
+    fn product_requires_the_category_unit_certificate_even_with_uncertified_admission() {
+        for canonical in [false, true] {
+            let factor = CategoryRule::try_new(
+                Symbols(2, canonical),
+                EnumeratedCodec::<CheckedGenericAdmissionMode, UncertifiedUnitAdmission>::new(),
+            )
+            .unwrap();
+            let left = ProductFusionRule::<_, _>::try_new(factor.clone(), U1FusionRule);
+            let right = ProductFusionRule::<_, _>::try_new(U1FusionRule, factor);
+            if canonical {
+                // Negative control: the admission selector alone does not reject a product.
+                assert!(left.is_ok());
+                assert!(right.is_ok());
+            } else {
+                assert!(matches!(
+                    left,
+                    Err(CategoryAdmissionError::MissingCanonicalUnit)
+                ));
+                assert!(matches!(
+                    right,
+                    Err(CategoryAdmissionError::MissingCanonicalUnit)
+                ));
+            }
+        }
+    }
+
+    #[test]
     fn asymmetric_a_and_b_use_the_right_factor_digit_fastest() {
-        let rule = ProductFusionRule::<_, _>::try_new(cg(Symbols(2)), cg(Symbols(3))).unwrap();
+        let rule =
+            ProductFusionRule::<_, _>::try_new(cg(Symbols(2, true)), cg(Symbols(3, true))).unwrap();
         let x = rule.encode_component_ids(s(1), s(1));
         // Explicit factor matrices from the storage probe's F blocks above;
         // exact Kronecker formula M[(i,j),(k,l)] = L[i,k] R[j,l].
@@ -559,7 +913,8 @@ mod storage {
     #[test]
     fn product_n_keeps_fs_overflow_and_a_later_zero_annuls_it() {
         let inner =
-            ProductFusionRule::<_, _>::try_new(cg(Symbols(u32::MAX)), cg(Symbols(2))).unwrap();
+            ProductFusionRule::<_, _>::try_new(cg(Symbols(u32::MAX, true)), cg(Symbols(2, true)))
+                .unwrap();
         let x = inner.encode_component_ids(s(1), s(1));
         let error = inner.try_nsymbol(x, x, x).unwrap_err();
         let ProductFusionRuleError::Category(failure) = error else {
@@ -655,10 +1010,10 @@ mod storage {
             true
         }
         fn fusion<'a>(&'a self, a: &u8, b: &u8) -> Result<Self::Fusion<'a>, Infallible> {
-            Symbols(2).fusion(a, b)
+            Symbols(2, true).fusion(a, b)
         }
         fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> u32 {
-            Symbols(2).nsymbol(a, b, c)
+            Symbols(2, true).nsymbol(a, b, c)
         }
         fn f_symbol(
             &self,
@@ -698,7 +1053,7 @@ mod storage {
             Ok(Some(2))
         }
         fn object_at(&self, index: u64) -> Result<u8, EnumerationError> {
-            Symbols(2).object_at(index)
+            Symbols(2, true).object_at(index)
         }
         fn object_index(&self, a: &u8) -> Result<u64, EnumerationError> {
             Ok(u64::from(*a))
