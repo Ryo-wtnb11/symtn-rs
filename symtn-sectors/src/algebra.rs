@@ -983,12 +983,10 @@ pub trait TypedSectorAdmission: crate::seal::Provider + 'static {
     fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error>;
 }
 
-/// Layout mode for existing multiplicity-free providers.
-#[doc(hidden)]
+/// Admission selector for multiplicity-free category rules.
 pub struct MultiplicityFreeAdmissionMode;
 
-/// Layout mode for checked Generic providers.
-#[doc(hidden)]
+/// Admission selector for checked Generic category rules.
 pub struct CheckedGenericAdmissionMode;
 
 /// Fallible categorical symbol access for Generic-fusion plan lowering.
@@ -1524,8 +1522,9 @@ impl std::error::Error for ProductSectorCodecError {}
 
 /// Cantor-pairing product codec.
 ///
-/// This is the default codec parameter of core's `ProductFusionRule`.
-/// Built-in user-layer product spaces use [`PackedProductCodec`] instead.
+/// This is the default codec of [`ProductFusionRule`](crate::ProductFusionRule)
+/// in every layer.
+/// Select [`PackedProductCodec`] explicitly for fixed-width encoding.
 /// Nested Cantor decoding is
 /// magnitude-dependent and its representable component domain shrinks as
 /// pairing is nested.

@@ -8,6 +8,29 @@
 //! [`SU2FusionRule`], ...) exported here. The provider traits are sealed
 //! bounds, not an extension point. This module is the only path to each item
 //! it lists.
+//!
+//! A category's labels pass through the adapter into spaces and tensors:
+//!
+//! ```
+//! use std::sync::Arc;
+//! use fusion_symbols::table::TableCategory;
+//! use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+//! use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let category = TableCategory::fibonacci();
+//! let tau = category.object(2)?;
+//! let rule = CategoryRule::try_new(
+//!     category,
+//!     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
+//! )?;
+//! let v = GradedSpace::try_new(Arc::new(rule), [(tau, 2)])?;
+//! let runtime = Runtime::builder().build()?;
+//! let tensor: TensorMap<_, Complex64> = TensorMap::zeros(&runtime, [&v], [&v])?;
+//! assert_eq!(tensor.subblock_count(), 1);
+//! # Ok(())
+//! # }
+//! ```
 
 /// Built-in fusion rules, their sector labels, and product constructors.
 pub use symtn_core::{
@@ -36,7 +59,6 @@ pub use symtn_core::{
     MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec, TypedSectorAdmission,
 };
 /// Sealed admission modes: the values of `TypedSectorAdmission::Mode`.
-#[doc(hidden)]
 pub use symtn_core::{CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode};
 /// Label codecs of a [`ProductFusionRule`], its third type
 /// parameter, and the per-factor layouts they pack.

@@ -78,10 +78,10 @@ So an SU(2) `GradedSpace` with degeneracy two in twice-spin sectors 0 and 1 has 
 </math>
 </div>
 
-The user layer exposes U(1), bosonic Z2, fermion parity fZ2,
-SU(2), and selected product symmetries through `GradedSpace` values over
-admitted providers. Product-sector dimensions multiply sector
-quantum dimensions componentwise.
+The user layer accepts built-in rules and `fusion_symbols` categories adapted
+through `CategoryRule`, including nested `ProductFusionRule` values, subject to
+each operation's capability bounds. Product-sector quantum dimensions come from
+fusion-symbols and multiply componentwise.
 
 ## Duals
 
@@ -672,10 +672,11 @@ endomorphism `H`, an imaginary-time gate uses
 This page describes the model implemented by symtn today, not the full
 generality of category-theoretic tensor calculus. Host ordinary operations are
 multiplicity-free plus the checked Generic operations that state their own
-bounds. `TableRule` has `Complex64` categorical coefficients and is
-tested for construction, transformations including explicit planar braids,
-tensor products, and composition. Ordinary arbitrary-axis contraction,
-factorization, and general network execution are not supported or claimed.
+bounds. `TableRule` supports Host construction, transformations, tensor products,
+composition, planar contraction, reductions, structural degeneracy operations
+and blockwise factorizations over `Complex64`. Ordinary arbitrary-axis
+contraction requires symmetric braiding; general table-rule network execution
+and prepared contraction/composition plans remain unsupported.
 Checked Generic support is Host-only. CUDA requires explicit transfer and
 supports a multiplicity-free subset over `f32`, `f64`, `Complex32` and
 `Complex64`; unsupported device

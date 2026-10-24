@@ -1,5 +1,5 @@
 [workspace]
-members = ["symtn", "symtn-core", "symtn-dense", "symtn-macros", "symtn-matrixalgebra", "symtn-network", "symtn-operations", "symtn-sectors", "symtn-tensors"]
+members = ["symtn", "symtn-core", "symtn-dense", "symtn-macros", "symtn-matrixalgebra", "symtn-network", "symtn-operations", "symtn-sectors", "symtn-tensors", "tests/production-contract"]
 resolver = "2"
 
 [workspace.package]

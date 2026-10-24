@@ -1,0 +1,18 @@
+[package]
+name = "symtn-production-contract"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "symtn-production-contract"
+path = "src/main.rs"
+# The workspace test harness unifies core's testing feature; use the CI run gate.
+test = false
+bench = false
+
+[dependencies]
+fusion-symbols = { version = "0.8.0", default-features = false }
+symtn-core = { path = "../../symtn-core" }

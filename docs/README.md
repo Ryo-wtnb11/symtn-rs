@@ -28,7 +28,10 @@ revision, provider, build, thread count, workload and raw results.
 
 [CI](../.github/workflows/ci.yml) runs lint, feature/backend contracts, the Host
 pool audit, Linux coverage tests, doctests, examples and rustdoc on ready PRs
-and main pushes. The full default-provider macOS suite runs on main nightly at
+and main pushes. The lint job also runs `cargo run -p symtn-production-contract`,
+a [normal-dependency consumer](../tests/production-contract/src/main.rs) that
+checks category A/B forwarding and query costs with `testing` disabled.
+The full default-provider macOS suite runs on main nightly at
 15:17 UTC and by manual dispatch in [macOS nightly](../.github/workflows/nightly.yml);
 its runtime checks detect platform regressions later than the push/PR gates.
 The scoped Accelerate backend job stays in CI. Ordinary mixed check/test jobs

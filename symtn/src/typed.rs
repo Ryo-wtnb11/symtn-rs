@@ -3,8 +3,9 @@
 //!
 //! This is the canonical user facade. `R`
 //! stays concrete through monomorphized construction, so any provider —
-//! including one defined downstream that implements the required admission and
-//! operation capability traits — can drive it, and the categorical
+//! including a downstream `fusion_symbols` category adapted through
+//! [`crate::sector::CategoryRule`], when the resulting rule satisfies the
+//! operation's admission and capability bounds — can drive it, and the categorical
 //! identity of a tensor comes back as [`TypedSectorAdmission::Sector`] labels
 //! instead of opaque [`crate::sector::SectorId`] keys. The engine itself never
 //! sees a label; the codec is the single boundary where one enters or leaves.

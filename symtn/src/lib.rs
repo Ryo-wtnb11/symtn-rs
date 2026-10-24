@@ -56,7 +56,8 @@
 //! - [`typed`]: the tensor API — [`typed::Runtime`], [`typed::GradedSpace`],
 //!   [`typed::TensorMap`], their options, results and errors;
 //! - [`sector`]: the symmetry contract — the built-in fusion rules and their
-//!   labels, and the traits a rule of your own implements;
+//!   labels, category adapters and codecs, and the sealed capability bounds
+//!   used by generic tensor code;
 //! - [`expert`]: storage, block views, the dense executor seam and cache
 //!   observability;
 //! - `krylov` (feature `krylov`): the [krylov](https://docs.rs/krylov)
