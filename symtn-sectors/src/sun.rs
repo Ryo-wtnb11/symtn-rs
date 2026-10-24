@@ -434,6 +434,20 @@ impl SunCodec {
         self.irreps.insert(sector, Arc::new(irrep.clone()));
         Ok(sector)
     }
+
+    fn dual<'a>(
+        &self,
+        category: impl Fn() -> &'a LieGroup + Copy,
+        sector: SectorId,
+    ) -> Result<SectorId, SUNFusionRuleError> {
+        if let Some(dual) = self.irreps.dual(sector) {
+            return Ok(dual);
+        }
+        let object = crate::category_rule::member_object(self, category, sector)?;
+        let dual = self.sector(&category().dual(&object))?;
+        self.irreps.insert_dual(sector, dual);
+        Ok(dual)
+    }
 }
 
 impl CategoryCodec<LieGroup> for SunCodec {
@@ -474,6 +488,27 @@ impl CategoryCodec<LieGroup> for SunCodec {
         object: &LieIrrep,
     ) -> Result<SectorId, SUNFusionRuleError> {
         self.sector(object)
+    }
+
+    fn admit<'a, const N: usize>(
+        &self,
+        category: impl Fn() -> &'a LieGroup + Copy,
+        _rule: &RuleIdentity,
+        operation: crate::CategoryOperation,
+        ids: [SectorId; N],
+    ) -> Result<[LieIrrep; N], SUNFusionRuleError> {
+        let objects = crate::category_rule::try_map_array(ids, |id| {
+            crate::category_rule::member_object(self, category, id)
+        })?;
+        let dualized = match operation {
+            crate::CategoryOperation::A => ids.first(),
+            crate::CategoryOperation::B => ids.get(1),
+            _ => None,
+        };
+        if let Some(&id) = dualized {
+            self.dual(category, id)?;
+        }
+        Ok(objects)
     }
 
     fn encode_channels(
@@ -533,13 +568,21 @@ impl AdapterAccess for SUNFusionRule {
         operation: crate::CategoryOperation,
         ids: [SectorId; 3],
     ) -> Result<crate::category_rule::AdmittedObjects<LieIrrep, 3>, SUNFusionRuleError> {
-        crate::category_rule::admit_in_order_with_dual(
-            &self.codec,
-            || self.category(),
-            &self.identity,
-            operation,
-            ids,
-        )
+        let objects = self
+            .codec
+            .admit(|| self.category(), &self.identity, operation, ids)?;
+        let dualized = match operation {
+            crate::CategoryOperation::A => ids.first(),
+            crate::CategoryOperation::B => ids.get(1),
+            _ => None,
+        };
+        let dual = dualized
+            .map(|&id| {
+                let dual_id = self.codec.dual(|| self.category(), id)?;
+                self.codec.object(|| self.category(), dual_id)
+            })
+            .transpose()?;
+        Ok((objects, dual))
     }
     fn identity(&self) -> &RuleIdentity {
         &self.identity
@@ -569,12 +612,7 @@ impl CheckedGenericFusion for SUNFusionRule {
     }
 
     fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
-        if let Some(dual) = self.codec.irreps.dual(sector) {
-            return Ok(dual);
-        }
-        let dual = forward::dual(self, sector)?;
-        self.codec.irreps.insert_dual(sector, dual);
-        Ok(dual)
+        self.codec.dual(|| self.category(), sector)
     }
 
     fn try_fusion_channels(
@@ -825,6 +863,28 @@ const fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vertex_admission_rejects_an_unencodable_dual() {
+        if usize::BITS != 64 {
+            return;
+        }
+        let rule = SUNFusionRule::new(3).unwrap();
+        let unit = rule.vacuum();
+        let sector = SectorId::new(usize::MAX);
+        for (operation, ids) in [
+            (crate::CategoryOperation::A, [sector, unit, unit]),
+            (crate::CategoryOperation::B, [unit, sector, unit]),
+        ] {
+            for _ in 0..2 {
+                assert!(matches!(
+                    crate::CategoryProvider::admit(&rule, operation, ids),
+                    Err(SUNFusionRuleError::UnrepresentableLabel { labels })
+                        if labels == [3_327_948_884, 2_746_052_115]
+                ));
+            }
+        }
+    }
 
     #[test]
     fn malformed_symbol_axes_map_without_a_source() {
