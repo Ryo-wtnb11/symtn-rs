@@ -2,6 +2,7 @@ use fusion_symbols::{
     category::FusionCategory,
     lie::{GroupId, LieGroup, LieIrrep},
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, OnceLock, PoisonError, RwLock};
@@ -240,7 +241,8 @@ fn racah_error(error: fusion_symbols::lie::LieError) -> SUNFusionRuleError {
 impl SUNFusionRule {
     /// Constructs an SU(N) rule, deferring rank-sized provider allocation until a query.
     /// SU(2) Dynkin labels span `0..=u32::MAX`; larger labels return
-    /// [`SUNFusionRuleError::UnrepresentableLabel`].
+    /// [`SUNFusionRuleError::UnrepresentableLabel`], including when fusion
+    /// produces a label above this bound.
     pub fn new(n: usize) -> Result<Self, SUNFusionRuleError> {
         if n < 2 {
             return Err(SUNFusionRuleError::InvalidRank { n });
@@ -266,8 +268,10 @@ impl SUNFusionRule {
     }
 
     fn category(&self) -> &LieGroup {
-        self.category
-            .get_or_init(|| LieGroup::new(GroupId::su(self.rank()).unwrap()).unwrap())
+        self.category.get_or_init(|| {
+            LieGroup::new(GroupId::su(self.rank()).expect("SUNFusionRule validates N >= 2"))
+                .expect("the SU(N) category is supported at every validated rank")
+        })
     }
 
     pub const fn rank(&self) -> usize {
@@ -288,7 +292,10 @@ impl SUNFusionRule {
 
     fn identity_bytes(n: usize) -> Arc<[u8]> {
         // Fingerprints are shared within A1 / higher A; do not allocate rank-sized provider state here.
-        let category = LieGroup::new(GroupId::su(if n == 2 { 2 } else { 3 }).unwrap()).unwrap();
+        let category = LieGroup::new(
+            GroupId::su(if n == 2 { 2 } else { 3 }).expect("2 and 3 are valid SU(N) ranks"),
+        )
+        .expect("SU(2) and SU(3) categories are supported");
         let mut bytes = Vec::with_capacity(category.authority_fingerprint().len() + 32);
         bytes.extend_from_slice(CODEC_VERSION);
         bytes.extend_from_slice(&(usize::BITS).to_le_bytes());
@@ -426,12 +433,12 @@ impl SunCodec {
         Ok(self.irreps.insert(sector, Arc::new(irrep)))
     }
 
-    fn sector(&self, irrep: &LieIrrep) -> Result<SectorId, SUNFusionRuleError> {
-        if let Some(sector) = self.irreps.by_irrep(irrep) {
+    fn sector(&self, irrep: Cow<'_, LieIrrep>) -> Result<SectorId, SUNFusionRuleError> {
+        if let Some(sector) = self.irreps.by_irrep(&irrep) {
             return Ok(sector);
         }
         let sector = self.encode_dynkin_iter(|| irrep.dynkin_labels())?;
-        self.irreps.insert(sector, Arc::new(irrep.clone()));
+        self.irreps.insert(sector, Arc::new(irrep.into_owned()));
         Ok(sector)
     }
 
@@ -444,7 +451,7 @@ impl SunCodec {
             return Ok(dual);
         }
         let object = crate::category_rule::member_object(self, category, sector)?;
-        let dual = self.sector(&category().dual(&object))?;
+        let dual = self.sector(Cow::Owned(category().dual(&object)))?;
         self.irreps.insert_dual(sector, dual);
         Ok(dual)
     }
@@ -487,7 +494,7 @@ impl CategoryCodec<LieGroup> for SunCodec {
         _rule: &RuleIdentity,
         object: &LieIrrep,
     ) -> Result<SectorId, SUNFusionRuleError> {
-        self.sector(object)
+        self.sector(Cow::Borrowed(object))
     }
 
     fn admit<'a, const N: usize>(
@@ -519,7 +526,7 @@ impl CategoryCodec<LieGroup> for SunCodec {
         outcomes: impl Iterator<Item = LieIrrep>,
     ) -> Result<SectorVec, SUNFusionRuleError> {
         let mut channels: SectorVec = outcomes
-            .map(|irrep| self.sector(&irrep))
+            .map(|irrep| self.sector(Cow::Owned(irrep)))
             .collect::<Result<_, _>>()?;
         channels.sort_unstable();
         Ok(channels)
@@ -527,10 +534,18 @@ impl CategoryCodec<LieGroup> for SunCodec {
 
     fn map_error(
         &self,
-        _inputs: &[SectorId],
+        inputs: &[SectorId],
         error: CategoryAdapterError<fusion_symbols::lie::LieError>,
     ) -> SUNFusionRuleError {
         match error {
+            CategoryAdapterError::Provider(fusion_symbols::lie::LieError::LabelOverflow)
+                if self.n == 2
+                    && matches!(inputs, [left, right] if left.id() <= u32::MAX as usize && right.id() <= u32::MAX as usize) =>
+            {
+                SUNFusionRuleError::UnrepresentableLabel {
+                    labels: vec![inputs[0].id() as i64 + inputs[1].id() as i64],
+                }
+            }
             CategoryAdapterError::Provider(error) => racah_error(error),
             CategoryAdapterError::DimensionNotRepresentable { sector } => {
                 SUNFusionRuleError::DimensionNotRepresentable { sector }
@@ -907,9 +922,8 @@ mod tests {
         assert!(error.source().is_none());
     }
 
-    /// The 0.2.3 adapter derived the FS phase as sign F[a,ā,a,a;1,1], the dual
-    /// by Dynkin reversal, and the twist as a constant; fusion-symbols 0.3.0 owns all
-    /// three. The fusion-symbols APIs must reproduce those derivations bit for bit.
+    /// The provider's FS phase, dual and twist must match sign F[a,ā,a,a;1,1],
+    /// Dynkin reversal and constant unit twist, respectively, bit for bit.
     #[test]
     fn rigid_data_matches_f_symbol_and_dynkin_derivations() {
         for (n, max_total) in [(2, 6), (3, 3), (4, 2)] {
@@ -1147,7 +1161,7 @@ mod tests {
             *rule.codec.irrep(|| rule.category(), eight).unwrap(),
             *first
         );
-        assert_eq!(rule.codec.sector(&first).unwrap(), three);
+        assert_eq!(rule.codec.sector(Cow::Borrowed(&first)).unwrap(), three);
 
         let anti_three = rule.encode_dynkin(&[0, 1]).unwrap();
         assert_eq!(rule.codec.irreps.dual(three), None);
@@ -1159,8 +1173,8 @@ mod tests {
         let su2 = SUNFusionRule::new(2).unwrap();
         let su4 = SUNFusionRule::new(4).unwrap();
         let wide = su4.codec.irrep(|| su4.category(), three).unwrap();
-        assert!(su2.codec.sector(&wide).is_err());
-        assert!(su2.codec.sector(&wide).is_err());
+        assert!(su2.codec.sector(Cow::Borrowed(&wide)).is_err());
+        assert!(su2.codec.sector(Cow::Borrowed(&wide)).is_err());
     }
 
     #[test]

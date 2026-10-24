@@ -56,3 +56,26 @@ fn warm_sun_channel_coordinate_encoding_does_not_allocate() {
         assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
     }
 }
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn sun_reverse_cache_miss_allocates_only_the_interned_entry() {
+    use fusion_symbols::lie::{GroupId, LieGroup};
+    use symtn_sectors::{CategoryProvider, SUNFusionRule};
+
+    for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
+        let rule = SUNFusionRule::new(n).unwrap();
+        let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
+        let object = category.irrep(labels).unwrap();
+        let expected = rule.encode_dynkin(labels).unwrap();
+        let _ = CategoryProvider::category(&rule);
+        let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
+        assert_eq!(sector, expected);
+        // One Arc entry and the initial backing allocation of each of the two maps.
+        // Provider label clones share their weight buffer; dynkin_labels() adds none.
+        assert_eq!(allocs.calls, 1 + 2, "SU({n}): {allocs:?}");
+        let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
+        assert_eq!(sector, expected);
+        assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
+    }
+}

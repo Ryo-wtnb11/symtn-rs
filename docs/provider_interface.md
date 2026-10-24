@@ -108,6 +108,9 @@ decoded query needs it and reuses its bounded irrep interner: a warm hit clones
 the provider's allocation-free handle, without a Dynkin-label `Vec`. The adapter
 has no separate object cache. Provider generation and returned symbol/channel
 storage have their own allocation costs; Generic blocks copy provider data.
+For `SUNFusionRule::new(2)`, fusion whose largest doubled-spin label exceeds
+`u32::MAX` returns `SUNFusionRuleError::UnrepresentableLabel`, as does encoding
+an input label above that bound.
 
 ## 1. `FusionRule`
 
