@@ -180,9 +180,9 @@ impl GenericFusionSymbols for GenericRule {
 }
 
 #[test]
-fn portable_contracts_are_implementable_without_symtn_core() {
-    // What: downstream sector providers can implement the checked
-    // multiplicity-free and Generic contracts without importing the engine.
+fn native_testing_providers_work_without_symtn_core() {
+    // Native testing fixtures implement these contracts through `testing::Provider`
+    // without depending on the fusion-tree engine.
     let multiplicity_free = CheckedMultiplicityFreeRule;
     fn accepts_canonical_unit<R: CanonicalUnitFusionRule>(_rule: &R) {}
     accepts_canonical_unit(&multiplicity_free);

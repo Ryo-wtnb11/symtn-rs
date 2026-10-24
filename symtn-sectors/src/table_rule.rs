@@ -84,8 +84,8 @@ impl TableSector {
     }
 }
 
-/// A [`TableRule`] that cannot be constructed: the uuid names no entry of
-/// the pinned database, or one symtn does not ship.
+/// Failure to load a [`TableRule`] through
+/// [`fusion_symbols::table::TableCategory::by_uuid`].
 ///
 /// Opaque: the table's own error is reachable only through
 /// [`std::error::Error::source`].
@@ -110,8 +110,9 @@ impl TableRule {
     ///
     /// # Errors
     ///
-    /// [`TableRuleError`] if the pinned database has no such entry or it is
-    /// not shipped (non-unitary, or above rank 4).
+    /// Returns [`TableRuleError`] when fusion-symbols rejects the UUID or
+    /// cannot load the category. Its concrete [`TableError`] is preserved
+    /// through [`std::error::Error::source`].
     pub fn by_uuid(uuid: &str) -> Result<Self, TableRuleError> {
         TableCategory::by_uuid(uuid)
             .map(Self::from_category)
