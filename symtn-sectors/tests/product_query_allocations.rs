@@ -2,6 +2,12 @@
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
 
+#[cfg(feature = "cgc-gen")]
+#[path = "../../tests/support/numerics.rs"]
+mod numerics;
+#[cfg(feature = "cgc-gen")]
+use num_complex::{Complex32, Complex64};
+
 use symtn_sectors::{
     CheckedFusionAlgebra, FermionParityFusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSector, SectorCodec, U1FusionRule,
@@ -113,5 +119,81 @@ fn warm_generic_product_queries() {
     ] {
         println!("SU3xSU3 {name}: fs {} calls/{} bytes; adapter {} calls/{} bytes; copied {copied} bytes",
             direct.calls, direct.bytes, adapted.calls, adapted.bytes);
+    }
+}
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn warm_nested_generic_product_queries() {
+    use symtn_sectors::{
+        CheckedGenericRigidSymbols, GenericRMatrix, SUNFusionRule, TypedSectorAdmission,
+    };
+
+    let rule = ProductFusionRule::<_, _>::try_new(
+        ProductFusionRule::<_, _>::try_new(
+            SUNFusionRule::new(3).unwrap(),
+            SUNFusionRule::new(3).unwrap(),
+        )
+        .unwrap(),
+        SUNFusionRule::new(3).unwrap(),
+    )
+    .unwrap();
+    let octet = vec![1, 1];
+    let id = rule
+        .try_encode_label(&ProductSector::new(
+            ProductSector::new(octet.clone(), octet.clone()),
+            octet,
+        ))
+        .unwrap();
+    let f = || rule.try_f_symbol_generic(id, id, id, id, id, id).unwrap();
+    f();
+    let (f, allocations) = counting_alloc::measure(f);
+    assert_eq!(f.data().len(), 4096);
+    assert!(
+        allocations.calls <= 5 && allocations.bytes <= 69824,
+        "F: {allocations:?}"
+    );
+    println!(
+        "(SU3xSU3)xSU3 F: {} calls/{} bytes",
+        allocations.calls, allocations.bytes
+    );
+    let queries: [(&str, &dyn Fn() -> GenericRMatrix<f64>); 3] = [
+        ("R", &|| rule.try_r_symbol_generic(id, id, id).unwrap()),
+        ("A", &|| rule.try_a_symbol_generic(id, id, id).unwrap()),
+        ("B", &|| rule.try_b_symbol_generic(id, id, id).unwrap()),
+    ];
+    for (name, query) in queries {
+        let expected = query();
+        let (actual, allocations) = counting_alloc::measure(query);
+        assert_eq!(actual.data(), expected.data());
+        assert_eq!(actual.shape(), (8, 8));
+        if name == "R" {
+            // Byte counts differ by allocator layout across targets (19784 on
+            // arm64 macOS, 19880 on x86_64 Linux), so this is an upper bound.
+            assert!(
+                allocations.calls <= 68 && allocations.bytes <= 19880,
+                "R: {allocations:?}"
+            );
+        } else {
+            assert!(
+                allocations.calls <= 38 && allocations.bytes <= 2360,
+                "{name}: {allocations:?}"
+            );
+        }
+        println!(
+            "(SU3xSU3)xSU3 {name}: {} calls/{} bytes",
+            allocations.calls, allocations.bytes
+        );
+    }
+    // The non-self-dual first/second input selects different retained duals.
+    let label = |x: Vec<i64>| ProductSector::new(ProductSector::new(x.clone(), x.clone()), x);
+    let three = rule.try_encode_label(&label(vec![1, 0])).unwrap();
+    let unit = rule.try_encode_label(&label(vec![0, 0])).unwrap();
+    for block in [
+        rule.try_a_symbol_generic(three, unit, three).unwrap(),
+        rule.try_b_symbol_generic(unit, three, three).unwrap(),
+    ] {
+        assert_eq!(block.shape(), (1, 1));
+        numerics::assert_close("fundamental A/B", block.data()[0], 1.0, 27);
     }
 }

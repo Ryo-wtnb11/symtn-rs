@@ -26,7 +26,7 @@ schedules; symtn does not prescribe them.
 ### 1. Symbol layer (`fusion-symbols` crate)
 
 fusion-symbols owns elementary fusion, multiplicities, dimensions, duals,
-Frobenius–Schur data, twists, F/R/CGC data, gauges and coefficient caches.
+Frobenius–Schur data, twists, F/R/A/B/CGC data, gauges and coefficient caches.
 It owns no symtn tensor, fusion tree, block layout or `SectorId` encoding.
 symtn disables its default features; `cgc-gen` opts into `lie-generated`.
 
@@ -45,6 +45,15 @@ Dynkin codec, lazy category and bounded irrep interner, and uses checked
 `Generic` admission even for SU(2). Warm interner hits clone allocation-free
 provider handles; returned blocks and channels have separate allocation costs.
 See the [provider interface](provider_interface.md) for admission and error bounds.
+
+The sectors adapter is the production boundary for validating returned
+F/R/A/B storage, for both multiplicity-free and checked Generic providers.
+It obtains logical axes from N, checks storage length and live-block axes,
+and normalizes an absent vertex's bare zero. Malformed data follows the
+codec's provider-error mapping. Core consumes the category authority's A/B
+blocks; its categorical shape rechecks and F-derived A/B oracles are limited
+to unit tests and `testing`. Tree bend/fold normalization and production
+tree/index guards remain core responsibilities.
 
 Elementary-symbol caches belong to fusion-symbols. Only the application may
 reset or budget them. A fixed gauge constrains numerical values, not their

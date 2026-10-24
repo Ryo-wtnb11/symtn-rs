@@ -149,7 +149,13 @@ pub enum SUNFusionRuleError {
     DimensionNotRepresentable {
         sector: SectorId,
     },
+    /// Returned symbol storage length disagrees with the logical N axes.
     MalformedSymbolData(SymbolShapeError),
+    /// Returned symbol axes disagree with the fusion multiplicities.
+    MalformedSymbolAxes {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
     Racah(SUNSymbolError),
 }
 
@@ -188,6 +194,10 @@ impl fmt::Display for SUNFusionRuleError {
                 sector.id()
             ),
             Self::MalformedSymbolData(_) => f.write_str("malformed Racah symbol data"),
+            Self::MalformedSymbolAxes { expected, actual } => write!(
+                f,
+                "Racah symbol axes {actual:?} disagree with the fusion multiplicities {expected:?}"
+            ),
             Self::Racah(_) => f.write_str("Racah SU(N) error"),
         }
     }
@@ -493,6 +503,9 @@ impl CategoryCodec<LieGroup> for SunCodec {
             CategoryAdapterError::MalformedSymbolData(error) => {
                 SUNFusionRuleError::MalformedSymbolData(error)
             }
+            CategoryAdapterError::MalformedSymbolAxes { expected, actual } => {
+                SUNFusionRuleError::MalformedSymbolAxes { expected, actual }
+            }
             CategoryAdapterError::ForeignObject { .. } => {
                 racah_error(fusion_symbols::lie::LieError::InvalidLabel)
             }
@@ -514,6 +527,19 @@ impl AdapterAccess for SUNFusionRule {
     }
     fn codec(&self) -> &SunCodec {
         &self.codec
+    }
+    fn admit_vertex_move(
+        &self,
+        operation: crate::CategoryOperation,
+        ids: [SectorId; 3],
+    ) -> Result<crate::category_rule::AdmittedObjects<LieIrrep, 3>, SUNFusionRuleError> {
+        crate::category_rule::admit_in_order_with_dual(
+            &self.codec,
+            || self.category(),
+            &self.identity,
+            operation,
+            ids,
+        )
     }
     fn identity(&self) -> &RuleIdentity {
         &self.identity
@@ -646,19 +672,33 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
 
     // SUN's existing boundary accepts empty moves before the provider needs
     // dimensions or a dual object; neither must fit an additional symtn id.
-    // Keep the provider's shaped block rather than strengthen that admission.
+    // Validate logical axes without strengthening that admission.
     fn try_a_symbol_generic(
         &self,
         a: SectorId,
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<f64>, Self::Error> {
-        let [a, b, c] = crate::category_rule::try_map_array([a, b, c], |id| {
+        let ids = [a, b, c];
+        let [a, b, c] = crate::category_rule::try_map_array(ids, |id| {
             self.codec.object(|| self.category(), id)
         })?;
         let block = self.category().a_symbol(&a, &b, &c).map_err(racah_error)?;
-        GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
-            .map_err(SUNFusionRuleError::MalformedSymbolData)
+        let rows = self
+            .category()
+            .try_nsymbol(&a, &b, &c)
+            .map_err(racah_error)? as usize;
+        let cols = if rows == 0 {
+            0
+        } else {
+            let dual_id = CheckedGenericFusion::try_dual(self, ids[0])?;
+            let dual = self.codec.object(|| self.category(), dual_id)?;
+            self.category()
+                .try_nsymbol(&dual, &c, &b)
+                .map_err(racah_error)? as usize
+        };
+        let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
+        Ok(GenericRMatrix::new(data, rows, cols))
     }
 
     fn try_b_symbol_generic(
@@ -667,12 +707,26 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<f64>, Self::Error> {
-        let [a, b, c] = crate::category_rule::try_map_array([a, b, c], |id| {
+        let ids = [a, b, c];
+        let [a, b, c] = crate::category_rule::try_map_array(ids, |id| {
             self.codec.object(|| self.category(), id)
         })?;
         let block = self.category().b_symbol(&a, &b, &c).map_err(racah_error)?;
-        GenericRMatrix::try_new(block.data().to_vec(), block.dim(), block.dim())
-            .map_err(SUNFusionRuleError::MalformedSymbolData)
+        let rows = self
+            .category()
+            .try_nsymbol(&a, &b, &c)
+            .map_err(racah_error)? as usize;
+        let cols = if rows == 0 {
+            0
+        } else {
+            let dual_id = CheckedGenericFusion::try_dual(self, ids[1])?;
+            let dual = self.codec.object(|| self.category(), dual_id)?;
+            self.category()
+                .try_nsymbol(&c, &dual, &a)
+                .map_err(racah_error)? as usize
+        };
+        let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
+        Ok(GenericRMatrix::new(data, rows, cols))
     }
 }
 
@@ -771,6 +825,27 @@ const fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_symbol_axes_map_without_a_source() {
+        use std::error::Error as _;
+        let rule = SUNFusionRule::new(3).unwrap();
+        let error = rule.codec.map_error(
+            &[],
+            CategoryAdapterError::MalformedSymbolAxes {
+                expected: vec![2, 2],
+                actual: vec![1, 4],
+            },
+        );
+        assert!(
+            matches!(&error, SUNFusionRuleError::MalformedSymbolAxes { expected, actual } if expected == &[2, 2] && actual == &[1, 4])
+        );
+        assert_eq!(
+            error.to_string(),
+            "Racah symbol axes [1, 4] disagree with the fusion multiplicities [2, 2]"
+        );
+        assert!(error.source().is_none());
+    }
 
     /// The 0.2.3 adapter derived the FS phase as sign F[a,ā,a,a;1,1], the dual
     /// by Dynkin reversal, and the twist as a constant; fusion-symbols 0.3.0 owns all

@@ -996,13 +996,14 @@ pub struct CheckedGenericAdmissionMode;
 /// This extends [`CheckedGenericFusion`] with the data needed to compile
 /// Generic permute, repartition, and braid rows.  The provider's error type is
 /// the structural provider error, so a failed symbol lookup keeps its typed
-/// source all the way to the plan boundary.  The tensor engine derives its A/B
-/// moves from these F and rigidity primitives after validating the
-/// categorical F/R shapes; [`Self::try_a_symbol_generic`] and
-/// [`Self::try_b_symbol_generic`] expose the authority's A and B blocks.
+/// source all the way to the plan boundary. The tensor engine consumes
+/// [`Self::try_a_symbol_generic`] and [`Self::try_b_symbol_generic`] from the
+/// category authority. Production adapters validate returned F/R/A/B axes
+/// and storage against fusion multiplicities before core consumes them;
+/// core rechecks categorical shapes only for native testing providers.
 ///
 /// Implementations inherit [`CheckedGenericFusion`]'s logical-immutability
-/// contract: F/R and rigidity answers for one identity are stable across
+/// contract: F/R/A/B and rigidity answers for one identity are stable across
 /// query order and concurrency even when internal warm state changes.
 pub trait CheckedGenericRigidSymbols: CheckedGenericFusion {
     type Scalar: CategoricalScalar + Send + Sync;
@@ -1358,11 +1359,10 @@ impl CategoricalScalar for Complex64 {
 /// dimensions and Frobenius–Schur phase) for a rule whose `nsymbol` can
 /// exceed 1.
 ///
-/// The Generic A/B matrices are not part of this tier: symtn derives them
-/// from these primitives and the validated F-symbol, as TensorKitSectors
-/// `Asymbol_from_Fsymbol` / `Bsymbol_from_Fsymbol` do (`sectors.jl:501-552`,
-/// v0.3.6), so every engine reads the same coefficients (see
-/// [`CheckedGenericRigidSymbols`]).
+/// The testing-only infallible path derives A/B from these primitives and
+/// the validated F-symbol using TensorKitSectors `Asymbol_from_Fsymbol` /
+/// `Bsymbol_from_Fsymbol` (`sectors.jl:501-552`, v0.3.6). Production engines
+/// consume the category authority's A/B through [`CheckedGenericRigidSymbols`].
 ///
 /// `frobenius_schur_phase_scalar` stays a bare `Scalar` (not a matrix): the
 /// FS phase is `sign(F^{a ā a}_a[1])` and for *any* fusion style the relevant

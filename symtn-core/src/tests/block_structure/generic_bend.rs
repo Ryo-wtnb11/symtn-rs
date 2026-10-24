@@ -552,10 +552,13 @@ fn checked_generic_bend_queries_only_the_rigid_data_it_uses() {
     assert_eq!(rule.dual_calls.get(), 3);
     // Includes the rank-1 domain tree's N(c, 1, c) admission probe,
     // which the multiplicity-free checked validator also makes.
-    assert_eq!(rule.n_calls.get(), 8);
-    assert_eq!(rule.f_calls.get(), 1);
-    assert_eq!(rule.sqrt_calls.get(), 3);
-    assert_eq!(rule.inv_sqrt_calls.get(), 2);
+    assert_eq!(rule.n_calls.get(), 4);
+    assert_eq!(
+        (rule.a_calls.get(), rule.b_calls.get(), rule.f_calls.get()),
+        (0, 1, 0)
+    );
+    assert_eq!(rule.sqrt_calls.get(), 1);
+    assert_eq!(rule.inv_sqrt_calls.get(), 1);
     assert_eq!(rule.fs_calls.get(), 1);
 }
 
@@ -625,12 +628,12 @@ fn checked_generic_bend_preserves_each_provider_failure_source() {
     );
 
     let rule = CheckedA4Spy {
-        fail_f: Some(1),
+        fail_b: Some(1),
         ..CheckedA4Spy::new()
     };
     assert_rigid_provider_error(
         generic_bendright_tree_pair_checked(&rule, &pair).unwrap_err(),
-        RigidSpyError::F,
+        RigidSpyError::B,
     );
 }
 

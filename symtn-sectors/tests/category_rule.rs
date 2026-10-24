@@ -5,13 +5,13 @@
 //! merged-admission tests compare against the literals the built-in providers
 //! are frozen to in `tests/provider_contracts/errors.rs`.
 
+use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use fusion_symbols::category::{
-    BraidingStyle, EnumerationError, FusionCategory, FusionStyle, RBlock,
+    BraidingStyle, EnumerationError, FusionCategory, FusionStyle, RBlock, SymbolBlock,
 };
 use fusion_symbols::finite::{ZNIrrep, ZN};
 use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep, U1Irrep as FsU1Irrep, U1};
@@ -1037,6 +1037,411 @@ fn checked_generic_blocks_take_their_shape_from_the_multiplicities() {
     );
 }
 
+/// Deliberately independent storage axes and checked multiplicities.
+#[derive(Clone, Debug, PartialEq)]
+struct ProbeBlock<const RANK: usize> {
+    axes: [usize; RANK],
+    data: &'static [f64],
+}
+
+impl<const RANK: usize> Eq for ProbeBlock<RANK> {}
+impl<const RANK: usize> Hash for ProbeBlock<RANK> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.axes.hash(state);
+        for value in self.data {
+            (if *value == 0.0 { 0 } else { value.to_bits() }).hash(state);
+        }
+    }
+}
+
+impl<const RANK: usize> SymbolBlock<RANK> for ProbeBlock<RANK> {
+    type Scalar = f64;
+    fn dims(&self) -> [usize; RANK] {
+        self.axes
+    }
+    fn get(&self, index: [usize; RANK]) -> f64 {
+        let offset = index
+            .into_iter()
+            .zip(self.axes)
+            .fold(0, |offset, (i, n)| offset * n + i);
+        self.data[offset]
+    }
+    fn as_slice(&self) -> &[f64] {
+        self.data
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct StorageProbe {
+    n: u32,
+    claimed_mf: bool,
+    checked_n: Option<(u32, u32)>,
+    f: ProbeBlock<4>,
+    r: ProbeBlock<2>,
+}
+
+thread_local! {
+    static STORAGE_N_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl StorageProbe {
+    fn new(n: u32, data: &'static [f64]) -> Self {
+        Self {
+            n,
+            claimed_mf: false,
+            checked_n: None,
+            f: ProbeBlock { axes: [1; 4], data },
+            r: ProbeBlock { axes: [1; 2], data },
+        }
+    }
+}
+
+impl FusionCategory for StorageProbe {
+    type Object = u8;
+    type Scalar = f64;
+    type FSymbol = ProbeBlock<4>;
+    type RSymbol = ProbeBlock<2>;
+    type Fusion<'a> = std::iter::Once<u8>;
+    type Error = std::convert::Infallible;
+
+    fn fusion_style(&self) -> FusionStyle {
+        if self.n > 1 && !self.claimed_mf {
+            FusionStyle::Generic
+        } else {
+            FusionStyle::Simple
+        }
+    }
+    fn braiding_style(&self) -> BraidingStyle {
+        BraidingStyle::Bosonic
+    }
+    fn unit(&self) -> u8 {
+        0
+    }
+    fn contains(&self, a: &u8) -> bool {
+        *a < 2
+    }
+    fn dual(&self, a: &u8) -> u8 {
+        1 - a
+    }
+    fn dim(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn twist(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
+        Ok(std::iter::once(0))
+    }
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
+        STORAGE_N_CALLS.with(|n| n.set(n.get() + 1));
+        self.n
+    }
+    fn try_nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
+        STORAGE_N_CALLS.with(|n| n.set(n.get() + 1));
+        Ok(self.checked_n.map_or(
+            self.n,
+            |(row, col)| if [*a, *b, *c] == [1; 3] { row } else { col },
+        ))
+    }
+    fn has_canonical_unit(&self) -> bool {
+        true
+    }
+    fn f_symbol(
+        &self,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+    ) -> Result<Self::FSymbol, Self::Error> {
+        Ok(self.f.clone())
+    }
+    fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<Self::RSymbol, Self::Error> {
+        Ok(self.r.clone())
+    }
+    fn authority_fingerprint(&self) -> &[u8] {
+        b"test:storage-probe"
+    }
+    fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
+        Ok(Some(2))
+    }
+    fn object_at(&self, index: u64) -> Result<u8, EnumerationError> {
+        u8::try_from(index)
+            .ok()
+            .filter(|&a| a < 2)
+            .ok_or(EnumerationError::OutOfRange)
+    }
+    fn object_index(&self, a: &u8) -> Result<u64, EnumerationError> {
+        Ok(u64::from(*a))
+    }
+}
+
+#[test]
+fn scalar_validation_uses_n_before_accepting_empty_or_bare_zero_storage() {
+    for (n, data, expected) in [
+        (
+            1,
+            &[][..],
+            Err(SymbolShapeError {
+                actual_len: 0,
+                expected_len: Some(1),
+            }),
+        ),
+        (0, &[][..], Ok(0.0)),
+        (0, &[0.0][..], Ok(0.0)),
+        (
+            0,
+            &[1.0][..],
+            Err(SymbolShapeError {
+                actual_len: 1,
+                expected_len: Some(0),
+            }),
+        ),
+        (
+            0,
+            &[0.0, 0.0][..],
+            Err(SymbolShapeError {
+                actual_len: 2,
+                expected_len: Some(0),
+            }),
+        ),
+        (1, &[0.0][..], Ok(0.0)),
+        (1, &[1.0][..], Ok(1.0)),
+    ] {
+        let scalar = mf(StorageProbe::new(n, data));
+        for result in [
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scalar.f_symbol_scalar(s(1), s(1), s(1), s(1), s(1), s(1))
+            })),
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scalar.r_symbol_scalar(s(1), s(1), s(1))
+            })),
+        ] {
+            match expected {
+                Ok(value) => assert_eq!(result.unwrap(), value),
+                Err(_) => assert!(
+                    result.is_err(),
+                    "malformed multiplicity-free storage must panic"
+                ),
+            }
+        }
+        let generic = cg(StorageProbe::new(n, data));
+        for result in [
+            generic
+                .try_f_symbol_generic(s(1), s(1), s(1), s(1), s(1), s(1))
+                .map(|block| block.data().to_vec()),
+            generic
+                .try_r_symbol_generic(s(1), s(1), s(1))
+                .map(|block| block.data().to_vec()),
+        ] {
+            match expected {
+                Ok(value) => assert_eq!(result.unwrap(), if n == 0 { vec![] } else { vec![value] }),
+                Err(shape) => assert_eq!(
+                    adapter_source::<std::convert::Infallible>(&result.unwrap_err()),
+                    &CategoryAdapterError::MalformedSymbolData(shape)
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn falsely_multiplicity_free_categories_cannot_discard_extra_coefficients() {
+    let mut category = StorageProbe::new(2, &[1.0; 16]);
+    category.claimed_mf = true;
+    category.f.axes = [2; 4];
+    category.r = ProbeBlock {
+        axes: [2; 2],
+        data: &[1.0; 4],
+    };
+    let rule = mf(category);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.f_symbol_scalar(
+            s(1),
+            s(1),
+            s(1),
+            s(1),
+            s(1),
+            s(1)
+        )))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.r_symbol_scalar(
+            s(1),
+            s(1),
+            s(1)
+        )))
+        .is_err()
+    );
+}
+
+#[test]
+fn equal_volume_axis_corruption_is_rejected_for_f_r_a_and_b() {
+    let mut category = StorageProbe::new(2, &[1.0; 16]);
+    category.f.axes = [1, 4, 2, 2];
+    category.r = ProbeBlock {
+        axes: [1, 4],
+        data: &[1.0; 4],
+    };
+    let rule = cg(category.clone());
+    for (error, expected, actual) in [
+        (
+            rule.try_f_symbol_generic(s(1), s(1), s(1), s(1), s(1), s(1))
+                .unwrap_err(),
+            vec![2; 4],
+            vec![1, 4, 2, 2],
+        ),
+        (
+            rule.try_r_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
+            vec![2; 2],
+            vec![1, 4],
+        ),
+    ] {
+        assert_eq!(
+            adapter_source::<std::convert::Infallible>(&error),
+            &CategoryAdapterError::MalformedSymbolAxes { expected, actual }
+        );
+    }
+    // Numerical zero coefficients do not make a live vertex absent.
+    let mut zero = category.clone();
+    zero.f.data = &[0.0; 16];
+    zero.r.data = &[0.0; 4];
+    let zero = cg(zero);
+    assert!(matches!(
+        adapter_source::<std::convert::Infallible>(
+            &zero
+                .try_f_symbol_generic(s(1), s(1), s(1), s(1), s(1), s(1))
+                .unwrap_err()
+        ),
+        CategoryAdapterError::MalformedSymbolAxes { .. }
+    ));
+    assert!(matches!(
+        adapter_source::<std::convert::Infallible>(
+            &zero.try_r_symbol_generic(s(1), s(1), s(1)).unwrap_err()
+        ),
+        CategoryAdapterError::MalformedSymbolAxes { .. }
+    ));
+    category.f.axes = [2; 4];
+    category.r.axes = [2; 2];
+    let valid = cg(category.clone());
+    assert!(valid
+        .try_f_symbol_generic(s(1), s(1), s(1), s(1), s(1), s(1))
+        .is_ok());
+    assert!(valid.try_r_symbol_generic(s(1), s(1), s(1)).is_ok());
+
+    // Default fs A/B constructs 2 x 2 storage; checked N reports 1 x 4.
+    category.f.data = &[1.0; 4];
+    category.checked_n = Some((1, 4));
+    let rule = cg(category.clone());
+    for error in [
+        rule.try_a_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
+        rule.try_b_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
+    ] {
+        assert_eq!(
+            adapter_source::<std::convert::Infallible>(&error),
+            &CategoryAdapterError::MalformedSymbolAxes {
+                expected: vec![1, 4],
+                actual: vec![2, 2]
+            }
+        );
+    }
+    category.checked_n = None;
+    let valid = cg(category);
+    assert!(valid.try_a_symbol_generic(s(1), s(1), s(1)).is_ok());
+    assert!(valid.try_b_symbol_generic(s(1), s(1), s(1)).is_ok());
+}
+
+#[test]
+fn adapter_n_query_budgets_cover_leaf_and_both_product_nestings() {
+    fn count(query: impl FnOnce()) -> usize {
+        STORAGE_N_CALLS.with(|n| n.set(0));
+        query();
+        STORAGE_N_CALLS.with(std::cell::Cell::get)
+    }
+    fn check<C>(category: C, id: SectorId, expected: [usize; 4])
+    where
+        C: FusionCategory<Scalar = f64> + Send + Sync + 'static,
+        C::Error: Send + Sync + 'static,
+    {
+        let generic = cg(category.clone());
+        let scalar = mf(category);
+        assert_eq!(
+            [
+                count(|| {
+                    assert_eq!(
+                        generic
+                            .try_f_symbol_generic(id, id, id, id, id, id)
+                            .unwrap()
+                            .data(),
+                        &[1.0]
+                    );
+                }),
+                count(|| {
+                    assert_eq!(
+                        generic.try_r_symbol_generic(id, id, id).unwrap().data(),
+                        &[1.0]
+                    );
+                }),
+                count(|| {
+                    assert_eq!(
+                        generic.try_a_symbol_generic(id, id, id).unwrap().data(),
+                        &[1.0]
+                    );
+                }),
+                count(|| {
+                    assert_eq!(
+                        generic.try_b_symbol_generic(id, id, id).unwrap().data(),
+                        &[1.0]
+                    );
+                }),
+            ],
+            expected
+        );
+        assert_eq!(
+            [
+                count(|| {
+                    assert_eq!(scalar.f_symbol_scalar(id, id, id, id, id, id), 1.0);
+                }),
+                count(|| {
+                    assert_eq!(scalar.r_symbol_scalar(id, id, id), 1.0);
+                }),
+                count(|| {
+                    assert_eq!(scalar.a_symbol_scalar(id, id, id), 1.0);
+                }),
+                count(|| {
+                    assert_eq!(scalar.b_symbol_scalar(id, id, id), 1.0);
+                }),
+            ],
+            expected
+        );
+    }
+    let leaf = StorageProbe::new(1, &[1.0]);
+    check(leaf.clone(), s(1), [4, 2, 3, 3]);
+    // fs checks product construction and leaf outputs; the adapter adds one
+    // logical-axis pass. Nesting does not multiply the number of leaf queries.
+    check(
+        fusion_symbols::product(
+            fusion_symbols::product(leaf.clone(), leaf.clone()),
+            leaf.clone(),
+        ),
+        s(7),
+        [36, 18, 21, 21],
+    );
+    check(
+        fusion_symbols::product(leaf.clone(), fusion_symbols::product(leaf.clone(), leaf)),
+        s(7),
+        [36, 18, 21, 21],
+    );
+}
+
 #[test]
 fn a_fusion_only_category_rejects_braiding_with_a_typed_source() {
     // Rep(S3), multiplicity-free and without braiding.
@@ -1760,7 +2165,9 @@ fn admission_expresses_the_compact_su2_schedule_and_r_zero_shortcut() {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Watched;
 
-static WATCHED_TOUCHES: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static WATCHED_TOUCHES: Cell<usize> = const { Cell::new(0) };
+}
 
 impl FusionCategory for Watched {
     type Object = u8;
@@ -1780,7 +2187,7 @@ impl FusionCategory for Watched {
         0
     }
     fn contains(&self, a: &u8) -> bool {
-        WATCHED_TOUCHES.fetch_add(1, Ordering::Relaxed);
+        WATCHED_TOUCHES.set(WATCHED_TOUCHES.get() + 1);
         *a == 0
     }
     fn dual(&self, a: &u8) -> u8 {
@@ -1875,10 +2282,26 @@ impl CategoryCodec<Watched> for LabelsFirst {
 #[test]
 fn admission_can_reject_labels_before_touching_the_category() {
     let rule = CategoryRule::try_new(Watched, LabelsFirst).unwrap();
-    let before = WATCHED_TOUCHES.load(Ordering::Relaxed);
+    let before = WATCHED_TOUCHES.get();
     assert_eq!(rule.try_nsymbol(s(1), s(0), s(0)), invalid(1));
     assert_eq!(rule.try_dual_sector(s(3)), invalid(3));
-    assert_eq!(WATCHED_TOUCHES.load(Ordering::Relaxed), before);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.a_symbol_scalar(
+            s(1),
+            s(0),
+            s(0)
+        )))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.b_symbol_scalar(
+            s(1),
+            s(0),
+            s(0)
+        )))
+        .is_err()
+    );
+    assert_eq!(WATCHED_TOUCHES.get(), before);
 }
 
 /// `Z2 ⊠ Z2` under Cantor pairing, admitted as `ProductFusionRule` does:
@@ -2110,6 +2533,16 @@ fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
             expected_len: Some(0),
         })
     );
+
+    let axes = CategoryAdapterError::<AuthorityFailed>::MalformedSymbolAxes {
+        expected: vec![2, 2],
+        actual: vec![1, 4],
+    };
+    assert_eq!(
+        axes.to_string(),
+        "symbol axes [1, 4] disagree with the fusion multiplicities [2, 2]"
+    );
+    assert!(axes.source().is_none());
 
     let rep_s3 = cg(TableCategory::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap());
     let error = rep_s3.try_twist_scalar(s(1)).unwrap_err();

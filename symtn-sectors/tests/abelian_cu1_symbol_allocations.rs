@@ -26,9 +26,7 @@ fn sweep<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(rule: &R, ids: &[SectorI
         for &b in ids {
             for &c in ids {
                 sum += rule.r_symbol_scalar(a, b, c);
-                if rule.nsymbol(a, b, c) == 1 {
-                    sum += rule.a_symbol_scalar(a, b, c) + rule.b_symbol_scalar(a, b, c);
-                }
+                sum += rule.a_symbol_scalar(a, b, c) + rule.b_symbol_scalar(a, b, c);
                 for &d in ids {
                     for &e in ids {
                         for &f in ids {

@@ -275,7 +275,247 @@ fn zero_left_r_still_rejects_an_invalid_right_mf_sector() {
 #[cfg(feature = "cgc-gen")]
 mod generated {
     use super::*;
-    use fusion_symbols::category::FusionCategory;
+    use fusion_symbols::category::{
+        BraidingStyle, EnumerationError, FusionCategory, FusionStyle, SymbolBlock,
+    };
+    use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep};
+
+    // SUNRepresentations 0.4.0 / TensorKitSectors 0.3.9 literals retained in
+    // fusion-symbols 0.8.0 tests/ab_symbols.rs::multiplicity_blocks_match_sunrepresentations.
+    const B_15: [f64; 4] = [
+        -0.353_553_390_593_273_73,
+        0.935_414_346_693_485_7,
+        -0.935_414_346_693_486_3,
+        -0.353_553_390_593_273_9,
+    ];
+
+    #[test]
+    fn category_authority_a_b_match_octet_and_asymmetric_product_literals() {
+        let su3 = SUNFusionRule::new(3).unwrap();
+        let [octet, fifteen, fifteen_bar, twenty_seven] =
+            [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_dynkin(&labels).unwrap());
+        for block in [
+            su3.try_a_symbol_generic(octet, octet, octet).unwrap(),
+            su3.try_b_symbol_generic(octet, octet, octet).unwrap(),
+        ] {
+            numerics::assert_slices_close(
+                "SU3 octet A/B",
+                block.data(),
+                &[1.0, 0.0, 0.0, 1.0],
+                CGC_TERMS,
+            );
+        }
+        let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
+        // TensorKitSectors product.jl::_kron: right multiplicity digit fastest.
+        let left = rule
+            .try_b_symbol_generic(
+                rule.encode_component_ids(fifteen, octet),
+                rule.encode_component_ids(fifteen_bar, octet),
+                rule.encode_component_ids(twenty_seven, octet),
+            )
+            .unwrap();
+        let right = rule
+            .try_b_symbol_generic(
+                rule.encode_component_ids(octet, fifteen),
+                rule.encode_component_ids(octet, fifteen_bar),
+                rule.encode_component_ids(octet, twenty_seven),
+            )
+            .unwrap();
+        let [r, s, t, u] = B_15;
+        #[rustfmt::skip]
+        let kron_left = [r,0.0,s,0.0, 0.0,r,0.0,s, t,0.0,u,0.0, 0.0,t,0.0,u];
+        #[rustfmt::skip]
+        let kron_right = [r,s,0.0,0.0, t,u,0.0,0.0, 0.0,0.0,r,s, 0.0,0.0,t,u];
+        numerics::assert_slices_close("B15 x I2", left.data(), &kron_left, CGC_TERMS);
+        numerics::assert_slices_close("I2 x B15", right.data(), &kron_right, CGC_TERMS);
+        // Transposing B reverses its off-diagonal sign; reversing product
+        // digits moves the nonzero (0,2) entry to (0,1).
+        assert!((*left.get(0, 2) - *left.get(2, 0)).abs() > 1.0);
+        assert!((*left.get(0, 2) - *right.get(0, 2)).abs() > 0.9);
+    }
+
+    struct RotatedF {
+        axes: [usize; 4],
+        data: Vec<Complex64>,
+    }
+    impl SymbolBlock<4> for RotatedF {
+        type Scalar = Complex64;
+        fn dims(&self) -> [usize; 4] {
+            self.axes
+        }
+        fn get(&self, index: [usize; 4]) -> Complex64 {
+            self.data[index
+                .into_iter()
+                .zip(self.axes)
+                .fold(0, |p, (i, n)| p * n + i)]
+        }
+        fn as_slice(&self) -> &[Complex64] {
+            &self.data
+        }
+    }
+
+    /// One SU3 vertex basis change C'_mu = sum_rho C_rho U[rho,mu].
+    /// Real U=[[0,1],[-1,0]] gives A'=U^T A=J; replacing -1 by -i
+    /// exercises conjugation. TensorKitSectors::Fsymbol_from_fusiontensor
+    /// is linear in left-tree C and antilinear in right-tree C. The real
+    /// gauge and J literal also appear in fs 0.8.0 tests/ab_symbols.rs::Rotated.
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    struct Rotated {
+        group: LieGroup,
+        complex: bool,
+    }
+    impl FusionCategory for Rotated {
+        type Object = LieIrrep;
+        type Scalar = Complex64;
+        type FSymbol = RotatedF;
+        type RSymbol = Complex64;
+        type Fusion<'a> = <LieGroup as FusionCategory>::Fusion<'a>;
+        type Error = LieError;
+        fn fusion_style(&self) -> FusionStyle {
+            self.group.fusion_style()
+        }
+        fn braiding_style(&self) -> BraidingStyle {
+            BraidingStyle::None
+        }
+        fn unit(&self) -> LieIrrep {
+            self.group.unit()
+        }
+        fn contains(&self, a: &LieIrrep) -> bool {
+            self.group.contains(a)
+        }
+        fn dual(&self, a: &LieIrrep) -> LieIrrep {
+            self.group.dual(a)
+        }
+        fn dim(&self, a: &LieIrrep) -> f64 {
+            self.group.dim(a)
+        }
+        fn frobenius_schur_phase(&self, a: &LieIrrep) -> Complex64 {
+            self.group.frobenius_schur_phase(a).into()
+        }
+        fn frobenius_schur_indicator(&self, a: &LieIrrep) -> Complex64 {
+            self.group.frobenius_schur_indicator(a).into()
+        }
+        fn twist(&self, a: &LieIrrep) -> Complex64 {
+            self.group.twist(a).into()
+        }
+        fn fusion<'a>(&'a self, a: &LieIrrep, b: &LieIrrep) -> Result<Self::Fusion<'a>, LieError> {
+            self.group.fusion(a, b)
+        }
+        fn nsymbol(&self, a: &LieIrrep, b: &LieIrrep, c: &LieIrrep) -> u32 {
+            self.group.nsymbol(a, b, c)
+        }
+        fn has_canonical_unit(&self) -> bool {
+            self.group.has_canonical_unit()
+        }
+        fn f_symbol(
+            &self,
+            a: &LieIrrep,
+            b: &LieIrrep,
+            c: &LieIrrep,
+            d: &LieIrrep,
+            e: &LieIrrep,
+            f: &LieIrrep,
+        ) -> Result<RotatedF, LieError> {
+            let vertices = [(a, b, e), (e, c, d), (b, c, f), (a, f, d)];
+            let axes = vertices.map(|(x, y, z)| self.nsymbol(x, y, z) as usize);
+            let base = self.group.f_symbol(a, b, c, d, e, f)?;
+            let mut data = if axes.contains(&0) {
+                vec![]
+            } else {
+                base.data()
+                    .iter()
+                    .copied()
+                    .map(Complex64::from)
+                    .collect::<Vec<_>>()
+            };
+            for (axis, (x, y, z)) in vertices.into_iter().enumerate() {
+                if data.is_empty()
+                    || !x.dynkin_labels().eq([2, 1])
+                    || !y.dynkin_labels().eq([1, 2])
+                    || !z.dynkin_labels().eq([2, 2])
+                {
+                    continue;
+                }
+                let inner: usize = axes[axis + 1..].iter().product();
+                let old = data.clone();
+                for (flat, value) in data.iter_mut().enumerate() {
+                    let i = flat / inner % 2;
+                    let other = flat + inner * (1 - i) - inner * i;
+                    let phase = if i == 1 {
+                        Complex64::new(1.0, 0.0)
+                    } else if self.complex {
+                        Complex64::new(0.0, -1.0)
+                    } else {
+                        Complex64::new(-1.0, 0.0)
+                    };
+                    *value = old[other] * if axis < 2 { phase } else { phase.conj() };
+                }
+            }
+            Ok(RotatedF { axes, data })
+        }
+        fn r_symbol(
+            &self,
+            _: &LieIrrep,
+            _: &LieIrrep,
+            _: &LieIrrep,
+        ) -> Result<Complex64, LieError> {
+            Err(LieError::Unsupported {
+                requires: "braiding in the rotated gauge",
+            })
+        }
+        fn authority_fingerprint(&self) -> &[u8] {
+            if self.complex {
+                b"test:su3-complex-vertex-gauge"
+            } else {
+                b"test:su3-real-vertex-gauge"
+            }
+        }
+        fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
+            self.group.object_count()
+        }
+        fn object_at(&self, index: u64) -> Result<LieIrrep, EnumerationError> {
+            self.group.object_at(index)
+        }
+        fn object_index(&self, a: &LieIrrep) -> Result<u64, EnumerationError> {
+            self.group.object_index(a)
+        }
+    }
+
+    #[test]
+    fn rotated_gauge_a_detects_transposition_and_complex_conjugation() {
+        let group = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
+        let objects = [[2, 1], [1, 2], [2, 2]].map(|labels| group.irrep(&labels).unwrap());
+        for complex in [false, true] {
+            let rule = CategoryRule::try_new(
+                Rotated {
+                    group: group.clone(),
+                    complex,
+                },
+                EnumeratedCodec::<CheckedGenericAdmissionMode>::new(),
+            )
+            .unwrap();
+            let [a, b, c] = objects
+                .each_ref()
+                .map(|x| rule.try_encode_label(x).unwrap());
+            let block = rule.try_a_symbol_generic(a, b, c).unwrap();
+            let off_diagonal = if complex {
+                Complex64::new(0.0, -1.0)
+            } else {
+                Complex64::new(-1.0, 0.0)
+            };
+            let expected = [
+                Complex64::new(0.0, 0.0),
+                off_diagonal,
+                Complex64::new(1.0, 0.0),
+                Complex64::new(0.0, 0.0),
+            ];
+            numerics::assert_slices_close("rotated SU3 A", block.data(), &expected, CGC_TERMS);
+            assert!((*block.get(0, 1) - *block.get(1, 0)).norm() > 1.0);
+            if complex {
+                assert!((*block.get(0, 1) - block.get(0, 1).conj()).norm() > 1.0);
+            }
+        }
+    }
 
     #[test]
     fn checked_generic_product_surface_preserves_hand_derived_factor_data() {
