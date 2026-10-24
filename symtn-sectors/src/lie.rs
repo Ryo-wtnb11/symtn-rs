@@ -220,6 +220,10 @@ impl LieGroupFusionRule {
     /// Rank-one labels span `0..=u32::MAX`; larger labels return
     /// [`LieGroupFusionRuleError::UnrepresentableLabel`]. Other ranks use the
     /// target's `usize` ID budget. Excluded global-form labels leave ID holes.
+    ///
+    /// The `RankNotRepresentable` bound covers this rule's label buffers only;
+    /// constructing the fusion-symbols category for an absurdly large rank is
+    /// fusion-symbols' allocation (fusion-symbols#187).
     pub fn new(group: GroupId) -> Result<Self, LieGroupFusionRuleError> {
         let rank = group.root_system.rank();
         if rank > isize::MAX as usize / size_of::<i64>() {

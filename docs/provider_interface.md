@@ -108,7 +108,7 @@ groups fail at construction, and reuses its bounded irrep interner: a warm hit c
 the provider's allocation-free handle, without a Dynkin-label `Vec`. The adapter
 has no separate object cache. Provider generation and returned symbol/channel
 storage have their own allocation costs; Generic blocks copy provider data.
-For `LieGroupFusionRule::new(GroupId::su(2)?)`, fusion whose largest doubled-spin label exceeds
+For a `LieGroupFusionRule` over `GroupId::su(2)`, fusion whose largest doubled-spin label exceeds
 `u32::MAX` returns `LieGroupFusionRuleError::UnrepresentableLabel`, as does encoding
 an input label above that bound.
 
@@ -152,7 +152,7 @@ construction must establish representability first.
 **Styles are claims the engine acts on.** `Unique` means every product has
 exactly one channel; `Simple` means several channels but no multiplicity;
 `Generic` admits multiplicity and may also be selected conservatively, as
-`LieGroupFusionRule::new(GroupId::su(2)?)` does. Declaring `Unique` when a product has two channels
+a `LieGroupFusionRule` over `GroupId::su(2)` does. Declaring `Unique` when a product has two channels
 selects a lowering that silently drops terms. `Bosonic`/`Fermionic` assert
 symmetric braiding; `Anyonic` and
 `NoBraiding` do not, so ordinary `contract` (and network contraction) rejects
