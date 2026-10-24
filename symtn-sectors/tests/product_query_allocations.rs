@@ -149,7 +149,10 @@ fn warm_nested_generic_product_queries() {
     f();
     let (f, allocations) = counting_alloc::measure(f);
     assert_eq!(f.data().len(), 4096);
-    assert_eq!((allocations.calls, allocations.bytes), (5, 69824));
+    assert!(
+        allocations.calls <= 5 && allocations.bytes <= 69824,
+        "F: {allocations:?}"
+    );
     println!(
         "(SU3xSU3)xSU3 F: {} calls/{} bytes",
         allocations.calls, allocations.bytes
@@ -165,7 +168,12 @@ fn warm_nested_generic_product_queries() {
         assert_eq!(actual.data(), expected.data());
         assert_eq!(actual.shape(), (8, 8));
         if name == "R" {
-            assert_eq!((allocations.calls, allocations.bytes), (68, 19784));
+            // Byte counts differ by allocator layout across targets (19784 on
+            // arm64 macOS, 19880 on x86_64 Linux), so this is an upper bound.
+            assert!(
+                allocations.calls <= 68 && allocations.bytes <= 19880,
+                "R: {allocations:?}"
+            );
         } else {
             assert!(
                 allocations.calls <= 38 && allocations.bytes <= 2360,

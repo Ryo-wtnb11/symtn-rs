@@ -1358,6 +1358,10 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn retained_su3_vertex_move_replay_queries_no_symbols() {
+    // Fills the process-global coefficient cache; sibling tests assert sharing in it.
+    let _guard = crate::test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let inner = symtn_sectors::SUNFusionRule::new(3).unwrap();
     let octet = inner.encode_dynkin(&[1, 1]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
