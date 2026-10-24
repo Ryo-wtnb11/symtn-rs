@@ -111,22 +111,33 @@ fn warm_generic_product_queries() {
     assert!(r_cost.matched_calls >= 1);
     assert!(a_cost.matched_calls >= 1);
     assert!(b_cost.matched_calls >= 1);
-    for (name, direct, adapted, copied) in [
-        ("F", fs_f_cost, f_cost, 2048),
-        ("R", fs_r_cost, r_cost, 128),
-        ("A", fs_a_cost, a_cost, 128),
-        ("B", fs_b_cost, b_cost, 128),
+    for (name, direct, adapted, len) in [
+        ("F", fs_f_cost, f_cost, f.data().len()),
+        ("R", fs_r_cost, r_cost, r.data().len()),
+        ("A", fs_a_cost, a_cost, a.data().len()),
+        ("B", fs_b_cost, b_cost, b.data().len()),
     ] {
-        println!("SU3xSU3 {name}: fs {} calls/{} bytes; adapter {} calls/{} bytes; copied {copied} bytes",
-            direct.calls, direct.bytes, adapted.calls, adapted.bytes);
+        println!(
+            "SU3xSU3 {name}: fs {} calls/{} bytes; adapter {} calls/{} bytes; len {len}",
+            direct.calls, direct.bytes, adapted.calls, adapted.bytes
+        );
+        assert_eq!(
+            (adapted.calls, adapted.bytes),
+            (
+                direct.calls + 1,
+                direct.bytes + (len * size_of::<f64>()) as u64
+            ),
+            "{name}: fs {direct:?}; adapter {adapted:?}"
+        );
     }
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_nested_generic_product_queries() {
+    use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
-        CheckedGenericRigidSymbols, GenericRMatrix, SUNFusionRule, TypedSectorAdmission,
+        CategoryProvider, CheckedGenericRigidSymbols, SUNFusionRule, TypedSectorAdmission,
     };
 
     let rule = ProductFusionRule::<_, _>::try_new(
@@ -145,44 +156,62 @@ fn warm_nested_generic_product_queries() {
             octet,
         ))
         .unwrap();
-    let f = || rule.try_f_symbol_generic(id, id, id, id, id, id).unwrap();
-    f();
-    let (f, allocations) = counting_alloc::measure(f);
+    let object = rule.object(id).unwrap();
+    let category = CategoryProvider::category(&rule);
+    let direct_f = || {
+        category
+            .f_symbol(&object, &object, &object, &object, &object, &object)
+            .unwrap()
+    };
+    let adapted_f = || rule.try_f_symbol_generic(id, id, id, id, id, id).unwrap();
+    let direct_r = || category.r_symbol(&object, &object, &object).unwrap();
+    let adapted_r = || rule.try_r_symbol_generic(id, id, id).unwrap();
+    let direct_a = || category.a_symbol(&object, &object, &object).unwrap();
+    let adapted_a = || rule.try_a_symbol_generic(id, id, id).unwrap();
+    let direct_b = || category.b_symbol(&object, &object, &object).unwrap();
+    let adapted_b = || rule.try_b_symbol_generic(id, id, id).unwrap();
+    direct_f();
+    adapted_f();
+    direct_r();
+    adapted_r();
+    direct_a();
+    adapted_a();
+    direct_b();
+    adapted_b();
+
+    let (fs_f, fs_f_cost) = counting_alloc::measure(direct_f);
+    let (f, f_cost) = counting_alloc::measure(adapted_f);
+    let (fs_r, fs_r_cost) = counting_alloc::measure(direct_r);
+    let (r, r_cost) = counting_alloc::measure(adapted_r);
+    let (fs_a, fs_a_cost) = counting_alloc::measure(direct_a);
+    let (a, a_cost) = counting_alloc::measure(adapted_a);
+    let (fs_b, fs_b_cost) = counting_alloc::measure(direct_b);
+    let (b, b_cost) = counting_alloc::measure(adapted_b);
+    assert_eq!(f.data(), fs_f.as_slice());
+    assert_eq!(r.data(), fs_r.as_slice());
+    assert_eq!(a.data(), fs_a.data());
+    assert_eq!(b.data(), fs_b.data());
     assert_eq!(f.data().len(), 4096);
-    assert!(
-        allocations.calls <= 5 && allocations.bytes <= 69824,
-        "F: {allocations:?}"
-    );
-    println!(
-        "(SU3xSU3)xSU3 F: {} calls/{} bytes",
-        allocations.calls, allocations.bytes
-    );
-    let queries: [(&str, &dyn Fn() -> GenericRMatrix<f64>); 3] = [
-        ("R", &|| rule.try_r_symbol_generic(id, id, id).unwrap()),
-        ("A", &|| rule.try_a_symbol_generic(id, id, id).unwrap()),
-        ("B", &|| rule.try_b_symbol_generic(id, id, id).unwrap()),
-    ];
-    for (name, query) in queries {
-        let expected = query();
-        let (actual, allocations) = counting_alloc::measure(query);
-        assert_eq!(actual.data(), expected.data());
-        assert_eq!(actual.shape(), (8, 8));
-        if name == "R" {
-            // Byte counts differ by allocator layout across targets (19784 on
-            // arm64 macOS, 19880 on x86_64 Linux), so this is an upper bound.
-            assert!(
-                allocations.calls <= 68 && allocations.bytes <= 19880,
-                "R: {allocations:?}"
-            );
-        } else {
-            assert!(
-                allocations.calls <= 38 && allocations.bytes <= 2360,
-                "{name}: {allocations:?}"
-            );
-        }
+    for block in [&r, &a, &b] {
+        assert_eq!(block.shape(), (8, 8));
+    }
+    for (name, direct, adapted, len) in [
+        ("F", fs_f_cost, f_cost, f.data().len()),
+        ("R", fs_r_cost, r_cost, r.data().len()),
+        ("A", fs_a_cost, a_cost, a.data().len()),
+        ("B", fs_b_cost, b_cost, b.data().len()),
+    ] {
         println!(
-            "(SU3xSU3)xSU3 {name}: {} calls/{} bytes",
-            allocations.calls, allocations.bytes
+            "(SU3xSU3)xSU3 {name}: fs {} calls/{} bytes; adapter {} calls/{} bytes; len {len}",
+            direct.calls, direct.bytes, adapted.calls, adapted.bytes
+        );
+        assert_eq!(
+            (adapted.calls, adapted.bytes),
+            (
+                direct.calls + 1,
+                direct.bytes + (len * size_of::<f64>()) as u64
+            ),
+            "{name}: fs {direct:?}; adapter {adapted:?}"
         );
     }
     // The non-self-dual first/second input selects different retained duals.

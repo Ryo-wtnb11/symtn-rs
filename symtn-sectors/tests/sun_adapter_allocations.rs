@@ -9,8 +9,9 @@ mod counting_alloc;
 mod numerics;
 use num_complex::{Complex32, Complex64};
 
+use fusion_symbols::category::{FusionCategory, SymbolBlock};
 use symtn_sectors::{
-    CheckedGenericFusion, CheckedGenericRigidSymbols, GenericRMatrix, SUNFusionRule,
+    CategoryProvider, CheckedGenericFusion, CheckedGenericRigidSymbols, SUNFusionRule,
 };
 
 #[global_allocator]
@@ -44,47 +45,65 @@ fn warm_sun_scalar_queries_reuse_interned_handles() {
 fn warm_sun_symbol_queries() {
     let rule = SUNFusionRule::new(3).unwrap();
     let octet = rule.encode_dynkin(&[1, 1]).unwrap();
-    let f = || {
+    let object = rule.object(octet).unwrap();
+    let category = CategoryProvider::category(&rule);
+    let direct_f = || {
+        category
+            .f_symbol(&object, &object, &object, &object, &object, &object)
+            .unwrap()
+    };
+    let adapted_f = || {
         rule.try_f_symbol_generic(octet, octet, octet, octet, octet, octet)
             .unwrap()
     };
-    f();
-    let (f, allocations) = counting_alloc::measure(f);
+    let direct_r = || category.r_symbol(&object, &object, &object).unwrap();
+    let adapted_r = || rule.try_r_symbol_generic(octet, octet, octet).unwrap();
+    let direct_a = || category.a_symbol(&object, &object, &object).unwrap();
+    let adapted_a = || rule.try_a_symbol_generic(octet, octet, octet).unwrap();
+    let direct_b = || category.b_symbol(&object, &object, &object).unwrap();
+    let adapted_b = || rule.try_b_symbol_generic(octet, octet, octet).unwrap();
+    direct_f();
+    adapted_f();
+    direct_r();
+    adapted_r();
+    direct_a();
+    adapted_a();
+    direct_b();
+    adapted_b();
+
+    let (fs_f, fs_f_cost) = counting_alloc::measure(direct_f);
+    let (f, f_cost) = counting_alloc::measure(adapted_f);
+    let (fs_r, fs_r_cost) = counting_alloc::measure(direct_r);
+    let (r, r_cost) = counting_alloc::measure(adapted_r);
+    let (fs_a, fs_a_cost) = counting_alloc::measure(direct_a);
+    let (a, a_cost) = counting_alloc::measure(adapted_a);
+    let (fs_b, fs_b_cost) = counting_alloc::measure(direct_b);
+    let (b, b_cost) = counting_alloc::measure(adapted_b);
+    assert_eq!(f.data(), fs_f.as_slice());
+    assert_eq!(r.data(), fs_r.as_slice());
+    assert_eq!(a.data(), fs_a.data());
+    assert_eq!(b.data(), fs_b.data());
     assert_eq!(f.data().len(), 16);
-    assert!(
-        allocations.calls <= 1 && allocations.bytes <= 128,
-        "F: {allocations:?}"
-    );
-    println!(
-        "SU3 F: {} calls/{} bytes",
-        allocations.calls, allocations.bytes
-    );
-    let queries: [(&str, &dyn Fn() -> GenericRMatrix<f64>); 3] = [
-        ("R", &|| {
-            rule.try_r_symbol_generic(octet, octet, octet).unwrap()
-        }),
-        ("A", &|| {
-            rule.try_a_symbol_generic(octet, octet, octet).unwrap()
-        }),
-        ("B", &|| {
-            rule.try_b_symbol_generic(octet, octet, octet).unwrap()
-        }),
-    ];
-    for (name, query) in queries {
-        let expected = query();
-        let (actual, allocations) = counting_alloc::measure(query);
-        assert_eq!(actual.data(), expected.data());
-        assert_eq!(actual.shape(), (2, 2));
-        // Upper bounds: R's byte count differs by allocator layout across
-        // targets (6168 on arm64 macOS, 6200 on x86_64 Linux).
-        let (calls, bytes) = if name == "R" { (22, 6200) } else { (6, 192) };
-        assert!(
-            allocations.calls <= calls && allocations.bytes <= bytes,
-            "{name}: {allocations:?}"
-        );
+    for block in [&r, &a, &b] {
+        assert_eq!(block.shape(), (2, 2));
+    }
+    for (name, direct, adapted, len) in [
+        ("F", fs_f_cost, f_cost, f.data().len()),
+        ("R", fs_r_cost, r_cost, r.data().len()),
+        ("A", fs_a_cost, a_cost, a.data().len()),
+        ("B", fs_b_cost, b_cost, b.data().len()),
+    ] {
         println!(
-            "SU3 {name}: {} calls/{} bytes",
-            allocations.calls, allocations.bytes
+            "SU3 {name}: fs {} calls/{} bytes; adapter {} calls/{} bytes; len {len}",
+            direct.calls, direct.bytes, adapted.calls, adapted.bytes
+        );
+        assert_eq!(
+            (adapted.calls, adapted.bytes),
+            (
+                direct.calls + 1,
+                direct.bytes + (len * size_of::<f64>()) as u64
+            ),
+            "{name}: fs {direct:?}; adapter {adapted:?}"
         );
     }
     // Tensor-unit vertices distinguish which input A and B dualize.
