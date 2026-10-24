@@ -15,7 +15,7 @@ use num_complex::Complex64;
 use symtn_core::{
     generic_braid_tree_pair_checked, generic_permute_tree_pair_checked,
     generic_transpose_tree_pair_checked, BraidingStyleKind, CategoricalScalar, FusionStyleKind,
-    SUNFusionRule, SUNFusionRuleError, SectorVec,
+    LieGroupFusionRule, LieGroupFusionRuleError, SectorVec,
 };
 
 trait Near: Copy {
@@ -217,7 +217,7 @@ where
 }
 
 fn sun_structure(
-    rule: &SUNFusionRule,
+    rule: &LieGroupFusionRule,
     codomain: &[(SectorId, bool)],
     domain: &[(SectorId, bool)],
 ) -> Arc<BlockStructure> {
@@ -260,8 +260,8 @@ fn all_transposes(codomain_rank: usize, domain_rank: usize) -> Vec<TreeTransform
     operations
 }
 
-fn sun3() -> (SUNFusionRule, SectorId, SectorId, SectorId) {
-    let rule = SUNFusionRule::new(3).unwrap();
+fn sun3() -> (LieGroupFusionRule, SectorId, SectorId, SectorId) {
+    let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let vacuum = rule.encode_dynkin(&[0, 0]).unwrap();
     let three = rule.encode_dynkin(&[1, 0]).unwrap();
     let adjoint = rule.encode_dynkin(&[1, 1]).unwrap();
@@ -278,10 +278,10 @@ fn sun3() -> (SUNFusionRule, SectorId, SectorId, SectorId) {
 fn checked_composer_matches_original_step_composition_on_sun() {
     let (rule, _, three, adjoint) = sun3();
     let a = (adjoint, false);
-    let su4 = SUNFusionRule::new(4).unwrap();
+    let su4 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap();
     let su4_adjoint = (su4.encode_dynkin(&[1, 0, 1]).unwrap(), false);
     let mut multis = 0;
-    let cases: Vec<(&SUNFusionRule, Legs, Legs)> = vec![
+    let cases: Vec<(&LieGroupFusionRule, Legs, Legs)> = vec![
         (&rule, vec![a, a], vec![a]),
         (&rule, vec![a, a, a, a], vec![]),
         (&rule, vec![a, a], vec![a, a]),
@@ -410,7 +410,7 @@ fn checked_composer_identity_is_exact_without_symbol_queries() {
 // `T[m_cod, m_dom] = Σ_{m_c} X_{f₁}[m_cod, m_c] · X_{f₂}[m_dom, m_c]` (the CGCs
 // are real). A permutation acts as `Y[i…] = T[p(i)…]` (TensorKit
 // `permute`). symtn's SU(N) F/R symbols are themselves derived from the same
-// fusion-symbols CGCs (`symtn-sectors/src/sun.rs`), so this oracle shares their gauge
+// fusion-symbols CGCs (`symtn-sectors/src/lie.rs`), so this oracle shares their gauge
 // but not F, R, `GenericK`, the composer or plan assembly. Only non-dual legs
 // and within-side or all-codomain permutations are claimed: dual legs and
 // bends need the cup/cap (Z, Frobenius-Schur) conventions.
@@ -423,7 +423,7 @@ struct DenseTensor {
 
 fn sun_irrep(
     category: &fusion_symbols::lie::LieGroup,
-    rule: &SUNFusionRule,
+    rule: &LieGroupFusionRule,
     sector: SectorId,
 ) -> fusion_symbols::lie::LieIrrep {
     category
@@ -431,12 +431,9 @@ fn sun_irrep(
         .unwrap()
 }
 
-fn cgc_dense(rule: &SUNFusionRule, a: SectorId, b: SectorId, c: SectorId) -> DenseTensor {
-    use fusion_symbols::{
-        category::GroupRepresentations,
-        lie::{GroupId, LieGroup},
-    };
-    let category = LieGroup::new(GroupId::su(rule.rank()).unwrap()).unwrap();
+fn cgc_dense(rule: &LieGroupFusionRule, a: SectorId, b: SectorId, c: SectorId) -> DenseTensor {
+    use fusion_symbols::{category::GroupRepresentations, lie::LieGroup};
+    let category = LieGroup::new(rule.group_id()).unwrap();
     let cgc = category
         .cgc(
             &sun_irrep(&category, rule, a),
@@ -461,12 +458,12 @@ fn cgc_dense(rule: &SUNFusionRule, a: SectorId, b: SectorId, c: SectorId) -> Den
     }
 }
 
-fn sector_dim(rule: &SUNFusionRule, sector: SectorId) -> usize {
+fn sector_dim(rule: &LieGroupFusionRule, sector: SectorId) -> usize {
     cgc_dense(rule, sector, CheckedGenericFusion::vacuum(rule), sector).shape[0]
 }
 
 /// `X[m₁ … mₙ, m_c]` of one splitting tree.
-fn tree_tensor(rule: &SUNFusionRule, tree: &FusionTreeKey) -> DenseTensor {
+fn tree_tensor(rule: &LieGroupFusionRule, tree: &FusionTreeKey) -> DenseTensor {
     let uncoupled = tree.uncoupled();
     assert!(tree.is_dual().iter().all(|dual| !dual));
     match uncoupled.len() {
@@ -548,7 +545,7 @@ fn tree_tensor(rule: &SUNFusionRule, tree: &FusionTreeKey) -> DenseTensor {
     }
 }
 
-fn pair_tensor(rule: &SUNFusionRule, pair: &FusionTreePairKey) -> DenseTensor {
+fn pair_tensor(rule: &LieGroupFusionRule, pair: &FusionTreePairKey) -> DenseTensor {
     let codomain = tree_tensor(rule, pair.codomain_tree());
     let domain = tree_tensor(rule, pair.domain_tree());
     let dc = *codomain.shape.last().unwrap();
@@ -705,7 +702,7 @@ fn checked_composer_matches_sun_dense_cgc_oracle() {
 // ---------------------------------------------------------------------------
 
 struct GaugedSun {
-    inner: SUNFusionRule,
+    inner: LieGroupFusionRule,
     adjoint: SectorId,
     phases: [Complex64; 2],
 }
@@ -752,7 +749,7 @@ impl GaugedSun {
 impl symtn_core::testing::Provider for GaugedSun {}
 
 impl CheckedGenericFusion for GaugedSun {
-    type Error = SUNFusionRuleError;
+    type Error = LieGroupFusionRuleError;
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
     }
@@ -855,7 +852,7 @@ impl CheckedGenericRigidSymbols for GaugedSun {
 fn checked_composer_is_covariant_under_complex_vertex_gauge() {
     let (rule, _, _, adjoint) = sun3();
     let gauged = GaugedSun {
-        inner: SUNFusionRule::new(3).unwrap(),
+        inner: LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         adjoint,
         phases: [
             Complex64::from_polar(1.0, 0.7),

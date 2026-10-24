@@ -229,7 +229,7 @@ fn multiplicity_free_exp_route_switches_at_the_predicate_boundary() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_and_multiplicity_free_exp_take_the_same_route() {
-    use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let mf = GradedSpace::try_new(
@@ -238,7 +238,7 @@ fn checked_and_multiplicity_free_exp_take_the_same_route() {
     )
     .unwrap();
     let checked = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         [0i64, 1, 2].map(|twice| (vec![twice], N)),
     )
     .unwrap();

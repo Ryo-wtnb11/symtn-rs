@@ -447,7 +447,7 @@ fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
 fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     // What: SU(2) is bosonic, so twist returns the compact receiver as is in
     // both modes.
-    use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
     let runtime = host_runtime();
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let mf_leg = GradedSpace::try_new(
@@ -457,7 +457,7 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
     )
     .unwrap();
@@ -1017,7 +1017,7 @@ fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
 fn su2_compact_compose_and_contract_agree_across_modes() {
     // What: the non-Abelian row. The bent outputs carry SU(2) bending
     // coefficients through the mode's own permute.
-    use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let mf_leg = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
@@ -1026,7 +1026,7 @@ fn su2_compact_compose_and_contract_agree_across_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
     )
     .unwrap();
@@ -1549,7 +1549,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
     // What: the non-Abelian row. TensorKit's swap coefficient is 1 on
     // j = 0, 1/2 and 1 (up to its rounding); both modes keep the spectrum and
     // agree with each other and with their dense routes.
-    use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let tensorkit_coefficient = [1.0, 1.0, 1.0];
     let values = |twice: usize, k: usize| -> Vec<f64> {
@@ -1562,7 +1562,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
     )
     .unwrap();
@@ -1621,9 +1621,9 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
     // What: non-self-dual SU(3) irreps on a dual leg (`[1,0]^2 + [0,1]`
     // dualized): the swapped spectrum moves to the destination's dual labels,
     // read from the staged destination, and equals the dense route.
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     let leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![1i64, 0], 2), (vec![0, 1], 1)],
     )
     .unwrap()
@@ -1905,7 +1905,7 @@ fn checked_anyonic_compact_full_trace_matches_the_dense_route() {
 fn su2_compact_full_trace_agrees_across_modes() {
     // What: the non-Abelian row; SU(2) is bosonic, so the hand trace is
     // `Σ_j (2j + 1) Σ_i s_j[i]`.
-    use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let values = |twice: usize, k: usize| -> Vec<f64> {
         (0..k).map(|i| 0.5 + (twice * 4 + i) as f64).collect()
@@ -1921,7 +1921,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
     )
     .unwrap();

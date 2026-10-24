@@ -225,12 +225,12 @@ fn multiplicity_free_device_axis_errors_match_the_host() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_axis_errors_are_the_multiplicity_free_facade_errors() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::GenericTensorError;
 
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
     let v = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0i64, 0], 2), (vec![1, 0], 1), (vec![1, 1], 2)],
     )
     .unwrap();

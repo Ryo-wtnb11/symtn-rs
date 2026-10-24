@@ -108,7 +108,10 @@ fn runtime_drift_names_the_member_and_field() {
 fn rule_instance_drift_names_the_member_and_field() {
     let runtime = host_runtime();
     let tensor = |rank: usize, trivial: Vec<i64>| {
-        let rule = Arc::new(symtn::sector::SUNFusionRule::new(rank).unwrap());
+        let rule = Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
+                .unwrap(),
+        );
         let leg = GradedSpace::try_new(rule, [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg]).unwrap()
     };

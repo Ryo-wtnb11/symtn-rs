@@ -3,10 +3,11 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_contract_reuses_one_runtime_generic_lane() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1_i64, 1_i64], 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {

@@ -304,10 +304,11 @@ fn non_symmetric_braiding_is_unsupported_for_every_split() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_split_matches_contract_then_permute() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
     let mut next = 0.0;
     let mut value = |_: &_, _: &[usize]| {

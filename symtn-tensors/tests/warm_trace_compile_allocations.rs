@@ -102,8 +102,9 @@ fn warm_multiplicity_free_trace_compile_is_bounded_by_its_terms() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_trace_compile_is_bounded_by_its_terms() {
-    use symtn_core::{CheckedGenericAdmissionMode, SUNFusionRule};
-    let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
+    let rule =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let sizes = [&[[0, 0], [1, 0]][..], &[[0, 0], [1, 0], [1, 1]][..]].map(|dynkins| {
         let sectors = dynkins
             .iter()

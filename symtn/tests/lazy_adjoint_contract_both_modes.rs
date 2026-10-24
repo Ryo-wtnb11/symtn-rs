@@ -18,7 +18,7 @@
 //! - (i) reference steps: `copy(t')` (the uncached `materialize`), then the
 //!   same operation on owned operands;
 //! - (ii) cross-mode agreement: SU(2) admitted multiplicity-free
-//!   (`SU2FusionRule`) against checked Generic (`SUNFusionRule::new(2)`), two
+//!   (`SU2FusionRule`) against checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two
 //!   adapters to the same exact A1 provider on one input;
 //! - SU(3) (checked only) with outer multiplicity two (`8 ⊗ 8 → 8`) and a
 //!   dual leg against (i).
@@ -31,7 +31,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::__network::{network_reuse_class, NetworkReuseClass};
 use symtn::typed::{BlockFusionTrees, Complex64, ContractSpec, GradedSpace, TensorMap};
 
@@ -261,7 +261,10 @@ fn sun_spin(sector: &Vec<i64>) -> usize {
     sector[0] as usize
 }
 
-fn su2_sources() -> (TensorMap<SU2FusionRule, f64>, TensorMap<SUNFusionRule, f64>) {
+fn su2_sources() -> (
+    TensorMap<SU2FusionRule, f64>,
+    TensorMap<LieGroupFusionRule, f64>,
+) {
     let runtime = host_runtime();
     let mf = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
@@ -269,7 +272,7 @@ fn su2_sources() -> (TensorMap<SU2FusionRule, f64>, TensorMap<SUNFusionRule, f64
     )
     .unwrap();
     let checked = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         SECTORS.map(|(s, k)| (vec![s as i64], k)),
     )
     .unwrap();
@@ -324,7 +327,7 @@ fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_c64() {
 fn su3_adjoint_transforms_with_outer_multiplicity_stay_lazy() {
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
@@ -369,7 +372,7 @@ fn su2_adjoint_operands_contract_and_agree_across_modes_c64() {
 fn su3_adjoint_operands_with_outer_multiplicity_contract() {
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
@@ -392,7 +395,7 @@ fn su3_adjoint_operands_with_outer_multiplicity_contract() {
 fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();

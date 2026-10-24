@@ -658,7 +658,7 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     /// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`:
     /// `(p + 1)(q + 1)(p + q + 2) / 2`.
@@ -669,7 +669,9 @@ mod checked_generic {
 
     fn measurements() -> Vec<Measurement> {
         let runtime = host_runtime();
-        let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         let adjoint = vec![2i64, 2];
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
         // Compact rows need the multiplicity-free `scalar` (see

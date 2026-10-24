@@ -215,11 +215,11 @@ mod u1 {
 #[cfg(feature = "cgc-gen")]
 mod su3 {
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     type Matrix = Vec<Vec<Complex64>>;
 
-    fn block(t: &TensorMap<SUNFusionRule, Complex64>, c: &Vec<i64>) -> Matrix {
+    fn block(t: &TensorMap<LieGroupFusionRule, Complex64>, c: &Vec<i64>) -> Matrix {
         let b = t.block(c).unwrap();
         (0..b.rows())
             .map(|i| (0..b.cols()).map(|j| b.get(i, j).unwrap()).collect())
@@ -249,7 +249,9 @@ mod su3 {
     #[test]
     fn su3_conjugated_contraction_matches_coupled_block_products() {
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+        let rule = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         // Dynkin labels: `3 = [1, 0]` and `3̄ = [0, 1]` at different
         // degeneracies, so `V ≠ V'`; `8 = [1, 1]`.
         let fundamental = vec![1i64, 0];

@@ -807,10 +807,11 @@ fn assert_sun_checked_generic_null_spaces<D>(
         + PartialEq
         + numerics::Numeric,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), 2)]).unwrap();
     // `V ⊗ V <- V` with `V` the adjoint irrep: its coupled sector `V` has
     // outer multiplicity 2, so that block is `(2 * 2 * 2) x 2`, its rows
@@ -942,10 +943,11 @@ fn assert_sun_checked_generic_polar_qh<D>(
 ) where
     D: symtn::typed::FactorizationScalar + fmt::Debug + PartialEq,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), 2)]).unwrap();
     let build = |matrix: [[D; 2]; 2], fallback: D| {
         let cross_sector = label.clone();

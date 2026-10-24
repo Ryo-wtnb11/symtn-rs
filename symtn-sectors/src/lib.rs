@@ -41,6 +41,12 @@ mod seal {
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
     pub use crate::seal::Provider;
+
+    /// Constructs an SU(N) Lie rule for downstream provider tests.
+    #[cfg(feature = "cgc-gen")]
+    pub fn su_lie_rule(n: usize) -> crate::LieGroupFusionRule {
+        crate::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap()
+    }
 }
 
 mod abelian;
@@ -58,9 +64,9 @@ mod su2;
 pub use su2::{SU2CoefficientError, SU2FusionRule, SU2Irrep, SU2_MAX_DOUBLED_SPIN};
 
 #[cfg(feature = "cgc-gen")]
-mod sun;
+mod lie;
 #[cfg(feature = "cgc-gen")]
-pub use sun::{SUNFusionRule, SUNFusionRuleError, SUNSymbolError};
+pub use lie::{LieGroupFusionRule, LieGroupFusionRuleError};
 
 mod product_rule;
 pub use product_rule::{ProductAdmission, ProductFusionRule, ProductFusionRuleError};

@@ -34,7 +34,7 @@ Storage uses ID order. Two operations instead need a semantic basis order:
   Product inner lines follow fusion-symbols' native factor channel order,
   varying the first factor fastest; this differs from sorting product sectors
   by their comparison key. A generated Lie factor inside a product retains
-  category channel order, while standalone `SUNFusionRule` sorts encoded ids.
+  category channel order, while standalone `LieGroupFusionRule` sorts encoded ids.
   For SU(N) with three or
   more legs on a side, TensorKit's dictionary-based inner-line order has no
   stable counterpart; symtn uses sector order there.
@@ -47,7 +47,7 @@ Storage uses ID order. Two operations instead need a semantic basis order:
 | CU(1) | Charge magnitude, with `0+` before `0-` |
 | TableRule | AnyonWiki object order; Ising is `1, ψ, σ`, unlike TensorKit |
 | Products | Total enumeration degree, then lexicographic over flattened factors |
-| SU(N) | Dynkin-label sum, then lexicographic |
+| `LieGroupFusionRule` | Dynkin-label sum, then lexicographic; quotient exclusions leave holes |
 
 A provider without a TensorKit counterpart defaults to ID order. A codec whose
 IDs disagree with its intended semantic order must override `sector_order_key`.
@@ -55,6 +55,13 @@ Implementation and reference pointers are in
 [`truncation.rs`](../symtn-matrixalgebra/src/truncation.rs),
 [`product_rule.rs`](../symtn-sectors/src/product_rule.rs) and the
 [basis-order tests](../symtn-core/src/tests/fusion_space/tensorkit_tree_order.rs).
+
+The Lie-group codec uses the root-system rank, preserves quotient holes and
+rejects excluded labels on encode and decode. Rank-one labels are bounded by
+`u32::MAX`; higher-rank labels share the target `usize` ID budget. Full
+root/global-form metadata and the actual category fingerprint enter identity,
+so equal labels or fingerprints across different groups are insufficient for
+compatibility.
 
 ## Caches
 

@@ -832,9 +832,10 @@ fn converted_lazy_adjoints_are_owned() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![2i64, 2], 2)]).unwrap();
     let source = filled!([&leg, &leg], [&leg, &leg]);
     assert!(
@@ -869,9 +870,10 @@ fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_diagonal_adjoint_converts_to_an_owned_compact_diagonal() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![2i64, 1], 3), (vec![0, 0], 2)]).unwrap();
     let spectra = [
         SectorSpectrum {

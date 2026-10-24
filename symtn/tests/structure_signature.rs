@@ -149,7 +149,10 @@ fn fixtures_are_equal_iff_structure_is_equal() {
     });
     #[cfg(feature = "cgc-gen")]
     check_fixture!("SU3 checked Generic", |variant| {
-        let rule = Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap());
+        let rule = Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+                .unwrap(),
+        );
         let pairs = match variant {
             0 => [(vec![0i64, 0], 1), (vec![1, 1], 2)],
             1 => [(vec![0i64, 0], 1), (vec![1, 1], 3)],
@@ -167,7 +170,10 @@ fn checked_generic_rule_instance_separates_signatures() {
     let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let signature = |rank: usize, trivial: Vec<i64>| {
-        let rule = Arc::new(symtn::sector::SUNFusionRule::new(rank).unwrap());
+        let rule = Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
+                .unwrap(),
+        );
         let leg = GradedSpace::try_new(rule, [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
             .unwrap()

@@ -14,23 +14,23 @@
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap, TensorScalar};
 
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
 
-type Space = GradedSpace<SUNFusionRule>;
+type Space = GradedSpace<LieGroupFusionRule>;
 type Sectors = Vec<(Vec<i64>, usize)>;
 
 /// Contract the codomain leg `lhs` of `x` with the leg `rhs` through
 /// `id(space(x, lhs))`, keeping the remaining legs in their partitions.
 fn contract_pair<D>(
     runtime: &Runtime,
-    x: &TensorMap<SUNFusionRule, D>,
+    x: &TensorMap<LieGroupFusionRule, D>,
     lhs: usize,
     rhs: usize,
-) -> TensorMap<SUNFusionRule, D>
+) -> TensorMap<LieGroupFusionRule, D>
 where
     D: TensorScalar,
 {
@@ -59,7 +59,7 @@ where
 fn assert_trace_matches<D>(
     runtime: &Runtime,
     what: &str,
-    source: &TensorMap<SUNFusionRule, D>,
+    source: &TensorMap<LieGroupFusionRule, D>,
     pairs: &[(usize, usize)],
     source_len: usize,
 ) where
@@ -89,7 +89,8 @@ fn assert_trace_matches<D>(
 }
 
 fn spaces(n: usize) -> (Space, Space) {
-    let rule = Arc::new(SUNFusionRule::new(n).unwrap());
+    let rule =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let (v, w): (Sectors, Sectors) = if n == 2 {
         (
             vec![(vec![0], 2), (vec![1], 1), (vec![2], 2)],

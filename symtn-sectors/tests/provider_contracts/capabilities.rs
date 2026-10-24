@@ -4,7 +4,7 @@
 //! Already pinned elsewhere: table styles and the semion's uncertified
 //! associator gauge (`tests/table_rule.rs`
 //! `styles_follow_the_braiding_and_the_exact_fusion_table`); SU(3) styles
-//! (`src/sun.rs` `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`).
+//! (`src/lie.rs` `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`).
 
 use num_complex::Complex64;
 use symtn_sectors::*;
@@ -76,9 +76,9 @@ fn multiplicity_free_rule_styles() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_reports_generic_bosonic_for_every_rank_including_two() {
+fn lie_group_reports_generic_bosonic_for_every_rank_including_two() {
     for n in [2, 3, 4] {
-        let rule = SUNFusionRule::new(n).unwrap();
+        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         assert_eq!(rule.fusion_style(), FusionStyleKind::Generic, "SU({n})");
         assert_eq!(rule.braiding_style(), Bosonic, "SU({n})");
         assert_eq!(rule.vacuum(), SectorId::new(0));
@@ -151,13 +151,13 @@ fn multiplicity_free_providers_carry_their_markers() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_carries_the_checked_generic_markers_for_every_rank() {
+fn lie_group_carries_the_checked_generic_markers_for_every_rank() {
     fn checked_canonical_unit<R: CheckedCanonicalUnitFusionRule>(_: &R) {}
     fn generic_admission<R: TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>>(_: &R) {}
     fn checked_pivotal<R: CheckedGenericPivotal + CheckedGenericRigidSymbols<Scalar = f64>>(_: &R) {
     }
     for n in [2, 3] {
-        let rule = SUNFusionRule::new(n).unwrap();
+        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         checked_canonical_unit(&rule);
         generic_admission(&rule);
         checked_pivotal(&rule);

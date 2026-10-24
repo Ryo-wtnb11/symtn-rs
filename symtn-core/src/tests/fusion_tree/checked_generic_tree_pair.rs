@@ -15,11 +15,11 @@ use std::cell::Cell;
 
 const TOL: f64 = 1e-12;
 
-fn sun3() -> SUNFusionRule {
-    SUNFusionRule::new(3).unwrap()
+fn sun3() -> LieGroupFusionRule {
+    symtn_sectors::testing::su_lie_rule(3)
 }
 
-fn irrep(rule: &SUNFusionRule, dynkin: [i64; 2]) -> SectorId {
+fn irrep(rule: &LieGroupFusionRule, dynkin: [i64; 2]) -> SectorId {
     rule.encode_dynkin(&dynkin).unwrap()
 }
 
@@ -175,7 +175,7 @@ fn checked_su3_octet_duality_maps_match_tensorkit_literals() {
 /// SU(3) behind a provider that counts and can fail `N` queries, with a
 /// configurable braiding style.
 struct SunProbe {
-    inner: SUNFusionRule,
+    inner: LieGroupFusionRule,
     braiding: BraidingStyleKind,
     n_calls: Cell<usize>,
     fail_n: Option<usize>,
@@ -392,7 +392,7 @@ fn checked_generic_pair_validation_admits_both_trees_and_one_coupled_sector() {
     ));
 }
 
-fn sun_8x8_to_8x8_structure(rule: &SUNFusionRule) -> Arc<BlockStructure> {
+fn sun_8x8_to_8x8_structure(rule: &LieGroupFusionRule) -> Arc<BlockStructure> {
     let eight = irrep(rule, [1, 1]);
     let leg = || SectorLeg::new([(eight, 1)], false);
     FusionTreeHomSpace::new(

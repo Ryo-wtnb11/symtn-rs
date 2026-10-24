@@ -258,10 +258,11 @@ fn sun_checked_generic_polar_and_pinv_accept_facade_layouts_of_rank_three_and_fo
     // outer multiplicity satisfy A = WP / PW, W isometric, and P Hermitian
     // PSD with P^2 = A^H A / A A^H (which fixes P uniquely), and the
     // Moore-Penrose laws for pinv.
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
     let value = |salt: u64| ((salt.wrapping_mul(2_654_435_761) % 1009) as f64) / 1009.0 - 0.5;
@@ -802,10 +803,11 @@ fn assert_sun_checked_generic_pinv<D>(
 ) where
     D: symtn::typed::AdvancedLinalgScalar + fmt::Debug + PartialEq,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let source: TensorMap<_, D> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, index| {

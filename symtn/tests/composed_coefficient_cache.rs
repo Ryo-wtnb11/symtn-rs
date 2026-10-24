@@ -203,9 +203,10 @@ fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
 #[test]
 fn checked_generic_su3_degeneracy_change_reuses_the_composed_coefficients() {
     let _serial = serial();
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = |sectors: &[([i64; 2], usize)]| {
         GradedSpace::try_new(
             Arc::clone(&provider),

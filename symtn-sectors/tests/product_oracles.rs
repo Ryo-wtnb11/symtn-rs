@@ -291,7 +291,7 @@ mod generated {
 
     #[test]
     fn category_authority_a_b_match_octet_and_asymmetric_product_literals() {
-        let su3 = SUNFusionRule::new(3).unwrap();
+        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let [octet, fifteen, fifteen_bar, twenty_seven] =
             [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_dynkin(&labels).unwrap());
         for block in [
@@ -519,7 +519,7 @@ mod generated {
 
     #[test]
     fn checked_generic_product_surface_preserves_hand_derived_factor_data() {
-        let su3 = SUNFusionRule::new(3).unwrap();
+        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let three = su3.encode_dynkin(&[1, 0]).unwrap();
         let anti_three = su3.encode_dynkin(&[0, 1]).unwrap();
         let six = su3.encode_dynkin(&[2, 0]).unwrap();
@@ -531,7 +531,9 @@ mod generated {
         assert_eq!(rule.braiding_style(), BraidingStyleKind::Bosonic);
         assert_eq!(rule.vacuum(), s(0));
         let debug = format!("{rule:?}");
-        assert!(debug.starts_with("ProductFusionRule { left: SU2FusionRule, right: SUNFusionRule"));
+        assert!(
+            debug.starts_with("ProductFusionRule { left: SU2FusionRule, right: LieGroupFusionRule")
+        );
         assert!(debug.contains(&format!("identity: {:?}", rule.rule_identity())));
         assert_ne!(debug, format!("{swapped:?}"));
 
@@ -667,9 +669,11 @@ mod generated {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn zero_left_r_still_rejects_an_invalid_right_generic_sector() {
-        let rule =
-            ProductFusionRule::<_, _>::try_new(SU2FusionRule, SUNFusionRule::new(2).unwrap())
-                .unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(
+            SU2FusionRule,
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+        )
+        .unwrap();
         let vacuum = rule.encode_component_ids(s(0), s(0));
         let absent = rule.encode_component_ids(s(2), s(0));
         // Negative control: a valid right factor preserves the absent SU(2) channel.
@@ -689,7 +693,7 @@ mod generated {
 
     #[test]
     fn su3_u1_keeps_the_full_octet_blocks_and_nonselfdual_phase() {
-        let su3 = SUNFusionRule::new(3).unwrap();
+        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let octet = su3.encode_dynkin(&[1, 1]).unwrap();
         let three = su3.encode_dynkin(&[1, 0]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, U1FusionRule).unwrap();
@@ -748,7 +752,7 @@ mod generated {
 
     #[test]
     fn su3_fermion_product_negates_every_octet_r_entry() {
-        let su3 = SUNFusionRule::new(3).unwrap();
+        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let octet = su3.encode_dynkin(&[1, 1]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule).unwrap();
         let odd = rule.encode_component_ids(octet, s(1));
@@ -769,7 +773,7 @@ mod generated {
 
     #[test]
     fn su3_su3_octet_checks_every_entry_of_the_fourfold_multiplicity_blocks() {
-        let su3 = SUNFusionRule::new(3).unwrap();
+        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let octet = su3.encode_dynkin(&[1, 1]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let x = rule.encode_component_ids(octet, octet);
@@ -811,7 +815,7 @@ mod generated {
 
     #[test]
     fn asymmetric_su3_product_pins_unequal_f_and_r_digit_orders() {
-        let su3 = SUNFusionRule::new(3).unwrap();
+        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let octet = su3.encode_dynkin(&[1, 1]).unwrap();
         let twenty_seven = su3.encode_dynkin(&[2, 2]).unwrap();
         let anti_three = su3.encode_dynkin(&[0, 1]).unwrap();
@@ -882,7 +886,7 @@ mod generated {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn checked_generic_products_complete_the_left_admission_before_the_right() {
-        let su2 = SUNFusionRule::new(2).unwrap();
+        let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
         let invalid_sun = s(u32::MAX as usize + 1);
         let max_charge = U1Irrep::new(i32::MAX).sector_id();
         let one_charge = U1Irrep::new(1).sector_id();
@@ -901,14 +905,14 @@ mod generated {
         // Negative control: repairing the left overflow exposes the right failure.
         let a = left_mf.encode_component_ids(s(0), s(0));
         assert!(
-            matches!(left_mf.try_nsymbol(a, b, s(0)), Err(ProductFusionRuleError::Right(SUNFusionRuleError::UnrepresentableLabel { labels })) if labels == [u32::MAX as i64 + 1])
+            matches!(left_mf.try_nsymbol(a, b, s(0)), Err(ProductFusionRuleError::Right(LieGroupFusionRuleError::UnrepresentableLabel { labels })) if labels == [u32::MAX as i64 + 1])
         );
 
         let left_cg = ProductFusionRule::<_, _>::try_new(su2, U1FusionRule).unwrap();
         let a = left_cg.encode_component_ids(s(0), max_charge);
         let b = left_cg.encode_component_ids(invalid_sun, one_charge);
         assert!(
-            matches!(left_cg.try_nsymbol(a, b, s(0)), Err(ProductFusionRuleError::Left(SUNFusionRuleError::UnrepresentableLabel { labels })) if labels == [u32::MAX as i64 + 1])
+            matches!(left_cg.try_nsymbol(a, b, s(0)), Err(ProductFusionRuleError::Left(LieGroupFusionRuleError::UnrepresentableLabel { labels })) if labels == [u32::MAX as i64 + 1])
         );
         let b = left_cg.encode_component_ids(s(0), one_charge);
         assert!(matches!(

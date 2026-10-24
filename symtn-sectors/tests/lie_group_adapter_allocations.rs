@@ -1,4 +1,4 @@
-//! Warm category adaptation reuses SUN's existing interned object handles.
+//! Warm category adaptation reuses the Lie-group codec's interned object handles.
 
 #![cfg(feature = "cgc-gen")]
 
@@ -11,20 +11,20 @@ use num_complex::{Complex32, Complex64};
 
 use fusion_symbols::category::{FusionCategory, SymbolBlock};
 use symtn_sectors::{
-    CategoryProvider, CheckedGenericFusion, CheckedGenericRigidSymbols, SUNFusionRule,
+    CategoryProvider, CheckedGenericFusion, CheckedGenericRigidSymbols, LieGroupFusionRule,
 };
 
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 #[test]
-fn warm_sun_scalar_queries_reuse_interned_handles() {
+fn warm_lie_group_scalar_queries_reuse_interned_handles() {
     for (n, labels, dimension, multiplicity) in [
         (2, &[2][..], 3.0, 1),
         (3, &[1, 1][..], 8.0, 2),
         (4, &[1, 0, 1][..], 15.0, 2),
     ] {
-        let rule = SUNFusionRule::new(n).unwrap();
+        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let adjoint = rule.encode_dynkin(labels).unwrap();
         let query = || {
             (
@@ -42,8 +42,8 @@ fn warm_sun_scalar_queries_reuse_interned_handles() {
 }
 
 #[test]
-fn warm_sun_symbol_queries() {
-    let rule = SUNFusionRule::new(3).unwrap();
+fn warm_lie_group_symbol_queries() {
+    let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let octet = rule.encode_dynkin(&[1, 1]).unwrap();
     let object = rule.object(octet).unwrap();
     let category = CategoryProvider::category(&rule);

@@ -5,7 +5,7 @@
 //! (`src/factorizations/truncation.jl:187,239`), an `Int` for SU(N), so its
 //! budgets and cross-sector ties compare exactly. The oracles here are the
 //! Weyl dimension formula and SU(2) as both a multiplicity-free
-//! (`SU2FusionRule`) and a checked Generic (`SUNFusionRule::new(2)`) provider:
+//! (`SU2FusionRule`) and a checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) provider:
 //! the same spectra must take the same decision in either mode.
 
 #![cfg(feature = "cgc-gen")]
@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, SectorSpectrum, SpectrumMagnitude, Truncation};
 
 /// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`.
@@ -32,7 +32,8 @@ macro_rules! kept {
 fn su3_quantum_dimension_is_exact() {
     // What: a weighted dimension is the Weyl dimension, not `sqrt(dim)^2`
     // (`sqrt(8)^2 = 8.000000000000002`).
-    let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+    let rule =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     for p in 0..4 {
         for q in 0..4 {
             let leg = GradedSpace::try_new(Arc::clone(&rule), [(vec![p, q], 2)]).unwrap();
@@ -62,7 +63,8 @@ fn su3_exact_dimension_tie_breaks_in_tensorkit_order() {
     // to SUNRepresentations' `isless` order, `(0, 1)` before `(1, 0)`: kept
     // first by a rank budget, discarded first by an error budget, whatever
     // order the caller lists the spectra in.
-    let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+    let rule =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let (three, three_bar) = (vec![1, 0], vec![0, 1]);
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
@@ -148,7 +150,7 @@ fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V)
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         spectra
             .iter()
             .map(|(twice, v)| (vec![*twice as i64], v.len())),

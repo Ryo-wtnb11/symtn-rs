@@ -15,7 +15,7 @@
 //! - (i) reference steps: `materialize` every lazy operand, then the same
 //!   operation on owned operands;
 //! - (ii) cross-mode agreement: SU(2) admitted multiplicity-free
-//!   (`SU2FusionRule`) against checked Generic (`SUNFusionRule::new(2)`).
+//!   (`SU2FusionRule`) against checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`).
 //!
 //! The device rows (multiplicity-free only) are `storage_parity_matrix.rs`
 //! `mixed_lazy_axpby_cuda_rows_match_host`.
@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{BlockFusionTrees, Complex64, GradedSpace, TensorMap};
 
 #[path = "../../tests/support/fixtures.rs"]
@@ -214,7 +214,13 @@ fn lazy_axpby_rows_agree_across_modes_f64() {
         f64,
         real
     );
-    let checked = axpby_rows!(SUNFusionRule::new(2).unwrap(), sun2, sun_spin, f64, real);
+    let checked = axpby_rows!(
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+        sun2,
+        sun_spin,
+        f64,
+        real
+    );
     assert_modes_agree(mf, checked);
 }
 
@@ -229,7 +235,7 @@ fn lazy_axpby_rows_agree_across_modes_c64() {
         complex
     );
     let checked = axpby_rows!(
-        SUNFusionRule::new(2).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         sun2,
         sun_spin,
         Complex64,

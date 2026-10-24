@@ -7,7 +7,7 @@
 //! (`linalg.jl:319`) and `VectorInterface.inner` (`src/tensors/vectorinterface.jl:114`),
 //! whose per-block `Diagonal` methods read only the stored diagonal. The style
 //! of the provider never enters. So SU(2) admitted multiplicity-free
-//! (`SU2FusionRule`) and checked Generic (`SUNFusionRule::new(2)`) must give
+//! (`SU2FusionRule`) and checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) must give
 //! the same answers, and both must match the hand oracle below:
 //!
 //! ```text
@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{Complex32, Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
 #[path = "../../tests/support/fixtures.rs"]
@@ -283,7 +283,13 @@ fn compact_dense_and_lazy_reductions_agree_across_modes_f64() {
     // operand reduces and `norm(p != 2)` exists on checked Generic.
     let real = |z: Complex64| z.re;
     let mf = reductions!(SU2FusionRule, su2, su2_twice, f64, real);
-    let checked = reductions!(SUNFusionRule::new(2).unwrap(), sun2, sun2_twice, f64, real);
+    let checked = reductions!(
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+        sun2,
+        sun2_twice,
+        f64,
+        real
+    );
     assert_both_modes::<f64>("f64", oracle(|z| z.re.into()), mf, checked);
 }
 
@@ -292,7 +298,7 @@ fn compact_dense_and_lazy_reductions_agree_across_modes_c64() {
     let complex = |z: Complex64| z;
     let mf = reductions!(SU2FusionRule, su2, su2_twice, Complex64, complex);
     let checked = reductions!(
-        SUNFusionRule::new(2).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         sun2,
         sun2_twice,
         Complex64,
@@ -351,7 +357,7 @@ fn svd_compact_spectrum_reduces_on_su3_and_on_su2_in_both_modes() {
     }
     check!(
         "su3",
-        SUNFusionRule::new(3).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         [(vec![0i64, 0], 2), (vec![1, 1], 3), (vec![1, 0], 2)]
     );
     let mf = check!(
@@ -361,7 +367,7 @@ fn svd_compact_spectrum_reduces_on_su3_and_on_su2_in_both_modes() {
     );
     let checked = check!(
         "checked su2",
-        SUNFusionRule::new(2).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         SECTORS.map(|(twice, k)| (sun2(twice), k))
     );
     for (p, (mf, checked)) in POWERS.iter().zip(mf[0].iter().zip(checked[0])) {

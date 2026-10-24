@@ -64,7 +64,7 @@ combination does not compile.
 
 The provider traits are sealed: they are the bounds generic code names, not
 an extension point. Z2, Z_N, U(1), fermion parity, CU(1), `TableRule`,
-`SU2FusionRule` and `SUNFusionRule` implement them through the same category
+`SU2FusionRule` and `LieGroupFusionRule` implement them through the same category
 adapter as `CategoryRule`, with private codecs that keep their labels, ids,
 identities and checked errors. `ProductFusionRule` uses the same adapter over
 fusion-symbols' `Product`. Native implementations remain under `testing` for
@@ -92,25 +92,54 @@ The [abelian](../symtn-sectors/src/abelian.rs) and
 [CU(1)](../symtn-sectors/src/cu1.rs) rules forward every symbol, including A/B;
 U(1)'s physical entries also use the category's CGC.
 The [SU2](../symtn-sectors/src/su2.rs) and
-[SUN](../symtn-sectors/src/sun.rs) wrappers use `LieGroup` through the adapter.
+[Lie-group](../symtn-sectors/src/lie.rs) wrappers use `LieGroup` through the adapter.
 symtn validates IDs before constructing category objects and queries the
 category's `frobenius_schur_phase`.
 
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
-| `SUNFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, SU(2) labels `0..=u32::MAX`; no physical expansion | SU(N) `LieGroup`, including exact A1 for `new(2)` |
+| `LieGroupFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, rank-one labels `0..=u32::MAX`; no physical expansion | A/B/C/D `LieGroup`, with full `GroupId` global-form admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
-`SUNFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
-nonfinite dimensions. It defers category construction until a successfully
-decoded query needs it and reuses its bounded irrep interner: a warm hit clones
+`LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
+nonfinite dimensions. It constructs the category eagerly, so unsupported
+groups fail at construction, and reuses its bounded irrep interner: a warm hit clones
 the provider's allocation-free handle, without a Dynkin-label `Vec`. The adapter
 has no separate object cache. Provider generation and returned symbol/channel
 storage have their own allocation costs; Generic blocks copy provider data.
-For `SUNFusionRule::new(2)`, fusion whose largest doubled-spin label exceeds
-`u32::MAX` returns `SUNFusionRuleError::UnrepresentableLabel`, as does encoding
+For a `LieGroupFusionRule` over `GroupId::su(2)`, fusion whose largest doubled-spin label exceeds
+`u32::MAX` returns `LieGroupFusionRuleError::UnrepresentableLabel`, as does encoding
 an input label above that bound.
+
+Construct it with `LieGroupFusionRule::new(group)`, where `group` is a
+`fusion_symbols::lie::GroupId`; `group_id()` returns that complete metadata.
+Supported families are SU(n), Sp(m), Spin(n), SO(n), their adjoint forms and
+fs's supported central quotients, including half-spin forms. Sp's argument is
+the even matrix dimension. D2 forms (Spin(4), SO(4), PSO(4)) return
+`LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })` from the
+pinned provider. No product substitute is constructed.
+
+The codec ranks all nonnegative Dynkin labels by total grade then
+lexicographically using the root-system rank. Global-form restrictions leave
+holes in that numbering: encoding or decoding an excluded label returns
+`LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`. Object conversion
+checks the complete category membership before using an interned label.
+Identities include the target width, explicit root/global-form metadata,
+codec/admission/scalar conventions and the actual category fingerprint;
+full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups even when
+their provider fingerprints agree. Persist semantic labels and rebuild caches
+when provider identity or codec conventions change.
+
+symtn retains only the bounded codec interner (65,536 label/object pairs and
+its dual lookup), with uncached conversion after capacity is reached. It
+computes no symbols and stores no symbol cache. fusion-symbols owns generated
+coefficients and its B/C/D catalog's default 256 MiB retention budget; that
+budget does not bound temporary generation memory. The categorical scalar is
+`f64`, and tensor execution uses the ordinary supported real/complex Host
+payloads; physical expansion and CUDA execution are not provided by this rule.
+Sp fundamental representations have FS indicator -1 and twist +1; this is
+bosonic braiding, not fermionic parity.
 
 ## 1. `FusionRule`
 
@@ -123,7 +152,7 @@ construction must establish representability first.
 **Styles are claims the engine acts on.** `Unique` means every product has
 exactly one channel; `Simple` means several channels but no multiplicity;
 `Generic` admits multiplicity and may also be selected conservatively, as
-`SUNFusionRule::new(2)` does. Declaring `Unique` when a product has two channels
+a `LieGroupFusionRule` over `GroupId::su(2)` does. Declaring `Unique` when a product has two channels
 selects a lowering that silently drops terms. `Bosonic`/`Fermionic` assert
 symmetric braiding; `Anyonic` and
 `NoBraiding` do not, so ordinary `contract` (and network contraction) rejects
@@ -237,20 +266,20 @@ The sectors adapter validates returned F/R/A/B storage against logical axes
 from checked N symbols on both admission paths. Wrong lengths produce
 `CategoryAdapterError::MalformedSymbolData`; equal-volume wrong axes produce
 `CategoryAdapterError::MalformedSymbolAxes { expected, actual }`. The codec
-maps these to the provider's error type; SUN exposes the corresponding
-`SUNFusionRuleError` variants. An absent vertex may use empty storage or a
+maps these to the provider's error type; `LieGroupFusionRule` exposes the corresponding
+`LieGroupFusionRuleError` variants. An absent vertex may use empty storage or a
 single zero, which becomes scalar zero or an empty Generic block. Empty
 storage for a live vertex and nonzero storage for an absent vertex are errors.
 Successful multiplicity-free validation borrows the block without allocating.
 
-`SUNFusionRule` preserves its absent-channel admission before requiring a
+`LieGroupFusionRule` preserves its absent-channel admission before requiring a
 finite dimension or an encoded derived dual. The tensor engine consumes the
 category authority's A/B blocks through `try_a_symbol_generic` and
 `try_b_symbol_generic`; it retains the dimension and Frobenius–Schur factors
 of tree bends and folds. Production A/B accessors delegate directly to the
 provider, whose admission owns error precedence and whose errors propagate
-without core N, dual, F or rigidity queries. SUN reuses its interned dual for
-the column N; all-SUN product admission retains the factors' derived dual
+without core N, dual, F or rigidity queries. `LieGroupFusionRule` reuses its interned dual for
+the column N; all-Lie-group product admission retains the factors' derived dual
 objects for that query. A custom `CategoryCodec::admit` override still runs unchanged;
 its returned inputs require a separate dual calculation. Adapters own
 production symbol validation. Only in unit tests or under `testing`, core
@@ -259,7 +288,7 @@ categorical shape check, so failures in that prefix take precedence for
 native synthetic providers that can bypass adapters. Public tree and index
 guards always apply.
 `CheckedGenericRigidSymbols::try_dim_scalar` defaults to
-`try_sqrt_dim_scalar²`; override it when `dim` is known exactly (SU(N) does),
+`try_sqrt_dim_scalar²`; override it when `dim` is known exactly (`LieGroupFusionRule` does),
 because truncation budgets and quantum-dimension-weighted norms compare
 `dim(c)` exactly, as TensorKit's integer dimensions do.
 
@@ -271,7 +300,7 @@ would change the tensor space.
 to the checked interface. Under `testing`, its rigid-symbol implementation
 uses `GenericRigidSymbols::dim_scalar` for `try_dim_scalar`, which likewise
 defaults to `sqrt_dim_scalar²`: override it for any integer dimension that is
-not a perfect square. `SUNFusionRule` instead implements the checked Generic
+not a perfect square. `LieGroupFusionRule` instead implements the checked Generic
 traits directly; its bounded interner falls back to per-call conversion when
 full.
 

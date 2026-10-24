@@ -1211,7 +1211,7 @@ fn generic_dense_block_plan_matches_per_source_oracle_matrix() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn racah_generated_sun_adjoint_checked_bound_round_trips() {
-    use symtn_sectors::SUNFusionRule;
+    use symtn_sectors::LieGroupFusionRule;
 
     fn repartition(source_nout: usize, target_nout: usize) -> TreeTransformOperation {
         let mut axes = (0..source_nout)
@@ -1223,8 +1223,8 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
     }
 
     fn snapshot(
-        rule: &SUNFusionRule,
-        space: &crate::BoundDynamicFusionMapSpace<SUNFusionRule>,
+        rule: &LieGroupFusionRule,
+        space: &crate::BoundDynamicFusionMapSpace<LieGroupFusionRule>,
     ) -> Vec<(Vec<Vec<i64>>, Vec<MultiplicityIndex>)> {
         let structure = space.space().structure();
         (0..structure.block_count())
@@ -1251,7 +1251,9 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
     }
 
     for (n, adjoint_labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let adjoint = provider.encode_dynkin(adjoint_labels).unwrap();
         assert_eq!(provider.try_nsymbol(adjoint, adjoint, adjoint).unwrap(), 2);
         let homspace = FusionTreeHomSpace::new(
@@ -1314,9 +1316,9 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query() {
-    use symtn_sectors::SUNFusionRule;
+    use symtn_sectors::LieGroupFusionRule;
 
-    let inner = SUNFusionRule::new(3).unwrap();
+    let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let adjoint = inner.encode_dynkin(&[1, 1]).unwrap();
     let fundamental = inner.encode_dynkin(&[1, 0]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
@@ -1362,7 +1364,9 @@ fn retained_su3_vertex_move_replay_queries_no_symbols() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let inner = symtn_sectors::SUNFusionRule::new(3).unwrap();
+    let inner =
+        symtn_sectors::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+            .unwrap();
     let octet = inner.encode_dynkin(&[1, 1]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let leg = |n| SectorLeg::new([(octet, n)], false);
@@ -1425,7 +1429,7 @@ fn retained_su3_vertex_move_replay_queries_no_symbols() {
 
 #[cfg(feature = "cgc-gen")]
 fn measured_provider_phase<T>(
-    provider: &MeasurementProvider<symtn_sectors::SUNFusionRule>,
+    provider: &MeasurementProvider<symtn_sectors::LieGroupFusionRule>,
     case: &str,
     phase: &str,
     run: impl FnOnce() -> T,
@@ -1449,10 +1453,10 @@ fn measure_checked_generic_transform_case(
     case: &str,
     operation: TreeTransformOperation,
 ) {
-    use symtn_sectors::SUNFusionRule;
+    use symtn_sectors::LieGroupFusionRule;
 
     fusion_symbols::cache::reset();
-    let inner = SUNFusionRule::new(n).unwrap();
+    let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
     let adjoint = inner.encode_dynkin(adjoint_labels).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let homspace = FusionTreeHomSpace::new(

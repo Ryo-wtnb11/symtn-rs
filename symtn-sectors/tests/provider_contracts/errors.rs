@@ -8,8 +8,8 @@
 //!   `tests/sector_labels.rs` `cu1_checked_validation_preserves_the_shared_error_precedence`.
 //! - SU(2) fusion closure beyond 254 and its validation order:
 //!   `src/su2.rs` `checked_su2_preserves_validation_order_and_domain`.
-//! - SU(N) label limits, lazy allocation failure, and absent-channel
-//!   shaped-empty F/R blocks: `src/sun.rs` `validation_and_identity_are_typed_and_stable`,
+//! - Lie-group label limits, fallible codec allocation, and absent-channel
+//!   shaped-empty F/R blocks: `src/lie.rs` `validation_and_identity_are_typed_and_stable`,
 //!   `checked_rigid_dimension_accepts_the_largest_su2_dynkin_label`,
 //!   `rigid_failures_remain_typed`.
 //! - Table R/twist rejection message on a fusion-only entry:
@@ -117,49 +117,55 @@ fn su2_n_rejects_unrepresentable_closure_after_validating_labels() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_errors_are_typed_and_checked_left_right_coupled() {
+fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
     assert!(matches!(
-        SUNFusionRule::new(1),
-        Err(SUNFusionRuleError::InvalidRank { n: 1 })
+        fusion_symbols::lie::GroupId::su(1),
+        Err(fusion_symbols::lie::GroupError::UnsupportedRank {
+            family: "su",
+            value: 1
+        })
     ));
     assert!(matches!(
-        SUNFusionRule::new(0),
-        Err(SUNFusionRuleError::InvalidRank { n: 0 })
+        fusion_symbols::lie::GroupId::su(0),
+        Err(fusion_symbols::lie::GroupError::UnsupportedRank {
+            family: "su",
+            value: 0
+        })
     ));
-    let su3 = SUNFusionRule::new(3).unwrap();
+    let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     assert!(matches!(
         su3.encode_dynkin(&[1, 0, 0]),
-        Err(SUNFusionRuleError::LabelLength {
+        Err(LieGroupFusionRuleError::LabelLength {
             expected: 2,
             found: 3
         })
     ));
     assert!(matches!(
         su3.encode_dynkin(&[0, -1]),
-        Err(SUNFusionRuleError::NegativeLabel {
+        Err(LieGroupFusionRuleError::NegativeLabel {
             index: 1,
             value: -1
         })
     ));
     assert!(matches!(
         su3.try_encode_label(&vec![-2, 0]),
-        Err(SUNFusionRuleError::NegativeLabel {
+        Err(LieGroupFusionRuleError::NegativeLabel {
             index: 0,
             value: -2
         })
     ));
 
-    let su2 = SUNFusionRule::new(2).unwrap();
+    let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
     assert!(matches!(
         su2.try_fusion_channels(s(u32::MAX as usize), s(1)),
-        Err(SUNFusionRuleError::UnrepresentableLabel { .. })
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
     ));
 
     #[cfg(target_pointer_width = "64")]
     {
-        let su2 = SUNFusionRule::new(2).unwrap();
+        let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
         let first = u32::MAX as usize + 1;
-        let unrepresentable = |result: Result<SectorVec, SUNFusionRuleError>, id: usize| matches!(result, Err(SUNFusionRuleError::UnrepresentableLabel { labels }) if labels == [id as i64]);
+        let unrepresentable = |result: Result<SectorVec, LieGroupFusionRuleError>, id: usize| matches!(result, Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [id as i64]);
         assert!(unrepresentable(
             su2.try_fusion_channels(s(first), s(first + 1)),
             first
@@ -170,15 +176,15 @@ fn sun_errors_are_typed_and_checked_left_right_coupled() {
         ));
         assert!(matches!(
             su2.try_nsymbol(s(first), s(first + 1), s(first + 2)),
-            Err(SUNFusionRuleError::UnrepresentableLabel { labels }) if labels == [first as i64]
+            Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [first as i64]
         ));
         assert!(matches!(
             su2.try_nsymbol(s(0), s(0), s(first + 2)),
-            Err(SUNFusionRuleError::UnrepresentableLabel { labels }) if labels == [first as i64 + 2]
+            Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [first as i64 + 2]
         ));
         assert!(matches!(
             su2.try_dual(s(first)),
-            Err(SUNFusionRuleError::UnrepresentableLabel { labels }) if labels == [first as i64]
+            Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [first as i64]
         ));
     }
 }

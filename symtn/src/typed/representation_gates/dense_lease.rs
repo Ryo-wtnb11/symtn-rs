@@ -9,7 +9,7 @@
 use super::*;
 use num_complex::Complex64;
 #[cfg(feature = "cgc-gen")]
-use symtn_core::SUNFusionRule;
+use symtn_core::LieGroupFusionRule;
 
 /// What `f` did on this thread: whether it succeeded, its dense leases,
 /// and its materializations inside and outside a runtime Host pool.
@@ -253,7 +253,9 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
         check(&format!("SU2 f64 {arm}"), lease_rows!(runtime, v, w, f64));
         #[cfg(feature = "cgc-gen")]
         {
-            let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+            let su3 = Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            );
             let leg = |pairs: &[(&[i64], usize)]| {
                 GradedSpace::try_new(
                     Arc::clone(&su3),
@@ -276,7 +278,8 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_trace_reads_the_spectrum_without_materializing() {
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let diagonal: TensorMap<_, f64> =

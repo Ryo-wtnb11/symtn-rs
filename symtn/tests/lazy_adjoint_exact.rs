@@ -404,9 +404,10 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_su3_multiplicity_legs() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let trivial = vec![0i64, 0];
     let leg =

@@ -462,9 +462,10 @@ fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
     // a constant number of header allocations, independent of how many fusion
     // trees the HomSpace enumerates. Re-enumerating the adjoint trees with
     // provider queries cost 810 and 1407 calls for the two spaces below.
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let space = |sectors: &[(Vec<i64>, usize)]| {
         GradedSpace::try_new(Arc::clone(&provider), sectors.iter().cloned()).unwrap()
     };
@@ -477,7 +478,7 @@ fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
     ]);
     let mut costs = Vec::new();
     for leg in [&small, &wide] {
-        let tensor: TensorMap<SUNFusionRule, f64> =
+        let tensor: TensorMap<LieGroupFusionRule, f64> =
             TensorMap::rand_with_seed(&runtime, [leg, leg], [leg, leg], 1942).unwrap();
         black_box(tensor.adjoint().unwrap());
         let (calls, _) = measure(|| {

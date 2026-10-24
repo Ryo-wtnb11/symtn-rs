@@ -275,7 +275,7 @@ macro_rules! multiplicity_free_full_qr_lq_bonds {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     /// SU(3), `a = 8^2 + 1`, `b = 8^2 + 1 + 6^2`: `a ⊗ a` holds 8 with
     /// multiplicity two and the codomain-only 10, 10̄, 27; `b` holds the
@@ -283,7 +283,9 @@ mod checked_generic {
     macro_rules! checked_full_qr_lq_bonds {
         ($d:ty) => {{
             let rt = Runtime::builder().dense_threads(1).build().unwrap();
-            let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+            let provider = Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            );
             let space = |irreps: Vec<(Vec<i64>, usize)>| {
                 GradedSpace::try_new(Arc::clone(&provider), irreps).unwrap()
             };
@@ -446,7 +448,9 @@ mod checked_generic {
     macro_rules! checked_literal_side_only {
         ($d:ty) => {{
             let rt = Runtime::builder().dense_threads(1).build().unwrap();
-            let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+            let provider = Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            );
             let space = |irreps: Vec<(Vec<i64>, usize)>| {
                 GradedSpace::try_new(Arc::clone(&provider), irreps).unwrap()
             };

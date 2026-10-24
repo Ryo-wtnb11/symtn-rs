@@ -723,7 +723,9 @@ fn checked_compact_arms_never_densify_their_spectrum_operand() {
     // rank-(1,1) transform and full trace arms, so a compact operand is read
     // as a spectrum there too.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(symtn_core::SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(
+        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+    );
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 1], 3)]).unwrap();
     let tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
@@ -1185,7 +1187,9 @@ fn checked_compact_trace_reads_the_spectrum_after_admission() {
     // spectrum, and the admitted full trace reads it from the compiled terms
     // without materializing (it densified after admission before).
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(symtn_core::SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(
+        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+    );
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let diagonal = TensorMap::diagonal(
         &runtime,

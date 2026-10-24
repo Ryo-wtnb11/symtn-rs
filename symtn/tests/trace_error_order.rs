@@ -148,10 +148,11 @@ fn multiplicity_free_device_trace_reports_the_host_error_per_misuse() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
-    let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+    let rule =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [(vec![0i64, 0], 2), (vec![1, 0], 1), (vec![1, 1], 2)],

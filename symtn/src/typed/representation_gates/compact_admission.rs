@@ -11,7 +11,7 @@
 
 use super::*;
 use num_complex::{Complex32, Complex64};
-use symtn_core::SUNFusionRule;
+use symtn_core::LieGroupFusionRule;
 use symtn_matrixalgebra::FactorScalar;
 use symtn_tensors::DynamicFusionMapSpace;
 
@@ -255,7 +255,8 @@ where
     );
     all.push(("su2 expert", matrix!(expert, rcond)));
 
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond = GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     for (name, bond) in [
         ("su3", bond.clone()),

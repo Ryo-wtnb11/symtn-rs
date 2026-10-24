@@ -434,16 +434,16 @@ fn multiplicity_free_a_and_b_match_the_hand_values_and_the_builtin_derivation() 
 fn a_and_b_blocks_are_the_category_authority() {
     let su3 = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
     let rule = cg(su3.clone());
-    let sun = SUNFusionRule::new(3).unwrap();
+    let sun = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let octet = su3.irrep(&[1, 1]).unwrap();
     let rule_octet = rule.try_encode_label(&octet).unwrap();
-    let sun_octet = sun.encode_dynkin(&[1, 1]).unwrap();
+    let lie_group_octet = sun.encode_dynkin(&[1, 1]).unwrap();
     let authority_a = su3.a_symbol(&octet, &octet, &octet).unwrap();
     let authority_b = su3.b_symbol(&octet, &octet, &octet).unwrap();
     for block in [
         rule.try_a_symbol_generic(rule_octet, rule_octet, rule_octet)
             .unwrap(),
-        sun.try_a_symbol_generic(sun_octet, sun_octet, sun_octet)
+        sun.try_a_symbol_generic(lie_group_octet, lie_group_octet, lie_group_octet)
             .unwrap(),
     ] {
         assert_eq!(block.shape(), (authority_a.dim(), authority_a.dim()));
@@ -452,7 +452,7 @@ fn a_and_b_blocks_are_the_category_authority() {
     for block in [
         rule.try_b_symbol_generic(rule_octet, rule_octet, rule_octet)
             .unwrap(),
-        sun.try_b_symbol_generic(sun_octet, sun_octet, sun_octet)
+        sun.try_b_symbol_generic(lie_group_octet, lie_group_octet, lie_group_octet)
             .unwrap(),
     ] {
         assert_eq!(block.shape(), (authority_b.dim(), authority_b.dim()));
@@ -2225,8 +2225,8 @@ impl FusionCategory for Watched {
     }
 }
 
-/// Rejects ids past 0 before it asks the category anything, as SU(N) checks
-/// its labels before building its lazy category.
+/// Rejects ids past 0 before asking the category, preserving labels-first
+/// validation independently of the category closure.
 #[derive(Clone, Copy, Debug)]
 struct LabelsFirst;
 

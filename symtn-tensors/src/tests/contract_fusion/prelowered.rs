@@ -742,7 +742,7 @@ fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
     // different orders, through the checked irregular core of `plan_compose`.
     use std::collections::BTreeMap;
     use symtn_core::CheckedGenericFusion;
-    use symtn_sectors::SUNFusionRule;
+    use symtn_sectors::LieGroupFusionRule;
 
     type Entries = BTreeMap<(BlockKey, Vec<usize>), f64>;
     fn position(block: &symtn_core::BlockRef<'_>, coordinates: &[usize]) -> usize {
@@ -782,7 +782,8 @@ fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = provider.encode_dynkin(&[1, 1]).unwrap();
     assert_eq!(provider.try_nsymbol(adjoint, adjoint, adjoint).unwrap(), 2);
     let leg = || SectorLeg::new([(adjoint, 2)], false);

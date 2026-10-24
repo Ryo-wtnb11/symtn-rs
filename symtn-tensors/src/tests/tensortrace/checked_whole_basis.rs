@@ -6,8 +6,8 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use symtn_core::{
     BraidingStyleKind, CheckedGenericFusion, CheckedGenericPivotal, CheckedGenericRigidSymbols,
-    FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity, SUNFusionRule,
-    SUNFusionRuleError, SectorVec,
+    FusionStyleKind, GenericFArray, GenericRMatrix, LieGroupFusionRule, LieGroupFusionRuleError,
+    RuleIdentity, SectorVec,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,7 +27,7 @@ enum Call {
 #[derive(Debug)]
 enum LedgerError {
     Injected(Call),
-    Delegated(SUNFusionRuleError),
+    Delegated(LieGroupFusionRuleError),
 }
 impl std::fmt::Display for LedgerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -47,7 +47,7 @@ impl std::error::Error for LedgerError {}
 /// built under one failure set is never a hit under another (equal
 /// identity must mean equal answers).
 struct Ledger {
-    inner: SUNFusionRule,
+    inner: LieGroupFusionRule,
     identity: RefCell<RuleIdentity>,
     calls: RefCell<Vec<Call>>,
     fail: RefCell<Vec<Call>>,
@@ -58,7 +58,7 @@ impl Ledger {
     fn query<T>(
         &self,
         call: Call,
-        answer: impl FnOnce(&SUNFusionRule) -> Result<T, SUNFusionRuleError>,
+        answer: impl FnOnce(&LieGroupFusionRule) -> Result<T, LieGroupFusionRuleError>,
     ) -> Result<T, LedgerError> {
         self.calls.borrow_mut().push(call);
         let names_failing_sector = match (call, self.fail_symbols_with.get()) {
@@ -187,7 +187,7 @@ fn axes() -> TensorTraceAxisSpec<'static> {
 /// its own.
 #[allow(clippy::arc_with_non_send_sync)]
 fn fixture() -> Fixture {
-    let inner = SUNFusionRule::new(3).unwrap();
+    let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let vacuum = inner.encode_dynkin(&[0, 0]).unwrap();
     let adjoint = inner.encode_dynkin(&[1, 1]).unwrap();
     let fundamental = inner.encode_dynkin(&[1, 0]).unwrap();
@@ -706,7 +706,7 @@ fn owned_checked_trace_preflights_once() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_trace_channel_factor_is_the_exact_dimension_quotient() {
-    let rule = SUNFusionRule::new(3).unwrap();
+    let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     // Hand Weyl formula for SU(3) `(p, q)`, independent of the provider.
     let weyl = |sector: SectorId| {
         let label = rule.decode_dynkin(sector).unwrap();
@@ -768,7 +768,7 @@ fn checked_trace_channel_factor_is_the_exact_dimension_quotient() {
 
 /// SU(2) `V ⊗ V ← V ⊗ V`, `V = 1 ⊕ 2²` (dims 3, 5), traced over the second
 /// leg pair, once through the multiplicity-free `SU2FusionRule` and once
-/// through the checked `SUNFusionRule::new(2)`. The permutation is the
+/// through the checked `LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`. The permutation is the
 /// identity and SU(2) twists are 1, so each term is the bare factor of its
 /// source tree `(a, b) → c`, and both modes must return the hand quotient
 /// `(2j_c+1)/(2j_a+1)` bit for bit. The previous MF `dim · inv_dim` missed
@@ -804,7 +804,7 @@ fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {
     let mf =
         TensorTraceFusionStructure::compile_fusion_dyn_checked(&mf_dst, &mf_src, axes).unwrap();
 
-    let sun = SUNFusionRule::new(2).unwrap();
+    let sun = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
     let checked_src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
         Arc::new(sun.clone()),
         homspace(

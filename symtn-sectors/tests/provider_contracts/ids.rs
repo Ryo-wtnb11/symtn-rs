@@ -12,7 +12,7 @@
 //! - CU(1) id `u32::MAX + 1` rejection: `tests/sector_labels.rs`
 //!   `cu1_codec_and_checked_overflow_preserve_the_tensor_kit_boundary`.
 //! - SU(3) graded-lex ids 0..6 and the SU(2) `u32::MAX` Dynkin edge:
-//!   `src/sun.rs` `codec_is_graded_lexicographic_and_roundtrips`,
+//!   `src/lie.rs` `codec_is_graded_lexicographic_and_roundtrips`,
 //!   `checked_rigid_dimension_accepts_the_largest_su2_dynkin_label`.
 //! - Table one-based labels and out-of-rank rejection: `tests/table_rule.rs`
 //!   `codec_round_trips_and_rejects_labels_outside_the_rank`.
@@ -109,8 +109,8 @@ fn su2_ids_are_doubled_spins() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_ids_are_graded_then_lexicographic_through_the_typed_path() {
-    let su4 = SUNFusionRule::new(4).unwrap();
+fn lie_group_ids_are_graded_then_lexicographic_through_the_typed_path() {
+    let su4 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap();
     for (labels, id) in [
         (vec![0, 0, 0], 0),
         (vec![0, 0, 1], 1),
@@ -126,7 +126,7 @@ fn sun_ids_are_graded_then_lexicographic_through_the_typed_path() {
         assert_eq!(su4.try_encode_label(&labels).unwrap(), s(id), "{labels:?}");
         assert_eq!(su4.try_decode_label(s(id)).unwrap(), labels);
     }
-    let su2 = SUNFusionRule::new(2).unwrap();
+    let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
     for twice_spin in [0, 1, 7] {
         assert_eq!(
             su2.try_encode_label(&vec![twice_spin]).unwrap(),

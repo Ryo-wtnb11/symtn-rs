@@ -188,12 +188,17 @@ fn u1_spaces(scale: usize) -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRu
 fn checked_su2_spaces(
     scale: usize,
 ) -> (
-    GradedSpace<symtn::sector::SUNFusionRule>,
-    GradedSpace<symtn::sector::SUNFusionRule>,
+    GradedSpace<symtn::sector::LieGroupFusionRule>,
+    GradedSpace<symtn::sector::LieGroupFusionRule>,
 ) {
     let space = |degs: [usize; 3]| {
         GradedSpace::try_new(
-            Arc::new(symtn::sector::SUNFusionRule::new(2).unwrap()),
+            Arc::new(
+                symtn::sector::LieGroupFusionRule::new(
+                    fusion_symbols::lie::GroupId::su(2).unwrap(),
+                )
+                .unwrap(),
+            ),
             [0i64, 1, 2]
                 .into_iter()
                 .zip(degs)

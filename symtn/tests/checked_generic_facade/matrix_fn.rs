@@ -107,10 +107,11 @@ fn assert_sun_checked_generic_inverse_outer_multiplicity<D>(n: usize, adjoint: V
 where
     D: symtn::typed::AdvancedLinalgScalar + fmt::Debug + PartialEq + numerics::Numeric,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let source: TensorMap<_, D> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
@@ -175,10 +176,11 @@ fn checked_generic_inv_sun_outer_multiplicity_satisfies_inverse_laws() {
 
 #[cfg(feature = "cgc-gen")]
 fn assert_sun_checked_generic_left_solve(n: usize, label: Vec<i64>) {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let divisor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
@@ -311,10 +313,11 @@ fn sun_checked_generic_left_solve_preserves_outer_multiplicity() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![1, 1];
     let codomain_leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
     let isomorphic_domain = GradedSpace::try_new(
@@ -491,10 +494,11 @@ fn checked_generic_exp_rejects_early_and_late_nonfinite_sectors_without_publicat
 
 #[cfg(feature = "cgc-gen")]
 fn assert_sun_checked_generic_exp_outer_multiplicity(n: usize, adjoint: Vec<i64>) {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
@@ -935,11 +939,13 @@ fn checked_generic_left_solve_covers_all_lazy_input_pairs() {
 #[test]
 fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
     // Checked compact SVD publishes `s` as a compact diagonal on its bond.
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for n in [3, 4] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
         let source: TensorMap<_, f64> =

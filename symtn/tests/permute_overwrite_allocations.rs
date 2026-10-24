@@ -6,7 +6,7 @@ use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
 #[cfg(feature = "cgc-gen")]
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
@@ -172,7 +172,8 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
 fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() {
     let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let warm = |labels: &[Vec<i64>]| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
@@ -206,7 +207,8 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
 fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees() {
     let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let warm = |labels: &[Vec<i64>]| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
@@ -289,8 +291,8 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
 
 #[cfg(feature = "cgc-gen")]
 fn assert_same_checked_tensor(
-    actual: &TensorMap<SUNFusionRule, f64>,
-    expected: &TensorMap<SUNFusionRule, f64>,
+    actual: &TensorMap<LieGroupFusionRule, f64>,
+    expected: &TensorMap<LieGroupFusionRule, f64>,
 ) {
     assert_eq!(actual.subblock_count(), expected.subblock_count());
     assert_eq!(
@@ -416,14 +418,15 @@ fn checked_generic_public_transform_measurement() {
         _ => panic!("unknown measurement case: {case}"),
     };
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap();
-    let apply = |source: &TensorMap<SUNFusionRule, f64>| match operation {
+    let apply = |source: &TensorMap<LieGroupFusionRule, f64>| match operation {
         "permute" => source.permute(&[1, 0], &[2]).unwrap(),
         "braid" => source.braid(&[1, 0], &[2], &[0, 1, 2]).unwrap(),
         "repartition" => source.repartition(1).unwrap(),

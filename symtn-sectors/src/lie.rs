@@ -1,11 +1,11 @@
 use fusion_symbols::{
     category::FusionCategory,
-    lie::{GroupId, LieGroup, LieIrrep},
+    lie::{CenterSubgroup, GlobalForm, GroupId, LieError, LieGroup, LieIrrep, RootSystem},
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, OnceLock, PoisonError, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use crate::category_rule::{forward, AdapterAccess};
 use crate::{
@@ -15,35 +15,35 @@ use crate::{
     GenericRMatrix, RuleIdentity, SectorId, SectorVec, SymbolShapeError, TypedSectorAdmission,
 };
 
-const CODEC_VERSION: &[u8] = b"symtn:sun:dynkin:graded-total-then-lex:v1";
-const IDENTITY_SCHEMA: u64 = 0x5355_4e5f_434f_4445;
+const CODEC_VERSION: &[u8] = b"symtn:lie:dynkin:graded-total-then-lex:v1";
+const IDENTITY_SCHEMA: u64 = 0x4c49_455f_434f_4445;
 
-/// Checked SU(N) rule over the fusion-symbols category adapter.
+/// Checked compact Lie-group rule over the fusion-symbols category adapter.
 ///
 /// The private Dynkin codec retains graded-total-then-lex ids, encoded-id
-/// channel ordering, bounded interning and lazy category construction.
-/// Every rank, including SU(2), uses checked Generic admission; no physical
+/// channel ordering, bounded interning and eager category construction.
+/// Every rank, including rank one, uses checked Generic admission; no physical
 /// expansion is provided.
 #[derive(Clone, Debug)]
-pub struct SUNFusionRule {
-    codec: SunCodec,
+pub struct LieGroupFusionRule {
+    codec: LieCodec,
     identity: RuleIdentity,
-    category: Arc<OnceLock<LieGroup>>,
+    category: LieGroup,
 }
 
 #[derive(Clone, Debug)]
-pub struct SunCodec {
-    n: usize,
+pub(crate) struct LieCodec {
+    group: GroupId,
     irreps: Arc<IrrepTable>,
 }
 
 /// Most sectors one rule interns. A full table still answers every query:
-/// misses are converted per call exactly as before (#2120).
+/// misses are converted per call.
 const IRREP_TABLE_CAPACITY: usize = 1 << 16;
 
-/// Interned `SectorId <-> fusion-symbols Irrep` pairs and duals of one SU(N) rule (#2120).
+/// Interned `SectorId <-> fusion-symbols Irrep` pairs and duals of one Lie-group rule.
 ///
-/// The codec is a bijection between ids and SU(`n`) irreps fixed by `n`, so
+/// The codec is a bijection between admitted ids and group irreps, fixed by `GroupId`, so
 /// either side is a complete key for the other, and the dual is a function of
 /// the id. Entries are immutable once inserted and only successful
 /// conversions are stored, so errors are recomputed per call. At most
@@ -85,7 +85,7 @@ impl IrrepTable {
     /// Records `sector <-> dual`; duality is an involution.
     fn insert_dual(&self, sector: SectorId, dual: SectorId) {
         let mut maps = self.0.write().unwrap_or_else(PoisonError::into_inner);
-        if maps.duals.len() < IRREP_TABLE_CAPACITY {
+        if maps.duals.len() < IRREP_TABLE_CAPACITY - usize::from(sector != dual) {
             maps.duals.insert(sector, dual);
             maps.duals.insert(dual, sector);
         }
@@ -106,28 +106,25 @@ impl IrrepTable {
     }
 }
 
-// The identity and the irrep table are pure functions of `n`, so equality and
+// The identity and the irrep table are pure functions of `GroupId`, so equality and
 // hashing ignore them.
-impl PartialEq for SUNFusionRule {
+impl PartialEq for LieGroupFusionRule {
     fn eq(&self, other: &Self) -> bool {
-        self.rank() == other.rank()
+        self.group_id() == other.group_id()
     }
 }
-impl Eq for SUNFusionRule {}
-impl std::hash::Hash for SUNFusionRule {
+impl Eq for LieGroupFusionRule {}
+impl std::hash::Hash for LieGroupFusionRule {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.rank().hash(state);
+        self.group_id().hash(state);
     }
 }
 
-/// Failure at the SU(N) label/provider boundary.
+/// Failure at the Lie-group label/provider boundary.
 #[derive(Debug)]
-pub enum SUNFusionRuleError {
-    InvalidRank {
-        n: usize,
-    },
+pub enum LieGroupFusionRuleError {
     RankNotRepresentable {
-        n: usize,
+        rank: usize,
     },
     LabelAllocation {
         len: usize,
@@ -157,18 +154,17 @@ pub enum SUNFusionRuleError {
         expected: Vec<usize>,
         actual: Vec<usize>,
     },
-    Racah(SUNSymbolError),
+    Provider(LieError),
 }
 
-impl fmt::Display for SUNFusionRuleError {
+impl fmt::Display for LieGroupFusionRuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidRank { n } => write!(f, "SU(N) requires N >= 2, got {n}"),
-            Self::RankNotRepresentable { n } => {
-                write!(f, "SU({n}) Dynkin labels exceed this platform's Vec limit")
+            Self::RankNotRepresentable { rank } => {
+                write!(f, "rank {rank} Dynkin labels exceed this platform's Vec limit")
             }
             Self::LabelAllocation { len, .. } => {
-                write!(f, "could not allocate {len} SU(N) Dynkin labels")
+                write!(f, "could not allocate {len} Dynkin labels")
             }
             Self::LabelLength { expected, found } => {
                 write!(f, "expected {expected} Dynkin labels, got {found}")
@@ -185,7 +181,7 @@ impl fmt::Display for SUNFusionRuleError {
             Self::DecodeOverflow { sector } => {
                 write!(
                     f,
-                    "SectorId {} cannot be decoded by this SU(N) codec",
+                    "SectorId {} cannot be decoded by this Dynkin codec",
                     sector.id()
                 )
             }
@@ -194,141 +190,161 @@ impl fmt::Display for SUNFusionRuleError {
                 "exact dimension for SectorId {} is not a finite positive f64",
                 sector.id()
             ),
-            Self::MalformedSymbolData(_) => f.write_str("malformed Racah symbol data"),
+            Self::MalformedSymbolData(_) => f.write_str("malformed provider symbol data"),
             Self::MalformedSymbolAxes { expected, actual } => write!(
                 f,
-                "Racah symbol axes {actual:?} disagree with the fusion multiplicities {expected:?}"
+                "provider symbol axes {actual:?} disagree with the fusion multiplicities {expected:?}"
             ),
-            Self::Racah(_) => f.write_str("Racah SU(N) error"),
+            Self::Provider(error) => error.fmt(f),
         }
     }
 }
 
-impl std::error::Error for SUNFusionRuleError {
+impl std::error::Error for LieGroupFusionRuleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::LabelAllocation { source, .. } => Some(source),
             Self::MalformedSymbolData(error) => Some(error),
-            Self::Racah(error) => Some(error),
+            Self::Provider(error) => Some(error),
             _ => None,
         }
     }
 }
 
-/// Failure reported by the SU(N) symbol authority.
-///
-/// Opaque: the authority's own error is reachable only through
-/// [`std::error::Error::source`].
-#[derive(Clone, Debug, PartialEq)]
-pub struct SUNSymbolError(fusion_symbols::lie::LieError);
-
-impl fmt::Display for SUNSymbolError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("SU(N) symbol authority failed")
-    }
+fn provider_error(error: LieError) -> LieGroupFusionRuleError {
+    LieGroupFusionRuleError::Provider(error)
 }
 
-impl std::error::Error for SUNSymbolError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.0)
-    }
-}
-
-fn racah_error(error: fusion_symbols::lie::LieError) -> SUNFusionRuleError {
-    SUNFusionRuleError::Racah(SUNSymbolError(error))
-}
-
-impl SUNFusionRule {
-    /// Constructs an SU(N) rule, deferring rank-sized provider allocation until a query.
-    /// SU(2) Dynkin labels span `0..=u32::MAX`; larger labels return
-    /// [`SUNFusionRuleError::UnrepresentableLabel`], including when fusion
-    /// produces a label above this bound.
-    pub fn new(n: usize) -> Result<Self, SUNFusionRuleError> {
-        if n < 2 {
-            return Err(SUNFusionRuleError::InvalidRank { n });
+impl LieGroupFusionRule {
+    /// Constructs a rule and eagerly checks provider support for the full group.
+    /// Rank-one labels span `0..=u32::MAX`; larger labels return
+    /// [`LieGroupFusionRuleError::UnrepresentableLabel`]. Other ranks use the
+    /// target's `usize` ID budget. Excluded global-form labels leave ID holes.
+    ///
+    /// The `RankNotRepresentable` bound covers this rule's label buffers only;
+    /// constructing the fusion-symbols category for an absurdly large rank is
+    /// fusion-symbols' allocation (fusion-symbols#187).
+    pub fn new(group: GroupId) -> Result<Self, LieGroupFusionRuleError> {
+        let rank = group.root_system.rank();
+        if rank > isize::MAX as usize / size_of::<i64>() {
+            return Err(LieGroupFusionRuleError::RankNotRepresentable { rank });
         }
-        if n - 1 > isize::MAX as usize / size_of::<i64>() {
-            return Err(SUNFusionRuleError::RankNotRepresentable { n });
-        }
+        let category = LieGroup::new(group).map_err(provider_error)?;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&(IDENTITY_SCHEMA, n), &mut hasher);
+        std::hash::Hash::hash(&(IDENTITY_SCHEMA, group), &mut hasher);
         let identity = RuleIdentity::from_canonical_bytes::<Self>(
             std::hash::Hasher::finish(&hasher),
-            Self::identity_bytes(n),
+            Self::identity_bytes(group, &category)?,
         );
-        let codec = SunCodec {
-            n,
-            irreps: Arc::default(),
-        };
         Ok(Self {
-            codec,
+            codec: LieCodec {
+                group,
+                irreps: Arc::default(),
+            },
             identity,
-            category: Arc::default(),
+            category,
         })
     }
 
     fn category(&self) -> &LieGroup {
-        self.category.get_or_init(|| {
-            LieGroup::new(GroupId::su(self.rank()).expect("SUNFusionRule validates N >= 2"))
-                .expect("the SU(N) category is supported at every validated rank")
-        })
+        &self.category
     }
 
-    pub const fn rank(&self) -> usize {
-        self.codec.n
+    /// Returns the complete root datum, including the global form.
+    pub const fn group_id(&self) -> GroupId {
+        self.codec.group
     }
 
-    /// Encodes nonnegative length `N - 1` Dynkin labels by total grade then lexicographic order.
-    /// For SU(2), the single Dynkin label must be at most `u32::MAX`.
-    pub fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, SUNFusionRuleError> {
-        self.codec.encode_dynkin_iter(|| labels.iter().copied())
+    /// Encodes admitted nonnegative Dynkin labels by total grade then lexicographic order.
+    pub fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, LieGroupFusionRuleError> {
+        self.codec.encode_dynkin(labels)
     }
 
-    /// Decodes a `SectorId` with bounded binary searches over the grade and each label.
-    /// SU(2) ids above `u32::MAX` are unrepresentable.
-    pub fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, SUNFusionRuleError> {
+    /// Decodes an admitted ID with bounded binary searches over the grade and each label.
+    pub fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, LieGroupFusionRuleError> {
         self.codec.decode_dynkin(sector)
     }
 
-    fn identity_bytes(n: usize) -> Arc<[u8]> {
-        // Fingerprints are shared within A1 / higher A; do not allocate rank-sized provider state here.
-        let category = LieGroup::new(
-            GroupId::su(if n == 2 { 2 } else { 3 }).expect("2 and 3 are valid SU(N) ranks"),
-        )
-        .expect("SU(2) and SU(3) categories are supported");
-        let mut bytes = Vec::with_capacity(category.authority_fingerprint().len() + 32);
-        bytes.extend_from_slice(CODEC_VERSION);
-        bytes.extend_from_slice(&(usize::BITS).to_le_bytes());
-        bytes.extend_from_slice(&n.to_le_bytes());
-        bytes.extend_from_slice(b":generic:bosonic:racah-sun");
+    fn identity_bytes(
+        group: GroupId,
+        category: &LieGroup,
+    ) -> Result<Arc<[u8]>, LieGroupFusionRuleError> {
+        let (root_tag, rank) = match group.root_system {
+            RootSystem::A(r) => (0, r),
+            RootSystem::B(r) => (1, r),
+            RootSystem::C(r) => (2, r),
+            RootSystem::D(r) => (3, r),
+            RootSystem::G2 => (4, 2),
+            RootSystem::F4 => (5, 4),
+            RootSystem::E6 => (6, 6),
+            RootSystem::E7 => (7, 7),
+            RootSystem::E8 => (8, 8),
+            _ => {
+                return Err(provider_error(LieError::Unsupported {
+                    requires: "root-system identity encoding",
+                }))
+            }
+        };
+        let (form_tag, parameter) = match group.form {
+            GlobalForm::SimplyConnected => (0, 0),
+            GlobalForm::Quotient(subgroup) => match subgroup {
+                CenterSubgroup::Zk(k) => (1, k),
+                CenterSubgroup::Z2 => (2, 0),
+                CenterSubgroup::Z4 => (3, 0),
+                CenterSubgroup::DVector => (4, 0),
+                CenterSubgroup::DHalfSpinPlus => (5, 0),
+                CenterSubgroup::DHalfSpinMinus => (6, 0),
+                CenterSubgroup::DFull => (7, 0),
+                _ => {
+                    return Err(provider_error(LieError::Unsupported {
+                        requires: "global-form identity encoding",
+                    }))
+                }
+            },
+        };
+        let mut bytes = CODEC_VERSION.to_vec();
+        bytes.extend_from_slice(&usize::BITS.to_le_bytes());
+        bytes.push(root_tag);
+        bytes.extend_from_slice(&rank.to_le_bytes());
+        bytes.push(form_tag);
+        bytes.extend_from_slice(&parameter.to_le_bytes());
+        bytes.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
         bytes.extend_from_slice(
             b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
         );
         bytes.extend_from_slice(category.authority_fingerprint());
-        Arc::from(bytes)
+        Ok(Arc::from(bytes))
     }
 }
 
-impl SunCodec {
+impl LieCodec {
+    fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, LieGroupFusionRuleError> {
+        self.check_labels(labels.iter().copied())?;
+        if !self.group.admits(labels) {
+            return Err(provider_error(LieError::NotAdmissible));
+        }
+        self.encode_dynkin_iter(|| labels.iter().copied())
+    }
+
     // Validate, then compute the grade and lexicographic rank without materializing labels.
     fn encode_dynkin_iter<I: ExactSizeIterator<Item = i64>>(
         &self,
         labels: impl Fn() -> I,
-    ) -> Result<SectorId, SUNFusionRuleError> {
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
         self.check_labels(labels())?;
-        let unrepresentable = || SUNFusionRuleError::UnrepresentableLabel {
+        let unrepresentable = || LieGroupFusionRuleError::UnrepresentableLabel {
             labels: labels().collect(),
         };
         let grade = labels()
             .try_fold(0usize, |sum, x| sum.checked_add(usize::try_from(x).ok()?))
             .ok_or_else(unrepresentable)?;
-        let mut rank = count_before_grade(grade, self.n - 1, usize::MAX)
+        let mut rank = count_before_grade(grade, self.group.root_system.rank(), usize::MAX)
             .exact()
             .ok_or_else(unrepresentable)?;
         let mut remaining = grade;
         for (index, label) in labels().enumerate() {
             let label = label as usize;
-            let tail = self.n - 2 - index;
+            let tail = self.group.root_system.rank() - 1 - index;
             rank = rank
                 .checked_add(
                     prefix_count(remaining, tail, label, usize::MAX)
@@ -342,10 +358,10 @@ impl SunCodec {
     }
 
     /// Decodes a `SectorId` with bounded binary searches over the grade and each label.
-    /// SU(2) ids above `u32::MAX` are unrepresentable.
-    fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, SUNFusionRuleError> {
+    /// Rank-one ids above `u32::MAX` are unrepresentable.
+    fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, LieGroupFusionRuleError> {
         let id = sector.id();
-        let r = self.n - 1;
+        let r = self.group.root_system.rank();
         let mut low = 0usize;
         let mut high = id;
         while low < high {
@@ -362,14 +378,14 @@ impl SunCodec {
         } else {
             count_before_grade(grade, r, id)
                 .exact()
-                .ok_or(SUNFusionRuleError::DecodeOverflow { sector })?
+                .ok_or(LieGroupFusionRuleError::DecodeOverflow { sector })?
         };
         let mut residual = id - before;
         let mut remaining = grade;
         let mut labels = Vec::new();
         labels
             .try_reserve_exact(r)
-            .map_err(|source| SUNFusionRuleError::LabelAllocation { len: r, source })?;
+            .map_err(|source| LieGroupFusionRuleError::LabelAllocation { len: r, source })?;
         for index in 0..r {
             let tail = r - index - 1;
             let mut low = 0usize;
@@ -383,36 +399,40 @@ impl SunCodec {
             }
             let skipped = prefix_count(remaining, tail, low, residual)
                 .and_then(Capped::exact)
-                .ok_or(SUNFusionRuleError::DecodeOverflow { sector })?;
+                .ok_or(LieGroupFusionRuleError::DecodeOverflow { sector })?;
             residual -= skipped;
             labels.push(
-                i64::try_from(low).map_err(|_| SUNFusionRuleError::DecodeOverflow { sector })?,
+                i64::try_from(low)
+                    .map_err(|_| LieGroupFusionRuleError::DecodeOverflow { sector })?,
             );
             remaining -= low;
         }
         if residual != 0 {
-            return Err(SUNFusionRuleError::DecodeOverflow { sector });
+            return Err(LieGroupFusionRuleError::DecodeOverflow { sector });
         }
         self.check_labels(labels.iter().copied())?;
+        if !self.group.admits(&labels) {
+            return Err(provider_error(LieError::NotAdmissible));
+        }
         Ok(labels)
     }
 
     fn check_labels(
         &self,
         labels: impl ExactSizeIterator<Item = i64>,
-    ) -> Result<(), SUNFusionRuleError> {
-        if labels.len() != self.n - 1 {
-            return Err(SUNFusionRuleError::LabelLength {
-                expected: self.n - 1,
+    ) -> Result<(), LieGroupFusionRuleError> {
+        if labels.len() != self.group.root_system.rank() {
+            return Err(LieGroupFusionRuleError::LabelLength {
+                expected: self.group.root_system.rank(),
                 found: labels.len(),
             });
         }
         for (index, value) in labels.enumerate() {
             if value < 0 {
-                return Err(SUNFusionRuleError::NegativeLabel { index, value });
+                return Err(LieGroupFusionRuleError::NegativeLabel { index, value });
             }
-            if self.n == 2 && value > i64::from(u32::MAX) {
-                return Err(SUNFusionRuleError::UnrepresentableLabel {
+            if self.group.root_system.rank() == 1 && value > i64::from(u32::MAX) {
+                return Err(LieGroupFusionRuleError::UnrepresentableLabel {
                     labels: vec![value],
                 });
             }
@@ -424,16 +444,23 @@ impl SunCodec {
         &self,
         category: impl Fn() -> &'a LieGroup,
         sector: SectorId,
-    ) -> Result<Arc<LieIrrep>, SUNFusionRuleError> {
+    ) -> Result<Arc<LieIrrep>, LieGroupFusionRuleError> {
         if let Some(irrep) = self.irreps.by_id(sector) {
             return Ok(irrep);
         }
         let labels = self.decode_dynkin(sector)?;
-        let irrep = category().irrep(&labels).map_err(racah_error)?;
+        let irrep = category().irrep(&labels).map_err(provider_error)?;
         Ok(self.irreps.insert(sector, Arc::new(irrep)))
     }
 
-    fn sector(&self, irrep: Cow<'_, LieIrrep>) -> Result<SectorId, SUNFusionRuleError> {
+    fn sector(
+        &self,
+        category: &LieGroup,
+        irrep: Cow<'_, LieIrrep>,
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
+        if !category.contains(&irrep) {
+            return Err(provider_error(LieError::InvalidLabel));
+        }
         if let Some(sector) = self.irreps.by_irrep(&irrep) {
             return Ok(sector);
         }
@@ -446,20 +473,20 @@ impl SunCodec {
         &self,
         category: impl Fn() -> &'a LieGroup + Copy,
         sector: SectorId,
-    ) -> Result<SectorId, SUNFusionRuleError> {
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
         if let Some(dual) = self.irreps.dual(sector) {
             return Ok(dual);
         }
         let object = crate::category_rule::member_object(self, category, sector)?;
-        let dual = self.sector(Cow::Owned(category().dual(&object)))?;
+        let dual = self.sector(category(), Cow::Owned(category().dual(&object)))?;
         self.irreps.insert_dual(sector, dual);
         Ok(dual)
     }
 }
 
-impl CategoryCodec<LieGroup> for SunCodec {
+impl CategoryCodec<LieGroup> for LieCodec {
     type Sector = Vec<i64>;
-    type Error = SUNFusionRuleError;
+    type Error = LieGroupFusionRuleError;
     type Mode = CheckedGenericAdmissionMode;
     type Unit = CanonicalUnitAdmission;
 
@@ -468,15 +495,15 @@ impl CategoryCodec<LieGroup> for SunCodec {
         _category: impl Fn() -> &'a LieGroup + Copy,
         _rule: &RuleIdentity,
         label: &Vec<i64>,
-    ) -> Result<SectorId, SUNFusionRuleError> {
-        self.encode_dynkin_iter(|| label.iter().copied())
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
+        self.encode_dynkin(label)
     }
 
     fn decode_label<'a>(
         &self,
         _category: impl Fn() -> &'a LieGroup + Copy,
         id: SectorId,
-    ) -> Result<Vec<i64>, SUNFusionRuleError> {
+    ) -> Result<Vec<i64>, LieGroupFusionRuleError> {
         self.decode_dynkin(id)
     }
 
@@ -484,17 +511,17 @@ impl CategoryCodec<LieGroup> for SunCodec {
         &self,
         category: impl Fn() -> &'a LieGroup + Copy,
         id: SectorId,
-    ) -> Result<LieIrrep, SUNFusionRuleError> {
+    ) -> Result<LieIrrep, LieGroupFusionRuleError> {
         self.irrep(category, id).map(|irrep| (*irrep).clone())
     }
 
     fn sector_id<'a>(
         &self,
-        _category: impl Fn() -> &'a LieGroup + Copy,
+        category: impl Fn() -> &'a LieGroup + Copy,
         _rule: &RuleIdentity,
         object: &LieIrrep,
-    ) -> Result<SectorId, SUNFusionRuleError> {
-        self.sector(Cow::Borrowed(object))
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
+        self.sector(category(), Cow::Borrowed(object))
     }
 
     fn admit<'a, const N: usize>(
@@ -503,7 +530,7 @@ impl CategoryCodec<LieGroup> for SunCodec {
         _rule: &RuleIdentity,
         operation: crate::CategoryOperation,
         ids: [SectorId; N],
-    ) -> Result<[LieIrrep; N], SUNFusionRuleError> {
+    ) -> Result<[LieIrrep; N], LieGroupFusionRuleError> {
         let objects = crate::category_rule::try_map_array(ids, |id| {
             crate::category_rule::member_object(self, category, id)
         })?;
@@ -520,13 +547,13 @@ impl CategoryCodec<LieGroup> for SunCodec {
 
     fn encode_channels(
         &self,
-        _category: &LieGroup,
+        category: &LieGroup,
         _rule: &RuleIdentity,
         _inputs: [SectorId; 2],
         outcomes: impl Iterator<Item = LieIrrep>,
-    ) -> Result<SectorVec, SUNFusionRuleError> {
+    ) -> Result<SectorVec, LieGroupFusionRuleError> {
         let mut channels: SectorVec = outcomes
-            .map(|irrep| self.sector(Cow::Owned(irrep)))
+            .map(|irrep| self.sector(category, Cow::Owned(irrep)))
             .collect::<Result<_, _>>()?;
         channels.sort_unstable();
         Ok(channels)
@@ -536,31 +563,31 @@ impl CategoryCodec<LieGroup> for SunCodec {
         &self,
         inputs: &[SectorId],
         error: CategoryAdapterError<fusion_symbols::lie::LieError>,
-    ) -> SUNFusionRuleError {
+    ) -> LieGroupFusionRuleError {
         match error {
             CategoryAdapterError::Provider(fusion_symbols::lie::LieError::LabelOverflow)
-                if self.n == 2
+                if self.group.root_system.rank() == 1
                     && matches!(inputs, [left, right] if left.id() <= u32::MAX as usize && right.id() <= u32::MAX as usize) =>
             {
-                SUNFusionRuleError::UnrepresentableLabel {
+                LieGroupFusionRuleError::UnrepresentableLabel {
                     labels: vec![inputs[0].id() as i64 + inputs[1].id() as i64],
                 }
             }
-            CategoryAdapterError::Provider(error) => racah_error(error),
+            CategoryAdapterError::Provider(error) => provider_error(error),
             CategoryAdapterError::DimensionNotRepresentable { sector } => {
-                SUNFusionRuleError::DimensionNotRepresentable { sector }
+                LieGroupFusionRuleError::DimensionNotRepresentable { sector }
             }
             CategoryAdapterError::MalformedSymbolData(error) => {
-                SUNFusionRuleError::MalformedSymbolData(error)
+                LieGroupFusionRuleError::MalformedSymbolData(error)
             }
             CategoryAdapterError::MalformedSymbolAxes { expected, actual } => {
-                SUNFusionRuleError::MalformedSymbolAxes { expected, actual }
+                LieGroupFusionRuleError::MalformedSymbolAxes { expected, actual }
             }
             CategoryAdapterError::ForeignObject { .. } => {
-                racah_error(fusion_symbols::lie::LieError::InvalidLabel)
+                provider_error(fusion_symbols::lie::LieError::InvalidLabel)
             }
             CategoryAdapterError::NoBraiding => {
-                racah_error(fusion_symbols::lie::LieError::Unsupported {
+                provider_error(fusion_symbols::lie::LieError::Unsupported {
                     requires: "braiding",
                 })
             }
@@ -568,21 +595,21 @@ impl CategoryCodec<LieGroup> for SunCodec {
     }
 }
 
-impl AdapterAccess for SUNFusionRule {
+impl AdapterAccess for LieGroupFusionRule {
     type Category = LieGroup;
-    type Codec = SunCodec;
+    type Codec = LieCodec;
 
     fn category(&self) -> &LieGroup {
         self.category()
     }
-    fn codec(&self) -> &SunCodec {
+    fn codec(&self) -> &LieCodec {
         &self.codec
     }
     fn admit_vertex_move(
         &self,
         operation: crate::CategoryOperation,
         ids: [SectorId; 3],
-    ) -> Result<crate::category_rule::AdmittedObjects<LieIrrep, 3>, SUNFusionRuleError> {
+    ) -> Result<crate::category_rule::AdmittedObjects<LieIrrep, 3>, LieGroupFusionRuleError> {
         let objects = self
             .codec
             .admit(|| self.category(), &self.identity, operation, ids)?;
@@ -607,10 +634,10 @@ impl AdapterAccess for SUNFusionRule {
     }
 }
 
-impl crate::seal::Provider for SUNFusionRule {}
+impl crate::seal::Provider for LieGroupFusionRule {}
 
-impl CheckedGenericFusion for SUNFusionRule {
-    type Error = SUNFusionRuleError;
+impl CheckedGenericFusion for LieGroupFusionRule {
+    type Error = LieGroupFusionRuleError;
 
     fn rule_identity(&self) -> RuleIdentity {
         self.identity.clone()
@@ -656,12 +683,12 @@ impl CheckedGenericFusion for SUNFusionRule {
     }
 }
 
-/// SU(N) uses the canonical trivial representation as its tensor unit.
-impl CheckedCanonicalUnitFusionRule for SUNFusionRule {}
+/// Lie groups use the canonical trivial representation as their tensor unit.
+impl CheckedCanonicalUnitFusionRule for LieGroupFusionRule {}
 
-impl TypedSectorAdmission for SUNFusionRule {
+impl TypedSectorAdmission for LieGroupFusionRule {
     type Sector = Vec<i64>;
-    type Error = SUNFusionRuleError;
+    type Error = LieGroupFusionRuleError;
     type Mode = CheckedGenericAdmissionMode;
 
     fn typed_rule_identity(&self) -> RuleIdentity {
@@ -681,11 +708,11 @@ impl TypedSectorAdmission for SUNFusionRule {
     }
 }
 
-impl CheckedGenericRigidSymbols for SUNFusionRule {
+impl CheckedGenericRigidSymbols for LieGroupFusionRule {
     type Scalar = f64;
 
     /// The provider's Weyl dimension, exact below `2^53`, rounded once above
-    /// it, and [`SUNFusionRuleError::DimensionNotRepresentable`] past `f64::MAX`.
+    /// it, and [`LieGroupFusionRuleError::DimensionNotRepresentable`] past `f64::MAX`.
     fn try_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
         forward::dimension(self, sector, FusionCategory::dim)
     }
@@ -723,7 +750,7 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         forward::r_block(self, [a, b, c])
     }
 
-    // SUN's existing boundary accepts empty moves before the provider needs
+    // The existing boundary accepts empty moves before the provider needs
     // dimensions or a dual object; neither must fit an additional symtn id.
     // Validate logical axes without strengthening that admission.
     fn try_a_symbol_generic(
@@ -736,11 +763,14 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         let [a, b, c] = crate::category_rule::try_map_array(ids, |id| {
             self.codec.object(|| self.category(), id)
         })?;
-        let block = self.category().a_symbol(&a, &b, &c).map_err(racah_error)?;
+        let block = self
+            .category()
+            .a_symbol(&a, &b, &c)
+            .map_err(provider_error)?;
         let rows = self
             .category()
             .try_nsymbol(&a, &b, &c)
-            .map_err(racah_error)? as usize;
+            .map_err(provider_error)? as usize;
         let cols = if rows == 0 {
             0
         } else {
@@ -748,7 +778,7 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
             let dual = self.codec.object(|| self.category(), dual_id)?;
             self.category()
                 .try_nsymbol(&dual, &c, &b)
-                .map_err(racah_error)? as usize
+                .map_err(provider_error)? as usize
         };
         let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
         Ok(GenericRMatrix::new(data, rows, cols))
@@ -764,11 +794,14 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
         let [a, b, c] = crate::category_rule::try_map_array(ids, |id| {
             self.codec.object(|| self.category(), id)
         })?;
-        let block = self.category().b_symbol(&a, &b, &c).map_err(racah_error)?;
+        let block = self
+            .category()
+            .b_symbol(&a, &b, &c)
+            .map_err(provider_error)?;
         let rows = self
             .category()
             .try_nsymbol(&a, &b, &c)
-            .map_err(racah_error)? as usize;
+            .map_err(provider_error)? as usize;
         let cols = if rows == 0 {
             0
         } else {
@@ -776,14 +809,14 @@ impl CheckedGenericRigidSymbols for SUNFusionRule {
             let dual = self.codec.object(|| self.category(), dual_id)?;
             self.category()
                 .try_nsymbol(&c, &dual, &a)
-                .map_err(racah_error)? as usize
+                .map_err(provider_error)? as usize
         };
         let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
         Ok(GenericRMatrix::new(data, rows, cols))
     }
 }
 
-impl CheckedGenericPivotal for SUNFusionRule {
+impl CheckedGenericPivotal for LieGroupFusionRule {
     fn try_twist_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
         forward::twist(self, sector)
     }
@@ -880,11 +913,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dual_interner_keeps_both_directions_within_capacity() {
+        let table = IrrepTable::default();
+        for id in 0..IRREP_TABLE_CAPACITY - 1 {
+            table.insert_dual(SectorId::new(id), SectorId::new(id));
+        }
+        let last = SectorId::new(IRREP_TABLE_CAPACITY - 1);
+        let extra = SectorId::new(IRREP_TABLE_CAPACITY);
+        table.insert_dual(last, extra);
+        assert_eq!(table.dual(last), None);
+        assert_eq!(table.dual(extra), None);
+        table.insert_dual(last, last);
+        assert_eq!(table.dual(last), Some(last));
+        assert_eq!(table.0.read().unwrap().duals.len(), IRREP_TABLE_CAPACITY);
+    }
+
+    #[test]
     fn vertex_admission_rejects_an_unencodable_dual() {
         if usize::BITS != 64 {
             return;
         }
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let unit = rule.vacuum();
         let sector = SectorId::new(usize::MAX);
         for (operation, ids) in [
@@ -894,7 +943,7 @@ mod tests {
             for _ in 0..2 {
                 assert!(matches!(
                     crate::CategoryProvider::admit(&rule, operation, ids),
-                    Err(SUNFusionRuleError::UnrepresentableLabel { labels })
+                    Err(LieGroupFusionRuleError::UnrepresentableLabel { labels })
                         if labels == [3_327_948_884, 2_746_052_115]
                 ));
             }
@@ -904,7 +953,7 @@ mod tests {
     #[test]
     fn malformed_symbol_axes_map_without_a_source() {
         use std::error::Error as _;
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let error = rule.codec.map_error(
             &[],
             CategoryAdapterError::MalformedSymbolAxes {
@@ -913,11 +962,11 @@ mod tests {
             },
         );
         assert!(
-            matches!(&error, SUNFusionRuleError::MalformedSymbolAxes { expected, actual } if expected == &[2, 2] && actual == &[1, 4])
+            matches!(&error, LieGroupFusionRuleError::MalformedSymbolAxes { expected, actual } if expected == &[2, 2] && actual == &[1, 4])
         );
         assert_eq!(
             error.to_string(),
-            "Racah symbol axes [1, 4] disagree with the fusion multiplicities [2, 2]"
+            "provider symbol axes [1, 4] disagree with the fusion multiplicities [2, 2]"
         );
         assert!(error.source().is_none());
     }
@@ -927,7 +976,7 @@ mod tests {
     #[test]
     fn rigid_data_matches_f_symbol_and_dynkin_derivations() {
         for (n, max_total) in [(2, 6), (3, 3), (4, 2)] {
-            let rule = SUNFusionRule::new(n).unwrap();
+            let rule = LieGroupFusionRule::new(GroupId::su(n).unwrap()).unwrap();
             let unit = rule.category().unit();
             let mut swept = 0;
             for id in 0.. {
@@ -965,7 +1014,7 @@ mod tests {
             assert!(swept > n);
         }
         // A complex irrep whose phase is not +1 in this gauge.
-        let su4 = SUNFusionRule::new(4).unwrap();
+        let su4 = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
         let fundamental = su4.encode_dynkin(&[1, 0, 0]).unwrap();
         assert_eq!(
             su4.try_frobenius_schur_phase_scalar(fundamental).unwrap(),
@@ -975,13 +1024,13 @@ mod tests {
 
     #[test]
     fn codec_is_graded_lexicographic_and_roundtrips() {
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let labels = [[0, 0], [0, 1], [1, 0], [0, 2], [1, 1], [2, 0]];
         for (id, label) in labels.into_iter().enumerate() {
             assert_eq!(rule.encode_dynkin(&label).unwrap(), SectorId::new(id));
             assert_eq!(rule.decode_dynkin(SectorId::new(id)).unwrap(), label);
         }
-        let su2 = SUNFusionRule::new(2).unwrap();
+        let su2 = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
         let edge = [i64::from(u32::MAX)];
         let id = su2.encode_dynkin(&edge).unwrap();
         assert_eq!(id, SectorId::new(u32::MAX as usize));
@@ -990,7 +1039,7 @@ mod tests {
 
     #[test]
     fn checked_rigid_dimension_accepts_the_largest_su2_dynkin_label() {
-        let rule = SUNFusionRule::new(2).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
         let sector = rule.encode_dynkin(&[i64::from(u32::MAX)]).unwrap();
         let expected_dimension = 2.0_f64.powi(32);
         let sqrt_dimension = rule.try_sqrt_dim_scalar(sector).unwrap();
@@ -1003,15 +1052,15 @@ mod tests {
         for label in [i64::from(u32::MAX) + 1, i64::MAX] {
             assert!(matches!(
                 rule.encode_dynkin(&[label]),
-                Err(SUNFusionRuleError::UnrepresentableLabel { .. })
+                Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
             ));
             assert!(matches!(
                 rule.decode_dynkin(SectorId::new(label as usize)),
-                Err(SUNFusionRuleError::UnrepresentableLabel { .. })
+                Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
             ));
             assert!(matches!(
                 rule.try_dim_scalar(SectorId::new(label as usize)),
-                Err(SUNFusionRuleError::UnrepresentableLabel { .. })
+                Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
             ));
         }
     }
@@ -1020,7 +1069,7 @@ mod tests {
     fn checked_rigid_dimension_is_the_exact_weyl_dimension() {
         // What: `dim` is not `sqrt(dim)^2`, which is off by one rounding for
         // 3, 6 and 8 (`sqrt(8)^2 = 8.000000000000002`).
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         for p in 0..6_i64 {
             for q in 0..6_i64 {
                 let sector = rule.encode_dynkin(&[p, q]).unwrap();
@@ -1035,7 +1084,7 @@ mod tests {
         if usize::BITS != 64 {
             return;
         }
-        let rule = SUNFusionRule::new(39).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(39).unwrap()).unwrap();
         let sector = SectorId::new(usize::try_from(17_876_288_714_431_443_296u64).unwrap());
         let mut expected = vec![0; 38];
         expected[37] = 31;
@@ -1045,42 +1094,40 @@ mod tests {
 
     #[test]
     fn validation_and_identity_are_typed_and_stable() {
-        assert!(matches!(
-            SUNFusionRule::new(1),
-            Err(SUNFusionRuleError::InvalidRank { .. })
-        ));
-        let rule = SUNFusionRule::new(3).unwrap();
+        assert!(GroupId::su(1).is_err());
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         assert!(matches!(
             rule.encode_dynkin(&[1]),
-            Err(SUNFusionRuleError::LabelLength { .. })
+            Err(LieGroupFusionRuleError::LabelLength { .. })
         ));
         assert!(matches!(
             rule.encode_dynkin(&[-1, 0]),
-            Err(SUNFusionRuleError::NegativeLabel { .. })
+            Err(LieGroupFusionRuleError::NegativeLabel { .. })
         ));
         assert!(matches!(
             rule.encode_dynkin(&[i64::MAX, i64::MAX]),
-            Err(SUNFusionRuleError::UnrepresentableLabel { .. })
+            Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
+        let too_large = GroupId {
+            root_system: RootSystem::A(isize::MAX as usize / size_of::<i64>() + 1),
+            form: GlobalForm::SimplyConnected,
+        };
         assert!(matches!(
-            SUNFusionRule::new(usize::MAX),
-            Err(SUNFusionRuleError::RankNotRepresentable { .. })
+            LieGroupFusionRule::new(too_large),
+            Err(LieGroupFusionRuleError::RankNotRepresentable { .. })
         ));
-        if usize::BITS == 64 {
-            let max_rank = isize::MAX as usize / size_of::<i64>() + 1;
-            let rule = SUNFusionRule::new(max_rank).unwrap();
-            assert!(matches!(
-                rule.decode_dynkin(rule.vacuum()),
-                Err(SUNFusionRuleError::LabelAllocation { .. })
-            ));
-            assert!(matches!(
-                rule.try_r_symbol_generic(rule.vacuum(), rule.vacuum(), rule.vacuum()),
-                Err(SUNFusionRuleError::LabelAllocation { .. })
-            ));
-            assert!(rule.category.get().is_none());
-        }
+        // Exercise the codec's fallible allocation independently: production
+        // rejects this rank before constructing eager provider state.
+        let codec = LieCodec {
+            group: too_large,
+            irreps: Arc::default(),
+        };
+        assert!(matches!(
+            codec.decode_dynkin(SectorId::new(0)),
+            Err(LieGroupFusionRuleError::LabelAllocation { .. })
+        ));
         for n in [3, 4] {
-            let rule = SUNFusionRule::new(n).unwrap();
+            let rule = LieGroupFusionRule::new(GroupId::su(n).unwrap()).unwrap();
             let labels = rule.decode_dynkin(SectorId::new(usize::MAX)).unwrap();
             assert_eq!(
                 rule.encode_dynkin(&labels).unwrap(),
@@ -1088,24 +1135,32 @@ mod tests {
             );
         }
         assert!(matches!(
-            SUNFusionRule::new(2)
+            LieGroupFusionRule::new(GroupId::su(2).unwrap())
                 .unwrap()
                 .decode_dynkin(SectorId::new(usize::MAX)),
-            Err(SUNFusionRuleError::DecodeOverflow { .. })
+            Err(LieGroupFusionRuleError::DecodeOverflow { .. })
         ));
         assert_eq!(
             rule.rule_identity(),
-            SUNFusionRule::new(3).unwrap().rule_identity()
+            LieGroupFusionRule::new(GroupId::su(3).unwrap())
+                .unwrap()
+                .rule_identity()
         );
         assert_ne!(
             rule.rule_identity(),
-            SUNFusionRule::new(4).unwrap().rule_identity()
+            LieGroupFusionRule::new(GroupId::su(4).unwrap())
+                .unwrap()
+                .rule_identity()
         );
-        let original = SUNFusionRule::identity_bytes(3);
-        let mut expected = b"symtn:sun:dynkin:graded-total-then-lex:v1".to_vec();
+        let original =
+            LieGroupFusionRule::identity_bytes(rule.group_id(), rule.category()).unwrap();
+        let mut expected = b"symtn:lie:dynkin:graded-total-then-lex:v1".to_vec();
         expected.extend_from_slice(&usize::BITS.to_le_bytes());
-        expected.extend_from_slice(&3usize.to_le_bytes());
-        expected.extend_from_slice(b":generic:bosonic:racah-sun");
+        expected.push(0); // A-series
+        expected.extend_from_slice(&2usize.to_le_bytes());
+        expected.push(0); // simply connected
+        expected.extend_from_slice(&0usize.to_le_bytes());
+        expected.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
         expected.extend_from_slice(
             b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
         );
@@ -1114,8 +1169,8 @@ mod tests {
         let mut changed = original.to_vec();
         changed[0] ^= 1;
         assert_ne!(
-            RuleIdentity::from_canonical_bytes::<SUNFusionRule>(IDENTITY_SCHEMA, original),
-            RuleIdentity::from_canonical_bytes::<SUNFusionRule>(
+            RuleIdentity::from_canonical_bytes::<LieGroupFusionRule>(IDENTITY_SCHEMA, original),
+            RuleIdentity::from_canonical_bytes::<LieGroupFusionRule>(
                 IDENTITY_SCHEMA,
                 Arc::from(changed)
             )
@@ -1124,12 +1179,12 @@ mod tests {
 
     #[test]
     fn stored_identity_is_shared_and_distinguishes_rank() {
-        let su3 = SUNFusionRule::new(3).unwrap();
-        let su4 = SUNFusionRule::new(4).unwrap();
+        let su3 = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
+        let su4 = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
         let (a, b) = (su3.rule_identity(), su3.rule_identity());
         assert!(a.same_content_allocation(&b));
         assert_ne!(a, su4.rule_identity());
-        let hash = |rule: &SUNFusionRule| {
+        let hash = |rule: &LieGroupFusionRule| {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             rule.rule_identity().hash(&mut hasher);
@@ -1140,7 +1195,7 @@ mod tests {
 
     #[test]
     fn irreps_and_duals_are_interned_once_per_sector() {
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let three = rule.encode_dynkin(&[1, 0]).unwrap();
         let eight = rule.encode_dynkin(&[1, 1]).unwrap();
         let first = rule.codec.irrep(|| rule.category(), three).unwrap();
@@ -1161,7 +1216,12 @@ mod tests {
             *rule.codec.irrep(|| rule.category(), eight).unwrap(),
             *first
         );
-        assert_eq!(rule.codec.sector(Cow::Borrowed(&first)).unwrap(), three);
+        assert_eq!(
+            rule.codec
+                .sector(rule.category(), Cow::Borrowed(&first))
+                .unwrap(),
+            three
+        );
 
         let anti_three = rule.encode_dynkin(&[0, 1]).unwrap();
         assert_eq!(rule.codec.irreps.dual(three), None);
@@ -1170,16 +1230,22 @@ mod tests {
         assert_eq!(rule.codec.irreps.dual(anti_three), Some(three));
 
         // Failed conversions are not interned.
-        let su2 = SUNFusionRule::new(2).unwrap();
-        let su4 = SUNFusionRule::new(4).unwrap();
+        let su2 = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
+        let su4 = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
         let wide = su4.codec.irrep(|| su4.category(), three).unwrap();
-        assert!(su2.codec.sector(Cow::Borrowed(&wide)).is_err());
-        assert!(su2.codec.sector(Cow::Borrowed(&wide)).is_err());
+        assert!(su2
+            .codec
+            .sector(su2.category(), Cow::Borrowed(&wide))
+            .is_err());
+        assert!(su2
+            .codec
+            .sector(su2.category(), Cow::Borrowed(&wide))
+            .is_err());
     }
 
     #[test]
     fn su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities() {
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let eight = rule.encode_dynkin(&[1, 1]).unwrap();
         assert_eq!(rule.fusion_style(), FusionStyleKind::Generic);
         assert_eq!(rule.braiding_style(), BraidingStyleKind::Bosonic);
@@ -1229,7 +1295,7 @@ mod tests {
 
     #[test]
     fn su3_rigid_symbols_match_sunrepresentations_fixtures() {
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let three = rule.encode_dynkin(&[1, 0]).unwrap();
         let anti_three = rule.encode_dynkin(&[0, 1]).unwrap();
         let eight = rule.encode_dynkin(&[1, 1]).unwrap();
@@ -1297,7 +1363,7 @@ mod tests {
 
     #[test]
     fn su2_fundamental_pivotal_phase_matches_f_gauge() {
-        let rule = SUNFusionRule::new(2).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
         let fundamental = rule.encode_dynkin(&[1]).unwrap();
         assert_eq!(
             rule.try_frobenius_schur_phase_scalar(fundamental).unwrap(),
@@ -1307,7 +1373,7 @@ mod tests {
 
     #[test]
     fn su4_adjoint_rigid_shape_smoke() {
-        let rule = SUNFusionRule::new(4).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
         let adjoint = rule.encode_dynkin(&[1, 0, 1]).unwrap();
         assert_eq!(rule.try_dim_scalar(adjoint).unwrap(), 15.0);
         assert_eq!(
@@ -1326,7 +1392,7 @@ mod tests {
 
     #[test]
     fn rigid_failures_remain_typed() {
-        let rule = SUNFusionRule::new(3).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let three = rule.encode_dynkin(&[1, 0]).unwrap();
         let eight = rule.encode_dynkin(&[1, 1]).unwrap();
         let r = rule.try_r_symbol_generic(three, three, eight).unwrap();
@@ -1338,13 +1404,13 @@ mod tests {
         assert_eq!(f.shape(), (0, 1, 0, 0));
         assert!(f.data().is_empty());
 
-        let rule = SUNFusionRule::new(78).unwrap();
+        let rule = LieGroupFusionRule::new(GroupId::su(78).unwrap()).unwrap();
         let mut labels = vec![0; 77];
         labels[36] = 19;
         let sector = rule.encode_dynkin(&labels).unwrap();
         assert!(matches!(
             rule.try_sqrt_dim_scalar(sector),
-            Err(SUNFusionRuleError::DimensionNotRepresentable { .. })
+            Err(LieGroupFusionRuleError::DimensionNotRepresentable { .. })
         ));
     }
 }

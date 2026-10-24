@@ -9,6 +9,8 @@
 
 use super::*;
 
+#[cfg(feature = "cgc-gen")]
+pub use symtn_sectors::testing::su_lie_rule;
 pub use symtn_sectors::testing::Provider;
 
 pub fn generic_braid_tree_pair<R>(

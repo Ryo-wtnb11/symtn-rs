@@ -33,16 +33,18 @@ symtn disables its default features; `cgc-gen` opts into `lie-generated`.
 | Provider data | Boundary |
 | --- | --- |
 | Z2, Z_N, U(1), fermion parity, CU(1) | Built-in rules use the category adapter for every symbol, including A/B and U(1)'s CGC. symtn keeps labels, codecs, identities and checked errors. |
-| SU(2), SU(N) | `SU2FusionRule` and `SUNFusionRule` use the adapter over `LieGroup` for fusion, N, F/R/A/B, dimensions, duals, twists and Frobenius–Schur phases. symtn keeps codecs, identities, ordering and checked admission. |
+| Compact SU(2), general Lie groups | `SU2FusionRule` and `LieGroupFusionRule` use the adapter over `LieGroup` for fusion, N, F/R/A/B, dimensions, duals, twists and Frobenius–Schur phases. symtn keeps codecs, identities, ordering and checked admission. |
 | AnyonWiki categories | `TableRule` uses the category adapter over pinned tables in their own gauge. |
 | An application category | `CategoryRule<C, K>` adapts `FusionCategory`; the codec owns labels and admission, not symbol formulas. |
 | Products | `ProductFusionRule` uses the category adapter over fusion-symbols' `Product` for all categorical data. symtn keeps factor admission, labels, codecs, identities and TensorKit sector order. |
 
 Built-in rules retain their own types over the shared adapter; they are not
 `CategoryRule` aliases. SU2 retains its compact doubled-spin codec and checked
-scalar CGC entries in descending magnetic order. SUN retains its graded
-Dynkin codec, lazy category and bounded irrep interner, and uses checked
-`Generic` admission even for SU(2). Warm interner hits clone allocation-free
+scalar CGC entries in descending magnetic order. `LieGroupFusionRule` retains
+its graded Dynkin codec and bounded irrep interner, constructs its `LieGroup`
+eagerly, validates complete `GroupId` admission and uses checked `Generic`
+admission at every rank. Identities include explicit root/global-form metadata
+and the actual category fingerprint; equal fingerprints do not merge groups. Warm interner hits clone allocation-free
 provider handles; returned blocks and channels have separate allocation costs.
 See the [provider interface](provider_interface.md) for admission and error bounds.
 

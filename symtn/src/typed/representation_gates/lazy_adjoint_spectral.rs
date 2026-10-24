@@ -905,14 +905,15 @@ fn assert_checked_generic_solve_acceptance<D>()
 where
     D: AdvancedLinalgScalar + core::fmt::Debug,
 {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(solve_spy(&calls, None)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
     let divisor: TensorMap<_, D> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
@@ -998,7 +999,7 @@ fn checked_generic_solves_are_owned_uncached_and_one_call_per_route() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_left_solve_preserves_injected_backend_provenance() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
@@ -1008,7 +1009,8 @@ fn checked_generic_left_solve_preserves_injected_backend_provenance() {
         )))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| f64::from(ij[0] == ij[1]))

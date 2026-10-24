@@ -253,11 +253,13 @@ fn checked_generic_diagonal_rejects_before_layout_and_preserves_error_precedence
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let adjoint_id = provider.encode_dynkin(&adjoint).unwrap();
         assert_eq!(
             provider
@@ -751,7 +753,10 @@ fn checked_generic_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
 fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     // 8 ⊗ 8 contains 8 twice.
-    let provider = Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(
+        symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+            .unwrap(),
+    );
     let leg = GradedSpace::try_new(provider, [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
     check_generic_structural_constructors(&runtime, &leg, |ij| {
         0.5 - (ij[0] * 7 + ij[1] * 2 + ij[2]) as f64 * 0.125
@@ -763,7 +768,7 @@ fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
 fn sun_endomorphism_row_and_column_tree_stacking_is_identical() {
     use std::collections::BTreeMap;
 
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::MultiplicityIndex;
 
     type TreePlacement = (
@@ -776,7 +781,9 @@ fn sun_endomorphism_row_and_column_tree_stacking_is_identical() {
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, _| 0.0).unwrap();

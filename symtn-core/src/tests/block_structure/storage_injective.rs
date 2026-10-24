@@ -151,7 +151,7 @@ fn checked_generic_coupled_storage_is_admitted_by_witness() {
     // What: checked-Generic SU(3) destinations with outer multiplicity use
     // the same coupled-sector builder, so both the staged preview and the
     // committed structure carry the witness.
-    let rule = SUNFusionRule::new(3).unwrap();
+    let rule = symtn_sectors::testing::su_lie_rule(3);
     let fundamental = rule.encode_dynkin(&[1, 0]).unwrap();
     let adjoint = rule.encode_dynkin(&[1, 1]).unwrap();
     let trivial = rule.encode_dynkin(&[0, 0]).unwrap();

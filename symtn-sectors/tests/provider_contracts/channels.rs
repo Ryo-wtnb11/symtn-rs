@@ -7,7 +7,7 @@
 //!   `frozen_su2_symbol_and_channel_oracle`.
 //! - CU(1) complete small-label order: `tests/abelian_cu1_values.rs`
 //!   `cu1_unary_data_and_fusion_order_follow_tensorkitsectors`.
-//! - SU(3) octet channels sorted by id: `src/sun.rs`
+//! - SU(3) octet channels sorted by id: `src/lie.rs`
 //!   `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`.
 
 use symtn_sectors::*;
@@ -39,8 +39,8 @@ fn su2_channels_ascend_in_doubled_spin() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_channels_are_sorted_by_encoded_id() {
-    let su3 = SUNFusionRule::new(3).unwrap();
+fn lie_group_channels_are_sorted_by_encoded_id() {
+    let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     // 3 = [1,0] (id 2), 3bar = [0,1] (id 1), 6 = [2,0] (id 5), 8 = [1,1] (id 4).
     assert_eq!(ids(su3.try_fusion_channels(s(2), s(2)).unwrap()), [1, 5]);
     assert_eq!(ids(su3.try_fusion_channels(s(2), s(1)).unwrap()), [0, 4]);
@@ -48,7 +48,7 @@ fn sun_channels_are_sorted_by_encoded_id() {
         ids(su3.try_fusion_channels_in_table(s(2), s(2)).unwrap()),
         [1, 5]
     );
-    let su2 = SUNFusionRule::new(2).unwrap();
+    let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
     assert_eq!(ids(su2.try_fusion_channels(s(1), s(1)).unwrap()), [0, 2]);
     assert_eq!(ids(su2.try_fusion_channels(s(2), s(3)).unwrap()), [1, 3, 5]);
 }

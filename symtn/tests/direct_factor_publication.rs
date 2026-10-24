@@ -186,22 +186,25 @@ fn compact_lq_requests_no_zeroed_output_storage() {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::{LeftPolar, RightPolar, Svd};
 
     fn su3_leg(
-        provider: &Arc<SUNFusionRule>,
+        provider: &Arc<LieGroupFusionRule>,
         irreps: &[(Vec<i64>, usize)],
-    ) -> GradedSpace<SUNFusionRule> {
+    ) -> GradedSpace<LieGroupFusionRule> {
         GradedSpace::try_new(Arc::clone(provider), irreps.to_vec()).unwrap()
     }
 
     /// Four coupled sectors, rows >= columns in each; every degeneracy is
     /// multiplied by `scale`, which leaves the tree structure unchanged.
     fn tall_legs(
-        provider: &Arc<SUNFusionRule>,
+        provider: &Arc<LieGroupFusionRule>,
         scale: usize,
-    ) -> (GradedSpace<SUNFusionRule>, GradedSpace<SUNFusionRule>) {
+    ) -> (
+        GradedSpace<LieGroupFusionRule>,
+        GradedSpace<LieGroupFusionRule>,
+    ) {
         let irreps = [vec![0i64, 0], vec![1, 0], vec![0, 1], vec![1, 1]];
         let rows = irreps
             .iter()
@@ -216,7 +219,7 @@ mod checked_generic {
         (su3_leg(provider, &rows), su3_leg(provider, &cols))
     }
 
-    fn payload_bytes(tensor: &TensorMap<SUNFusionRule, f64>) -> usize {
+    fn payload_bytes(tensor: &TensorMap<LieGroupFusionRule, f64>) -> usize {
         std::mem::size_of_val(tensor.dense_data().unwrap())
     }
 
@@ -279,7 +282,9 @@ mod checked_generic {
 
     macro_rules! cases {
         ($d:ty, $runtime:expr) => {{
-            let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+            let provider = Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            );
             let (rows, cols) = tall_legs(&provider, 1);
             let tall: TensorMap<_, $d> =
                 TensorMap::rand_with_seed($runtime, [&rows], [&cols], 1481).unwrap();
@@ -324,7 +329,9 @@ mod checked_generic {
     fn checked_generic_polar_allocates_no_per_sector_temporaries() {
         let _measurement = counting_alloc::serial();
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         let scratch = |scale| {
             let (rows, cols) = tall_legs(&provider, scale);
             let a: TensorMap<_, f64> =
@@ -368,9 +375,11 @@ mod checked_generic {
     // whole payload growth.
     #[test]
     fn checked_generic_facade_factorizations_read_the_payload_in_place() {
-        type Tensor = TensorMap<SUNFusionRule, f64>;
+        type Tensor = TensorMap<LieGroupFusionRule, f64>;
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         let excess = |scale: usize, rank4: bool| {
             let leg = su3_leg(&provider, &[(vec![1, 1], 2 * scale), (vec![0, 0], scale)]);
             let fused = leg.fuse(&leg).unwrap();

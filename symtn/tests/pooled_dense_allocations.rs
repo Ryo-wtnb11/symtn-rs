@@ -154,9 +154,10 @@ fn pooled_lease_adds_no_allocation_calls_at_any_block_count() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_pooled_lease_adds_no_allocation_calls_at_any_block_count() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     let _serial = counting_alloc::serial();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let sets: [&[([i64; 2], usize)]; 2] = [
         &[([0, 0], 3), ([1, 0], 2)],
         &[

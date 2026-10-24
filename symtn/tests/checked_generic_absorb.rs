@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 use symtn::typed::{Complex64, Error, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -50,8 +50,10 @@ where
     D: Copy + Debug + PartialEq + symtn::typed::TensorScalar,
 {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let destination_provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let source_provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let destination_provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let source_provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let destination_legs = [3, 4, 2].map(|degeneracy| {
         GradedSpace::try_new(
             Arc::clone(&destination_provider),
@@ -165,9 +167,12 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
     // copying; the input payloads remain the caller-owned originals.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
-    let equal_identity = Arc::new(SUNFusionRule::new(3).unwrap());
-    let wrong_identity = Arc::new(SUNFusionRule::new(4).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let equal_identity =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let wrong_identity =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
     let equal_leg = GradedSpace::try_new(Arc::clone(&equal_identity), [(vec![1, 1], 2)]).unwrap();
     let dual_leg = GradedSpace::try_new(Arc::clone(&equal_identity), [(vec![1, 1], 2)])
