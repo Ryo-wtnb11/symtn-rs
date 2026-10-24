@@ -421,7 +421,11 @@ impl U1Irrep {
 
     pub fn checked_fuse(self, other: Self) -> Result<Self, FusionAlgebraError> {
         match U1.fusion(&self.fs(), &other.fs()) {
-            Ok(mut fused) => Ok(Self::from_fs(fused.next().unwrap())),
+            Ok(mut fused) => {
+                Ok(Self::from_fs(fused.next().expect(
+                    "a successful U(1) fusion has exactly one channel",
+                )))
+            }
             Err(_) => Err(FusionAlgebraError::U1FusionOverflow {
                 left: self.charge,
                 right: other.charge,

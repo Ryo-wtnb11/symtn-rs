@@ -92,7 +92,10 @@ const SU2_ENCODING_IDENTITY: &[u8] =
 
 fn category() -> &'static LieGroup {
     static CATEGORY: OnceLock<LieGroup> = OnceLock::new();
-    CATEGORY.get_or_init(|| LieGroup::new(GroupId::su(2).unwrap()).unwrap())
+    CATEGORY.get_or_init(|| {
+        LieGroup::new(GroupId::su(2).expect("2 is a valid SU(N) rank"))
+            .expect("the SU(2) category is supported")
+    })
 }
 
 fn identity() -> &'static RuleIdentity {

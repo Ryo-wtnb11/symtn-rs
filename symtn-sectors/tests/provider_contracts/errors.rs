@@ -149,6 +149,12 @@ fn sun_errors_are_typed_and_checked_left_right_coupled() {
         })
     ));
 
+    let su2 = SUNFusionRule::new(2).unwrap();
+    assert!(matches!(
+        su2.try_fusion_channels(s(u32::MAX as usize), s(1)),
+        Err(SUNFusionRuleError::UnrepresentableLabel { .. })
+    ));
+
     #[cfg(target_pointer_width = "64")]
     {
         let su2 = SUNFusionRule::new(2).unwrap();
