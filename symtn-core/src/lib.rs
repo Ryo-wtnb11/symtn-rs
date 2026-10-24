@@ -39,7 +39,7 @@ pub use symtn_sectors::{
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};
 #[cfg(feature = "cgc-gen")]
-pub use symtn_sectors::{SUNFusionRule, SUNFusionRuleError, SUNSymbolError};
+pub use symtn_sectors::{LieGroupFusionRule, LieGroupFusionRuleError};
 
 pub mod axes;
 mod storage;

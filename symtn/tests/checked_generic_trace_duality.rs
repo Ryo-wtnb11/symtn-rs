@@ -10,16 +10,17 @@ mod report;
 use std::sync::Arc;
 
 use report::cause;
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 use symtn::typed::{GradedSpace, OperationError, Runtime, TensorMap};
 
 #[test]
 fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
-    let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+    let rule =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64, 0], 1), (vec![1, 0], 2)]).unwrap();
     let w = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64, 0], 1), (vec![1, 1], 1)]).unwrap();
-    let rejects = |result: Result<TensorMap<SUNFusionRule, f64>, _>, what: &str| {
+    let rejects = |result: Result<TensorMap<LieGroupFusionRule, f64>, _>, what: &str| {
         let error = result.expect_err(what);
         assert!(
             matches!(

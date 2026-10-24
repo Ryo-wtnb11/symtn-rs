@@ -3,10 +3,11 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_compact_qr_preserves_provider_and_reconstructs() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, _| {
@@ -821,10 +822,11 @@ fn checked_dual_diagonal_qr_lq_publish_on_the_input_bond_without_provider_querie
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_compact_lq_preserves_provider_and_reconstructs() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, _| {
@@ -862,10 +864,11 @@ fn sun_checked_generic_compact_lq_preserves_provider_and_reconstructs() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_full_qr_preserves_provider_and_reconstructs() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, _| {

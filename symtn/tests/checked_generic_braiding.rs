@@ -834,10 +834,11 @@ fn assert_sun_identity_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) 
 where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let legs = [2, 1, 2].map(|degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), degeneracy)]).unwrap()
     });
@@ -890,10 +891,11 @@ fn assert_sun_flip_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) -> D
 where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let legs = [2, 1, 2].map(|degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), degeneracy)]).unwrap()
     });

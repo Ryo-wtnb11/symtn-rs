@@ -111,8 +111,8 @@ fn facade_error_is_nameable_per_rule() {
     assert_eq!(error, Error::RuleMismatch);
     #[cfg(feature = "cgc-gen")]
     {
-        use symtn::sector::{SUNFusionRule, SUNFusionRuleError};
-        let _: FacadeError<SUNFusionRule> =
-            GenericTensorError::<SUNFusionRuleError>::Facade(Error::RuleMismatch);
+        use symtn::sector::{LieGroupFusionRule, LieGroupFusionRuleError};
+        let _: FacadeError<LieGroupFusionRule> =
+            GenericTensorError::<LieGroupFusionRuleError>::Facade(Error::RuleMismatch);
     }
 }

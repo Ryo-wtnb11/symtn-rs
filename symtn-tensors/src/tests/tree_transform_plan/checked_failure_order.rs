@@ -2,14 +2,14 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use symtn_core::{
     generic_braid_tree_pair_checked, validate_generic_fusion_tree_pair_checked, BraidingStyleKind,
-    FusionStyleKind, SUNFusionRule, SUNFusionRuleError, SectorVec,
+    FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError, SectorVec,
 };
 
 #[derive(Debug)]
 enum TwoKeyError {
     SourceALater,
     SourceBEarlier,
-    Delegated(SUNFusionRuleError),
+    Delegated(LieGroupFusionRuleError),
 }
 impl std::fmt::Display for TwoKeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -23,9 +23,9 @@ impl std::fmt::Display for TwoKeyError {
 impl std::error::Error for TwoKeyError {}
 
 // Immutable failure policy: only these two admitted R keys fail. Logging does
-// not affect answers, and ordinary SUN structural/other symbol answers remain.
+// not affect answers, and ordinary Lie-group structural/other symbol answers remain.
 struct TwoKeyFailures {
-    inner: SUNFusionRule,
+    inner: LieGroupFusionRule,
     vacuum: SectorId,
     adjoint: SectorId,
     r_calls: RefCell<Vec<[SectorId; 3]>>,
@@ -136,7 +136,7 @@ struct OrderFixture {
 /// basis trees), with source A (`[vac, adj]` inner lines) placed before source
 /// B (`[adj, adj]`), all vertices one.
 fn order_fixture() -> OrderFixture {
-    let inner = SUNFusionRule::new(3).unwrap();
+    let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let v = inner.encode_dynkin(&[0, 0]).unwrap();
     let a = inner.encode_dynkin(&[1, 1]).unwrap();
     assert_eq!(inner.try_nsymbol(a, a, v).unwrap(), 1);
@@ -149,7 +149,7 @@ fn order_fixture() -> OrderFixture {
     let canonical = homspace
         .coupled_subblock_structure_from_leg_degeneracies_generic_checked(&inner)
         .unwrap();
-    // Select full keys from the actual checked SUN layout, including the
+    // Select full keys from the actual checked Lie-group layout, including the
     // one-based multiplicity vertices; do not invent an admitted tree.
     let keys = (0..canonical.block_count())
         .map(|i| {
@@ -170,7 +170,7 @@ fn order_fixture() -> OrderFixture {
                         .iter()
                         .all(|vertex| vertex.get() == 1)
             })
-            .expect("actual checked SUN layout must contain the proposed source")
+            .expect("actual checked Lie-group layout must contain the proposed source")
             .clone()
     };
     let source_a = select(&[v, a]);

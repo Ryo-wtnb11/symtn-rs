@@ -204,12 +204,14 @@ fn generic_toy_core_composition_matches_block_products() {
 mod racah {
     use super::*;
     use std::collections::BTreeMap;
-    use symtn::sector::{SU2FusionRule, SU2Irrep, SUNFusionRule};
+    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 
     #[test]
     fn su3_staged_contraction_matches_block_products() {
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let rule = Arc::new(SUNFusionRule::new(3).unwrap());
+        let rule = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         // `8 ⊗ 8 → 8` has outer multiplicity two.
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -335,7 +337,9 @@ mod racah {
         assert_close("SU(2) MF physical", &pc.data, &want, sa[1] * sa[2]);
         assert!(want.iter().any(|v| v.abs() > 0.5));
 
-        let rule = Arc::new(SUNFusionRule::new(2).unwrap());
+        let rule = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+        );
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
             degeneracies.map(|(s, n)| (vec![s as i64], n)),

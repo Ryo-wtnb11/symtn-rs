@@ -10,5 +10,10 @@ fusion-symbols' `Product`: factor order and association remain part of the
 provider and sector type. Multiplicity-free factors select multiplicity-free
 admission; a checked-Generic factor selects checked-Generic admission.
 
-The `cgc-gen` feature enables the generated SUN provider. It does not
-turn arbitrary product labels or raw `SectorId` values into stable wire data.
+The `cgc-gen` feature enables `LieGroupFusionRule::new(GroupId)` over
+fusion-symbols A/B/C/D categories. It validates full global-form admission,
+uses graded Dynkin-vector labels and checked Generic Host execution, and
+forwards all symbols to fusion-symbols. Unsupported groups, including D2,
+fail at construction with `LieGroupFusionRuleError::Provider`. The compact
+`SU2FusionRule` keeps its multiplicity-free and physical-basis capabilities.
+Raw `SectorId` values remain rule-local rather than stable wire data.

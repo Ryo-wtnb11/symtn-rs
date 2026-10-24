@@ -25,8 +25,11 @@ The default host provider is Tenferro's resolved compiled default: BLAS when
 its CPU build enables `cpu-blas`, otherwise `cpu-faer`; see the
 [backend policy](../docs/backend_policy.md) and [`Cargo.toml`](Cargo.toml) for
 alternatives. `cuda` and `cgc-gen` add
-the typed CUDA surface and SUN providers. Contraction-order planners and their
-configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
+the typed CUDA surface and `LieGroupFusionRule`, respectively. The latter uses
+fusion-symbols A/B/C/D categories with checked Generic Host execution,
+Dynkin-vector labels and explicit `GroupId` global forms. `SU2FusionRule`
+retains its compact multiplicity-free and physical-basis capabilities.
+Contraction-order planners and their configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
 
 The `krylov` feature makes Host `TensorMap` a vector of the
 [krylov](https://docs.rs/krylov) crate (re-exported as `symtn::krylov`), so

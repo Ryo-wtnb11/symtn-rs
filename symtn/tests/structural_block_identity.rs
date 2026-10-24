@@ -379,10 +379,12 @@ fn su2_product_isometry_follows_tensorkit_inner_line_order() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_isometry_is_the_block_identity_across_multiplicity_vertices() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
         let rt = Runtime::builder().build().unwrap();
-        let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         let (octet, singlet) = (vec![1i64, 1], vec![0i64, 0]);
         let v = GradedSpace::try_new(
             Arc::clone(&provider),

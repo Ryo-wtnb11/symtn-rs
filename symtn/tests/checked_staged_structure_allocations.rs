@@ -226,10 +226,12 @@ fn warm_staged_checked_plans_lend_the_canonical_structure() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_racah_checked_contraction_is_bounded_by_sectors_and_groups() {
-    use symtn::sector::SUNFusionRule;
-    let su2 = Arc::new(SUNFusionRule::new(2).unwrap());
+    use symtn::sector::LieGroupFusionRule;
+    let su2 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
     let su2 = GradedSpace::try_new(su2, [(vec![0i64], 1), (vec![1], 2)]).unwrap();
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let su3 = GradedSpace::try_new(su3, [(vec![0i64, 0], 1), (vec![1, 1], 1)]).unwrap();
     for (case, leg, ranks) in [
         ("SU(2)", &su2, &[2usize, 4, 6][..]),

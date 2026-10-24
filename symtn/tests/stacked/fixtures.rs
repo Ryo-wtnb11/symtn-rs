@@ -116,7 +116,12 @@ macro_rules! for_each_symmetry {
         });
         #[cfg(feature = "cgc-gen")]
         $check!("SU3 checked Generic", |variant: usize| {
-            let rule = Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap());
+            let rule = Arc::new(
+                symtn::sector::LieGroupFusionRule::new(
+                    fusion_symbols::lie::GroupId::su(3).unwrap(),
+                )
+                .unwrap(),
+            );
             GradedSpace::try_new(rule, [(vec![0i64, 0], 1), (vec![1, 1], 3 + variant)]).unwrap()
         });
     }};

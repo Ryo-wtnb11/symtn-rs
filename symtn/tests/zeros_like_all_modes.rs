@@ -198,19 +198,25 @@ fn complex_symbol_zeros_like_keeps_space_and_form() {
 #[cfg(feature = "cgc-gen")]
 mod checked {
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    fn sun_leg(n: usize, sectors: &[(Vec<i64>, usize)]) -> GradedSpace<SUNFusionRule> {
-        GradedSpace::try_new(Arc::new(SUNFusionRule::new(n).unwrap()), sectors.to_vec()).unwrap()
+    fn sun_leg(n: usize, sectors: &[(Vec<i64>, usize)]) -> GradedSpace<LieGroupFusionRule> {
+        GradedSpace::try_new(
+            Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            ),
+            sectors.to_vec(),
+        )
+        .unwrap()
     }
 
     /// The `su2_leg` sectors as checked Generic SU(2) labels `[2j]`.
-    fn checked_su2_leg() -> GradedSpace<SUNFusionRule> {
+    fn checked_su2_leg() -> GradedSpace<LieGroupFusionRule> {
         sun_leg(2, &[(vec![0], 2), (vec![1], 3), (vec![2], 1)])
     }
 
     /// `8 ⊗ 8 ∋ 8` twice: the dense fixture has outer multiplicity.
-    fn su3_leg() -> GradedSpace<SUNFusionRule> {
+    fn su3_leg() -> GradedSpace<LieGroupFusionRule> {
         sun_leg(3, &[(vec![1, 1], 2), (vec![0, 0], 1)])
     }
 

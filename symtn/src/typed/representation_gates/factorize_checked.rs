@@ -3,14 +3,15 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let solver_calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(fail_second_svd(&solver_calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let real: TensorMap<_, f64> = TensorMap::diagonal(
@@ -134,13 +135,14 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(polar_spy(&Arc::default())))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 3), (vec![0, 0], 2)])
         .unwrap()
         .try_dual()
@@ -180,14 +182,15 @@ fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let svd_calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(polar_spy(&svd_calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, num_complex::Complex64> = TensorMap::diagonal(
@@ -375,7 +378,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
@@ -383,7 +386,8 @@ fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work
         .with_dense_executor(Box::new(polar_spy(&svd_calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -480,7 +484,7 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     // both shape-based null spaces are empty whatever its zeros, read with
     // no materialization or dense kernel, keep the provider, and agree with
     // the dense route.
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     macro_rules! check {
         ($dtype:ty) => {{
@@ -489,7 +493,9 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
                 .with_dense_executor(Box::new(polar_spy(&calls)))
                 .build()
                 .unwrap();
-            let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+            let provider = Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            );
             let bond =
                 GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)])
                     .unwrap();
@@ -541,10 +547,11 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![1, 0], 2)]).unwrap();
     let real: TensorMap<_, f32> = TensorMap::diagonal(
         &runtime,
@@ -614,10 +621,11 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
@@ -678,10 +686,11 @@ fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
 #[test]
 fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
     use num_complex::Complex64;
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let column =
@@ -840,11 +849,11 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let su3 = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0, 0], 2), (vec![1, 0], 3)],
     )
     .unwrap();

@@ -165,10 +165,11 @@ fn fermionic_u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_lazy_adjoint_lq_matches_the_materialized_adjoint() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint_irrep =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2), (vec![0, 0], 1)]).unwrap();
     let octet = GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2)]).unwrap();

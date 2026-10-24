@@ -252,10 +252,11 @@ fn multiplicity_free_su2_lazy_adjoint_factorizations_match_the_materialized_adjo
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(2).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
     let a = GradedSpace::try_new(
         Arc::clone(&provider),
         [(vec![0i64], 2), (vec![1], 2), (vec![2], 1)],
@@ -271,10 +272,11 @@ fn checked_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_multiplicity_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let a =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 1), (vec![0, 0], 1)]).unwrap();
     let b = GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2)]).unwrap();
@@ -297,10 +299,11 @@ fn checked_su3_multiplicity_lazy_adjoint_factorizations_match_the_materialized_a
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_seams_keep_non_self_dual_sectors_and_dual_legs() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let three =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 0], 2), (vec![0, 0], 1)]).unwrap();
     let three_bar =

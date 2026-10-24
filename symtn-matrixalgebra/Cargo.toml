@@ -27,5 +27,5 @@ cpu-blas = ["symtn-tensors/cpu-blas"]
 blas-accelerate = ["symtn-tensors/blas-accelerate"]
 blas-openblas = ["symtn-tensors/blas-openblas"]
 blas-mkl = ["symtn-tensors/blas-mkl"]
-# Test-only: admits `SUNFusionRule` so checked-Generic SU(3) fixtures run here.
+# Test-only: admits `LieGroupFusionRule` so checked-Generic SU(3) fixtures run here.
 cgc-gen = ["symtn-tensors/cgc-gen"]

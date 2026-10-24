@@ -324,11 +324,13 @@ fn checked_generic_rule_instance_alone_separates_signatures() {
     // What: SU(3) and SU(4) trivial legs give the same hom space and
     // block structure content, so the rule identity alone separates them.
     use std::sync::Arc;
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let signature = |rank: usize, trivial: Vec<i64>| {
-        let rule = Arc::new(SUNFusionRule::new(rank).unwrap());
+        let rule = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap()).unwrap(),
+        );
         let leg = GradedSpace::try_new(rule, [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
             .unwrap()

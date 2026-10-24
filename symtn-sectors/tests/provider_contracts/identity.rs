@@ -2,7 +2,7 @@
 //!
 //! Already pinned elsewhere:
 //! - SU(2) canonical bytes: `src/su2.rs` `identity_and_label_boundary_are_unchanged`.
-//! - SU(N) rank distinction and shared allocation: `src/sun.rs`
+//! - SU(N) rank distinction and shared allocation: `src/lie.rs`
 //!   `stored_identity_is_shared_and_distinguishes_rank` (the public
 //!   `rule_identity()` value itself is pinned below).
 //! - Every shipped table entry distinct, stable, and unequal to Z2 / Z_2:
@@ -72,16 +72,20 @@ fn equal_groups_under_different_rules_stay_distinct() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun2_and_compact_su2_are_different_rules() {
-    let sun2 = SUNFusionRule::new(2).unwrap();
+fn lie_group_su2_and_compact_su2_are_different_rules() {
+    let sun2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
     assert_ne!(sun2.rule_identity(), SU2FusionRule.rule_identity());
     assert_eq!(
         sun2.rule_identity(),
-        SUNFusionRule::new(2).unwrap().rule_identity()
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
+            .unwrap()
+            .rule_identity()
     );
     assert_ne!(
         sun2.rule_identity(),
-        SUNFusionRule::new(3).unwrap().rule_identity()
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+            .unwrap()
+            .rule_identity()
     );
     assert_eq!(sun2.typed_rule_identity(), sun2.rule_identity());
 }
@@ -174,41 +178,51 @@ fn table_identity_is_the_fingerprint_under_the_table_tag() {
     );
 }
 
-/// The legacy SU(N) identity, independently of `SUNFusionRule`'s private
-/// helpers: type tag `SUNFusionRule`; canonical bytes = codec version,
-/// `usize::BITS` (u32 LE), `n` (usize LE), the capability string and the
-/// fusion-symbols authority fingerprint of A1 (n = 2) or higher A (n >= 3);
-/// prehash = `DefaultHasher` over `(schema 0x5355_4e5f_434f_4445, n)`.
+/// SU(n) identity oracle: explicit A_(n-1), simply-connected metadata,
+/// 64-bit graded Dynkin codec conventions and literal provider fingerprints.
 #[cfg(all(feature = "cgc-gen", target_pointer_width = "64"))]
-fn sun_identity(n: usize, fingerprint: &[u8]) -> RuleIdentity {
-    let mut bytes = b"symtn:sun:dynkin:graded-total-then-lex:v1".to_vec();
+fn lie_group_identity(n: usize, fingerprint: &[u8]) -> RuleIdentity {
+    let mut bytes = b"symtn:lie:dynkin:graded-total-then-lex:v1".to_vec();
     bytes.extend_from_slice(&64u32.to_le_bytes());
-    bytes.extend_from_slice(&(n as u64).to_le_bytes());
-    bytes.extend_from_slice(b":generic:bosonic:racah-sun");
+    bytes.push(0); // A root system.
+    bytes.extend_from_slice(&((n - 1) as u64).to_le_bytes());
+    bytes.push(0); // Simply connected.
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
     bytes.extend_from_slice(
         b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
     );
     bytes.extend_from_slice(fingerprint);
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (0x5355_4e5f_434f_4445_u64, n).hash(&mut hasher);
-    RuleIdentity::from_canonical_bytes::<SUNFusionRule>(hasher.finish(), Arc::from(bytes))
+    (
+        0x4c49_455f_434f_4445_u64,
+        fusion_symbols::lie::GroupId::su(n).unwrap(),
+    )
+        .hash(&mut hasher);
+    RuleIdentity::from_canonical_bytes::<LieGroupFusionRule>(hasher.finish(), Arc::from(bytes))
 }
 
 #[cfg(all(feature = "cgc-gen", target_pointer_width = "64"))]
 #[test]
-fn sun_public_identity_is_the_legacy_canonical_bytes() {
+fn lie_group_public_identity_has_explicit_canonical_group_metadata() {
     let a1 = b"racah:su2-exact:model=bigrational-round-once:3j=condon-shortley:cg=condon-shortley:6j=racah-single-sum:f=tks-su2irrep:r=tks-su2irrep:fs=tks-su2irrep:epoch=1";
     let higher_a = b"racah:sun-gt:ref=sunrep-0.4:basis=gt-order:gauge=qrpos-cref:descent=ladder-lstsq:tol=sunrep-tol-tier:epoch=1";
     assert_eq!(
-        SUNFusionRule::new(2).unwrap().rule_identity(),
-        sun_identity(2, a1)
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
+            .unwrap()
+            .rule_identity(),
+        lie_group_identity(2, a1)
     );
     assert_eq!(
-        SUNFusionRule::new(3).unwrap().rule_identity(),
-        sun_identity(3, higher_a)
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+            .unwrap()
+            .rule_identity(),
+        lie_group_identity(3, higher_a)
     );
     assert_ne!(
-        SUNFusionRule::new(3).unwrap().rule_identity(),
-        sun_identity(3, a1)
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+            .unwrap()
+            .rule_identity(),
+        lie_group_identity(3, a1)
     );
 }

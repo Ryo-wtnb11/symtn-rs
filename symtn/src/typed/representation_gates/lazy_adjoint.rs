@@ -3,10 +3,11 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let fundamental = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)]).unwrap();
     let antifundamental = GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 1], 3)]).unwrap();
     let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
@@ -239,10 +240,11 @@ fn lazy_adjoint_metadata_is_logical_and_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_inv_lazy_is_detached_and_keeps_receiver_cold() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
@@ -269,10 +271,11 @@ fn checked_generic_inv_lazy_is_detached_and_keeps_receiver_cold() {
 fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
     // What: both null directions use the opposite operation on the owned
     // parent, detach the final adjoint, and never publish the lazy cache.
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
@@ -332,10 +335,11 @@ fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, indices| {
@@ -401,10 +405,11 @@ fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| f64::from(ij == [0, 1]))
@@ -426,10 +431,11 @@ fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_lazy_flip_stays_cold_and_keeps_logical_duality() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![2, 2], 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
@@ -759,17 +765,17 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_unique_simple_and_both_
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_both_dtypes() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let su2 = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(2).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         [(vec![0], 2), (vec![1], 3), (vec![2], 2)],
     )
     .unwrap();
     // `8 ⊗ 8 → 8` has outer multiplicity two.
     let su3 = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
@@ -1202,8 +1208,9 @@ fn adjoint_contract_and_compose_stay_parent_native() {
 /// product `B_c(t)ᴴ B_c(t)` over every block, the `8 ⊗ 8 → 8` rows of outer
 /// multiplicity two included.
 #[cfg(feature = "cgc-gen")]
-fn assert_checked_adjoint_contract_and_compose<D>(source: &TensorMap<symtn_core::SUNFusionRule, D>)
-where
+fn assert_checked_adjoint_contract_and_compose<D>(
+    source: &TensorMap<symtn_core::LieGroupFusionRule, D>,
+) where
     D: TensorScalar + core::fmt::Debug,
 {
     let lazy = source.adjoint().unwrap();
@@ -1280,12 +1287,12 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_adjoint_contract_and_compose_read_the_parent() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     // `8 ⊗ 8 → 8` has outer multiplicity two.
     let leg = GradedSpace::try_new(
-        Arc::new(SUNFusionRule::new(3).unwrap()),
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
@@ -1841,7 +1848,9 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
 #[test]
 fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(symtn_core::SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(
+        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+    );
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {
@@ -1878,7 +1887,9 @@ fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
 #[test]
 fn checked_trace_nonselfdual_multiblock_real_matches_hand_weighted_trace() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(symtn_core::SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(
+        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+    );
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2), (vec![2, 0], 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {

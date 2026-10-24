@@ -821,19 +821,21 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::GenericTensorError;
 
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
     let other_rt = Runtime::builder().dense_threads(1).build().unwrap();
-    let su2 = Arc::new(SUNFusionRule::new(2).unwrap());
+    let su2 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 2), (vec![1], 1)]).unwrap();
     let w = v.try_dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &w], [&v], 1).unwrap();
     let permuted = t.permute(&[1], &[2, 0]).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, permuted);
     // The same shape under SU(3)'s identity: only the rule differs.
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let su3_leg = |dual: bool| {
         let leg =
             GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
@@ -864,7 +866,8 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         })
         .unwrap()
     };
-    let into = |d: &mut TensorMap<SUNFusionRule, f64>| t.permute_into(&[1], &[2, 0], d, 1.0, 0.5);
+    let into =
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| t.permute_into(&[1], &[2, 0], d, 1.0, 0.5);
 
     t.permute_into(&[1], &[2, 0], &mut fresh(&rt), 1.0, 0.5)
         .unwrap();
@@ -897,7 +900,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         ],
     )
     .unwrap();
-    let compact_snap = |d: &TensorMap<SUNFusionRule, f64>| {
+    let compact_snap = |d: &TensorMap<LieGroupFusionRule, f64>| {
         d.diagview()
             .unwrap()
             .iter()
@@ -912,7 +915,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         into
     );
     rejects!(
-        |d: &TensorMap<SUNFusionRule, f64>| host_snap(&d.materialize().unwrap()).0,
+        |d: &TensorMap<LieGroupFusionRule, f64>| host_snap(&d.materialize().unwrap()).0,
         "checked permute_into lazy destination",
         permuted.adjoint().unwrap(),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
@@ -923,7 +926,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         "checked permute_into alias",
         t.clone(),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let source = d.clone();
             source.permute_into(&[0, 1], &[2], d, 1.0, 0.5)
         }
@@ -942,7 +945,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         wrong,
         GenericTensorError::Facade(Error::Operation(operation))
             if matches!(**operation, symtn::typed::OperationError::SpaceMismatch { .. }),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let clone = d.clone();
             let result = into(d);
             drop(clone);
@@ -954,7 +957,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         "checked permute_into shared",
         fresh(&rt),
         GenericTensorError::Facade(Error::DestinationShared),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let clone = d.clone();
             let result = into(d);
             drop(clone);
@@ -970,12 +973,13 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::{ContractSpec, GenericTensorError};
 
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
     let other_rt = Runtime::builder().dense_threads(1).build().unwrap();
-    let su2 = Arc::new(SUNFusionRule::new(2).unwrap());
+    let su2 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 2), (vec![1], 1)]).unwrap();
     let w = v.try_dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &w], [&v], 1).unwrap();
@@ -989,14 +993,15 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     };
     let contracted = t.contract(&r, &spec).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, contracted);
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let su3_leg = GradedSpace::try_new(su3, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
     let foreign_rule = sentinel!(
         &rt,
         TensorMap::<_, f64>::rand_with_seed(&rt, [&su3_leg, &su3_leg], [&su3_leg], 3).unwrap()
     );
     let wrong = sentinel!(&rt, t);
-    let into = |d: &mut TensorMap<SUNFusionRule, f64>| t.contract_into(&r, &spec, d, 1.0, 0.5);
+    let into = |d: &mut TensorMap<LieGroupFusionRule, f64>| t.contract_into(&r, &spec, d, 1.0, 0.5);
 
     t.contract_into(&r, &spec, &mut fresh(&rt), 1.0, 0.5)
         .unwrap();
@@ -1015,7 +1020,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         into
     );
     rejects!(
-        |d: &TensorMap<SUNFusionRule, f64>| host_snap(&d.materialize().unwrap()).0,
+        |d: &TensorMap<LieGroupFusionRule, f64>| host_snap(&d.materialize().unwrap()).0,
         "checked contract_into lazy destination",
         contracted.adjoint().unwrap(),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
@@ -1026,7 +1031,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         "checked contract_into alias",
         fresh(&rt),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lhs = d.clone();
             lhs.contract_into(&r, &spec, d, 1.0, 0.5)
         }
@@ -1036,7 +1041,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         "checked contract_into alias of a lazy operand's parent",
         fresh(&rt),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lazy = d.adjoint().unwrap();
             t.contract_into(&lazy, &spec, d, 1.0, 0.5)
         }
@@ -1046,7 +1051,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         "checked contract_into legs not dual",
         fresh(&rt),
         _,
-        |d: &mut TensorMap<SUNFusionRule, f64>| t.contract_into(&undual, &spec, d, 1.0, 0.5)
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| t.contract_into(&undual, &spec, d, 1.0, 0.5)
     );
     rejects!(
         host_snap,
@@ -1062,7 +1067,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         wrong,
         GenericTensorError::Facade(Error::Operation(operation))
             if matches!(**operation, symtn::typed::OperationError::SpaceMismatch { .. }),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let clone = d.clone();
             let result = into(d);
             drop(clone);
@@ -1074,7 +1079,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         "checked contract_into shared",
         fresh(&rt),
         GenericTensorError::Facade(Error::DestinationShared),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let clone = d.clone();
             let result = into(d);
             drop(clone);
@@ -1092,12 +1097,13 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::GenericTensorError;
 
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
     let other_rt = Runtime::builder().dense_threads(1).build().unwrap();
-    let su2 = Arc::new(SUNFusionRule::new(2).unwrap());
+    let su2 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 2), (vec![1], 1)]).unwrap();
     let w = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 1), (vec![2], 2)]).unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &w], [&v], 1).unwrap();
@@ -1105,7 +1111,8 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
     let undual = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &w], [&w], 4).unwrap();
     let traced = t.trace_pairs(&[(0, 2)]).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, traced);
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let su3_leg = GradedSpace::try_new(su3, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
     let foreign_rule = sentinel!(
         &rt,
@@ -1115,8 +1122,9 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         &rt,
         TensorMap::<_, f64>::rand_with_seed(&rt, [&v], [&v], 5).unwrap()
     );
-    let into = |d: &mut TensorMap<SUNFusionRule, f64>| t.trace_pairs_into(&[(0, 2)], d, 1.0, 0.5);
-    let shared = |d: &mut TensorMap<SUNFusionRule, f64>| {
+    let into =
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| t.trace_pairs_into(&[(0, 2)], d, 1.0, 0.5);
+    let shared = |d: &mut TensorMap<LieGroupFusionRule, f64>| {
         let clone = d.clone();
         let result = into(d);
         drop(clone);
@@ -1148,10 +1156,10 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         "checked trace_pairs_into leg out of range",
         fresh(&rt),
         GenericTensorError::Facade(Error::Operation(_)),
-        |d: &mut TensorMap<SUNFusionRule, f64>| t.trace_pairs_into(&[(0, 9)], d, 1.0, 0.5)
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| t.trace_pairs_into(&[(0, 9)], d, 1.0, 0.5)
     );
     rejects!(
-        |d: &TensorMap<SUNFusionRule, f64>| host_snap(&d.materialize().unwrap()).0,
+        |d: &TensorMap<LieGroupFusionRule, f64>| host_snap(&d.materialize().unwrap()).0,
         "checked trace_pairs_into lazy destination",
         traced.adjoint().unwrap(),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
@@ -1162,7 +1170,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         "checked trace_pairs_into alias of a lazy source's parent",
         sentinel!(&rt, t),
         GenericTensorError::Facade(Error::InvalidArgument(_)),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lazy = d.adjoint().unwrap();
             lazy.trace_pairs_into(&[(0, 1)], d, 1.0, 0.5)
         }
@@ -1172,7 +1180,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         "checked trace_pairs_into legs not dual",
         fresh(&rt),
         GenericTensorError::Plan(_),
-        |d: &mut TensorMap<SUNFusionRule, f64>| {
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let into = undual.trace_pairs_into(&[(0, 2)], d, 1.0, 0.5);
             // Eager's own staging error, in the same wrapper.
             let eager = undual.trace_pairs(&[(0, 2)]).unwrap_err();
@@ -1185,7 +1193,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         "checked trace_pairs_into space before legs not dual",
         wrong.clone(),
         error if space(error),
-        |d: &mut TensorMap<SUNFusionRule, f64>| undual.trace_pairs_into(&[(0, 2)], d, 1.0, 0.5)
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| undual.trace_pairs_into(&[(0, 2)], d, 1.0, 0.5)
     );
     rejects!(
         host_snap,

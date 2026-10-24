@@ -317,12 +317,12 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     macro_rules! su3_case {
         ($dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
             let runtime = runtime();
-            let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+            let provider = Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
             // 8 ⊗ 8 → 8 has multiplicity 2.
             let v = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
             let w = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1), (vec![1, 0], 1)])

@@ -1021,7 +1021,7 @@ category_provider_via_adapter!(
 );
 
 #[cfg(feature = "cgc-gen")]
-category_provider_via_adapter!(crate::SUNFusionRule => fusion_symbols::lie::LieGroup);
+category_provider_via_adapter!(crate::LieGroupFusionRule => fusion_symbols::lie::LieGroup);
 
 impl<C, K> CategoryProvider for CategoryRule<C, K>
 where

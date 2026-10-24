@@ -301,9 +301,8 @@ fn symtn_core_exports_exactly_the_pinned_names() {
         "SU2FusionRule",
         "SU2Irrep",
         "SU2_MAX_DOUBLED_SPIN",
-        "SUNFusionRule",
-        "SUNFusionRuleError",
-        "SUNSymbolError",
+        "LieGroupFusionRule",
+        "LieGroupFusionRuleError",
         "SectorBlock",
         "SectorCodec",
         "SectorId",
@@ -429,6 +428,7 @@ fn testing_feature_forwards_exactly_the_pinned_oracles() {
         "multiplicity_free_permute_tree_pair_block",
         "multiplicity_free_transpose_tree_pair",
         "unique_permute_tree",
+        "su_lie_rule",
     ]
     .into_iter()
     .map(str::to_owned)

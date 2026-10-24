@@ -26,17 +26,17 @@ that its result equals the canonical contraction before reporting it.
 With the default `cgc-gen` feature it also runs exact checked-Generic
 SU3 `[1,1]` and SU4 `[1,0,1]` fixtures for public owned transforms, reductions,
 compose, and contract, plus compact QR for those fixtures and a one-sector SU3
-vacuum control. Compact QR coverage is limited to these checked-SUN owned rows;
+vacuum control. Compact QR coverage is limited to these checked Lie-group owned rows;
 no trivial or multiplicity-free row is implied. Transform/compose/contract
 checks are public-call self-consistency checks comparing provider authority, spaces, block layout,
 full fusion-tree keys, and payload; scale/add also check elementary payload
 laws, norm/inner check scalar identities, and compact QR reconstructs the input
 outside timing. On this base those fixtures
-print an explicit trace exclusion because this exact `SUNFusionRule` lacks the
+print an explicit trace exclusion because this exact `LieGroupFusionRule` lacks the
 `SectorCodec` bound required by checked trace dispatch, and a destination
 exclusion because it lacks the required multiplicity-free dispatch bounds.
 The checked-Generic API exists; these operations are neither emulated nor
-replaced for the exact SUN fixtures.
+replaced for the exact SU(N) fixtures.
 The `qr_compact_generic_layout` selector adds one lower-level public owned-QR
 control for an infallible Generic provider. It compares the same two-sector
 rank-(1,1) tensor in two padded expert layouts: canonical key order and the
@@ -325,7 +325,7 @@ The benchmark-local XOR provider has a fixed 16-label domain; labels 0 and 1
 retain the previous fixture behavior. The many-small geometry is `G=16`, with
 16 row trees and 16 column trees (`T=32` total side trees under the issue's
 convention), and 16 source blocks. It is only a finite cardinality/dataflow
-control and makes no physical non-Abelian claim. Existing generated SUN QR rows
+control and makes no physical non-Abelian claim. Existing generated SU(N) QR rows
 supply a physical many-tree supplement. Rank-4, multiplicity, and broader G/T
 correctness sweeps, plus
 direct borrow/pack probes, belong to tests because the public benchmark API

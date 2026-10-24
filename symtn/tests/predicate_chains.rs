@@ -205,12 +205,13 @@ fn su2_chains_decide_constructed_cases_and_project_by_formula() {
 fn checked_generic_su3_chains_decide_true_and_false_cases() {
     use std::cell::Cell;
 
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let rt = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
-    let materialized_adjoint = |t: &TensorMap<SUNFusionRule, f64>| {
+    let materialized_adjoint = |t: &TensorMap<LieGroupFusionRule, f64>| {
         let logical = t
             .adjoint()
             .unwrap()
@@ -227,19 +228,19 @@ fn checked_generic_su3_chains_decide_true_and_false_cases() {
         })
         .unwrap()
     };
-    let identity_like = |t: &TensorMap<SUNFusionRule, f64>| {
+    let identity_like = |t: &TensorMap<LieGroupFusionRule, f64>| {
         TensorMap::isomorphism(&rt, t.codomain().iter(), t.domain().iter()).unwrap()
     };
-    let is_identity = |gram: TensorMap<SUNFusionRule, f64>, tol: f64| {
+    let is_identity = |gram: TensorMap<LieGroupFusionRule, f64>, tol: f64| {
         let identity = identity_like(&gram);
         gram.axpby(1.0, &identity, -1.0).unwrap().norm(2.0).unwrap()
             <= tol * gram.norm(2.0).unwrap().max(1.0)
     };
     // `t† ∘ t == id`, and for unitarity also `t ∘ t† == id`.
-    let is_isometric = |t: &TensorMap<SUNFusionRule, f64>, tol: f64| {
+    let is_isometric = |t: &TensorMap<LieGroupFusionRule, f64>, tol: f64| {
         is_identity(materialized_adjoint(t).compose(t).unwrap(), tol)
     };
-    let is_unitary = |t: &TensorMap<SUNFusionRule, f64>, tol: f64| {
+    let is_unitary = |t: &TensorMap<LieGroupFusionRule, f64>, tol: f64| {
         is_isometric(t, tol) && is_identity(t.compose(&materialized_adjoint(t)).unwrap(), tol)
     };
     let x: TensorMap<_, f64> =

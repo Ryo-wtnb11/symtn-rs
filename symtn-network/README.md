@@ -11,7 +11,7 @@ symtn executes the resulting plan locally.
 The default host backend is `cpu-faer`; enable at least one host backend.
 `opt-path` enables opt-einsum-path search and `cotengra-python` calls Python
 cotengra for path search. `cuda` still requires a host backend, while
-`cgc-gen` forwards generated SUN support; see `Cargo.toml` for the
+`cgc-gen` forwards `LieGroupFusionRule` support; see `Cargo.toml` for the
 other provider and BLAS flags.
 
 Run the [contraction example](examples/contract.rs) with:

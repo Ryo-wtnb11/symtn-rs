@@ -376,11 +376,13 @@ fn checked_generic_reduction_dimension_failure_is_typed_and_nonpublishing() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, _| {
@@ -400,7 +402,7 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
         assert!((complex_dagger.tr().unwrap() - complex.tr().unwrap().conj()).norm() < 1.0e-12);
     }
 
-    let provider = SUNFusionRule::new(3).unwrap();
+    let provider = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let three = provider.encode_dynkin(&[1, 0]).unwrap();
     let eight = provider.encode_dynkin(&[1, 1]).unwrap();
     let r = provider.try_r_symbol_generic(three, three, eight).unwrap();

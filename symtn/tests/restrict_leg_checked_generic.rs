@@ -12,14 +12,15 @@
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, LegSelection, TensorMap};
 
 #[test]
 fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
@@ -71,7 +72,8 @@ fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
 #[test]
 fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
@@ -118,7 +120,8 @@ fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
 #[test]
 fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [(vec![0i64, 0], 3), (vec![2i64, 2], 4)],
@@ -175,7 +178,8 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
 #[test]
 fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 4)]).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
@@ -254,8 +258,8 @@ fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices
 /// gather of `source`'s block with the same fusion trees at the kept
 /// `positions` on each listed `(axis, positions)`.
 fn literal_slice(
-    source: &TensorMap<SUNFusionRule, f64>,
-    destination: &TensorMap<SUNFusionRule, f64>,
+    source: &TensorMap<LieGroupFusionRule, f64>,
+    destination: &TensorMap<LieGroupFusionRule, f64>,
     kept: &[(usize, &[usize])],
 ) -> Vec<f64> {
     let mut payload = vec![f64::NAN; destination.dense_data().unwrap().len()];
@@ -295,8 +299,8 @@ fn literal_slice(
 /// The payload `destination` must hold when each `source` block is written
 /// into the kept `positions` on `axis` and everything else stays zero.
 fn literal_scatter(
-    source: &TensorMap<SUNFusionRule, f64>,
-    destination: &TensorMap<SUNFusionRule, f64>,
+    source: &TensorMap<LieGroupFusionRule, f64>,
+    destination: &TensorMap<LieGroupFusionRule, f64>,
     axis: usize,
     positions: &[usize],
 ) -> Vec<f64> {

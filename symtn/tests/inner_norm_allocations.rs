@@ -310,25 +310,24 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
     }
 }
 
-/// SU(N) checked `dim` allocates per query (`symtn-sectors/src/sun.rs::
-/// decode_dynkin`'s `Vec<i64>` plus fusion-symbols' own irrep decode), so the
-/// reductions still pay the provider's cost once per coupled sector; the
-/// reduction owners themselves add none on top of the G provider queries
-/// (#1219).
+/// Checked reductions add no allocations beyond the provider's warm
+/// dimension queries over the G coupled sectors. Compare those costs directly
+/// so changes in provider allocation do not weaken the reduction contract.
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)]).unwrap();
-    let lhs: TensorMap<SUNFusionRule, f64> =
+    let lhs: TensorMap<LieGroupFusionRule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
             trees.codomain_vertices()[0].get() as f64 + indices.iter().sum::<usize>() as f64
         })
         .unwrap();
-    let rhs: TensorMap<SUNFusionRule, f64> =
+    let rhs: TensorMap<LieGroupFusionRule, f64> =
         TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
             2.0 * trees.domain_vertices()[0].get() as f64 - indices[0] as f64
         })

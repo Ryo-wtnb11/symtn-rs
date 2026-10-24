@@ -23,7 +23,7 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use num_complex::{Complex32, Complex64};
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 use symtn::typed::TensorMap;
 use symtn::typed::{Eig, Eigh, GradedSpace, SectorSpectrum, Svd, Truncation};
 
@@ -97,8 +97,9 @@ macro_rules! assert_isometry {
     }};
 }
 
-fn su3_legs() -> (Arc<SUNFusionRule>, GradedSpace<SUNFusionRule>) {
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+fn su3_legs() -> (Arc<LieGroupFusionRule>, GradedSpace<LieGroupFusionRule>) {
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [(vec![1i64, 0], 3), (vec![2i64, 2], 2)],
@@ -108,7 +109,7 @@ fn su3_legs() -> (Arc<SUNFusionRule>, GradedSpace<SUNFusionRule>) {
 }
 
 /// A smaller space on the same provider, used as a `truncspace` target.
-fn su3_target(provider: &Arc<SUNFusionRule>) -> GradedSpace<SUNFusionRule> {
+fn su3_target(provider: &Arc<LieGroupFusionRule>) -> GradedSpace<LieGroupFusionRule> {
     GradedSpace::try_new(Arc::clone(provider), [(vec![2i64, 2], 2)]).unwrap()
 }
 

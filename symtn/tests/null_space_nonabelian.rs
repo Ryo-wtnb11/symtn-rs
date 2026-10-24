@@ -137,7 +137,7 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     // Dynkin labels: 1 = [0,0], 8 = [1,1], 10 = [3,0], 10bar = [0,3],
     // 27 = [2,2]; `8 (x) 8 = 1 + 8 + 8 + 10 + 10bar + 27`. With
@@ -147,7 +147,8 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
     //   10, 10bar, 27: (8,8) 4 each
     // against `b = 1^2 + 8^3` columns `2, 3, 0, 0, 0`.
     let runtime = host_runtime();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let a =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 1], 2), (vec![0, 0], 1)]).unwrap();
     let a_dual = a.try_dual().unwrap();

@@ -5,7 +5,7 @@ use std::fmt::{self, Debug};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use symtn::sector::SUNFusionRule;
+use symtn::sector::LieGroupFusionRule;
 use symtn::sector::SectorId;
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
@@ -73,8 +73,8 @@ fn marker(trees: &BlockFusionTrees<Vec<i64>>, indices: &[usize]) -> usize {
 }
 
 fn assert_same<D: OracleScalar>(
-    actual: &TensorMap<SUNFusionRule, D>,
-    expected: &TensorMap<SUNFusionRule, D>,
+    actual: &TensorMap<LieGroupFusionRule, D>,
+    expected: &TensorMap<LieGroupFusionRule, D>,
 ) {
     assert_eq!(actual.codomain(), expected.codomain());
     assert_eq!(actual.domain(), expected.domain());
@@ -109,8 +109,8 @@ fn assert_same<D: OracleScalar>(
 
 fn authority_provider<D>(
     planned: &PlannedNetwork,
-    tensors: &[&TensorMap<SUNFusionRule, D>],
-) -> *const SUNFusionRule {
+    tensors: &[&TensorMap<LieGroupFusionRule, D>],
+) -> *const LieGroupFusionRule {
     let mut authorities = tensors
         .iter()
         .enumerate()
@@ -127,9 +127,9 @@ fn authority_provider<D>(
 
 fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: Vec<i64>) {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let lhs_provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let rhs_provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let tail_provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let lhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
+    let rhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
+    let tail_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let lhs_leg = GradedSpace::try_new(Arc::clone(&lhs_provider), [(label.clone(), 1)]).unwrap();
     let rhs_leg = GradedSpace::try_new(Arc::clone(&rhs_provider), [(label.clone(), 1)]).unwrap();
     let tail_leg = GradedSpace::try_new(Arc::clone(&tail_provider), [(label.clone(), 1)]).unwrap();
@@ -212,9 +212,9 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
         &expected,
     );
 
-    let drift_lhs_provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let drift_middle_provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let drift_tail_provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let drift_lhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
+    let drift_middle_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
+    let drift_tail_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let drift_lhs_leg =
         GradedSpace::try_new(Arc::clone(&drift_lhs_provider), [(label.clone(), 1)]).unwrap();
     let drift_middle_leg =
@@ -325,7 +325,7 @@ fn sun_checked_generic_network_matches_manual_explicit_greedy_cached_and_replay(
 #[test]
 fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(symtn_core::testing::su_lie_rule(3));
     let label = vec![1, 1];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let lhs: TensorMap<_, Complex64> =
@@ -408,7 +408,7 @@ impl fmt::Display for InjectedError {
 impl std::error::Error for InjectedError {}
 
 struct InjectedGeneric {
-    inner: SUNFusionRule,
+    inner: LieGroupFusionRule,
     fail_encode: AtomicBool,
     fail_decode_at: AtomicUsize,
     decode_calls: AtomicUsize,
@@ -421,7 +421,7 @@ struct InjectedGeneric {
 impl InjectedGeneric {
     fn new() -> Self {
         Self {
-            inner: SUNFusionRule::new(3).unwrap(),
+            inner: symtn_core::testing::su_lie_rule(3),
             fail_encode: AtomicBool::new(false),
             fail_decode_at: AtomicUsize::new(0),
             decode_calls: AtomicUsize::new(0),
@@ -1247,9 +1247,9 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     };
     let degeneracies = [(5, 4), (4, 6), (5, 6)];
 
-    let checked = Arc::new(SUNFusionRule::new(2).unwrap());
+    let checked = Arc::new(symtn_core::testing::su_lie_rule(2));
     let checked_space = |dim| GradedSpace::try_new(Arc::clone(&checked), [(vec![1], dim)]).unwrap();
-    let checked_tensors: Vec<TensorMap<SUNFusionRule, f64>> = degeneracies
+    let checked_tensors: Vec<TensorMap<LieGroupFusionRule, f64>> = degeneracies
         .iter()
         .enumerate()
         .map(|(seed, &(rows, cols))| {
@@ -1419,14 +1419,14 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
     use symtn_network::plan_cache_stats;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let chain = |provider: &Arc<SUNFusionRule>, seed: u64| {
+    let chain = |provider: &Arc<LieGroupFusionRule>, seed: u64| {
         let leg = GradedSpace::try_new(Arc::clone(provider), [(vec![1], 3)]).unwrap();
-        let tensors: Vec<TensorMap<SUNFusionRule, f64>> = (0..3)
+        let tensors: Vec<TensorMap<LieGroupFusionRule, f64>> = (0..3)
             .map(|index| TensorMap::rand_with_seed(&runtime, [&leg], [&leg], seed + index).unwrap())
             .collect();
         tensors
     };
-    let contract = |tensors: &[TensorMap<SUNFusionRule, f64>]| {
+    let contract = |tensors: &[TensorMap<LieGroupFusionRule, f64>]| {
         net(
             &[op(&["a"], &["b"]), op(&["b"], &["c"]), op(&["c"], &["d"])],
             &["a"],
@@ -1436,14 +1436,14 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
         .unwrap()
     };
 
-    let first_provider = Arc::new(SUNFusionRule::new(2).unwrap());
+    let first_provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let first_weak = Arc::downgrade(&first_provider);
     let first = chain(&first_provider, 20);
     drop(contract(&first));
     drop((first, first_provider));
     assert!(first_weak.upgrade().is_none());
 
-    let current_provider = Arc::new(SUNFusionRule::new(2).unwrap());
+    let current_provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let current = chain(&current_provider, 30);
     let output = contract(&current);
     assert!(std::ptr::eq(output.provider(), current_provider.as_ref()));

@@ -28,15 +28,15 @@ fn warm_su2_fusion_and_dual_allocate_only_the_returned_channels() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn warm_sun_channel_coordinate_encoding_does_not_allocate() {
+fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
     use fusion_symbols::{
         category::FusionCategory,
         lie::{GroupId, LieGroup},
     };
-    use symtn_sectors::SUNFusionRule;
+    use symtn_sectors::LieGroupFusionRule;
 
     for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
-        let rule = SUNFusionRule::new(n).unwrap();
+        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
         let adjoint = category.irrep(labels).unwrap();
         let channel_labels: Vec<_> = category
@@ -59,12 +59,12 @@ fn warm_sun_channel_coordinate_encoding_does_not_allocate() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_reverse_cache_miss_allocates_only_the_interned_entry() {
+fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
     use fusion_symbols::lie::{GroupId, LieGroup};
-    use symtn_sectors::{CategoryProvider, SUNFusionRule};
+    use symtn_sectors::{CategoryProvider, LieGroupFusionRule};
 
     for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
-        let rule = SUNFusionRule::new(n).unwrap();
+        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
         let object = category.irrep(labels).unwrap();
         let expected = rule.encode_dynkin(labels).unwrap();

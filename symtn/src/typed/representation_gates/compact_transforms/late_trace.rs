@@ -2,21 +2,21 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use symtn_core::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
-    CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
-    SUNFusionRule, SUNFusionRuleError, SectorId, SectorVec, TypedSectorAdmission,
+    CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray, GenericRMatrix, LieGroupFusionRule,
+    LieGroupFusionRuleError, RuleIdentity, SectorId, SectorVec, TypedSectorAdmission,
 };
 
 // Negative fixture: real SU(3) structural answers, with a typed error only at
 // the pivotal query. A distinct identity prevents hits under the real provider.
 struct RejectingTraceTwist {
-    inner: SUNFusionRule,
+    inner: LieGroupFusionRule,
     twist_calls: AtomicUsize,
 }
 
 impl symtn_core::testing::Provider for RejectingTraceTwist {}
 
 impl CheckedGenericFusion for RejectingTraceTwist {
-    type Error = SUNFusionRuleError;
+    type Error = LieGroupFusionRuleError;
     fn rule_identity(&self) -> RuleIdentity {
         RuleIdentity::of_type::<Self>()
     }
@@ -85,15 +85,18 @@ impl CheckedGenericRigidSymbols for RejectingTraceTwist {
 impl CheckedGenericPivotal for RejectingTraceTwist {
     fn try_twist_scalar(&self, _sector: SectorId) -> Result<f64, Self::Error> {
         self.twist_calls.fetch_add(1, Ordering::Relaxed);
-        // Sentinel payload: construction uses SU(3); no delegated call can
-        // produce an invalid-rank-zero error at this point.
-        Err(SUNFusionRuleError::InvalidRank { n: 0 })
+        // Sentinel capability is unavailable only in this synthetic fixture.
+        Err(LieGroupFusionRuleError::Provider(
+            fusion_symbols::lie::LieError::Unsupported {
+                requires: "synthetic trace twist",
+            },
+        ))
     }
 }
 
 impl TypedSectorAdmission for RejectingTraceTwist {
     type Sector = Vec<i64>;
-    type Error = SUNFusionRuleError;
+    type Error = LieGroupFusionRuleError;
     type Mode = CheckedGenericAdmissionMode;
     fn typed_rule_identity(&self) -> RuleIdentity {
         self.rule_identity()
@@ -115,7 +118,7 @@ where
 {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(RejectingTraceTwist {
-        inner: SUNFusionRule::new(3).unwrap(),
+        inner: LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         twist_calls: AtomicUsize::new(0),
     });
     let leg =
@@ -141,7 +144,9 @@ where
     assert!(matches!(
         result,
         Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(
-            SUNFusionRuleError::InvalidRank { n: 0 }
+            LieGroupFusionRuleError::Provider(fusion_symbols::lie::LieError::Unsupported {
+                requires: "synthetic trace twist"
+            })
         )))
     ));
     assert_eq!(provider.twist_calls.load(Ordering::Relaxed), 1);

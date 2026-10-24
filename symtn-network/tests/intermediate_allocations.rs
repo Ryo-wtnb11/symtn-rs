@@ -977,16 +977,16 @@ fn checked_overwrite_worker<D>(chi: usize, reuse: bool)
 where
     D: AllocationScalar,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(2).unwrap());
+    let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let fundamental = || vec![1_i64];
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi)]).unwrap();
     let left = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi + 1)]).unwrap();
     let right = GradedSpace::try_new(provider, [(fundamental(), chi + 1)]).unwrap();
     let left_dual = left.try_dual().unwrap();
-    let tensors: [TypedTensorMap<SUNFusionRule, D>; 3] = std::array::from_fn(|index| {
+    let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let (codomain, domain) = match index {
             0 => (&left, &bond),
             1 => (&bond, &right),
@@ -1029,7 +1029,7 @@ fn checked_cached_worker<D>(chi: usize, cached: bool)
 where
     D: AllocationScalar,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn_network::{configure_plan_cache, PlanCacheConfig};
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -1040,10 +1040,10 @@ where
             ..Default::default()
         },
     );
-    let provider = Arc::new(SUNFusionRule::new(2).unwrap());
+    let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let leg = GradedSpace::try_new(provider, [(vec![1_i64], chi + 1)]).unwrap();
     let leg_dual = leg.try_dual().unwrap();
-    let tensors: [TypedTensorMap<SUNFusionRule, D>; 3] = std::array::from_fn(|index| {
+    let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let codomain = if index == 2 { &leg_dual } else { &leg };
         TypedTensorMap::rand_with_seed(
             &runtime,
@@ -1071,7 +1071,7 @@ where
         .contract(&refs)
         .unwrap()
     };
-    sample_overwrite_replays::<SUNFusionRule, D>(chi, cached, |_| contract(), &oracle);
+    sample_overwrite_replays::<LieGroupFusionRule, D>(chi, cached, |_| contract(), &oracle);
 }
 
 fn run_typed_overwrite_worker(

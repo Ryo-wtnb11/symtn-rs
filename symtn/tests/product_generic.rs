@@ -1,14 +1,18 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
-use symtn::sector::{ProductFusionRule, ProductSector, SUNFusionRule, U1FusionRule, U1Irrep};
+use symtn::sector::{LieGroupFusionRule, ProductFusionRule, ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 #[test]
 fn product_braid_moves_unequal_degeneracies_and_multiplicity_vertices() {
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let rule = Arc::new(
-        ProductFusionRule::<_, _>::try_new(SUNFusionRule::new(3).unwrap(), U1FusionRule).unwrap(),
+        ProductFusionRule::<_, _>::try_new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = ProductSector::new(vec![1, 1], U1Irrep::new(0));
     let legs =

@@ -17,7 +17,7 @@
 //!    source the reference-step oracle (`materialize`, then eager) is eager
 //!    itself;
 //! 2. multiplicity-free SU(2) (`SU2FusionRule`) == checked Generic SU(2)
-//!    (`SUNFusionRule::new(2)`), two adapters to the same exact A1 provider on one input;
+//!    (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two adapters to the same exact A1 provider on one input;
 //! 3. the destination keeps its payload allocation and provider.
 //!
 //! 4. the reference-step oracle: eager on the materialized source equals
@@ -518,9 +518,12 @@ fn su2_leg() -> GradedSpace<SU2FusionRule> {
 }
 
 #[cfg(feature = "cgc-gen")]
-fn sun2_leg() -> GradedSpace<symtn::sector::SUNFusionRule> {
+fn sun2_leg() -> GradedSpace<symtn::sector::LieGroupFusionRule> {
     GradedSpace::try_new(
-        Arc::new(symtn::sector::SUNFusionRule::new(2).unwrap()),
+        Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
+                .unwrap(),
+        ),
         SU2_SECTORS.map(|(s, k)| (vec![s as i64], k)),
     )
     .unwrap()
@@ -798,14 +801,20 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
 
     // SU(3): `8 ⊗ 8 → 8` carries outer multiplicity two.
     let v = GradedSpace::try_new(
-        Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap()),
+        Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+                .unwrap(),
+        ),
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
     both_lanes!(&runtime, v, v, debug_key::<Vec<i64>>);
     // A non-self-dual SU(3) bond on a dual leg.
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap()),
+        Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+                .unwrap(),
+        ),
         [(vec![1i64, 0], 2), (vec![0, 1], 1)],
     )
     .unwrap()
@@ -1079,7 +1088,10 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
 
     // SU(3): `8 ⊗ 8 → 8` carries outer multiplicity two.
     let v = GradedSpace::try_new(
-        Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap()),
+        Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+                .unwrap(),
+        ),
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
@@ -1176,7 +1188,12 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
         lazy_trace!(source!(&runtime, v, v, key));
         // A large untraced leg, so the result payload dominates the staging.
         let w = GradedSpace::try_new(
-            Arc::new(symtn::sector::SUNFusionRule::new(2).unwrap()),
+            Arc::new(
+                symtn::sector::LieGroupFusionRule::new(
+                    fusion_symbols::lie::GroupId::su(2).unwrap(),
+                )
+                .unwrap(),
+            ),
             [(vec![0i64], 24), (vec![1], 24), (vec![2], 24)],
         )
         .unwrap();
@@ -1593,7 +1610,10 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
 
     // SU(3): `8 ⊗ 8 → 8` carries outer multiplicity two.
     let v = GradedSpace::try_new(
-        Arc::new(symtn::sector::SUNFusionRule::new(3).unwrap()),
+        Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+                .unwrap(),
+        ),
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
@@ -1791,7 +1811,10 @@ fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
     compact_contract_allocations!(&runtime, v, b, U1Irrep::new(0));
     #[cfg(feature = "cgc-gen")]
     {
-        let rule = Arc::new(symtn::sector::SUNFusionRule::new(2).unwrap());
+        let rule = Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
+                .unwrap(),
+        );
         let v = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64], 4)]).unwrap();
         let b = GradedSpace::try_new(rule, [(vec![0i64], 128)]).unwrap();
         compact_contract_allocations!(&runtime, v, b, vec![0i64]);

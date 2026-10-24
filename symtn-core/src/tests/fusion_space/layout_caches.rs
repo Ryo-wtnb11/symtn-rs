@@ -696,7 +696,7 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
 
     #[cfg(feature = "cgc-gen")]
     {
-        let checked = crate::SUNFusionRule::new(3).unwrap();
+        let checked = symtn_sectors::testing::su_lie_rule(3);
         let vacuum = checked.encode_dynkin(&[0, 0]).unwrap();
         let fundamental = checked.encode_dynkin(&[1, 0]).unwrap();
         let hom = |deg: usize| {
@@ -777,7 +777,7 @@ fn generic_complete_owner_keeps_canonical_identity_regions_and_budget() {
         "tests::fusion_space::layout_caches::generic_complete_owner_keeps_canonical_identity_regions_and_budget",
     ) { return; }
     clear_structure_caches();
-    let rule = SUNFusionRule::new(3).unwrap();
+    let rule = symtn_sectors::testing::su_lie_rule(3);
     let adjoint = rule.encode_dynkin(&[1, 1]).unwrap();
     let vacuum = rule.encode_dynkin(&[0, 0]).unwrap();
     let hom = || {

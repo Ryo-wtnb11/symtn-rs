@@ -3,10 +3,11 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let legs =
         [2, 3, 5].map(|n| GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], n)]).unwrap());
     let source = TensorMap::<_, f64>::from_subblock_fn(
@@ -93,7 +94,7 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::sector::{U1FusionRule, U1Irrep};
 
     fn bits<R: TypedSectorAdmission>(tensor: &TensorMap<R, Complex64>) -> Vec<(u64, u64)> {
@@ -125,7 +126,8 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     };
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![2i64, 1], 3), (vec![0, 0], 2)]).unwrap();
     let big = [(1.5, 0.5), (-2.0, -1.0), (0.25, 3.0)];
     let small = [(3.0, -0.75), (-0.5, 2.0)];
@@ -230,7 +232,8 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     // Non-self-dual SU(3) irreps on a dual leg (`[1,0]^2 + [0,1]` dualized to
     // `[0,1]^2 + [1,0]`): the adjoint keeps the space, not its dual, and
     // conjugates the values.
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let chiral = GradedSpace::try_new(provider, [(vec![1i64, 0], 2), (vec![0, 1], 1)])
         .unwrap()
         .try_dual()
@@ -380,11 +383,13 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for n in [3, 4] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
         let source: TensorMap<_, f64> =
@@ -1165,9 +1170,9 @@ fn sun_cat_marker(trees: &symtn::typed::BlockFusionTrees<Vec<i64>>) -> usize {
 
 #[cfg(feature = "cgc-gen")]
 fn assert_sun_cat_values<D>(
-    output: &TensorMap<symtn::sector::SUNFusionRule, D>,
-    lhs: &TensorMap<symtn::sector::SUNFusionRule, D>,
-    rhs: &TensorMap<symtn::sector::SUNFusionRule, D>,
+    output: &TensorMap<symtn::sector::LieGroupFusionRule, D>,
+    lhs: &TensorMap<symtn::sector::LieGroupFusionRule, D>,
+    rhs: &TensorMap<symtn::sector::LieGroupFusionRule, D>,
     changed_axis: usize,
     lhs_extent: usize,
     value: impl Fn(usize) -> D,
@@ -1223,11 +1228,13 @@ fn assert_sun_cat_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) -> D 
 where
     D: Copy + fmt::Debug + PartialEq + symtn::typed::TensorScalar,
 {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let left_provider = Arc::new(SUNFusionRule::new(n).unwrap());
-    let right_provider = Arc::new(SUNFusionRule::new(n).unwrap());
+    let left_provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let right_provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let left_common =
         GradedSpace::try_new(Arc::clone(&left_provider), [(label.clone(), 1)]).unwrap();
     let right_common =
@@ -1333,11 +1340,13 @@ fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
         let tensor: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
@@ -1462,7 +1471,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
         adjoint_root_vertices.dedup();
         assert_eq!(adjoint_root_vertices, [1, 2]);
 
-        let snapshot = |tensor: &TensorMap<SUNFusionRule, f64>| {
+        let snapshot = |tensor: &TensorMap<LieGroupFusionRule, f64>| {
             (0..tensor.subblock_count())
                 .map(|index| tensor.subblock_fusion_trees(index).unwrap())
                 .collect::<Vec<_>>()
@@ -1503,7 +1512,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     if crate::run_isolated_or_return(
         "SYMTN_CHECKED_FACADE_COMPLETED_STORE",
         "transforms::sun_checked_generic_transforms_reuse_the_runtime_completed_store",
@@ -1513,7 +1522,9 @@ fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        let provider = Arc::new(SUNFusionRule::new(n).unwrap());
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+        );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
@@ -1523,7 +1534,7 @@ fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
 
         for operation in ["permute", "braid", "repartition"] {
             symtn::cache::clear();
-            let apply = |tensor: &TensorMap<SUNFusionRule, f64>| match operation {
+            let apply = |tensor: &TensorMap<LieGroupFusionRule, f64>| match operation {
                 "permute" => tensor.permute(&[1, 0], &[2]),
                 "braid" => tensor.braid(&[1, 0], &[2], &[0, 1, 2]),
                 "repartition" => tensor.repartition(1),
@@ -1766,10 +1777,11 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![1, 1];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let other =
@@ -1798,12 +1810,18 @@ fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
     }));
     type SunStep<D> = (
         &'static str,
-        Result<TensorMap<SUNFusionRule, D>, GenericTensorError<symtn::sector::SUNFusionRuleError>>,
-        Result<TensorMap<SUNFusionRule, D>, GenericTensorError<symtn::sector::SUNFusionRuleError>>,
+        Result<
+            TensorMap<LieGroupFusionRule, D>,
+            GenericTensorError<symtn::sector::LieGroupFusionRuleError>,
+        >,
+        Result<
+            TensorMap<LieGroupFusionRule, D>,
+            GenericTensorError<symtn::sector::LieGroupFusionRuleError>,
+        >,
     );
     fn ops<D: symtn::typed::TensorScalar>(
-        lazy: &TensorMap<SUNFusionRule, D>,
-        owned: &TensorMap<SUNFusionRule, D>,
+        lazy: &TensorMap<LieGroupFusionRule, D>,
+        owned: &TensorMap<LieGroupFusionRule, D>,
     ) -> [SunStep<D>; 5] {
         [
             (

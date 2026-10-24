@@ -83,7 +83,7 @@ fn uncached_generic_preview_keeps_its_coupled_region_geometry() {
         "SYMTN_GENERIC_PREVIEW_COLD", "tests::block_structure::staged_content::uncached_generic_preview_keeps_its_coupled_region_geometry",
     ) { return; }
     clear_structure_caches();
-    let rule = SUNFusionRule::new(3).unwrap();
+    let rule = symtn_sectors::testing::su_lie_rule(3);
     let adjoint = rule.encode_dynkin(&[1, 1]).unwrap();
     let trivial = rule.encode_dynkin(&[0, 0]).unwrap();
     let leg = |dual| SectorLeg::new([(adjoint, 2), (trivial, 3)], dual);

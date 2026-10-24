@@ -829,11 +829,11 @@ where
 
 #[cfg(feature = "cgc-gen")]
 fn su3_checked_input<D: FactorScalar>(
-    provider: &Arc<symtn_core::SUNFusionRule>,
+    provider: &Arc<symtn_core::LieGroupFusionRule>,
     nin: usize,
     seed: usize,
 ) -> (
-    BoundDynamicFusionMapSpace<symtn_core::SUNFusionRule>,
+    BoundDynamicFusionMapSpace<symtn_core::LieGroupFusionRule>,
     Vec<D>,
 ) {
     let adjoint = provider.encode_dynkin(&[1, 1]).unwrap();
@@ -879,7 +879,7 @@ fn su3_checked_input<D: FactorScalar>(
 
 #[cfg(feature = "cgc-gen")]
 fn hermitian_regions_copy<D: FactorScalar>(
-    space: &BoundDynamicFusionMapSpace<symtn_core::SUNFusionRule>,
+    space: &BoundDynamicFusionMapSpace<symtn_core::LieGroupFusionRule>,
     data: &[D],
 ) -> Vec<D> {
     let mut hermitian = data.to_vec();
@@ -908,7 +908,7 @@ fn hermitian_regions_copy<D: FactorScalar>(
 
 #[cfg(feature = "cgc-gen")]
 fn assert_checked_su3_full_family_borrows_input<D: FactorScalar>() {
-    let provider = Arc::new(symtn_core::SUNFusionRule::new(3).unwrap());
+    let provider = Arc::new(symtn_core::testing::su_lie_rule(3));
     let (square, general) = su3_checked_input::<D>(&provider, 2, 3);
     let (tall_space, tall) = su3_checked_input::<D>(&provider, 1, 5);
     let hermitian = hermitian_regions_copy(&square, &general);

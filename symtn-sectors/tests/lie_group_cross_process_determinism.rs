@@ -12,9 +12,9 @@
 
 use std::process::Command;
 
-use symtn_sectors::{CheckedGenericFusion, CheckedGenericRigidSymbols, SUNFusionRule};
+use symtn_sectors::{CheckedGenericFusion, CheckedGenericRigidSymbols, LieGroupFusionRule};
 
-const CHILD_ENV: &str = "SYMTN_SUN_DETERMINISM_CHILD";
+const CHILD_ENV: &str = "SYMTN_LIE_GROUP_DETERMINISM_CHILD";
 const TEST_NAME: &str = "su3_f_and_r_symbols_are_bit_identical_across_processes";
 
 fn fnv(hash: &mut u64, bits: u64) {
@@ -28,7 +28,7 @@ fn fnv(hash: &mut u64, bits: u64) {
 /// channel `8 ⊗ 8 → 8`) and every R block among them; returns
 /// `(f_blocks, r_blocks, hash)`.
 fn su3_symbol_hash() -> (usize, usize, u64) {
-    let rule = SUNFusionRule::new(3).unwrap();
+    let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let labels = [[1, 1], [1, 0], [0, 1]].map(|l| rule.encode_dynkin(&l).unwrap());
     let channels = |x, y| rule.try_fusion_channels(x, y).unwrap();
     let (mut f_blocks, mut r_blocks, mut hash) = (0, 0, 0xcbf2_9ce4_8422_2325u64);

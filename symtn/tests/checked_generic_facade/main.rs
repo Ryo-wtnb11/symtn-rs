@@ -113,15 +113,15 @@ fn endomorphism_terms(payload_len: usize) -> usize {
 #[cfg(feature = "cgc-gen")]
 trait SunEigInput: symtn::typed::AdvancedLinalgScalar<Eig = Complex64> + fmt::Debug {
     fn to_complex(
-        source: &TensorMap<symtn::sector::SUNFusionRule, Self>,
-    ) -> TensorMap<symtn::sector::SUNFusionRule, Complex64>;
+        source: &TensorMap<symtn::sector::LieGroupFusionRule, Self>,
+    ) -> TensorMap<symtn::sector::LieGroupFusionRule, Complex64>;
 }
 
 #[cfg(feature = "cgc-gen")]
 impl SunEigInput for f64 {
     fn to_complex(
-        source: &TensorMap<symtn::sector::SUNFusionRule, Self>,
-    ) -> TensorMap<symtn::sector::SUNFusionRule, Complex64> {
+        source: &TensorMap<symtn::sector::LieGroupFusionRule, Self>,
+    ) -> TensorMap<symtn::sector::LieGroupFusionRule, Complex64> {
         source.convert::<Complex64>()
     }
 }
@@ -129,8 +129,8 @@ impl SunEigInput for f64 {
 #[cfg(feature = "cgc-gen")]
 impl SunEigInput for Complex64 {
     fn to_complex(
-        source: &TensorMap<symtn::sector::SUNFusionRule, Self>,
-    ) -> TensorMap<symtn::sector::SUNFusionRule, Complex64> {
+        source: &TensorMap<symtn::sector::LieGroupFusionRule, Self>,
+    ) -> TensorMap<symtn::sector::LieGroupFusionRule, Complex64> {
         source.clone()
     }
 }

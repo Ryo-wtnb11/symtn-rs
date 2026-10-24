@@ -176,11 +176,12 @@ fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
     if !backend::faer_is_default_backend() {
         return;
     }
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = |scale: usize| {
         GradedSpace::try_new(
             Arc::clone(&provider),

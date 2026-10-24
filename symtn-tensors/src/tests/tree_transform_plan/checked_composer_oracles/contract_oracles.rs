@@ -19,7 +19,7 @@ use crate::contract::{BoundDynamicFusionMapSpace, TensorContractFusionExecutionC
 use symtn_operations::{OutputAxisOrder, TensorContractSpec};
 
 type Leg = Vec<(SectorId, usize)>;
-type Bound = BoundDynamicFusionMapSpace<SUNFusionRule>;
+type Bound = BoundDynamicFusionMapSpace<LieGroupFusionRule>;
 
 trait Value: Copy + std::fmt::Debug {
     fn make(index: usize, seed: f64) -> Self;
@@ -47,7 +47,11 @@ impl Value for Complex64 {
     }
 }
 
-fn space(rule: &Arc<SUNFusionRule>, codomain: &[(&Leg, bool)], domain: &[(&Leg, bool)]) -> Bound {
+fn space(
+    rule: &Arc<LieGroupFusionRule>,
+    codomain: &[(&Leg, bool)],
+    domain: &[(&Leg, bool)],
+) -> Bound {
     let legs = |legs: &[(&Leg, bool)]| {
         FusionProductSpace::new(
             legs.iter()
@@ -93,7 +97,7 @@ fn indices(shape: &[usize]) -> impl Iterator<Item = Vec<usize>> + '_ {
 /// The physical dense tensor (row-major over the legs, each leg ordered by
 /// sector, then degeneracy, then multiplet) of a non-dual checked tensor.
 fn expand<D: Value>(
-    rule: &SUNFusionRule,
+    rule: &LieGroupFusionRule,
     legs: &[&Leg],
     space: &Bound,
     data: &[D],
@@ -274,7 +278,7 @@ struct Case {
     transforms: usize,
 }
 
-fn run_case<D>(rule: &Arc<SUNFusionRule>, legs: &[Leg], case: &Case)
+fn run_case<D>(rule: &Arc<LieGroupFusionRule>, legs: &[Leg], case: &Case)
 where
     D: Value
         + crate::DenseRecouplingScalar

@@ -10,7 +10,7 @@
 use super::*;
 use num_complex::Complex64;
 #[cfg(feature = "cgc-gen")]
-use symtn_core::SUNFusionRule;
+use symtn_core::LieGroupFusionRule;
 use symtn_core::ZNFusionRule;
 
 const RUNTIME: &str = "operands belong to different runtimes";
@@ -232,7 +232,8 @@ fn misuse_reports_one_first_error_in_both_modes() {
         .unwrap()
     };
     #[cfg(feature = "cgc-gen")]
-    let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
+    let su3 =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     #[cfg(feature = "cgc-gen")]
     let su3_leg = |pairs: &[(&[i64], usize)]| {
         GradedSpace::try_new(
@@ -345,8 +346,12 @@ fn rule_mismatch_is_the_first_error_in_both_modes() {
     assert_eq!(rule_rows!(za, zb, Complex64), expected, "Z2/Z3 c64");
     #[cfg(feature = "cgc-gen")]
     {
-        let su3 = Arc::new(SUNFusionRule::new(3).unwrap());
-        let su4 = Arc::new(SUNFusionRule::new(4).unwrap());
+        let su3 = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
+        let su4 = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap(),
+        );
         let sa =
             GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
         let sb = GradedSpace::try_new(Arc::clone(&su4), [(vec![0, 0, 0], 1)]).unwrap();

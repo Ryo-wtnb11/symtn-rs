@@ -811,12 +811,14 @@ factorization_suite!(complex32_payload, Complex32, Complex64);
 mod checked_generic {
     use super::*;
     use std::sync::Arc;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::GradedSpace;
 
-    fn su3_leg(degeneracy: usize) -> GradedSpace<SUNFusionRule> {
+    fn su3_leg(degeneracy: usize) -> GradedSpace<LieGroupFusionRule> {
         GradedSpace::try_new(
-            Arc::new(SUNFusionRule::new(3).unwrap()),
+            Arc::new(
+                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            ),
             [(vec![2i64, 2], degeneracy)],
         )
         .unwrap()

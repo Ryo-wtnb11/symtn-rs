@@ -3,14 +3,15 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eigh_vals_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -154,10 +155,11 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         &runtime,
@@ -208,14 +210,15 @@ fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eigh_vals_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1)]).unwrap();
     let near: TensorMap<_, Complex64> = TensorMap::diagonal(
         &runtime,
@@ -287,14 +290,15 @@ fn assert_same_complex_multisets<S: PartialEq + std::fmt::Debug>(
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eig_vals_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -369,14 +373,15 @@ fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eig_vals_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 2)]).unwrap();
     let c = |re: f64, im: f64| Complex64::new(re, im);
@@ -485,14 +490,15 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eig_vals_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let c = |re: f64, im: f64| Complex64::new(re, im);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 4)]).unwrap();
     let ties: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -558,10 +564,11 @@ fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         &runtime,
@@ -611,14 +618,15 @@ fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_vals_refuses_nonfinite_values() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eig_vals_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1), (vec![1, 0], 1)]).unwrap();
     for bad in [
         Complex64::new(f64::NAN, 0.0),
@@ -670,14 +678,15 @@ fn checked_compact_diagonal_eig_vals_refuses_nonfinite_values() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eigh_full_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     macro_rules! check {
@@ -747,10 +756,11 @@ fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let dual_leg = leg.try_dual().unwrap();
@@ -930,7 +940,7 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let svd_vals_calls = Arc::clone(&calls);
@@ -938,7 +948,8 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
         .with_dense_executor(Box::new(eig_full_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let c = |re: f64, im: f64| Complex64::new(re, im);
@@ -1038,10 +1049,11 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let dual_leg = leg.try_dual().unwrap();
@@ -1273,14 +1285,15 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eig_full_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1), (vec![1, 0], 2)]).unwrap();
     for bad in [
         Complex64::new(f64::NAN, 0.0),
@@ -1349,10 +1362,11 @@ fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eig_full_rejects_inconsistent_spectrum_admission() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         &runtime,
@@ -1408,14 +1422,15 @@ fn checked_compact_diagonal_eig_full_rejects_inconsistent_spectrum_admission() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_directly() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .with_dense_executor(Box::new(eigh_full_spy(&calls)))
         .build()
         .unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1), (vec![1, 0], 2)]).unwrap();
     let complex = |values: [Complex64; 2]| {
         TensorMap::<_, Complex64>::diagonal(
@@ -1486,10 +1501,11 @@ fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_direct
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_eigh_full_rejects_inconsistent_spectrum_admission() {
-    use symtn_core::SUNFusionRule;
+    use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         &runtime,

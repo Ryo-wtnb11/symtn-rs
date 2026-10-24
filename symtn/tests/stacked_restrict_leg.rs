@@ -190,7 +190,10 @@ fn restrict_leg_rejects_what_eager_rejects() {
 fn a_selection_of_another_rule_instance_is_a_rule_mismatch() {
     let runtime = host_runtime();
     let leg = |rank: usize, trivial: Vec<i64>| {
-        let rule = Arc::new(symtn::sector::SUNFusionRule::new(rank).unwrap());
+        let rule = Arc::new(
+            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
+                .unwrap(),
+        );
         GradedSpace::try_new(rule, [(trivial, 2)]).unwrap()
     };
     let su3 = leg(3, vec![0, 0]);

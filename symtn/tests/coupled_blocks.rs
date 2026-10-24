@@ -676,10 +676,12 @@ fn absent_coupled_sector_is_tensorkits_empty_view() {
 mod su3 {
 
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    pub(super) fn legs() -> [GradedSpace<SUNFusionRule>; 3] {
-        let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    pub(super) fn legs() -> [GradedSpace<LieGroupFusionRule>; 3] {
+        let provider = Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        );
         let octet =
             GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 1], 2), (vec![0, 0], 1)])
                 .unwrap();
@@ -712,7 +714,7 @@ mod su3 {
                 a.block(&vec![1i64]),
                 Err(symtn::typed::GenericTensorError::Structure(
                     symtn::typed::CheckedGenericStructureError::Provider(
-                        symtn::sector::SUNFusionRuleError::LabelLength { found: 1, .. }
+                        symtn::sector::LieGroupFusionRuleError::LabelLength { found: 1, .. }
                     )
                 ))
             ),

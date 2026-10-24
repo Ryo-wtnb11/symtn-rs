@@ -1,15 +1,17 @@
-//! Absent SUN vertices do not require representable derived data.
+//! Absent Lie-group vertices do not require representable derived data.
 
 #![cfg(feature = "cgc-gen")]
 
-use symtn_sectors::{CheckedGenericFusion, CheckedGenericRigidSymbols, SUNFusionRule, SectorId};
+use symtn_sectors::{
+    CheckedGenericFusion, CheckedGenericRigidSymbols, LieGroupFusionRule, SectorId,
+};
 
 #[test]
-fn absent_sun_moves_do_not_require_an_encoded_dual_or_finite_dimension() {
+fn absent_lie_group_moves_do_not_require_an_encoded_dual_or_finite_dimension() {
     if usize::BITS != 64 {
         return;
     }
-    let su3 = SUNFusionRule::new(3).unwrap();
+    let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     // This id's Dynkin reversal lies beyond usize::MAX in graded-lex order.
     let unencodable_dual = SectorId::new(usize::MAX);
     assert_eq!(
@@ -17,7 +19,7 @@ fn absent_sun_moves_do_not_require_an_encoded_dual_or_finite_dimension() {
         [2_746_052_115, 3_327_948_884]
     );
 
-    let su78 = SUNFusionRule::new(78).unwrap();
+    let su78 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(78).unwrap()).unwrap();
     let mut labels = vec![0; 77];
     labels[36] = 19;
     let overflowing_dimension = su78.encode_dynkin(&labels).unwrap();

@@ -378,7 +378,7 @@ mod checked_generic {
     use std::sync::Arc;
 
     use super::*;
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     use symtn::typed::GradedSpace;
 
     macro_rules! checked_generic_suite {
@@ -389,7 +389,10 @@ mod checked_generic {
                 #[test]
                 fn su3_base_operations_match_the_widened_oracle() {
                     let runtime = runtime();
-                    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+                    let provider = Arc::new(
+                        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+                            .unwrap(),
+                    );
                     let adjoint = vec![2i64, 2];
                     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)])
                         .unwrap();

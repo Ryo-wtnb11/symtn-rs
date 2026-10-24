@@ -321,9 +321,10 @@ fn leg_roles_equal_the_permute_composition() {
 #[test]
 fn checked_generic_leg_roles_equal_the_permute_composition() {
     let _serial = counting_alloc::serial();
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
     let runtime = host_runtime();
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let v =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
     let w = GradedSpace::try_new(provider, [(vec![1, 0], 1), (vec![1, 1], 1)])

@@ -55,12 +55,12 @@ fn warm_product_queries() {
 fn warm_generic_product_queries() {
     use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
-        CategoryProvider, CheckedGenericRigidSymbols, SUNFusionRule, TypedSectorAdmission,
+        CategoryProvider, CheckedGenericRigidSymbols, LieGroupFusionRule, TypedSectorAdmission,
     };
 
     let rule = ProductFusionRule::<_, _>::try_new(
-        SUNFusionRule::new(3).unwrap(),
-        SUNFusionRule::new(3).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
     )
     .unwrap();
     let octet = vec![1, 1];
@@ -137,16 +137,16 @@ fn warm_generic_product_queries() {
 fn warm_nested_generic_product_queries() {
     use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
-        CategoryProvider, CheckedGenericRigidSymbols, SUNFusionRule, TypedSectorAdmission,
+        CategoryProvider, CheckedGenericRigidSymbols, LieGroupFusionRule, TypedSectorAdmission,
     };
 
     let rule = ProductFusionRule::<_, _>::try_new(
         ProductFusionRule::<_, _>::try_new(
-            SUNFusionRule::new(3).unwrap(),
-            SUNFusionRule::new(3).unwrap(),
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         )
         .unwrap(),
-        SUNFusionRule::new(3).unwrap(),
+        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
     )
     .unwrap();
     let octet = vec![1, 1];

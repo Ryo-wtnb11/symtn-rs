@@ -2947,24 +2947,24 @@ macro_rules! run_provider {
 #[cfg(feature = "cgc-gen")]
 fn run_checked_sun(
     symmetry: &str,
-    provider: std::sync::Arc<symtn::sector::SUNFusionRule>,
+    provider: std::sync::Arc<symtn::sector::LieGroupFusionRule>,
     label: Vec<i64>,
     degeneracy: usize,
     min_time: Duration,
     qr_only: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
     let space = GradedSpace::try_new(provider, [(label, degeneracy)])?;
     if form_enabled("destination") {
-        println!("# {symmetry}: destination rows excluded: the public destination methods retain multiplicity-free dispatch bounds, so the exact SUN fixtures cannot call them");
+        println!("# {symmetry}: destination rows excluded: the public destination methods retain multiplicity-free dispatch bounds, so the exact SU(N) fixtures cannot call them");
     }
     for operation in ["permute", "transpose", "repartition"] {
         if qr_only || !operation_enabled(operation) || !form_enabled("owned") {
             continue;
         }
         let runtime = benchmark_runtime()?;
-        let source = TensorMap::<SUNFusionRule, f64>::rand_with_seed(
+        let source = TensorMap::<LieGroupFusionRule, f64>::rand_with_seed(
             &runtime,
             [&space, &space],
             [&space],
@@ -2995,17 +2995,17 @@ fn run_checked_sun(
     }
 
     if !qr_only && (operation_enabled("trace") || operation_enabled("trace_adjoint")) {
-        println!("# {symmetry}: trace rows excluded: checked-Generic trace dispatch exists, but SUNFusionRule lacks the required SectorCodec");
+        println!("# {symmetry}: trace rows excluded: checked-Generic trace dispatch exists, but LieGroupFusionRule lacks the required SectorCodec");
     }
 
     let runtime = benchmark_runtime()?;
-    let lhs = TensorMap::<SUNFusionRule, f64>::rand_with_seed(
+    let lhs = TensorMap::<LieGroupFusionRule, f64>::rand_with_seed(
         &runtime,
         [&space, &space],
         [&space, &space],
         725,
     )?;
-    let rhs = TensorMap::<SUNFusionRule, f64>::rand_with_seed(
+    let rhs = TensorMap::<LieGroupFusionRule, f64>::rand_with_seed(
         &runtime,
         [&space, &space],
         [&space, &space],
@@ -3072,9 +3072,12 @@ fn run_checked_sun(
                     "warm",
                     min_time,
                     || {
-                        Ok::<_, symtn::typed::GenericTensorError<symtn::sector::SUNFusionRuleError>>(
-                            lhs.scale(0.5).unwrap(),
-                        )
+                        Ok::<
+                            _,
+                            symtn::typed::GenericTensorError<
+                                symtn::sector::LieGroupFusionRuleError,
+                            >,
+                        >(lhs.scale(0.5).unwrap())
                     },
                 )?;
                 for (&actual, &input) in scaled
@@ -3712,11 +3715,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "cgc-gen")]
     {
         use std::sync::Arc;
-        use symtn::sector::SUNFusionRule;
+        use symtn::sector::LieGroupFusionRule;
 
         run_checked_sun(
             "SU3[0;0]",
-            Arc::new(SUNFusionRule::new(3)?),
+            Arc::new(LieGroupFusionRule::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )?),
             vec![0, 0],
             degeneracy,
             min_time,
@@ -3724,7 +3729,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         run_checked_sun(
             "SU3[1;1]",
-            Arc::new(SUNFusionRule::new(3)?),
+            Arc::new(LieGroupFusionRule::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )?),
             vec![1, 1],
             degeneracy,
             min_time,
@@ -3732,7 +3739,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         run_checked_sun(
             "SU4[1;0;1]",
-            Arc::new(SUNFusionRule::new(4)?),
+            Arc::new(LieGroupFusionRule::new(
+                fusion_symbols::lie::GroupId::su(4).unwrap(),
+            )?),
             vec![1, 0, 1],
             degeneracy,
             min_time,

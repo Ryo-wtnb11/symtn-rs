@@ -172,9 +172,10 @@ fn su2_sector_change_rebuilds_only_changed_groups() {
 #[test]
 fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
     let _serial = serial();
-    use symtn::sector::SUNFusionRule;
+    use symtn::sector::LieGroupFusionRule;
 
-    let provider = Arc::new(SUNFusionRule::new(3).unwrap());
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = |sectors: &[([i64; 2], usize)]| {
         GradedSpace::try_new(
             Arc::clone(&provider),

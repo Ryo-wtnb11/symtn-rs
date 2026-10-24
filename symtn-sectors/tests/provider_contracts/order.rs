@@ -6,7 +6,7 @@ use symtn_sectors::{
     TableRule, U1FusionRule, U1Irrep, U1SectorLayout, Z2FusionRule, Z2Irrep, ZNFusionRule,
 };
 #[cfg(feature = "cgc-gen")]
-use symtn_sectors::{CheckedGenericFusion, SUNFusionRule};
+use symtn_sectors::{CheckedGenericFusion, LieGroupFusionRule};
 
 use crate::s;
 
@@ -58,8 +58,8 @@ fn single_factor_rules_order_by_id() {
 
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn sun_orders_by_encoded_id() {
-    let su3 = SUNFusionRule::new(3).unwrap();
+fn lie_group_orders_by_encoded_id() {
+    let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     for id in [0, 1, 2, 4, 9] {
         assert_eq!(
             positions(CheckedGenericFusion::sector_order_key(&su3, s(id))),
