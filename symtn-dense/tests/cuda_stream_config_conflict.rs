@@ -1,3 +1,4 @@
+//! Separate binary: CubeCL stream configuration is process-wide and set once.
 //! #1391: a device must not open over a CubeCL configuration that something
 //! else loaded first with more than one stream, because the single stream is
 //! what orders writes into buffers bound earlier (tensor4all/cubecl#16).

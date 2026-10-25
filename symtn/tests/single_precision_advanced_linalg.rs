@@ -17,7 +17,7 @@
 //! | `exp`, positive powers, `map_diagonal(sqrt)`, `eig_full` residual | 1 (backward stable / elementwise) |
 //! | eigenvalues | `sigma_max / sigma_min` of the double-precision eigenvector factor (Bauer–Fike) |
 
-mod single_precision_oracle;
+use crate::single_precision_oracle;
 
 use std::sync::Arc;
 

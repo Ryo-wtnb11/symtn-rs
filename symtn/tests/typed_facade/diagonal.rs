@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn compact_reductions_carry_the_su2_dimension_weight() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact reductions apply `dim(c)` exactly where the dense ones
     // do. Z2 alone cannot see this — every `dim(c)` is one there.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = su2_tensor(&runtime);
     let typed = typed.svd_compact(&[0], &[1]).unwrap().s;
@@ -49,9 +49,9 @@ fn compact_reductions_carry_the_su2_dimension_weight() {
 
 #[test]
 fn compact_add_matches_pointwise_values_on_both_arms() {
+    let _serial = crate::counting_alloc::serial();
     // What: diagonal + diagonal stays diagonal, and diagonal + dense goes dense
     // — and both arms obey the pointwise linear-combination law.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_bond(&runtime);
 
@@ -96,10 +96,10 @@ fn compact_add_matches_pointwise_values_on_both_arms() {
 
 #[test]
 fn compose_takes_the_compact_paths_and_reconstructs_the_source() {
+    let _serial = crate::counting_alloc::serial();
     // What: `u * s * vh` runs through the bond-scaling arms rather than a
     // dense GEMM, and still reproduces the source — plus `s * s`, the
     // diagonal-times-diagonal arm.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
     let Svd {
@@ -131,11 +131,11 @@ fn compose_takes_the_compact_paths_and_reconstructs_the_source() {
 
 #[test]
 fn compose_declines_a_compact_arm_it_cannot_prove() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact arms fire on a proved destination, not on the storage
     // alone. Two spectra on different bond spaces are not composable at all,
     // and the guard is what leaves that verdict to the expert layer instead of
     // multiplying two unrelated spectra elementwise.
-    let _guard = cache_lock();
     let runtime = runtime();
     let wide = z2_tensor_split(&runtime, 2);
     // A second endomorphism on a leg with different degeneracies, so its bond
@@ -299,8 +299,9 @@ const DIAGONAL_CONTRACT_CASES: &[(&str, bool, ContractSpec<'static>)] = &[
 
 #[test]
 fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
-    if crate::run_isolated_or_return(
+    if crate::typed_facade::run_isolated_or_return(
         "SYMTN_TYPED_FACADE_COMPACT_CONTRACT_IDENTITY_OUTPUT_DOES_NO",
         "diagonal::compact_contract_identity_output_does_not_publish_a_transform_cache_entry",
     ) {
@@ -318,7 +319,7 @@ fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
         .unwrap()
         .s;
     symtn::cache::clear();
-    let before = crate::completed_transformers();
+    let before = crate::typed_facade::completed_transformers();
 
     let result = tensor
         .contract(
@@ -336,12 +337,12 @@ fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
         result.dense_data().unwrap().len(),
         tensor.dense_data().unwrap().len()
     );
-    assert_eq!(crate::completed_transformers(), before);
+    assert_eq!(crate::typed_facade::completed_transformers(), before);
 }
 
 #[test]
 fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
 
     macro_rules! exercise {
@@ -478,9 +479,9 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
 
 #[test]
 fn complex_diagonal_contract_matches_the_typed_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: every complex compact arm agrees with the ordinary typed engine
     // route on the same spaces, including a compact `D · D` result.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_complex_tensor(&runtime);
     let typed_s = typed.svd_compact(&[0, 1], &[2]).unwrap().s;
@@ -532,6 +533,7 @@ fn complex_diagonal_contract_matches_the_typed_dense_route() {
 
 #[test]
 fn the_diagonal_contract_arm_keeps_fermionic_signs() {
+    let _serial = crate::counting_alloc::serial();
     // What: bends inside the compact arm's `permute` pick up the same parity
     // signs as the ordinary typed engine route.
     //
@@ -544,7 +546,6 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
     // flag. `TensorMap::try_contract_diagonal` declines rather than assumes it,
     // and that guard is what would have to be tested if a dual bond leg ever
     // became constructible here.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = fermionic_endo(&runtime);
     let typed_s = typed.svd_compact(&[0], &[1]).unwrap().s;
@@ -625,11 +626,11 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
 
 #[test]
 fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
+    let _serial = crate::counting_alloc::serial();
     // What: the arm must not answer where the dense route would refuse. A
     // contracted leg whose duality flag does not match the spectrum's bond leg
     // is inadmissible, and the error is the expert layer's, not a scaled tensor
     // on a made-up space.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -819,6 +820,7 @@ fn all_output_orders(n: usize) -> Vec<Vec<usize>> {
 
 #[test]
 fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact arm never differs from the dense route it replaces.
     // This direct oracle catches a shared fast-path mistake or a divergence
     // between the codomain rank derived by the arm (`self.rank() - 1` for
@@ -832,7 +834,6 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
     // reach: it has one domain
     // leg) as well as at the trailing one, and an inadmissible pattern must be
     // refused by both routes rather than answered by one.
-    let _guard = cache_lock();
     let runtime = runtime();
     for split in [1, 2] {
         let t = z2_tensor_split(&runtime, split);
@@ -1008,6 +1009,7 @@ where
 
 #[test]
 fn compact_rank_one_swaps_match_the_forced_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: every re-ordering of a compact bond factor returns the tensor the
     // dense tree transform returns — same legs and same bytes.
     //
@@ -1015,7 +1017,6 @@ fn compact_rank_one_swaps_match_the_forced_dense_route() {
     // coefficient is exactly 1 — dropping the coefficient entirely still passes
     // here. The coefficient is carried by the Z3 and fZ2 sweep below, which is
     // where a mutation to it dies.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_bond(&runtime);
     let dense = forced_dense(&typed);
@@ -1039,13 +1040,13 @@ fn compact_rank_one_swaps_match_the_forced_dense_route() {
 
 #[test]
 fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
+    let _serial = crate::counting_alloc::serial();
     // What: the swap's per-sector coefficient is only observable where the two
     // ends of the bond are not interchangeable. Z3 is not self-dual, so the
     // destination block of every sector is a *different* sector; the fermionic
     // provider adds a braiding phase the bosonic cases cannot show. A dual leg
     // is swept on both, since bending is what fixes which sector labels the
     // destination structure carries.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     for is_dual in [false, true] {
@@ -1149,11 +1150,11 @@ fn z2_spectrum_fixture(
 
 #[test]
 fn compact_is_posdef_matches_the_forced_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: reading the stored spectrum answers exactly what eigendecomposing
     // the materialization answers, on every sign pattern and at every
     // tolerance — including the strictness at zero, which is the one place a
     // `>=` would pass a positive-semidefinite spectrum the dense route rejects.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let positive = z2_spectrum_fixture(&runtime, false);
@@ -1187,12 +1188,12 @@ fn compact_is_posdef_matches_the_forced_dense_route() {
 
 #[test]
 fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum() {
+    let _serial = crate::counting_alloc::serial();
     // What: a c64 payload whose stored values are real up to rounding is the
     // case where a compact branch could disagree with the dense one — the dense
     // route Hermitian-eigendecomposes and so reads only the real part, and the
     // compact branch must make the same choice rather than, say, comparing a
     // modulus. The `d` of `eigh_full` is exactly that payload.
-    let _guard = cache_lock();
     let runtime = runtime();
     let real = z2_complex_tensor(&runtime);
     let square = real
@@ -1347,13 +1348,13 @@ fn sweep_compact_trace_variants<R, D>(
 
 #[test]
 fn compact_full_trace_matches_the_forced_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: the full trace of a rank-(1,1) compact spectrum factor over its
     // only pair is the same number on compact and forced-dense storage — U(1),
     // SU(2) (non-unit quantum dimensions), fZ2 (the twist makes it a
     // supertrace) and the packed U(1) x fZ2 product route, on plain and dual
     // bond legs, f64 and c64, both pair orders, and on legs the compact swaps
     // bent themselves.
-    let _guard = cache_lock();
     let runtime = runtime();
     let real = |value: f64| value;
     let complex = |value: f64| Complex64::new(value, 0.25 + value % 3.0);
@@ -1474,6 +1475,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
 
 #[test]
 fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
+    let _serial = crate::counting_alloc::serial();
     // What: on a single fermion-parity sector, `trace_pairs` and `tr` differ by
     // exactly the twist: an odd fZ2 bond flips the sign, an even one does not,
     // and the bosonic Z2 twin of the odd bond pins that the sign is the *twist*
@@ -1482,7 +1484,6 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
     // tensor traces without the fermionic sign once transposed — which kills a
     // coefficient that reads the sector alone, or swaps the dual and non-dual
     // arms.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let assert_supertrace =
@@ -1541,13 +1542,13 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
 
 #[test]
 fn compact_trace_of_no_pairs_returns_the_source_and_malformed_pairs_fail_first() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact arm's boundaries. Tracing nothing on a compact factor
     // returns the source (the pre-guard short-circuit), and a malformed pair
     // list errors before the arm can run — the same validation order as on
     // dense storage. The dense geometries
     // outside the guard (rank > 2, partial pairs) are pinned by the
     // `trace_pairs` tests above.
-    let _guard = cache_lock();
     let runtime = runtime();
     let s = z2_bond(&runtime);
 

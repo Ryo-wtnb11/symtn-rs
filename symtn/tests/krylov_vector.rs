@@ -26,14 +26,9 @@ use symtn::typed::{
 };
 use symtn_sectors::{TableRule, TableSector};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 use numerics::Numeric;
 
@@ -210,6 +205,7 @@ macro_rules! vector_contract {
 
 #[test]
 fn vector_operations_match_the_dense_expansion() {
+    let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     let (a, b) = (0.75, -2.5);
     let (ca, cb) = (Complex64::new(0.5, -2.0), Complex64::new(-1.5, 0.25));
@@ -226,6 +222,7 @@ fn vector_operations_match_the_dense_expansion() {
 
 #[test]
 fn lazy_and_compact_receivers_are_refused_by_similar() {
+    let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     let (v, _) = su2_legs();
     let x = filled!(&rt, [&v], [&v], Complex64, 4);
@@ -266,6 +263,7 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
 
 #[test]
 fn krylov_reports_operation_errors_as_vector_errors() {
+    let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let b = filled!(&rt, [&v, &w], [&v], f64, 5);
@@ -399,6 +397,7 @@ fn f64_alg() -> Lanczos {
 
 #[test]
 fn eigsolve_in_single_precision() {
+    let _serial = crate::counting_alloc::serial();
     // SU(2) spin 1: [-2, -1, 1], to single precision (Lanczos tolerance
     // above the f32 rounding of the residual).
     let rt = Runtime::builder().build().unwrap();
@@ -421,6 +420,7 @@ fn eigsolve_in_single_precision() {
 
 #[test]
 fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
+    let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     for twice in [1usize, 2] {
         let want = heisenberg_eigenvalues(twice);
@@ -558,6 +558,7 @@ fn symtn_get<R, D: Numeric + TensorScalar>(
 
 #[test]
 fn exponentiate_matches_the_block_exponential() {
+    let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     for twice in [1usize, 2] {
         let lambda = heisenberg_eigenvalues(twice);
@@ -611,6 +612,7 @@ fn exponentiate_matches_the_block_exponential() {
 
 #[test]
 fn fibonacci_vectors_carry_the_golden_ratio_weight() {
+    let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(TableRule::fibonacci());
     let (one, tau) = (TableSector::new(1), TableSector::new(2));
@@ -667,6 +669,7 @@ fn fibonacci_vectors_carry_the_golden_ratio_weight() {
 
 #[test]
 fn warm_eigsolve_allocates_only_its_results() {
+    let _serial = crate::counting_alloc::serial();
     // A random Hermitian H with many distinct eigenvalues, so Lanczos
     // restarts; the map writes in place (`contract_into`).
     let rt = Runtime::builder().dense_threads(1).build().unwrap();

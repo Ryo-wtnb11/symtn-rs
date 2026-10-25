@@ -1,5 +1,4 @@
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -516,6 +515,7 @@ where
 
 #[test]
 fn checked_generic_twist_scales_full_keys_for_real_and_complex_payloads() {
+    let _serial = crate::counting_alloc::serial();
     // What: +1/-1 factors act on exact Generic tree keys, including μ=2
     // vertices and outer degeneracy two, for codomain/domain/repeated axes and
     // direct/lazy orientations without changing the input or provider Arc.
@@ -525,6 +525,7 @@ fn checked_generic_twist_scales_full_keys_for_real_and_complex_payloads() {
 
 #[test]
 fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     // What: index and empty requests precede every provider query; NoBraiding
     // rejection is an early facade error, while a staged pivotal failure keeps
     // its provider type and leaves the source payload unchanged.
@@ -568,6 +569,7 @@ fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing
 
 #[test]
 fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing() {
+    let _serial = crate::counting_alloc::serial();
     // What: TensorKit's NoBraiding unit carve-out and bosonic short circuit
     // share storage without pivotal queries; an anyonic all-one provider stages
     // values once and then takes the same identity-sharing path.
@@ -718,6 +720,7 @@ where
 
 #[test]
 fn checked_generic_flip_scales_full_keys_and_lazy_duality_for_real_and_complex_payloads() {
+    let _serial = crate::counting_alloc::serial();
     // What: checked Generic replay uses staged χ/θ factors on complete μ=2
     // keys; repeated legs fail before provider queries, and lazy results own toggled metadata.
     assert_flip_nontrivial_case(|marker| marker as f64);
@@ -726,6 +729,7 @@ fn checked_generic_flip_scales_full_keys_and_lazy_duality_for_real_and_complex_p
 
 #[test]
 fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(
         7,
@@ -756,6 +760,7 @@ fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
 
 #[test]
 fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(8, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, |marker| marker as f64);
@@ -803,6 +808,7 @@ fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
 
 #[test]
 fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::with_fs(
         9,
@@ -874,6 +880,7 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_twist_identity_shares_exact_provider_and_layout() {
+    let _serial = crate::counting_alloc::serial();
     // What: the checked SU(3)/SU(4) pivotal implementation is θ=1, so all four
     // provider/dtype cases share payload and preserve the admitted layout.
     assert_sun_identity_case(3, vec![2, 2], |value| value as f64);
@@ -940,6 +947,7 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_flip_preserves_full_key_layout_and_inverse_roundtrip() {
+    let _serial = crate::counting_alloc::serial();
     assert_sun_flip_case(3, vec![2, 2], |value| value as f64);
     assert_sun_flip_case(3, vec![2, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
@@ -1134,6 +1142,7 @@ fn assert_compose_any_braiding<D>(
 
 #[test]
 fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
+    let _serial = crate::counting_alloc::serial();
     // What (#1378): canonical composition glues lhs.domain to rhs.codomain
     // without crossing legs, so it is blockwise matrix multiplication for
     // every braiding style (TensorKit `mul!`), with outer degeneracies,
@@ -1154,6 +1163,7 @@ fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
 
 #[test]
 fn checked_generic_contract_keeps_its_braiding_boundaries() {
+    let _serial = crate::counting_alloc::serial();
     // What (#1372, #1378): general `contract` shares the ordinary contraction's
     // symmetric-braiding boundary, canonical axes included, and the checked
     // Generic engine keeps Fermionic general contraction explicitly
@@ -1224,6 +1234,7 @@ fn checked_generic_contract_keeps_its_braiding_boundaries() {
 
 #[test]
 fn checked_generic_planar_contract_is_bosonic_only() {
+    let _serial = crate::counting_alloc::serial();
     // What (#2284): a Bosonic checked provider's planar contraction is its
     // ordinary contraction; every other style is the typed
     // `UnsupportedTensorContractScope` (the checked engine has no planar
@@ -1291,6 +1302,7 @@ fn checked_generic_planar_contract_is_bosonic_only() {
 
 #[test]
 fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
+    let _serial = crate::counting_alloc::serial();
     // What (#1553, #1620): factorization and solve leg roles are a `permute`, so a split
     // other than the current one needs a symmetric braiding. The anyonic
     // provider refuses it with the permute's typed error before any
@@ -1335,6 +1347,7 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
 
 #[test]
 fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
+    let _serial = crate::counting_alloc::serial();
     // What: as TensorKit `trace_permute!`, the braiding gate comes before any
     // index handling, so a non-symmetric provider's trace fails even with an
     // empty or malformed pair list (#1872).
@@ -1378,12 +1391,13 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
 
 #[test]
 fn checked_trace_pivotal_failure_does_not_publish_destination() {
+    let _serial = crate::counting_alloc::serial();
     const ISOLATED: &str = "SYMTN_CHECKED_TRACE_PUBLICATION_ISOLATED";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "checked_trace_pivotal_failure_does_not_publish_destination",
+                "checked_generic_braiding::checked_trace_pivotal_failure_does_not_publish_destination",
                 "--nocapture",
             ])
             .env(ISOLATED, "1")

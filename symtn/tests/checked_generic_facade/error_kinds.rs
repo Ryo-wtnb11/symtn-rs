@@ -109,6 +109,7 @@ fn checked<T: fmt::Debug, E>(
 
 #[test]
 fn multiplicity_free_misuse_has_one_variant_per_kind() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let wide = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)]).unwrap();
@@ -192,7 +193,7 @@ fn multiplicity_free_misuse_has_one_variant_per_kind() {
 
 #[test]
 fn checked_misuse_has_one_variant_per_kind() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();

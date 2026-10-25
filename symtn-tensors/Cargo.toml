@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "symtn-tensors"
 version = "0.1.1"
 description = "Symmetric-tensor operations for symtn"
@@ -51,3 +52,11 @@ symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"]
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }
 # Tests reset fusion-symbols' process-global caches as an application would.
 fusion-symbols = { version = "0.8.1", default-features = false }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "serial"
+path = "tests/serial.rs"

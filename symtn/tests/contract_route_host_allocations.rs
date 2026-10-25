@@ -8,19 +8,14 @@
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
 // these gates do not model (#2107).
-#[path = "../../tests/support/backend.rs"]
-mod backend;
+use crate::backend;
 
 use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractPlan, ContractSpec, GradedSpace, Runtime, StackedTensorMap, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measure(f: impl FnOnce()) -> (u64, u64) {
     let ((), allocs) = counting_alloc::measure(f);
@@ -116,10 +111,10 @@ const BASE: [(&str, Row); 2] = [
 
 #[test]
 fn core_and_copy_c_route_allocation_calls_are_bounded_by_base() {
+    let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
-    let _serial = counting_alloc::serial();
     let rows = [("core", row(&[0, 1])), ("copyC", row(&[1, 0]))];
     for ((name, row), (base_name, base)) in rows.iter().zip(BASE) {
         eprintln!("{name}: {row:?}");

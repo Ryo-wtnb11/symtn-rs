@@ -10,3 +10,6 @@ repository = "https://github.com/Ryo-wtnb11/symtn-rs"
 
 [workspace.dependencies]
 strided-kernel = { version = "0.4.4", features = ["parallel"] }
+
+[profile.dev]
+debug = "line-tables-only"

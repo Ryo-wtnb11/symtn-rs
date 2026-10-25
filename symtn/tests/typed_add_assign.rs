@@ -4,14 +4,9 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Error, OperationError};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-#[path = "support/report.rs"]
-mod report;
+use crate::counting_alloc;
+use crate::report;
 use report::Report;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f64> {
     let rule = Arc::new(U1FusionRule);
@@ -28,6 +23,7 @@ fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f6
 
 #[test]
 fn scale_assign_mutates_unique_dense_payload() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let mut value = tensor(&runtime, 3, 2.0);
     value.scale_assign(3.0).unwrap();
@@ -39,6 +35,7 @@ fn scale_assign_mutates_unique_dense_payload() {
 
 #[test]
 fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let x = tensor(&runtime, 2, 3.0);
     let mut destination = tensor(&runtime, 2, 2.0);
@@ -58,6 +55,7 @@ fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
 
 #[test]
 fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let mut destination = tensor(&runtime, 2, 2.0);
     let x = tensor(&runtime, 3, 3.0);
@@ -76,6 +74,7 @@ fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
 
 #[test]
 fn unique_dense_destinations_are_allocation_free() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let mut destination = tensor(&runtime, 64, 2.0);
     let x = tensor(&runtime, 64, 3.0);

@@ -7,15 +7,13 @@
 //! The checked fusion algebra keeps symtn's error contract: U(1) or CU(1)
 //! fusion leaving the label range is an `Err`, never a wrapped label.
 
-use num_complex::{Complex32, Complex64};
 use symtn_sectors::{
     CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FusionAlgebraError,
     FusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorId,
     U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule, CU1_MAX_TWICE_CHARGE,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 trait Rule: FusionRule + CheckedFusionAlgebra + MultiplicityFreeRigidSymbols<Scalar = f64> {}
 impl<R: FusionRule + CheckedFusionAlgebra + MultiplicityFreeRigidSymbols<Scalar = f64>> Rule for R {}

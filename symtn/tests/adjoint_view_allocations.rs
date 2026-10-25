@@ -5,11 +5,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measure(f: impl FnOnce()) -> (u64, u64) {
     let (allocations, bytes, _) = measure_peak(f);
@@ -46,7 +42,7 @@ fn tensor(
 
 #[test]
 fn adjoint_creation_allocates_metadata_not_a_receiver_sized_payload() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the fallible typed constructor transactionally admits the logical
     // adjoint layout, so metadata may scale with rank and tree count. It must
     // not scale with degeneracy: that would mean copying the parent payload.
@@ -77,7 +73,7 @@ fn adjoint_creation_allocates_metadata_not_a_receiver_sized_payload() {
 
 #[test]
 fn adjoint_involution_does_not_allocate() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the second dagger restores the parent body without allocating.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let source = tensor(&runtime, (-4..=4).map(|charge| (charge, 2)), 4);
@@ -92,7 +88,7 @@ fn adjoint_involution_does_not_allocate() {
 
 #[test]
 fn labelled_block_inspection_refuses_a_lazy_adjoint_without_copying() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let parent = tensor(&runtime, [(0, 64)], 2);
     let parent_block = parent.subblock(0).unwrap();
@@ -129,7 +125,7 @@ fn labelled_block_inspection_refuses_a_lazy_adjoint_without_copying() {
 
 #[test]
 fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materialization() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: compact and full SVD of a lazy adjoint factor the parent directly
     // and never hide a receiver-sized logical-adjoint allocation around it.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -178,7 +174,7 @@ fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materializatio
 
 #[test]
 fn lazy_scale_and_add_allocate_only_one_input_sized_payload() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space =
@@ -222,7 +218,7 @@ fn lazy_scale_and_add_allocate_only_one_input_sized_payload() {
 
 #[test]
 fn lazy_add_allocation_count_does_not_depend_on_the_block_count() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: `add` with a lazy-adjoint operand copies each block through one
     // bounds-checked strided call (#1399) and allocates only its output and
     // the tensor wrapping it, the same count as the per-element kernel it
@@ -261,7 +257,7 @@ fn lazy_add_allocation_count_does_not_depend_on_the_block_count() {
 
 #[test]
 fn block_stride_buffers_spill_only_past_rank_sixteen() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the per-op block layout (`CheckedBlockLayout`, #1401) holds up
     // to 16 non-unit axes inline, so at rank 10 lazy `add` and lazy-adjoint
     // materialization allocate as at rank 2, for one block or many. Past 16
@@ -315,7 +311,7 @@ fn block_stride_buffers_spill_only_past_rank_sixteen() {
 
 #[test]
 fn identity_adjoint_transform_cost_is_independent_of_rank_and_block_count() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: identity permute, braid, and repartition share the lazy view with
     // zero allocations across increasing rank and U1 sector counts.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -349,7 +345,7 @@ fn identity_adjoint_transform_cost_is_independent_of_rank_and_block_count() {
 
 #[test]
 fn ordinary_tensor_clone_does_not_allocate() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the representation split keeps an owned tensor's value-like Arc clone cost.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let source = tensor(&runtime, (-4..=4).map(|charge| (charge, 2)), 4);
@@ -394,7 +390,7 @@ fn measure_eager_lazy_core_compose(
 
 #[test]
 fn typed_single_group_lazy_compose_stays_below_the_measured_engine_margin() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: warmed typed lazy-adjoint compose measured 40 allocations when
     // admitted here; 64 leaves platform headroom without inheriting the erased
     // facade's former 128-allocation ceiling.
@@ -404,7 +400,7 @@ fn typed_single_group_lazy_compose_stays_below_the_measured_engine_margin() {
 
 #[test]
 fn typed_multigroup_lazy_compose_stays_below_the_measured_engine_margin() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the corresponding multigroup route measured 52 allocations; 80
     // keeps explicit headroom while still killing a return to per-term replay.
     let calls = measure_eager_lazy_core_compose(
@@ -421,7 +417,7 @@ fn typed_multigroup_lazy_compose_stays_below_the_measured_engine_margin() {
 
 #[test]
 fn materialize_allocates_one_fresh_payload_per_call() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: `materialize` (#1545) of an owned dense tensor or a lazy adjoint
     // costs one payload allocation plus fixed body wrappers, whatever the
     // block count, on every call: the result never shares a payload, so a
@@ -457,7 +453,7 @@ fn materialize_allocates_one_fresh_payload_per_call() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What (#1942): a warm checked Generic adjoint of a complete tensor costs
     // a constant number of header allocations, independent of how many fusion
     // trees the HomSpace enumerates. Re-enumerating the adjoint trees with

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn checked_generic_reductions_cover_real_complex_dense_payloads() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -57,6 +57,7 @@ fn checked_generic_reductions_cover_real_complex_dense_payloads() {
 
 #[test]
 fn checked_generic_compact_reductions_read_only_the_spectrum() {
+    let _serial = crate::counting_alloc::serial();
     // What: a checked Generic compact operand reduces from its stored values,
     // weighted by `dim(X) = 1 + sqrt(2)`, against compact, dense and lazy
     // partners; the dense partner's off-diagonal entries are not read.
@@ -162,7 +163,7 @@ fn checked_generic_compact_reductions_read_only_the_spectrum() {
 
 #[test]
 fn checked_generic_reductions_do_not_requery_the_admitted_fusion_style() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     // Admission fixed the Generic style; a provider whose answer changes
     // afterwards is neither asked again nor able to drop the `dim` weights.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -184,6 +185,7 @@ fn checked_generic_reductions_do_not_requery_the_admitted_fusion_style() {
 
 #[test]
 fn checked_generic_host_add_scale_cover_real_and_complex_payloads() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -222,7 +224,7 @@ fn checked_generic_host_add_scale_cover_real_and_complex_payloads() {
 
 #[test]
 fn checked_generic_add_rejects_runtime_before_layout_without_queries() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let foreign_runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
@@ -246,7 +248,7 @@ fn checked_generic_add_rejects_runtime_before_layout_without_queries() {
 
 #[test]
 fn checked_generic_add_rejects_layout_mismatch_without_queries() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let narrow = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -270,7 +272,7 @@ fn checked_generic_add_rejects_layout_mismatch_without_queries() {
 
 #[test]
 fn checked_generic_add_assign_rejects_runtime_before_layout_and_preserves_receiver() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let foreign_runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
@@ -303,7 +305,7 @@ fn checked_generic_add_assign_rejects_runtime_before_layout_and_preserves_receiv
 
 #[test]
 fn checked_generic_add_assign_rejects_layout_mismatch_and_preserves_receiver() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let narrow = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -336,6 +338,7 @@ fn checked_generic_add_assign_rejects_layout_mismatch_and_preserves_receiver() {
 
 #[test]
 fn checked_generic_lazy_adjoint_preserves_provider_and_reductions() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -358,6 +361,7 @@ fn checked_generic_lazy_adjoint_preserves_provider_and_reductions() {
 
 #[test]
 fn checked_generic_reduction_dimension_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -376,6 +380,7 @@ fn checked_generic_reduction_dimension_failure_is_typed_and_nonpublishing() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -422,6 +427,7 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
 /// operand, NaN and `Inf` included (#1442).
 #[test]
 fn checked_generic_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -475,7 +481,7 @@ fn checked_generic_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
 
 #[test]
 fn checked_tr_matches_the_literal_weighted_sum_and_keeps_error_precedence() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =
@@ -573,7 +579,7 @@ fn checked_tr_matches_the_literal_weighted_sum_and_keeps_error_precedence() {
 
 #[test]
 fn checked_inner_and_norm_take_one_weight_per_sector_and_keep_error_precedence() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =

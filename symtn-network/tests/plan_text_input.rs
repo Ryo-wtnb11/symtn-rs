@@ -8,19 +8,16 @@
 use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     load_plan_cache, plan_cache_stats, save_plan_cache, ContractError, ContractionPlan, Network,
     SliceKind, SlicePlan, SlicedPlan,
 };
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 // `[i; l] = A[i; j] B[j; k] C[k; l]` contracted as `A (B C)`: B and C first
 // (result 3, open legs `j l`), then A with 3 (result 4, open legs `i l`).

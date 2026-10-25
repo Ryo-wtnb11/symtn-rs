@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "symtn-core"
 version = "0.1.1"
 description = "Core tensor data structures for symtn"
@@ -45,3 +46,11 @@ num-complex = "0.4"
 [[bench]]
 name = "fusion_tree_key"
 harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "serial"
+path = "tests/serial.rs"

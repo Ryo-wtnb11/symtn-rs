@@ -12,9 +12,7 @@ use symtn::typed::{
     Error, GradedSpace, OperationError, Runtime, SectorSpectrum, TensorMap, TensorScalar,
 };
 
-#[macro_use]
-#[path = "support/nonfinite_factor_input.rs"]
-mod nonfinite_factor_input;
+use crate::nonfinite_factor_input;
 use nonfinite_factor_input::assert_finite_input_refusals;
 
 fn leg() -> GradedSpace<U1FusionRule> {

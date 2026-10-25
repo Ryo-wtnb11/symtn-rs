@@ -19,11 +19,7 @@ use symtn_tensors::{
     RuleIdentity, TensorContractFusionExecutionContext, TensorContractSpec,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize, usize) {
     counting_alloc::start();
@@ -49,7 +45,7 @@ fn chain_homspace(sector_count: i32) -> FusionTreeHomSpace {
 
 #[test]
 fn cold_lowered_enumeration_streams_and_builds_once() {
-    let _global_cache_guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
 
     // Streaming: admitted keys grow linearly with the sector count while the
     // candidate space (codomain x domain sector pairs) grows quadratically.
@@ -228,7 +224,7 @@ fn run_route() -> RouteRun {
 
 #[test]
 fn cold_contract_plan_build_stays_cached_after_first_run() {
-    let _global_cache_guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
 
     // Discard one run: the first contraction in the process pays a one-time
     // warmup (lazy statics, thread-local init) that would otherwise skew the

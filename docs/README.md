@@ -40,11 +40,22 @@ debug assertions and overflow checks stay enabled. Coverage keeps its own
 profile, disables target-artifact caching to avoid disk exhaustion, and retains
 all per-crate floors.
 
-Coverage and macOS nightly serialize only the `symtn-tensors` lib binary: its
+Local dev and test builds use line-table debug information to retain file:line
+backtraces while reducing linked artifact size. The tensor crates group
+integration tests into explicit `integration` and `serial` targets per crate.
+`integration` members neither observe nor reset process-global state and run
+concurrently without serial guards. Whole files that install the counting
+allocator, assert on process-global counters or cache state, or reset that
+observed state belong to `serial`. Its root installs the counting allocator
+once, and every test takes [the shared serial guard](../tests/support/counting_alloc.rs)
+first. Cold-cache tests establish their preconditions through public clear/reset
+APIs. Runtime-local caches and thread-local CUDA transfer counters do not require
+serialization. Tests requiring set-once process state keep separate targets:
+`runtime_owned_cpu_pool`, `cuda_stream_config_{conflict,single}`, and
+`intermediate_allocations`. Run a member with a module filter, for example
+`cargo test -p symtn --no-default-features --features krylov,blas-openblas --test serial krylov_vector::`.
+
+Coverage and macOS nightly also serialize the `symtn-tensors` lib binary: its
 [cache-test support](../symtn-tensors/src/test_support.rs) explains why unrelated
 constructors can disturb process-global snapshots. A separate `--test '*'`
-selects integration targets only, so the lib runs once. Integration targets
-isolate snapshot assertions in single-test binaries or use
-[the counting allocator's mutex](../tests/support/counting_alloc.rs); other
-targets do not inspect global snapshots or are CUDA-gated. Preserve this
-isolation when adding tests.
+selects integration targets only, so the lib runs once.

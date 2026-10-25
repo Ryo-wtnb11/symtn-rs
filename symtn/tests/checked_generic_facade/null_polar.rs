@@ -11,6 +11,7 @@ fn multiply_2x2<D: symtn::typed::TensorScalar>(
 
 #[test]
 fn checked_generic_polar_matches_independent_real_and_complex_qh_oracles() {
+    let _serial = crate::counting_alloc::serial();
     // What: both factor orders retain the source authority and match Q/H,
     // including conjugate-transpose arithmetic for a genuinely complex Q.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -78,6 +79,7 @@ fn checked_generic_polar_matches_independent_real_and_complex_qh_oracles() {
 
 #[test]
 fn checked_generic_polar_direction_covers_rectangular_side_only_and_empty_inputs() {
+    let _serial = crate::counting_alloc::serial();
     // What: complete dimensions, not populated blocks, select the requested
     // tall/wide contract before any dense factorization.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -123,6 +125,7 @@ fn checked_generic_polar_direction_covers_rectangular_side_only_and_empty_inputs
 
 #[test]
 fn checked_generic_polar_lazy_redirects_to_the_opposite_parent_operation() {
+    let _serial = crate::counting_alloc::serial();
     // What: lazy adjoints reuse the parent's owned P, return owned W-adjoints,
     // and report the operation requested on the receiver.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -192,6 +195,7 @@ fn checked_generic_polar_lazy_redirects_to_the_opposite_parent_operation() {
 
 #[test]
 fn checked_generic_polar_completes_rank_deficient_and_zero_sectors() {
+    let _serial = crate::counting_alloc::serial();
     // What: compact-full SVD completion returns a full isometry/coisometry;
     // P remains Hermitian PSD for rank-deficient and zero matrices.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -262,7 +266,7 @@ fn checked_generic_polar_completes_rank_deficient_and_zero_sectors() {
 
 #[test]
 fn checked_generic_polar_stages_svd_and_both_gemms_without_publication() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     // What: sectors stream (each SVD is followed by its W and P GEMMs, so
     // only one sector's factors are live), and any SVD or GEMM failure
     // returns no factor while preserving the source and provider authority.
@@ -317,7 +321,7 @@ fn checked_generic_polar_stages_svd_and_both_gemms_without_publication() {
 
 #[test]
 fn checked_only_compact_diagonal_polar_is_direct_and_refuses_nonfinite_values() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let runtime = Runtime::builder()
@@ -508,7 +512,7 @@ fn checked_only_compact_diagonal_polar_is_direct_and_refuses_nonfinite_values() 
 
 #[test]
 fn checked_generic_lazy_polar_second_svd_failure_keeps_parent_unchanged() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     for left in [true, false] {
         let svd_calls = Arc::new(SpyCounts::default());
         let gemm_calls = Arc::clone(&svd_calls);
@@ -553,7 +557,7 @@ fn checked_generic_lazy_polar_second_svd_failure_keeps_parent_unchanged() {
 
 #[test]
 fn checked_generic_polar_provider_error_precedes_dense_work() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     // What: complete codomain dimensions are queried before domain,
     // direction, admission, and dense work.
     let svd_calls = Arc::new(SpyCounts::default());
@@ -607,6 +611,7 @@ fn checked_generic_polar_provider_error_precedes_dense_work() {
 
 #[test]
 fn checked_generic_null_spaces_cover_shape_zero_disjoint_and_side_only_sectors() {
+    let _serial = crate::counting_alloc::serial();
     // What: Generic null spaces are shape-based (MatrixAlgebraKit
     // `qr_null!`/`lq_null!`): square sectors are empty whatever their rank,
     // a tall sector keeps `rows - cols` orthonormal directions annihilating
@@ -720,7 +725,7 @@ fn checked_generic_null_spaces_cover_shape_zero_disjoint_and_side_only_sectors()
 
 #[test]
 fn checked_generic_null_dense_failure_is_typed_and_nonpublishing() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     // What: a later sector QR failure crosses the public Generic facade as a
     // typed plan error without changing the source or returning a partial null.
     let calls = Arc::new(SpyCounts::default());
@@ -754,7 +759,7 @@ fn checked_generic_null_dense_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_compact_null_is_direct_and_agrees_with_dense() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -913,6 +918,7 @@ fn assert_sun_checked_generic_null_spaces<D>(
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_null_spaces_resolve_cross_mu_for_both_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     // What: SU(3)/SU(4) multiplicity blocks keep `rows - cols` orthonormal
     // directions annihilating a rank-deficient input whose rows mix both
     // vertices, and the composed rank-revealing null space adds the rank
@@ -1007,6 +1013,7 @@ fn assert_sun_checked_generic_polar_qh<D>(
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_polar_cross_mu_qh_oracles_for_both_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     let s = std::f64::consts::FRAC_1_SQRT_2;
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_polar_qh::<f64>(
@@ -1038,7 +1045,7 @@ fn sun_checked_generic_polar_cross_mu_qh_oracles_for_both_dtypes() {
 /// fail them.
 #[test]
 fn checked_compact_diagonal_polar_publishes_on_the_input_space_without_provider_queries() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for dual in [false, true] {
         for fault in ["fail_algebra", "invalid_style"] {

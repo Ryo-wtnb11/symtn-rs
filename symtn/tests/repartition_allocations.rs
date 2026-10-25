@@ -5,14 +5,11 @@ use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn repartition_to_current_split_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     // What: a repartition which leaves the boundary unchanged only clones Arc
     // handles, preserves provider authority, and performs no heap allocation.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

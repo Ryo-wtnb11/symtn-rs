@@ -1,3 +1,4 @@
+//! Separate binary: its process-global lifetime allocator counts worker-thread allocations and frees.
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::{Cell, RefCell};
 use std::process::Command;
@@ -674,7 +675,9 @@ fn first_execution_lays_out_temporaries_in_the_consumer_contracted_order() {
         .output()
         .unwrap();
     assert!(
-        output.status.success(),
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("test result: ok. 1 passed; 0 failed;"),
         "temporary-order allocator worker failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1096,7 +1099,9 @@ fn run_typed_overwrite_worker(
         .output()
         .unwrap();
     assert!(
-        output.status.success(),
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("test result: ok. 1 passed; 0 failed;"),
         "typed worker failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1243,7 +1248,9 @@ fn warm_lazy_conj_replay_does_not_materialize_the_input() {
         .output()
         .unwrap();
     assert!(
-        output.status.success(),
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("test result: ok. 1 passed; 0 failed;"),
         "lazy-conj allocator worker failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );

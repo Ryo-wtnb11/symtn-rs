@@ -2,11 +2,11 @@ use super::*;
 
 #[test]
 fn contract_matches_a_hand_computed_product_with_a_reordered_output() {
+    let _serial = crate::counting_alloc::serial();
     // What: a 2x3 by 3x4 contraction with `output_axes = [1, 0]` is the
     // transpose of the matrix product, element for element. The values are the
     // ones the expert-layer helper is pinned to, so the facade is proved to
     // pass the axes and the output order through unaltered.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let (rows, shared, columns) = (
@@ -41,9 +41,9 @@ fn contract_matches_a_hand_computed_product_with_a_reordered_output() {
 
 #[test]
 fn contract_with_the_default_output_order_keeps_the_open_axes_in_place() {
+    let _serial = crate::counting_alloc::serial();
     // What: `0..open_rank` is the identity output order, so the same product
     // comes back untransposed.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let (rows, shared, columns) = (
@@ -74,8 +74,8 @@ fn contract_with_the_default_output_order_keeps_the_open_axes_in_place() {
 
 #[test]
 fn contract_carries_a_simple_fusion_provider_with_a_complex_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: the contraction seam is neither abelian- nor real-specific.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
@@ -118,9 +118,9 @@ fn contract_carries_a_simple_fusion_provider_with_a_complex_payload() {
 
 #[test]
 fn contract_rejects_operands_from_different_runtimes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the runtime is a trust boundary — two runtimes own separate
     // execution state, so mixing them is refused before any provider work.
-    let _guard = cache_lock();
     let first = runtime();
     let second = runtime();
     let provider = Arc::new(external_z3());
@@ -149,11 +149,11 @@ fn contract_rejects_operands_from_different_runtimes() {
 
 #[test]
 fn contract_accepts_separately_allocated_equal_identity_providers() {
+    let _serial = crate::counting_alloc::serial();
     // What: the counterpart of the distinct-identity rejection — two
     // independent allocations of one rule interoperate in an operation, not
     // just in construction, and produce the same values a single allocation
     // does.
-    let _guard = cache_lock();
     let runtime = runtime();
     let first = Arc::new(external_z3());
     let second = Arc::new(external_z3());
@@ -191,10 +191,10 @@ fn contract_accepts_separately_allocated_equal_identity_providers() {
 
 #[test]
 fn contract_rejects_operands_with_distinct_rule_identities() {
+    let _serial = crate::counting_alloc::serial();
     // What: two providers of one Rust type but different identities are a
     // different algebra. The rejection comes from the expert layer, which is
     // why the facade does not pre-check it.
-    let _guard = cache_lock();
     let runtime = runtime();
     let first = Arc::new(external_z3_tagged(0));
     let second = Arc::new(external_z3_tagged(1));
@@ -229,7 +229,7 @@ fn contract_rejects_operands_with_distinct_rule_identities() {
 
 #[test]
 fn otimes_rejects_runtime_and_rule_identity_mismatches() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let first = runtime();
     let second = runtime();
     let provider = Arc::new(external_z3());
@@ -267,10 +267,10 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
 
 #[test]
 fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
+    let _serial = crate::counting_alloc::serial();
     // What: the #595 NoBraiding oracle is TensorKit's own PlanarTrivial
     // category. The previous contract-plus-output-permute route reached its
     // NoBraiding boundary; the monoidal merge succeeds without an R symbol.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(planar_trivial());
     let lhs_cod = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
@@ -335,9 +335,9 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
 
 #[test]
 fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
+    let _serial = crate::counting_alloc::serial();
     // Built-in TensorKit-equivalent FermionParity semantics: complex payload
     // multiplication is sign-free because otimes performs no leg crossing.
-    let _guard = cache_lock();
     let runtime = runtime();
     let rule = Arc::new(symtn::sector::FermionParityFusionRule);
     let leg = GradedSpace::try_new(
@@ -395,7 +395,7 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
 
 #[test]
 fn typed_deligne_product_uses_the_explicit_component_order() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
@@ -436,7 +436,7 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
 
 #[test]
 fn typed_deligne_product_rejects_a_component_identity_mismatch() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let lhs_rule = Arc::new(external_z3_tagged(0));
     let lhs = counting_z3(
@@ -465,7 +465,7 @@ fn typed_deligne_product_rejects_a_component_identity_mismatch() {
 
 #[test]
 fn typed_deligne_product_checks_runtime_before_both_component_identities() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let first = runtime();
     let second = runtime();
     let left_rule = Arc::new(external_z3_tagged(0));
@@ -516,7 +516,7 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
 
 #[test]
 fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
@@ -611,11 +611,11 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
 
 #[test]
 fn typed_deligne_product_accepts_a_nondefault_product_codec() {
+    let _serial = crate::counting_alloc::serial();
     type Codec = symtn::sector::PackedProductCodec<
         symtn::sector::U1SectorLayout,
         symtn::sector::Fz2SectorLayout,
     >;
-    let _guard = cache_lock();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
@@ -647,7 +647,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
 
 #[test]
 fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
@@ -703,6 +703,7 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
 
 #[test]
 fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
+    let _serial = crate::counting_alloc::serial();
     type WrongCodec = symtn::sector::PackedProductCodec<
         symtn::sector::U1SectorLayout,
         symtn::sector::Fz2SectorLayout,
@@ -746,7 +747,7 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
 
 #[test]
 fn contract_ordered_delegates_with_a_nonidentity_output_order() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let leg = u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]);
@@ -791,8 +792,7 @@ fn contract_ordered_delegates_with_a_nonidentity_output_order() {
 
 #[test]
 fn typed_contract_parallel_su2_replay_matches_serial() {
-    let _guard = cache_lock();
-
+    let _serial = crate::counting_alloc::serial();
     fn run(runtime: &Runtime) -> Vec<f64> {
         let provider = Arc::new(SU2FusionRule);
         let leg = GradedSpace::try_new(
@@ -840,9 +840,9 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
     reason = "the test table records axes and expected error class in one fixture row"
 )]
 fn contract_error_classes_and_their_both_defect_precedence() {
+    let _serial = crate::counting_alloc::serial();
     // What: the typed contract reports
     // a bad output order before a simultaneous contracted-leg mismatch.
-    let _guard = cache_lock();
     let second = runtime();
     let runtime = runtime();
     let typed_fixture = |runtime: &Runtime| {
@@ -1113,17 +1113,17 @@ fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>()
 
 #[test]
 fn non_symmetric_contract_entries_reject_canonical_axes_but_compose_admits() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     assert_host_contract_entries_reject_but_compose_admits::<false>();
     assert_host_contract_entries_reject_but_compose_admits::<true>();
 }
 
 #[test]
 fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
+    let _serial = crate::counting_alloc::serial();
     // What: the same one-sector 2x2 operands under a bosonic rule contract on
     // the canonical axes to the composition oracle, so the rejections above
     // are the braiding boundary alone.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::U1FusionRule),
@@ -1181,9 +1181,9 @@ fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
 
 #[test]
 fn non_symmetric_compact_trace_rejects_like_dense_trace() {
+    let _serial = crate::counting_alloc::serial();
     // What: the rank-(1,1) compact-spectrum trace is rejected with the dense
     // trace's error instead of answering from the spectrum (#1355).
-    let _guard = cache_lock();
     assert_compact_trace_rejects_like_dense_trace::<false>();
     assert_compact_trace_rejects_like_dense_trace::<true>();
 }
@@ -1252,7 +1252,7 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn non_symmetric_device_contract_entries_reject_but_compose_admits() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     assert_device_contract_entries_reject_but_compose_admits::<false>();
     assert_device_contract_entries_reject_but_compose_admits::<true>();
 }

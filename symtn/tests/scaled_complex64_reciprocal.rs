@@ -20,8 +20,7 @@
 //! correct reciprocal satisfies: `inv(2^k z) = 2^-k inv(z)`,
 //! `inv(conj z) = conj(inv z)`, and `z * inv(z) ≈ 1`.
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::f64::consts::{E, FRAC_1_SQRT_2, LN_2, PI, SQRT_2};

@@ -6,19 +6,18 @@
 //! `add(y, x, α, β) == β·y + α·x` fails every case.
 //!
 //! The CUDA gate runs with `cargo test -p symtn --features cuda,cpu-faer
-//! --test axpby_dense_oracle -- --ignored` on a CUDA host.
+//! --test integration axpby_dense_oracle:: -- --ignored` on a CUDA host.
 
 use std::collections::HashMap;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::{
     FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
     U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 const F64_COEFFS: (f64, f64) = (0.75, -2.5);
 const C64_ALPHA: Complex64 = Complex64::new(0.5, -2.0);

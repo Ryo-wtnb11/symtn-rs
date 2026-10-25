@@ -10,7 +10,7 @@
 //! store — is in the ungated `typed_transform_host_side.rs`.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_transform_contracts -- --ignored`.
+//! serial typed_cuda_transform_contracts:: -- --ignored`.
 
 #![cfg(feature = "cuda")]
 
@@ -48,8 +48,7 @@ macro_rules! full_transpose {
     }};
 }
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 use std::sync::Arc;
 use symtn::typed::Direction;
@@ -59,14 +58,8 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Error;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-/// Orders process-global cache clears against warm/cold count windows
-/// (#2084). Cooperative: every new clearing test must take `cache_exclusive`
-/// and every new count-dependent test `cache_shared`.
+/// Orders the local process-global cache probes; Runtime-local probes run concurrently.
 static CACHE_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
-
-fn cache_shared() -> std::sync::RwLockReadGuard<'static, ()> {
-    CACHE_TEST_LOCK.read().unwrap_or_else(|e| e.into_inner())
-}
 
 fn cache_exclusive() -> std::sync::RwLockWriteGuard<'static, ()> {
     CACHE_TEST_LOCK.write().unwrap_or_else(|e| e.into_inner())
@@ -120,7 +113,7 @@ fn delta<T>(body: impl FnOnce() -> T) -> (T, CudaTransferStats) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_device_transform_uploads_only_its_output_and_downloads_nothing() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let device = fixture(&runtime).to_cuda().unwrap();
     // Sized on the Host, so the device's first call below really is its cold
@@ -175,6 +168,7 @@ fn a_warm_device_transform_uploads_only_its_output_and_downloads_nothing() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn clearing_the_cuda_caches_releases_only_the_device_executor_state() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let device = fixture(&runtime).to_cuda().unwrap();
@@ -211,7 +205,7 @@ fn clearing_the_cuda_caches_releases_only_the_device_executor_state() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn clearing_and_re_preparing_does_not_creep_the_plan_reservation() {
-    let _cache = cache_exclusive();
+    let _serial = crate::counting_alloc::serial();
     // What: `clear_cuda_caches` returns the executor's plan-entry
     // reservation, so repeated clear/re-prepare cycles of the same structures
     // leave the ledger and the cap where the first preparation put them.
@@ -247,6 +241,7 @@ fn clearing_and_re_preparing_does_not_creep_the_plan_reservation() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_transform_short_circuits_do_no_device_work() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let device = fixture(&runtime).to_cuda().unwrap();
     let expected = fixture(&runtime).dense_data().unwrap().to_vec();
@@ -290,6 +285,7 @@ fn device_transform_short_circuits_do_no_device_work() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_transform_rejections_happen_before_any_device_work() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let device = fixture(&runtime).to_cuda().unwrap();
     // Warm the structures first, so a rejection cannot be confused with the
@@ -352,7 +348,7 @@ fn device_transform_rejections_happen_before_any_device_work() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_cold_device_transform_uploads_one_coefficient_payload_per_structure() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     // SU(2) recouples, so the structure has a real coefficient payload and a
     // pack/scatter workspace. Both are uploaded once, on the first replay of
     // that structure, and never again while the Host store admits it.
@@ -448,7 +444,7 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_device_into_transfers_nothing_and_allocates_nothing() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let source = fixture(&runtime).to_cuda().unwrap();
     let mut destination = fixture(&runtime)
@@ -564,6 +560,7 @@ fn a_warm_device_into_transfers_nothing_and_allocates_nothing() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_admits_the_exact_layout_on_the_shared_runtime_store() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     // Host `overwrite_tree_transform` admits the source/destination layout
     // pair after a successful replay, so a second call resolves the operation
@@ -616,6 +613,7 @@ fn device_into_admits_the_exact_layout_on_the_shared_runtime_store() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_rejections_happen_before_any_device_work() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let host = fixture(&runtime);
     let expected = host.permute(&[2, 0], &[1, 3]).unwrap();
@@ -878,7 +876,7 @@ fn fermionic_fixture(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParit
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_device_twist_uploads_only_its_output_and_downloads_nothing() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let host = fermionic_fixture(&runtime);
     let device = host.to_cuda().unwrap();
@@ -930,6 +928,7 @@ fn a_warm_device_twist_uploads_only_its_output_and_downloads_nothing() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_short_circuits_do_no_device_work() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let bosonic = fixture(&runtime).to_cuda().unwrap();
     let fermionic_host = fermionic_fixture(&runtime);
@@ -978,6 +977,7 @@ fn device_twist_short_circuits_do_no_device_work() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_rejections_happen_before_any_device_work() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let host = fermionic_fixture(&runtime);
     let device = host.to_cuda().unwrap();

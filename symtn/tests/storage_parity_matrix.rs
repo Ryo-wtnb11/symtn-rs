@@ -41,8 +41,7 @@
 //! - Checked Generic and complex-coefficient rules have no CUDA methods
 //!   (compile-time absent).
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::sync::Arc;

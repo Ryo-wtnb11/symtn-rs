@@ -4,8 +4,7 @@
 //! direct-region routes are gated through the facade in
 //! `symtn/tests/factorization_session_scope.rs`.
 //!
-//! This is a separate test binary because `cpu_session_stats` is a
-//! process-wide counter; the mutex serializes its readers here.
+//! Every test in this target takes the shared serial guard.
 //!
 //! Route: an adjoint view keeps the source blocks' offsets and strides but
 //! swaps their codomain and domain axes, so its structure has no coupled-sector
@@ -96,8 +95,7 @@ fn u1_tensor_with(charges: &[i32], rows: usize, cols: usize) -> BoundTensorMap {
 
 /// A Generic toy rule with one self-dual sector `x` whose `x ⊗ x` channel has
 /// multiplicity 2: the smallest rule that takes the Generic entry.
-#[path = "../../tests/support/generic_toy_fusion.rs"]
-mod generic_toy_fusion;
+use crate::generic_toy_fusion;
 use generic_toy_fusion::ToyGenericRule;
 
 /// [`ToyGenericRule`] behind the fallible checked-Generic provider surface.
@@ -254,6 +252,7 @@ fn assert_fallback_and_checked_generic_routes_open_one_session(mut dense: Defaul
 
 #[test]
 fn qr_fallback_and_checked_generic_routes_open_one_session_at_one_thread() {
+    let _serial = crate::counting_alloc::serial();
     assert_fallback_and_checked_generic_routes_open_one_session(
         DefaultDenseExecutor::with_threads(1).unwrap(),
     );
@@ -261,6 +260,7 @@ fn qr_fallback_and_checked_generic_routes_open_one_session_at_one_thread() {
 
 #[test]
 fn qr_fallback_and_checked_generic_routes_open_one_session_at_default_threads() {
+    let _serial = crate::counting_alloc::serial();
     assert_fallback_and_checked_generic_routes_open_one_session(DefaultDenseExecutor::new());
 }
 
@@ -486,21 +486,23 @@ fn assert_streaming_sites_admit_once(mut dense: DefaultDenseExecutor) {
 
 #[test]
 fn streaming_factorization_sites_admit_once_per_call_at_one_thread() {
+    let _serial = crate::counting_alloc::serial();
     assert_streaming_sites_admit_once(DefaultDenseExecutor::with_threads(1).unwrap());
 }
 
 #[test]
 fn streaming_factorization_sites_admit_once_per_call_at_default_threads() {
+    let _serial = crate::counting_alloc::serial();
     assert_streaming_sites_admit_once(DefaultDenseExecutor::new());
 }
 
-#[path = "../src/tests/scripted_executor.rs"]
-mod scripted_executor;
+use crate::scripted_executor;
 
 /// Negative control for the admission gate: without the executor's scope the
 /// same streaming site pays one admission per session.
 #[test]
 fn streaming_site_without_the_executor_scope_admits_per_session() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = COUNTER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let bound = u1_tensor(&[-1, 0, 1]);
     let direct = BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap();

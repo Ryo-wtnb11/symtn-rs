@@ -23,8 +23,7 @@ use symtn::typed::{
     TypedTensorTransformDispatch,
 };
 
-#[path = "../../tests/support/toy_rules.rs"]
-mod toy_rules;
+use crate::toy_rules;
 
 use toy_rules::{GenericLabel, GenericToy};
 

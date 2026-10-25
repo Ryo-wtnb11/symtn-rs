@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "symtn-operations"
 version = "0.1.1"
 description = "Symmetry-free tensor operations for symtn"
@@ -58,3 +59,11 @@ harness = false
 [lints.rust]
 # `symtn_scope_audit`: CI-only coverage audit of Host pool entry (host_pool.rs).
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(symtn_scope_audit)"] }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "serial"
+path = "tests/serial.rs"

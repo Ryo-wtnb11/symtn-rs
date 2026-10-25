@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn tensor_map_zeros_carries_a_complex_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: the payload dtype is independent of the provider's real
     // categorical coefficient scalar.
-    let _guard = cache_lock();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let runtime = runtime();
@@ -22,9 +22,9 @@ fn tensor_map_zeros_carries_a_complex_payload() {
 
 #[test]
 fn tensor_map_accepts_separately_allocated_equal_identity_providers() {
+    let _serial = crate::counting_alloc::serial();
     // What: two independent allocations of one rule interoperate; the facade
     // keys on `RuleIdentity`, never on `Arc` identity.
-    let _guard = cache_lock();
     let first = Arc::new(external_z3());
     let second = Arc::new(external_z3());
     assert!(!Arc::ptr_eq(&first, &second));
@@ -38,6 +38,7 @@ fn tensor_map_accepts_separately_allocated_equal_identity_providers() {
 
 #[test]
 fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
+    let _serial = crate::counting_alloc::serial();
     // What: two providers of the same Rust type but different identities are a
     // rule mismatch, reported before any layout is staged — the caches stay
     // exactly as they were.
@@ -70,6 +71,7 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
 
 #[test]
 fn enumerated_rules_share_identity_by_category_value() {
+    let _serial = crate::counting_alloc::serial();
     // What: a fusion-symbols category under `EnumeratedCodec` is identified by
     // its value. Two separately built Z3 rules mix, and Z3 and Z5 (whose
     // fusion-symbols fingerprints are equal) are a rule mismatch.
@@ -77,7 +79,6 @@ fn enumerated_rules_share_identity_by_category_value() {
     use symtn::sector::EnumeratedCodec;
 
     type ZnRule = CategoryRule<ZN, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
-    let _guard = cache_lock();
     let rule = |modulus| {
         Arc::new(ZnRule::try_new(ZN::new(modulus).unwrap(), EnumeratedCodec::new()).unwrap())
     };
@@ -105,6 +106,7 @@ fn enumerated_rules_share_identity_by_category_value() {
 
 #[test]
 fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
+    let _serial = crate::counting_alloc::serial();
     // What: an expert codec composing `EnumeratedCodec`'s identity before
     // any rule resolves it must still separate Z3 from Z5. Charges (2, 2)
     // fuse to 1 in Z3 and to 4 in Z5, so the [2, 2] <- [1] layout has one
@@ -169,7 +171,6 @@ fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
     }
 
     type WrappedRule = CategoryRule<ZN, Wrapped>;
-    let _guard = cache_lock();
     let runtime = runtime();
     let blocks = |modulus: u32| {
         let rule = Arc::new(WrappedRule::try_new(ZN::new(modulus).unwrap(), Wrapped).unwrap());
@@ -190,8 +191,9 @@ fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
 
 #[test]
 fn checked_construction_failure_publishes_no_cache_state() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
-    if crate::run_isolated_or_return(
+    if crate::typed_facade::run_isolated_or_return(
         "SYMTN_TYPED_FACADE_CHECKED_CONSTRUCTION_FAILURE_PUBLISHES_N",
         "construction::checked_construction_failure_publishes_no_cache_state",
     ) {
@@ -217,7 +219,7 @@ fn checked_construction_failure_publishes_no_cache_state() {
         structure_cache_info(StructureCacheKind::SectorStructure),
         structure_cache_info(StructureCacheKind::DegeneracyStructure),
     );
-    let runtime_before = crate::completed_transformers();
+    let runtime_before = crate::typed_facade::completed_transformers();
 
     let error =
         TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, [&codomain], [&domain]).unwrap_err();
@@ -233,7 +235,10 @@ fn checked_construction_failure_publishes_no_cache_state() {
         ),
         before
     );
-    assert_eq!(crate::completed_transformers(), runtime_before);
+    assert_eq!(
+        crate::typed_facade::completed_transformers(),
+        runtime_before
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -242,10 +247,10 @@ fn checked_construction_failure_publishes_no_cache_state() {
 
 #[test]
 fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
+    let _serial = crate::counting_alloc::serial();
     // What: a codec that cannot decode an id the engine produced fails the
     // construction with the provider's own error instead of panicking inside
     // the fill.
-    let _guard = cache_lock();
     let provider = Arc::new(external_z3_with(Quirk::NarrowDecode));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 1), (Z3Charge(1), 2)]).unwrap();
@@ -265,10 +270,10 @@ fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
 
 #[test]
 fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
+    let _serial = crate::counting_alloc::serial();
     // What: the legs come back as typed graded spaces with their labels and
     // dual flags intact, and every block reports decoded labels plus a data
     // view consistent with the buffer.
-    let _guard = cache_lock();
     let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
     let dual = leg.try_dual().unwrap();
@@ -304,7 +309,7 @@ fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
 
 #[test]
 fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let leg = GradedSpace::try_new(
@@ -393,11 +398,11 @@ fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
 
 #[test]
 fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
+    let _serial = crate::counting_alloc::serial();
     // What: a dual domain leg carrying charge 2 — whose dual is charge 1, so a
     // confusion between the two would show — is decoded as charge 2, matching
     // the convention that a tree labels a domain leg with the space's own
     // sector rather than its dual.
-    let _guard = cache_lock();
     let provider = Arc::new(external_z3());
     let codomain = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(1), 1)]).unwrap();
     // A dual constructor interprets its key through the orientation, so key
@@ -428,9 +433,9 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
 
 #[test]
 fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
+    let _serial = crate::counting_alloc::serial();
     // What: the whole phase-2 surface works for a non-abelian (Simple) external
     // provider with a complex payload, not just for the abelian fixture.
-    let _guard = cache_lock();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let runtime = runtime();
@@ -468,10 +473,10 @@ fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
 
 #[test]
 fn typed_block_fill_preserves_tree_and_storage_order() {
+    let _serial = crate::counting_alloc::serial();
     // What: each typed block exposes the same tree and column-major indices
     // that drove its fill closure, without borrowing the retired facade as an
     // oracle.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::Z2FusionRule);
     let leg = GradedSpace::try_new(
@@ -516,7 +521,7 @@ fn typed_block_fill_preserves_tree_and_storage_order() {
 
 #[test]
 fn typed_rand_with_seed_is_deterministic_f64() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = u1_typed_leg();
     let first: TensorMap<symtn::sector::U1FusionRule, f64> =
@@ -533,7 +538,7 @@ fn typed_rand_with_seed_is_deterministic_f64() {
 
 #[test]
 fn typed_rand_with_seed_is_deterministic_c64() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = fz2_typed_leg();
     let first: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
@@ -554,10 +559,10 @@ fn typed_rand_with_seed_is_deterministic_c64() {
 
 #[test]
 fn rand_and_isomorphism_build_on_an_external_provider() {
+    let _serial = crate::counting_alloc::serial();
     // What: nothing in the new constructors needs a built-in rule — a
     // downstream Z3 provider gets a populated random tensor and a lawful
     // structural isomorphism from the same public vocabulary.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
@@ -584,12 +589,12 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
 
 #[test]
 fn typed_isomorphism_satisfies_the_identity_law_on_a_builtin_rule() {
+    let _serial = crate::counting_alloc::serial();
     // What: `f† ∘ f = id` on the domain product, on a rank-2 <- rank-2
     // isomorphism whose two sides carry the same fused content through
     // opposite dual arrangements ([dual, leg] <- [leg, dual]). The norm-fuser
     // shape (single fused codomain leg) is exercised by the byte-parity test
     // below.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = u1_typed_leg();
     let dual = leg.try_dual().unwrap();
@@ -606,10 +611,10 @@ fn typed_isomorphism_satisfies_the_identity_law_on_a_builtin_rule() {
 
 #[test]
 fn typed_isometry_embeds_and_satisfies_the_identity_law() {
+    let _serial = crate::counting_alloc::serial();
     // What: on a strictly-embedding fixture (every domain sector strictly
     // smaller than its codomain sibling in at least one sector) the isometry
     // satisfies `w† ∘ w = id(domain)`.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let small = GradedSpace::try_new(
@@ -642,7 +647,7 @@ fn typed_isometry_embeds_and_satisfies_the_identity_law() {
 
 #[test]
 fn typed_isometry_rejects_a_non_embeddable_pair() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let small = u1_typed_leg();
     let big = GradedSpace::try_new(
@@ -665,6 +670,7 @@ fn typed_isometry_rejects_a_non_embeddable_pair() {
 
 #[test]
 fn typed_structural_constructors_reject_an_empty_leg_list() {
+    let _serial = crate::counting_alloc::serial();
     // What: the provider is inferred from the legs, so an empty construction
     // has nothing to infer it from.
     let runtime = runtime();
@@ -687,9 +693,9 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
 
 #[test]
 fn typed_rand_rejects_mismatched_providers_like_zeros() {
+    let _serial = crate::counting_alloc::serial();
     // What: two providers with distinct rule identities are a rule mismatch on
     // the random constructor exactly as on `zeros`.
-    let _guard = cache_lock();
     let first = Arc::new(external_z3_tagged(0));
     let second = Arc::new(external_z3_tagged(1));
     let runtime = runtime();
@@ -706,12 +712,12 @@ fn typed_rand_rejects_mismatched_providers_like_zeros() {
 
 #[test]
 fn typed_isomorphism_rejects_embeddable_but_not_isomorphic_content() {
+    let _serial = crate::counting_alloc::serial();
     // What: the isomorphism gate is `domain ≅ codomain`, strictly stronger
     // than the isometry embedding — a domain that embeds but is smaller must
     // be rejected. The embeddable-but-not-isomorphic fixture is deliberate:
     // it proves `isomorphism` routes through the isomorphism check, not the
     // isometry one.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let small = GradedSpace::try_new(
@@ -743,12 +749,12 @@ fn typed_isomorphism_rejects_embeddable_but_not_isomorphic_content() {
 
 #[test]
 fn typed_isometry_rejects_a_larger_domain_degeneracy_with_identical_sector_sets() {
+    let _serial = crate::counting_alloc::serial();
     // What: the embedding check is sectorwise `deg_domain <= deg_codomain`,
     // not sector-set containment — identical sector sets with one domain
     // degeneracy exactly one above its codomain sibling must fail. The
     // off-by-one fixture makes a `deg + 1` slip in the
     // comparison visible.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let codomain = GradedSpace::try_new(
@@ -780,9 +786,9 @@ fn typed_isometry_rejects_a_larger_domain_degeneracy_with_identical_sector_sets(
 
 #[test]
 fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
+    let _serial = crate::counting_alloc::serial();
     // What: the norm-fuser shape carries an asymmetric dual arrangement and
     // still satisfies the defining isomorphism law.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let typed_v = GradedSpace::try_new(
@@ -823,7 +829,7 @@ fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
 
 #[test]
 fn typed_c64_unitary_satisfies_the_identity_law() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = fz2_typed_leg();
     let leg_dual = leg.try_dual().unwrap();
@@ -846,7 +852,7 @@ fn typed_c64_unitary_satisfies_the_identity_law() {
 
 #[test]
 fn typed_isometry_on_a_dual_domain_satisfies_the_identity_law() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let small = GradedSpace::try_new(
@@ -888,10 +894,10 @@ fn typed_isometry_on_a_dual_domain_satisfies_the_identity_law() {
 
 #[test]
 fn typed_su2_isomorphism_satisfies_the_identity_law() {
+    let _serial = crate::counting_alloc::serial();
     // What: nothing in the structural constructors is abelian-specific — a
     // simple-fusion SU(2) provider's isomorphism still satisfies `f† ∘ f =
     // id` through genuinely non-trivial recoupling.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
@@ -908,11 +914,11 @@ fn typed_su2_isomorphism_satisfies_the_identity_law() {
 
 #[test]
 fn typed_leg_dims_include_quantum_dimensions() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 2: `leg_dims` values on a built-in abelian rule and on
     // built-in SU(2), whose non-abelian sectors
     // are what make the quantum-dimension weighting visible (spin-1/2 with
     // degeneracy 2 contributes 4, not 2).
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let typed = z2_tensor(&runtime);
@@ -924,10 +930,10 @@ fn typed_leg_dims_include_quantum_dimensions() {
 
 #[test]
 fn typed_leg_dims_carry_an_external_provider_with_nontrivial_dimensions() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 2's external-provider leg: `ExternalSu2` reports quantum dimension
     // 2 for twice-spin 1, so the degeneracy-2 leg weighs 4. This pins an
     // external provider rather than a built-in special case.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
@@ -939,8 +945,8 @@ fn typed_leg_dims_carry_an_external_provider_with_nontrivial_dimensions() {
 
 #[test]
 fn typed_scalar_reads_a_complex_full_contraction() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 4's c64 leg: a complex endomorphism traced to rank 0.
-    let _guard = cache_lock();
     let runtime = runtime();
     let complex = |value: f64| Complex64::new(value, 1.0 + value % 5.0);
     let leg = GradedSpace::try_new(
@@ -963,7 +969,7 @@ fn typed_scalar_reads_a_complex_full_contraction() {
 
 #[test]
 fn typed_scalar_on_a_tensor_with_legs_is_an_invalid_argument() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -976,9 +982,9 @@ fn typed_scalar_on_a_tensor_with_legs_is_an_invalid_argument() {
 
 #[test]
 fn typed_to_c64_widens_dense_and_compact_values_exactly() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 6: widening adds an exactly zero imaginary component on dense and
     // compact diagonal payloads.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -1007,11 +1013,11 @@ fn typed_to_c64_widens_dense_and_compact_values_exactly() {
 
 #[test]
 fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 6's law checks: `re(t) + i*im(t)` rebuilds `t` byte-exactly through
     // `to_c64` + `add`,
     // and on a real tensor `re(to_c64(x)) == x`, `im(to_c64(x)) ==
     // zeros_like(x)`, byte-exactly.
-    let _guard = cache_lock();
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
 
@@ -1047,10 +1053,10 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
 
 #[test]
 fn typed_re_im_keep_a_compact_spectrum_on_its_bond_space() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 6's diagonal leg: `re`/`im` of a complex compact spectrum factor
     // map spectrum-to-spectrum, and the law `re + i*im == t` holds on the
     // materialized payloads.
-    let _guard = cache_lock();
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
     let s: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
@@ -1075,11 +1081,11 @@ fn typed_re_im_keep_a_compact_spectrum_on_its_bond_space() {
 
 #[test]
 fn typed_leg_dims_route_each_axis_to_its_own_leg() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 2's axis-routing leg: every earlier fixture has homogeneous leg
     // dimensions, so a leg_dims that reads the wrong leg (e.g. domain[0] for
     // the last codomain axis) still passes them. Three pairwise-distinct
     // dimensions in a 2 <- 1 split make any misrouting visible, per axis.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::Z2FusionRule);
     let z2_pairs = |even: usize, odd: usize| {
@@ -1098,9 +1104,9 @@ fn typed_leg_dims_route_each_axis_to_its_own_leg() {
 
 #[test]
 fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
+    let _serial = crate::counting_alloc::serial();
     // What: `zeros` admits a runtime-rank multi-block layout through the
     // checked path and returns a zero buffer of exactly the layout's length.
-    let _guard = cache_lock();
     let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
     let dual = leg.try_dual().unwrap();
@@ -1120,10 +1126,10 @@ fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
 
 #[test]
 fn id_writes_the_nonuniform_fused_diagonal() {
+    let _serial = crate::counting_alloc::serial();
     // What: the identity on a leg list whose per-sector degeneracies differ
     // from leg to leg — the case where the
     // diagonal offsets inside a coupled-sector block are not all the same.
-    let _guard = cache_lock();
     let runtime = runtime();
     let z2 = Arc::new(symtn::sector::Z2FusionRule);
     let typed_leg = |even, odd| {

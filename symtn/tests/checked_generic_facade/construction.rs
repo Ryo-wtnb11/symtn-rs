@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2), (Label::Vacuum, 1)])
@@ -89,7 +90,7 @@ fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
 
 #[test]
 fn checked_generic_diagonal_rejects_before_layout_and_preserves_error_precedence() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond =
@@ -253,6 +254,7 @@ fn checked_generic_diagonal_rejects_before_layout_and_preserves_error_precedence
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -294,7 +296,7 @@ fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
 
 #[test]
 fn checked_generic_space_algebra_keeps_multiplicity_dimensions_and_failures_typed() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let provider = Arc::new(CheckedOnlyToy::new_space_probe(7));
     let rhs_provider = Arc::new(CheckedOnlyToy::new_space_probe(7));
     let left = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -350,6 +352,7 @@ fn checked_generic_space_algebra_keeps_multiplicity_dimensions_and_failures_type
 
 #[test]
 fn checked_only_provider_uses_ordinary_typed_ownership_and_vertices() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let first = Arc::new(CheckedOnlyToy::new(0));
     let second = Arc::new(CheckedOnlyToy::new(0));
@@ -384,7 +387,7 @@ fn checked_only_provider_uses_ordinary_typed_ownership_and_vertices() {
 
 #[test]
 fn checked_generic_subblocks_decode_transactionally_and_keep_outer_multiplicity() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -452,7 +455,7 @@ fn checked_generic_subblocks_decode_transactionally_and_keep_outer_multiplicity(
 #[test]
 #[ignore]
 fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let codomain =
@@ -549,6 +552,7 @@ fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch(
 
 #[test]
 fn checked_errors_stay_typed_and_callback_waits_for_all_decodes() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let error = GradedSpace::try_new(Arc::clone(&provider), [(Label::Invalid, 1)]).unwrap_err();
@@ -576,7 +580,7 @@ fn checked_errors_stay_typed_and_callback_waits_for_all_decodes() {
 
 #[test]
 fn identity_mismatch_precedes_algebra_queries_and_both_dtypes_fill() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let first = Arc::new(CheckedOnlyToy::new(0));
     let other = Arc::new(CheckedOnlyToy::new(1));
@@ -607,6 +611,7 @@ fn identity_mismatch_precedes_algebra_queries_and_both_dtypes_fill() {
 
 #[test]
 fn failed_checked_admission_leaves_the_provider_usable() {
+    let _serial = crate::counting_alloc::serial();
     // A failed admission must not leave provider-side state behind: the same
     // provider then builds exactly what a provider that never failed builds.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -739,6 +744,7 @@ fn check_generic_structural_constructors<R>(
 
 #[test]
 fn checked_generic_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     // X ⊗ X = 1 ⊕ 2X: every rank >= 2 side carries a multiplicity vertex.
     let provider = Arc::new(CheckedOnlyToy::new(0));
@@ -751,6 +757,7 @@ fn checked_generic_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     // 8 ⊗ 8 contains 8 twice.
     let provider = Arc::new(
@@ -766,6 +773,7 @@ fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_endomorphism_row_and_column_tree_stacking_is_identical() {
+    let _serial = crate::counting_alloc::serial();
     use std::collections::BTreeMap;
 
     use symtn::sector::LieGroupFusionRule;

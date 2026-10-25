@@ -20,11 +20,7 @@ use symtn::expert::{DefaultDenseExecutor, SharedCpuContext};
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, HermitianTol, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn pooled() -> Runtime {
     Runtime::builder().dense_threads(1).build().unwrap()
@@ -135,7 +131,7 @@ fn assert_pooled_within_locked(
 
 #[test]
 fn pooled_lease_adds_no_allocation_calls_at_any_block_count() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     for sectors in [2, 6] {
         let space = GradedSpace::try_new(
             Arc::new(U1FusionRule),
@@ -154,8 +150,8 @@ fn pooled_lease_adds_no_allocation_calls_at_any_block_count() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_pooled_lease_adds_no_allocation_calls_at_any_block_count() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
-    let _serial = counting_alloc::serial();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let sets: [&[([i64; 2], usize)]; 2] = [

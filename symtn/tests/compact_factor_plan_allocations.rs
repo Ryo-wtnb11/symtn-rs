@@ -6,11 +6,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{Eigh, GradedSpace, Qr, Svd, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measured<T>(operation: impl FnOnce() -> T) -> (T, u64) {
     let (value, allocs) = counting_alloc::measure(operation);
@@ -41,6 +37,7 @@ fn tensor(runtime: &Runtime) -> TensorMap<U1FusionRule, f64> {
 // svd_compact 144, qr_compact 111, eigh_full 120.
 #[test]
 fn second_compact_factorization_builds_the_plan_with_a_bounded_constant() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let a = tensor(&runtime);
     let warm_svd = a.svd_compact(&[0, 1], &[2, 3]).unwrap();

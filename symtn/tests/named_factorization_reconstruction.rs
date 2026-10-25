@@ -9,8 +9,7 @@
 //! The isometry and reconstruction laws hold in every valid gauge, so no
 //! factor values are pinned.
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use num_complex::Complex64;
 use std::sync::Arc;

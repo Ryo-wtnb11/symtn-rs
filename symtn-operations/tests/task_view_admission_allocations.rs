@@ -6,14 +6,11 @@ use symtn_operations::{
     TreeTransformStructure, TreeTransformWorkspace,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn warmed_public_host_admission_without_tasks_is_allocation_free() {
+    let _serial = crate::counting_alloc::serial();
     // An empty completed transform takes the normal profiled Host admission
     // seam but has no scale, block, coefficient, or dense numerical work.
     let structure =

@@ -16,16 +16,13 @@ use symtn::sector::{
     TypedSectorAdmission,
 };
 use symtn::typed::FusionAlgebraError;
-use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{plan_cache_stats, GreedyDenseOptimizer, Network, NetworkExecutionWorkspace};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 /// The planned and cached network paths may group the contraction differently from the
 /// direct typed call, so payloads agree within the workspace tolerance rule

@@ -12,11 +12,7 @@ use symtn::sector::{
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn allocations<T>(f: impl FnOnce() -> T) -> (u64, T) {
     let (value, allocs) = counting_alloc::measure(f);
@@ -36,7 +32,6 @@ const LAZY_ADJOINT_CEILING: u64 = 64;
 /// row). The Runtime transform store must see no miss on a warm call.
 macro_rules! assert_warm_lazy_adjoint {
     ($provider:expr, $sectors:expr $(,)?) => {{
-        let _guard = counting_alloc::serial();
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         let leg = GradedSpace::try_new(
             std::sync::Arc::new($provider),
@@ -99,16 +94,19 @@ fn centered(count: i32) -> impl Iterator<Item = i32> {
 
 #[test]
 fn warm_lazy_adjoint_u1_allocates_like_owned_contract() {
+    let _serial = crate::counting_alloc::serial();
     assert_warm_lazy_adjoint!(U1FusionRule, centered(3).map(U1Irrep::new));
 }
 
 #[test]
 fn warm_lazy_adjoint_su2_allocates_like_owned_contract() {
+    let _serial = crate::counting_alloc::serial();
     assert_warm_lazy_adjoint!(SU2FusionRule, (0..3).map(SU2Irrep::from_twice_spin));
 }
 
 #[test]
 fn warm_lazy_adjoint_fz2_u1_allocates_like_owned_contract() {
+    let _serial = crate::counting_alloc::serial();
     let parity = |q: i32| {
         if q.rem_euclid(2) == 0 {
             Z2Irrep::EVEN

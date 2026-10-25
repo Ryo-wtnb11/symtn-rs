@@ -12,11 +12,7 @@ use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap, TensorScalar};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Allocations of `f` on this thread; `matched_zeroed_calls` counts the
 /// allocator-zeroed ones of exactly `payload_bytes`.
@@ -50,7 +46,6 @@ fn su2_space(
 /// The contracted bond carries only charge 0, so the destination `[a] <- [c]`
 /// has coupled charges -1 and 1 that no GEMM writes (inactive blocks).
 fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u64, seed: u64) {
-    let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let open = u1_space(&provider, &[(-1, 2), (0, 3), (1, 2)]);
@@ -112,18 +107,19 @@ const TOTAL_ALLOCATIONS_U1: u64 = 38;
 
 #[test]
 fn owned_f64_contraction_output_is_one_allocator_zeroed_payload() {
+    let _serial = crate::counting_alloc::serial();
     u1_contract_measurement::<f64>(TOTAL_ALLOCATIONS_U1, 1_212_001);
 }
 
 #[test]
 fn owned_c64_contraction_output_is_one_allocator_zeroed_payload() {
+    let _serial = crate::counting_alloc::serial();
     u1_contract_measurement::<Complex64>(TOTAL_ALLOCATIONS_U1, 1_212_002);
 }
 
 /// SU(2) compose: non-abelian recoupling, so this is the fixture where the
 /// coefficient scratch is converted per structure identity.
 fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
-    let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     // Destination `[a, c] <- [d, e]` couples to spins 1/2 and 3/2; the bond
@@ -155,6 +151,7 @@ fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
 
 #[test]
 fn owned_su2_contraction_with_inactive_sectors_is_one_allocator_zeroed_payload() {
+    let _serial = crate::counting_alloc::serial();
     // 36 calls / 3468 bytes, one 1088-byte zeroed payload.
     su2_compose_measurement::<f64>(1_212_003);
 }
@@ -165,6 +162,7 @@ fn owned_su2_contraction_with_inactive_sectors_is_one_allocator_zeroed_payload()
 /// `zeroed_allocations_of(size_of_val(data))` checks per dtype.
 #[test]
 fn owned_su2_single_precision_contraction_allocates_like_double() {
+    let _serial = crate::counting_alloc::serial();
     let double = su2_compose_measurement::<f64>(1_315_003);
     let single = su2_compose_measurement::<f32>(1_315_003);
     assert_eq!(

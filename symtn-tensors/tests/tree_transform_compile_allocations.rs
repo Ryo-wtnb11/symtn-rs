@@ -61,11 +61,7 @@ fn derive<R: MultiplicityFreeRigidSymbols>(
     source.transformed_multiplicity_free(operation).unwrap()
 }
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn su2_f_move_structure() -> BlockStructure {
     let keys = [[0, 1], [2, 1]].map(|inner| {
@@ -228,7 +224,7 @@ fn rank_129_su2_vacuum_structure() -> BlockStructure {
 
 #[test]
 fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_work() {
-    let _global_cache_guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     symtn_core::clear_structure_caches();
 
     let calls = Arc::new(AtomicUsize::new(0));
@@ -275,7 +271,7 @@ fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_wo
 
 #[test]
 fn su2_f_move_compile_has_no_per_destination_coefficient_rows() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let structure = su2_f_move_structure();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
     let _ =
@@ -295,7 +291,7 @@ fn su2_f_move_compile_has_no_per_destination_coefficient_rows() {
 
 #[test]
 fn su2_tree_pair_f_move_compile_has_no_per_destination_coefficient_rows() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let structure = su2_f_move_structure();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
     let _ = build_tree_pair_transform_group_plan(&SU2FusionRule, operation.clone(), &structure)
@@ -357,7 +353,7 @@ where
 
 #[test]
 fn cold_ordered_tree_pair_staging_stays_within_allocation_envelopes() {
-    let _global_cache_guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
 
     // What: exact counts cover missing-position plan compilation after registry
     // capacity exists, independently of unrelated typed-cache test order.
@@ -385,7 +381,7 @@ fn cold_ordered_tree_pair_staging_stays_within_allocation_envelopes() {
 
 #[test]
 fn rank_nine_same_split_groups_stay_within_the_cold_resolution_allocation_budget() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let vacuum = SU2FusionRule.vacuum();
     let leg =
         |sectors: &[SectorId]| SectorLeg::new(sectors.iter().map(|&sector| (sector, 1)), false);
@@ -427,7 +423,7 @@ fn rank_one_u1_pair_structure(count: usize) -> BlockStructure {
 
 #[test]
 fn unique_rank_one_u1_plan_allocations_do_not_scale_with_source_blocks() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     for count in [1, 2, 4, 8, 16] {
         let structure = rank_one_u1_pair_structure(count);
         let operation = TreeTransformOperation::permute([0], [1]);
@@ -469,7 +465,7 @@ fn unique_rank_one_u1_plan_allocations_do_not_scale_with_source_blocks() {
 
 #[test]
 fn grouped_multi_compile_borrows_plan_coefficient_matrix() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     const BLOCKS: usize = 2;
     const COEFFICIENT_BYTES: usize = 64 * 1024;
 
@@ -654,7 +650,7 @@ fn reused_sector_change_plan<T: Copy>(
 
 #[test]
 fn sector_change_binding_copies_coefficients_of_changed_groups_only() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // Why only operations that keep the space: the binding needs the
     // destination structure, and these map `[s, s, s] <- [d]` onto itself.
     for operation in [
@@ -769,7 +765,7 @@ fn rank_six_u1_layout() -> BoundDynamicFusionMapSpace<U1FusionRule> {
 
 #[test]
 fn unique_cache_three_misses_reuse_the_context_tree_pair_scratch() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the Unique compile's tree-pair scratch (three trees of three
     // buffers) belongs to the execution context, so only a context's first
     // cache-3 miss allocates it, for the direct and the lazy-adjoint compile.

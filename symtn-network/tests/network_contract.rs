@@ -14,8 +14,7 @@ use symtn_network::{
     Network, NetworkExecutionWorkspace,
 };
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{conj, net, op};
 
 /// `[i; m] = a[i; j] * b[j; k] * c[k; m]`.

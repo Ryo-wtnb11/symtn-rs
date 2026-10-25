@@ -6,14 +6,11 @@ use std::hint::black_box;
 
 use symtn_operations::{try_cat_owned_raw, OwnedCatCopy, OwnedCatSide};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn strided_row_cat_allocates_only_the_output_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: a domain cat of a transposed 48x40 slab (source row stride 40)
     // and a contiguous 48x24 slab allocates exactly the output vector. The
     // 1920-element strided copy stays below strided's parallel threshold, so

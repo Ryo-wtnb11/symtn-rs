@@ -18,21 +18,15 @@
 //! kept a one-member replay there, 208 bytes and 8 allocations on these
 //! fixtures).
 //!
-//! One test, so the process-wide caches warm in one fixed order.
+//! The target-wide serial guard keeps this test's cache warm-up ordered.
 
-#[path = "../../tests/support/backend.rs"]
-mod backend;
+use crate::backend;
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::common;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::prepared;
 
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 use std::fmt::Debug;
 
@@ -253,6 +247,7 @@ fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
 
 #[test]
 fn host_compose_plan_values_bytes_allocations_and_errors_are_pinned() {
+    let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }

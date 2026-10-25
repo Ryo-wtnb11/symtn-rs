@@ -9,14 +9,13 @@
 use std::sync::Arc;
 
 use fusion_symbols::lie::{GroupId, LieError};
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::{LieGroupFusionRule, LieGroupFusionRuleError};
 use symtn::typed::{
     CheckedGenericStructureError, GenericTensorError, GradedSpace, Runtime, TensorMap, TensorScalar,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 #[test]
 fn graded_space_preserves_typed_global_form_rejections() {

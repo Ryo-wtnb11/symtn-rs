@@ -1,18 +1,9 @@
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
-use support::numerics;
-#[macro_use]
-#[allow(unused_macros)]
-mod contract_cases;
-mod braiding_probe;
+use crate::braiding_probe;
+use crate::contract_cases;
+use crate::numerics;
 
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 use contract_cases::{

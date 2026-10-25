@@ -31,9 +31,7 @@ use symtn::typed::{
 };
 use symtn_sectors::{TableRule, TableSector};
 
-#[macro_use]
-#[path = "support/table_fixture.rs"]
-mod table_fixture;
+use crate::table_fixture;
 use table_fixture::*;
 
 type Table = TensorMap<TableRule, Complex64>;

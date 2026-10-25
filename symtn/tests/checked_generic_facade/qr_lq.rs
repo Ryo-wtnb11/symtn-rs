@@ -3,6 +3,7 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_compact_qr_preserves_provider_and_reconstructs() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -44,7 +45,7 @@ fn sun_checked_generic_compact_qr_preserves_provider_and_reconstructs() {
 
 #[test]
 fn checked_compact_diagonal_qr_lq_all_modes_use_hand_phase_and_magnitude() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -290,7 +291,7 @@ fn checked_compact_diagonal_qr_lq_all_modes_use_hand_phase_and_magnitude() {
 /// provider does not fail `qr_full` (#1751).
 #[test]
 fn checked_compact_diagonal_qr_rejects_nonfinite_and_skips_the_provider_when_finite() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -577,7 +578,7 @@ fn real_spectra<S: Clone>(sectors: [S; 2], values: [&[f64]; 2]) -> Vec<SectorSpe
 
 #[test]
 fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_rules() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep};
 
     let calls = Arc::new(SpyCounts::default());
@@ -770,7 +771,7 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
 /// an output space and a failing provider cannot fail them.
 #[test]
 fn checked_dual_diagonal_qr_lq_publish_on_the_input_bond_without_provider_queries() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -822,6 +823,7 @@ fn checked_dual_diagonal_qr_lq_publish_on_the_input_bond_without_provider_querie
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_compact_lq_preserves_provider_and_reconstructs() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -864,6 +866,7 @@ fn sun_checked_generic_compact_lq_preserves_provider_and_reconstructs() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_full_qr_preserves_provider_and_reconstructs() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -905,6 +908,7 @@ fn sun_checked_generic_full_qr_preserves_provider_and_reconstructs() {
 
 #[test]
 fn checked_generic_compact_qr_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(120));
@@ -929,6 +933,7 @@ fn checked_generic_compact_qr_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_generic_compact_lq_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(121));
@@ -953,6 +958,7 @@ fn checked_generic_compact_lq_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_generic_full_qr_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -972,6 +978,7 @@ fn checked_generic_full_qr_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_generic_full_lq_reconstructs_and_preserves_provider() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -995,6 +1002,7 @@ fn checked_generic_full_lq_reconstructs_and_preserves_provider() {
 
 #[test]
 fn checked_generic_full_lq_supports_complex_scalars() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -1010,6 +1018,7 @@ fn checked_generic_full_lq_supports_complex_scalars() {
 
 #[test]
 fn checked_generic_full_lq_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();

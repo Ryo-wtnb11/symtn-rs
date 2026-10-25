@@ -41,11 +41,10 @@
 use std::sync::Arc;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{Complex32, Complex64, Error};
+use symtn::typed::{Complex64, Error};
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 /// Floating terms per norm: one per stored entry of the fixtures (21). The
 /// two engines sum the same terms in different orders, so exact equality is
@@ -53,8 +52,7 @@ mod numerics;
 /// dispatch mistake could survive.
 const TERMS: usize = 21;
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

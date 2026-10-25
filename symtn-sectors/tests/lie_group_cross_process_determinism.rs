@@ -15,7 +15,8 @@ use std::process::Command;
 use symtn_sectors::{CheckedGenericFusion, CheckedGenericRigidSymbols, LieGroupFusionRule};
 
 const CHILD_ENV: &str = "SYMTN_LIE_GROUP_DETERMINISM_CHILD";
-const TEST_NAME: &str = "su3_f_and_r_symbols_are_bit_identical_across_processes";
+const TEST_NAME: &str =
+    "lie_group_cross_process_determinism::su3_f_and_r_symbols_are_bit_identical_across_processes";
 
 fn fnv(hash: &mut u64, bits: u64) {
     for byte in bits.to_le_bytes() {

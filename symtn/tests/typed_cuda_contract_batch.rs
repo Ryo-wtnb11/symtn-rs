@@ -1,19 +1,13 @@
 //! Public C1/Core and C2/SwappedCore CUDA batch gates. Run on A100 with
 //! `cargo test -p symtn --no-default-features --features cuda,cpu-faer
-//! --test typed_cuda_contract_batch -- --ignored --test-threads=1`.
+//! --test serial typed_cuda_contract_batch:: -- --ignored --test-threads=1`.
 #![cfg(feature = "cuda")]
 
-mod braiding_probe;
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-#[macro_use]
-#[allow(unused_macros)]
-mod contract_cases;
+use crate::braiding_probe;
+use crate::common;
+
+use crate::contract_cases;
+use crate::numerics;
 
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 use common::{DevicePayload, DeviceRule};
@@ -260,6 +254,7 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn signed_core_and_swapped_core_all_device_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     macro_rules! cases {
         ($dtype:ty) => {
@@ -277,6 +272,7 @@ fn signed_core_and_swapped_core_all_device_dtypes() {
 
 #[test]
 fn signed_fixture_twist_is_nonvacuous_without_a_device() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     for space in [fermion_u1()] {
         let dual = space.try_dual().unwrap();
@@ -368,6 +364,7 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn signed_core_zeroes_inactive_blocks_after_poisoning() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -536,11 +533,7 @@ fn check_changed_input_reuse<R: DeviceRule, D: DevicePayload>(
     }
 }
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[derive(Clone, Copy)]
 struct Observation {
@@ -738,6 +731,7 @@ fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn public_core_and_swapped_core_match_independent_oracle() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     for (case, _) in candidate_core_probes::<_, f64>(&runtime, &u1_non_self_dual()) {
         if matches!(case.name, "C1" | "C2") {
@@ -764,6 +758,7 @@ fn public_core_and_swapped_core_match_independent_oracle() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn swapped_core_uses_rhs_stride_and_nondefault_split() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let v = u1(&[(0, 2), (1, 1)]);
     let w = u1(&[(0, 1), (1, 2)]);
@@ -807,6 +802,7 @@ fn swapped_core_uses_rhs_stride_and_nondefault_split() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let case = u1_inactive_cases::<f64>(&runtime)
         .into_iter()
@@ -896,6 +892,7 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn execute_only_caller_pins_no_core_zero_template() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let case = u1_inactive_cases::<f64>(&runtime)
         .into_iter()
@@ -942,6 +939,7 @@ fn execute_only_caller_pins_no_core_zero_template() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn invalid_bindings_preserve_poisoned_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let other_runtime = Runtime::builder().cuda(0).build().unwrap();
     let reserved_before = runtime
@@ -1024,6 +1022,7 @@ fn invalid_bindings_preserve_poisoned_destination() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn negative_only_signed_core_matches_literal_twist() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let odd = symtn::typed::GradedSpace::try_new(
         Arc::new(
@@ -1091,6 +1090,7 @@ fn negative_only_signed_core_matches_literal_twist() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn copy_c_nonzero_single_public_admission() {
+    let _serial = crate::counting_alloc::serial();
     fn check<D: DevicePayload>() {
         let runtime = Runtime::builder().cuda(0).build().unwrap();
         let v = su2();
@@ -1621,6 +1621,7 @@ fn check_high_water<R: DeviceRule, D: DevicePayload>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn dynamic_tree_single_transform_routes_are_admitted() {
+    let _serial = crate::counting_alloc::serial();
     fn bosonic<D: DevicePayload>(runtime: &Runtime) {
         // The second inactive fixture has a source transform and is pinned as
         // DynamicTree by storage_contract_tests::each_way_a_device_overwrite;
@@ -1685,6 +1686,7 @@ fn dynamic_tree_single_transform_routes_are_admitted() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn dynamic_tree_multi_transform_stays_unsupported() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let case = su2_bent::<f64>(&runtime);
     let left = StackedTensorMap::pack(&[&case.lhs])
@@ -1705,6 +1707,7 @@ fn dynamic_tree_multi_transform_stays_unsupported() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let leg =
         symtn::typed::GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)])

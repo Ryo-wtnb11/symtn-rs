@@ -11,11 +11,7 @@ use symtn_tensors::{
     TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 const WORKLOADS: [([usize; 2], [usize; 2], [usize; 4]); 3] = [
     ([2, 3], [0, 1], [0, 1, 2, 3]),
@@ -141,6 +137,7 @@ where
 
 #[test]
 fn warmed_prepared_rank4_fusion_replay_allocates_nothing() {
+    let _serial = crate::counting_alloc::serial();
     assert_replay_allocates_nothing(&U1FusionRule, &u1_sectors());
     assert_replay_allocates_nothing(
         &FermionParityFusionRule,

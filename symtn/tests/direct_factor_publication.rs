@@ -3,10 +3,8 @@
 //! zero-filling first, and polar runs its GEMMs into the output regions
 //! instead of per-sector temporaries that are then copied.
 
-#[path = "../../tests/support/backend.rs"]
-mod backend;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::backend;
+use crate::numerics;
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -14,19 +12,14 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{Complex32, Complex64, Runtime};
+use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, Lq, TensorMap, TensorScalar};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[derive(Debug)]
 #[cfg_attr(
@@ -151,6 +144,7 @@ macro_rules! lq_cases {
 
 #[test]
 fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     lq_cases!(f64, &runtime);
     lq_cases!(Complex64, &runtime);
@@ -166,6 +160,7 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
 // zero-fills its own workspaces (#2107).
 #[test]
 fn compact_lq_requests_no_zeroed_output_storage() {
+    let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
@@ -309,7 +304,7 @@ mod checked_generic {
 
     #[test]
     fn checked_generic_polar_and_lq_match_reconstruction_oracles() {
-        let _measurement = counting_alloc::serial();
+        let _serial = crate::counting_alloc::serial();
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         cases!(f64, &runtime);
         cases!(Complex64, &runtime);
@@ -327,7 +322,7 @@ mod checked_generic {
     // which per-sector temporaries would.
     #[test]
     fn checked_generic_polar_allocates_no_per_sector_temporaries() {
-        let _measurement = counting_alloc::serial();
+        let _serial = crate::counting_alloc::serial();
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
@@ -375,6 +370,7 @@ mod checked_generic {
     // whole payload growth.
     #[test]
     fn checked_generic_facade_factorizations_read_the_payload_in_place() {
+        let _serial = crate::counting_alloc::serial();
         type Tensor = TensorMap<LieGroupFusionRule, f64>;
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         let provider = Arc::new(

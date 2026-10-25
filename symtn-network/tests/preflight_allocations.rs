@@ -14,15 +14,10 @@ use symtn_network::{
     NetworkExecutionWorkspace, NetworkIR, SlicedPlan, TemporaryLabel,
 };
 
-#[path = "../../symtn/tests/braiding_probe/mod.rs"]
-mod braiding_probe;
+use crate::braiding_probe;
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Allocation calls (alloc and realloc) made by `run` on this thread.
 fn allocations<T>(run: impl FnOnce() -> T) -> (u64, T) {
@@ -68,6 +63,7 @@ fn pair_network() -> Network {
 /// a caller-owned workspace is the baseline.
 #[test]
 fn a_warm_network_contract_allocates_no_more_than_its_replay() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let [a, b, c] = u1_operands(&runtime);
     let network = pair_network();
@@ -128,6 +124,7 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
 /// `contract` does to reject the same operands (the error itself).
 #[test]
 fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg =
         GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)]).unwrap();

@@ -6,15 +6,12 @@
 //! sectors and degeneracies above one. A batch fails as a whole and names
 //! every failing member.
 
-#[path = "../../tests/support/backend.rs"]
-mod backend;
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::backend;
 
-#[path = "support/report.rs"]
-mod report;
+use crate::numerics;
+use crate::prepared;
+
+use crate::report;
 use report::Report;
 
 use std::fmt::Debug;
@@ -35,8 +32,7 @@ use prepared::eigh::{
 };
 use prepared::{fz2u1_legs, members, su2_legs, u1_legs};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 

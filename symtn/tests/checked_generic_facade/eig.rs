@@ -157,6 +157,7 @@ fn assert_sun_checked_generic_eigh<D>(
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_eigh_cross_mu_projectors_for_both_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_eigh(
             n,
@@ -309,6 +310,7 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_eig_nonnormal_cross_mu_projectors_for_both_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_eig::<f64>(n, label.clone());
         assert_sun_checked_generic_eig::<Complex64>(n, label);
@@ -317,6 +319,7 @@ fn sun_checked_generic_eig_nonnormal_cross_mu_projectors_for_both_dtypes() {
 
 #[test]
 fn checked_generic_eigh_vals_preserves_spectrum_and_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -438,6 +441,7 @@ fn assert_checked_generic_eigh_factors<D>(
 
 #[test]
 fn checked_generic_eigh_full_and_trunc_preserve_contract_for_both_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
@@ -471,6 +475,7 @@ fn checked_generic_eigh_full_and_trunc_preserve_contract_for_both_dtypes() {
 
 #[test]
 fn checked_generic_eigh_lazy_success_and_failure_leave_the_view_lazy() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -505,6 +510,7 @@ fn checked_generic_eigh_lazy_success_and_failure_leave_the_view_lazy() {
 
 #[test]
 fn checked_generic_eigh_rejects_invalid_inputs_before_publication() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -566,7 +572,7 @@ fn eig_fault_spy() -> SpyExecutor {
 
 #[test]
 fn checked_generic_eigh_preflights_all_sectors_and_runs_once_per_sector() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -612,7 +618,7 @@ fn checked_generic_eigh_preflights_all_sectors_and_runs_once_per_sector() {
 
 #[test]
 fn checked_generic_eigh_dense_failure_preserves_the_source() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -635,7 +641,7 @@ fn checked_generic_eigh_dense_failure_preserves_the_source() {
 
 #[test]
 fn checked_generic_eig_dense_failure_preserves_the_source() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder()
         .dense_threads(1)
         .with_dense_executor(Box::new(eig_fault_spy()))
@@ -656,6 +662,7 @@ fn checked_generic_eig_dense_failure_preserves_the_source() {
 
 #[test]
 fn checked_generic_eigh_qdim_and_decode_failures_publish_no_pair() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -694,6 +701,7 @@ fn checked_generic_eigh_qdim_and_decode_failures_publish_no_pair() {
 
 #[test]
 fn checked_generic_eig_qdim_and_decode_failures_publish_no_pair() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -732,6 +740,7 @@ fn checked_generic_eig_qdim_and_decode_failures_publish_no_pair() {
 
 #[test]
 fn checked_generic_eigh_signed_ties_are_stable_and_degenerate_projectors_are_invariant() {
+    let _serial = crate::counting_alloc::serial();
     use std::cell::Cell;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -806,6 +815,7 @@ fn checked_generic_eigh_signed_ties_are_stable_and_degenerate_projectors_are_inv
 
 #[test]
 fn checked_generic_eig_vals_preserves_spectrum_and_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -893,7 +903,7 @@ fn assert_checked_generic_eig_reconstruction(
 
 #[test]
 fn checked_generic_eig_full_is_complex_and_reconstructs_nonnormal_inputs() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -1011,6 +1021,7 @@ fn checked_generic_eig_full_is_complex_and_reconstructs_nonnormal_inputs() {
 
 #[test]
 fn checked_generic_eig_ties_are_stable_and_degenerate_projectors_are_invariant() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
@@ -1084,6 +1095,7 @@ fn checked_generic_eig_ties_are_stable_and_degenerate_projectors_are_invariant()
 
 #[test]
 fn checked_generic_eig_truncation_reports_discarded_spectrum_norm_only() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
@@ -1146,7 +1158,7 @@ fn assert_defective_eigenpairs(
 
 #[test]
 fn eig_full_accepts_finite_defective_sectors_in_both_modes_without_a_rank_svd() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     let counts = Arc::new(SpyCounts::default());
@@ -1255,7 +1267,7 @@ fn assert_unit_gauged_eigenpairs(
 
 #[test]
 fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -1363,7 +1375,7 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
 
 #[test]
 fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     // A finite Jordan block `2 I + N` of size n in one sector. faer's
@@ -1441,6 +1453,7 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
 
 #[test]
 fn checked_generic_eig_rejects_nonfinite_input() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -1465,6 +1478,7 @@ fn checked_generic_eig_rejects_nonfinite_input() {
 
 #[test]
 fn checked_generic_eig_lazy_calls_leave_the_source_view_lazy() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -1490,7 +1504,7 @@ fn checked_generic_eig_lazy_calls_leave_the_source_view_lazy() {
 /// failing or style-changing provider cannot fail it.
 #[test]
 fn checked_nondual_compact_diagonal_eigh_full_makes_no_provider_query() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for fault in ["fail_algebra", "invalid_style"] {
         let provider = Arc::new(CheckedOnlyToy::new_product_probe(1));
@@ -1523,6 +1537,7 @@ fn checked_nondual_compact_diagonal_eigh_full_makes_no_provider_query() {
 /// and `diag(1 + iδ, 2)` exactly when `δ ≤ tol·√5`.
 #[test]
 fn checked_generic_eigh_admits_at_the_given_hermitian_tolerance() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -1566,6 +1581,7 @@ fn checked_generic_eigh_admits_at_the_given_hermitian_tolerance() {
 
 #[test]
 fn checked_generic_eig_order_matches_the_lexicographic_oracle_and_the_mf_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: #1985 on checked Generic. Dense and compact EIG/EIGH, full and
     // values-only, publish the order sorted here independently (EIG
     // lexicographic `(re, im)`, EIGH ascending), and dense EIG agrees with

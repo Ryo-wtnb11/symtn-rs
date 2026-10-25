@@ -15,14 +15,9 @@ use symtn::typed::{
     TypedTensorContractDispatch, TypedTensorModeDispatch, TypedTensorTransformDispatch,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
-
-#[path = "../../tests/support/toy_rules.rs"]
-mod toy_rules;
+use crate::toy_rules;
 
 use toy_rules::{GenericLabel, GenericToy};
 
@@ -101,7 +96,6 @@ fn warm<R: TypedSectorAdmission>(leg: &GradedSpace<R>, rank: usize) -> Warm
 where
     R::Mode: Mode<R>,
 {
-    let _serial = counting_alloc::serial();
     symtn::cache::clear();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = leg.clone();
@@ -206,6 +200,7 @@ impl Warm {
 /// incidental sizes.
 #[test]
 fn warm_staged_checked_plans_lend_the_canonical_structure() {
+    let _serial = crate::counting_alloc::serial();
     let leg = GradedSpace::try_new(
         Arc::new(GenericToy),
         [(GenericLabel::Vacuum, 1), (GenericLabel::X, 2)],
@@ -226,6 +221,7 @@ fn warm_staged_checked_plans_lend_the_canonical_structure() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_racah_checked_contraction_is_bounded_by_sectors_and_groups() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
     let su2 =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());

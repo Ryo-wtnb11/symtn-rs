@@ -21,8 +21,7 @@ use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRul
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

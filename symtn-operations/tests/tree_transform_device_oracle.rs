@@ -8,7 +8,7 @@
 //! the oracle walks the fixture's own block metadata, the host executor walks
 //! the structure's baked fused layouts.
 
-mod common;
+use crate::common;
 
 use common::{
     all_fixtures, expert_interleaved_destination, expert_interleaved_recoupling_destination,

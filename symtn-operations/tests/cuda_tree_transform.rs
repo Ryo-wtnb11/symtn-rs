@@ -12,7 +12,7 @@
 
 #![cfg(feature = "cuda")]
 
-mod common;
+use crate::common;
 
 use common::{
     all_fixtures, conjugated_recoupling, expert_interleaved_destination,

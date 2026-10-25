@@ -271,7 +271,7 @@ fn assert_contract_compose_compact_laws_hold<R>(
 
 #[test]
 fn contract_compose_and_compact_laws_hold_on_u1() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed_a = u1_oracle(&runtime, 1.0);
     let typed_b = u1_oracle(&runtime, 100.0);
@@ -284,7 +284,7 @@ fn contract_compose_and_compact_laws_hold_on_u1() {
 
 #[test]
 fn contract_compose_and_compact_laws_hold_on_u1_fz2() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed_a = u1_fz2_oracle(&runtime, 1.0);
     let typed_b = u1_fz2_oracle(&runtime, 100.0);
@@ -297,7 +297,7 @@ fn contract_compose_and_compact_laws_hold_on_u1_fz2() {
 
 #[test]
 fn contract_compose_and_compact_laws_hold_on_fz2_u1_su2() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed_a = fz2_u1_su2_oracle(&runtime, 1.0);
     let typed_b = fz2_u1_su2_oracle(&runtime, 100.0);
@@ -310,6 +310,7 @@ fn contract_compose_and_compact_laws_hold_on_fz2_u1_su2() {
 
 #[test]
 fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
+    let _serial = crate::counting_alloc::serial();
     // What: the exact relation on `fZ2 x U(1) x SU(2)`,
     // `compose(a, b) == contract(a, twist(b, b's dual codomain legs))`. The
     // weaker `contract != compose` would pin only that *a* twist exists, not
@@ -319,7 +320,6 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
     // job at all: a twist deleted from a shared kernel moves both buffers
     // together. The bosonic family is the control — theta is one there, so the
     // twisted operand is the operand and the two contractions agree.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let fermionic_a = fz2_u1_su2_oracle(&runtime, 1.0);
@@ -574,7 +574,7 @@ fn assert_reductions_and_factorizations_hold<R>(
 
 #[test]
 fn reductions_and_factorizations_hold_on_u1() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed_a = u1_oracle(&runtime, 1.0);
     let typed_b = u1_oracle(&runtime, 100.0);
@@ -587,7 +587,7 @@ fn reductions_and_factorizations_hold_on_u1() {
 
 #[test]
 fn reductions_and_factorizations_hold_on_u1_fz2() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed_a = u1_fz2_oracle(&runtime, 1.0);
     let typed_b = u1_fz2_oracle(&runtime, 100.0);
@@ -600,7 +600,7 @@ fn reductions_and_factorizations_hold_on_u1_fz2() {
 
 #[test]
 fn reductions_and_factorizations_hold_on_fz2_u1_su2() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed_a = fz2_u1_su2_oracle(&runtime, 1.0);
     let typed_b = fz2_u1_su2_oracle(&runtime, 100.0);
@@ -630,7 +630,7 @@ fn reductions_and_factorizations_hold_on_fz2_u1_su2() {
 /// earlier in this file.
 #[test]
 fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
 
     let rule = Arc::new(
@@ -696,8 +696,7 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
 /// automatic equivalence.
 #[test]
 fn nested_three_factor_product_keeps_its_declared_factor_order() {
-    let _guard = cache_lock();
-
+    let _serial = crate::counting_alloc::serial();
     let left_assoc = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(

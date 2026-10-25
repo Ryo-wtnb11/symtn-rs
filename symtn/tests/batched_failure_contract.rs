@@ -5,10 +5,7 @@
 //! through the shared `SpyExecutor`; the oracle is eager on an unspied Runtime
 //! over the same runtime-independent member data.
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::prepared;
 
 use std::sync::Arc;
 

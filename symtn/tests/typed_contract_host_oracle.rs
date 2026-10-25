@@ -18,15 +18,8 @@
 //!   returning contraction on every fixture (#1346), so the Host
 //!   overwrite is the same oracle the device overwrite is gated against.
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-#[macro_use]
-mod contract_cases;
+use crate::contract_cases;
+use crate::numerics;
 
 use contract_cases::{
     blas_contract_oracle, dense_oracle, fermionic_blas_contract_oracle, fz2_tensorkit_loops,

@@ -22,8 +22,7 @@ use symtn::sector::{
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, Qr, Svd, TensorMap, Truncation};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 
@@ -33,10 +32,7 @@ type Fz2U1Su2Codec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
 type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, Fz2U1Su2Codec>;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-
-use symtn::typed::Complex32;
+use crate::numerics;
 
 /// Floating terms reaching one compared entry of the operation identities: a
 /// composition over a contracted `V ⊗ V` leg plus the recoupling terms of a

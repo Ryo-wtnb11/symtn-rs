@@ -12,7 +12,7 @@
 
 use symtn_sectors::*;
 
-use crate::s;
+use super::s;
 
 fn ids(channels: SectorVec) -> Vec<usize> {
     channels.iter().map(|sector| sector.id()).collect()

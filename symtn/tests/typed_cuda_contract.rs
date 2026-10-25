@@ -24,25 +24,19 @@
 //!    above plus destinations with blocks no GEMM writes; warm calls transfer
 //!    and allocate nothing; rejections leave the destination untouched.
 //!
-//! The contract tests read the process-wide transfer counters, hence
-//! `--test-threads=1`. Run with `cargo test -p symtn --no-default-features
-//! --features cuda,cpu-faer --test typed_cuda_contract -- --ignored
+//! The target-wide serial guard isolates the thread-local transfer counters.
+//! Run with `cargo test -p symtn --no-default-features
+//! --features cuda,cpu-faer --test serial typed_cuda_contract:: -- --ignored
 //! --test-threads=1` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-#[path = "support/report.rs"]
-mod report;
+use crate::common;
+
+use crate::contract_cases;
+use crate::numerics;
+use crate::report;
 use report::Report;
-use support::numerics;
-#[macro_use]
-mod contract_cases;
 
 use common::{DevicePayload, DeviceRule};
 use contract_cases::{
@@ -59,11 +53,7 @@ use symtn::typed::{ContractSpec, Runtime, TensorMap};
 
 // Host allocations are counted on the measuring thread only; device runtime
 // threads never allocate for the warm host-allocation contract.
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn delta<T>(body: impl FnOnce() -> T) -> (T, CudaTransferStats) {
     let before = cuda_transfer_stats();
@@ -135,6 +125,7 @@ fn every_fixture<D: DevicePayload>(runtime: &Runtime) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn general_axes_match_the_host_and_the_blas_contract_oracle_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     every_fixture::<f64>(&runtime);
     every_fixture::<Complex64>(&runtime);
@@ -145,6 +136,7 @@ fn general_axes_match_the_host_and_the_blas_contract_oracle_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn general_axes_match_the_physical_basis_contraction() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     fn dense<R, D>(case: Case<R, D>)
     where
@@ -191,6 +183,7 @@ fn lazy_at<D: DevicePayload>(runtime: &Runtime) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn zero_copy_candidates_match_the_host_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     fn at<D: DevicePayload>(runtime: &Runtime) {
         for (case, _) in candidate_core_probes::<_, D>(runtime, &u1_non_self_dual()) {
@@ -215,6 +208,7 @@ fn zero_copy_candidates_match_the_host_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn core_form_lazy_contractions_match_the_host_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     // Values only. The planner's `copyC` route for this geometry is pinned by
     // the route-parity test in symtn-tensors (`storage_contract_tests.rs`).
     let runtime = Runtime::builder().cuda(0).build().unwrap();
@@ -232,6 +226,7 @@ fn core_form_lazy_contractions_match_the_host_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn lazy_adjoint_operands_match_the_host_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     lazy_at::<f64>(&runtime);
     lazy_at::<Complex64>(&runtime);
@@ -249,6 +244,7 @@ fn lazy_adjoint_operands_match_the_host_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn identity_adjoint_operands_are_borrowed_by_the_device_dynamic_tree() {
+    let _serial = crate::counting_alloc::serial();
     fn at<R: DeviceRule, D: DevicePayload>(v: &symtn::typed::GradedSpace<R>, symmetry: &str) {
         for index in 0..3 {
             // A fresh Runtime per case: its scratch high-water mark is this
@@ -311,6 +307,7 @@ fn identity_adjoint_operands_are_borrowed_by_the_device_dynamic_tree() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn copy_c_probes_move_only_c_and_match_the_host_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
     fn at<R: DeviceRule, D: DevicePayload>(
         v: &symtn::typed::GradedSpace<R>,
@@ -386,6 +383,7 @@ fn copy_c_probes_move_only_c_and_match_the_host_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_general_contraction_uploads_only_its_output() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let case = u1_rank_five::<f64>(&runtime);
@@ -429,6 +427,7 @@ fn a_warm_general_contraction_uploads_only_its_output() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_scratch_grows_only_at_a_high_water_mark_and_is_released_by_the_clear_path() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let large = u1_rank_five::<f64>(&runtime);
@@ -540,6 +539,7 @@ fn check_fermionic<R, D>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn fermionic_contractions_match_the_host_and_both_tensorkit_twist_roles_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     // General axes with the twist on one or both contracted legs, the
     // canonical form whose θ varies within one coupled sector (lifted from
     // the storage core route to DynamicTree), and lazy adjoints on either
@@ -555,6 +555,7 @@ fn fermionic_contractions_match_the_host_and_both_tensorkit_twist_roles_at_every
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn fz2_loops_as_explicit_device_contracts_match_tensorkit() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let loops = fz2_tensorkit_loops(
         &runtime,
@@ -573,6 +574,7 @@ fn fz2_loops_as_explicit_device_contracts_match_tensorkit() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_fermionic_contraction_uploads_only_its_output() {
+    let _serial = crate::counting_alloc::serial();
     // What: θ travels as descriptor scalars, so a warm twisted contraction
     // costs exactly what an untwisted one does — the #740 output upload.
     let runtime = Runtime::builder().cuda(0).build().unwrap();
@@ -603,6 +605,7 @@ fn a_warm_fermionic_contraction_uploads_only_its_output() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn rejections_happen_before_any_device_work_and_match_the_host() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let other = Runtime::builder().cuda(0).build().unwrap();
     let case = u1_rank_five::<f64>(&runtime);
@@ -691,6 +694,7 @@ fn check_splits<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn every_split_matches_the_host_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     check_splits(u1_rank_five::<f64>(&runtime));
     check_splits(su2_bent::<Complex64>(&runtime));
@@ -829,6 +833,7 @@ fn every_overwrite_fixture<D: DevicePayload>(runtime: &Runtime) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn contract_into_a_poisoned_destination_matches_the_host_and_the_oracles_at_every_dtype() {
+    let _serial = crate::counting_alloc::serial();
     // What: general axes, lazy adjoints, the core-form lazy (`copyC`) class, both
     // fermionic twist roles, and destinations with blocks no GEMM writes —
     // by the core route, by an identity output and under an output transform
@@ -843,6 +848,7 @@ fn contract_into_a_poisoned_destination_matches_the_host_and_the_oracles_at_ever
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_overwrite_transfers_and_allocates_nothing() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
     // What: no reset and no output initialisation — a warm overwrite costs
     // no upload, no download, no device allocation, no scratch growth and no
@@ -924,6 +930,7 @@ fn a_warm_overwrite_transfers_and_allocates_nothing() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn overwrite_rejections_match_the_host_in_order_and_leave_the_destination_untouched() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let other = Runtime::builder().cuda(0).build().unwrap();
     let case = u1_rank_five::<f64>(&runtime);

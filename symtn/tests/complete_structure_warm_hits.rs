@@ -1,6 +1,6 @@
 //! Warm public eager calls reuse the core complete-structure cache: each call
 //! is a hit, never a miss, admission, or eviction, and returns bit-identical
-//! data. One test per process keeps the global cache statistics isolated.
+//! data. Every test in this target takes the shared serial guard.
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 
@@ -98,6 +98,8 @@ macro_rules! warm_ops {
 
 #[test]
 fn warm_eager_calls_hit_complete_structure_cache() {
+    let _serial = crate::counting_alloc::serial();
+    symtn::cache::clear();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     warm_ops!(
         &runtime,

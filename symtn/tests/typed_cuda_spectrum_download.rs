@@ -10,11 +10,10 @@
 //!   uploads `d` once, already filled, together with `v`'s zeros; with
 //!   cuSOLVER's ascending order no selector is uploaded (#1985).
 //!
-//! This file holds a single test because it reads the process-wide
-//! [`cuda_transfer_stats`] counters.
+//! [`cuda_transfer_stats`] snapshots count only the calling thread.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_spectrum_download -- --ignored` on a CUDA host.
+//! integration typed_cuda_spectrum_download:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
@@ -25,8 +24,7 @@ use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Eigh, GradedSpace, Runtime, Svd, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 

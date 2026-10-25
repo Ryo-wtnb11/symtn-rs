@@ -1,8 +1,7 @@
 //! `StackedTensorMap::restrict_leg` on a real device (#1503).
 //!
-//! Its own binary with one test, because `cuda_transfer_stats` is
-//! process-wide. Run with `cargo test -p symtn --no-default-features
-//! --features cuda,cpu-faer --test stacked_restrict_leg_cuda -- --ignored`.
+//! `cuda_transfer_stats` is thread-local. Run with `cargo test -p symtn --no-default-features
+//! --features cuda,cpu-faer --test integration stacked_restrict_leg_cuda:: -- --ignored`.
 
 #![cfg(feature = "cuda")]
 
@@ -12,9 +11,7 @@ use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, LegSelection, StackedTensorMap, TensorMap};
 
-#[macro_use]
-#[path = "stacked/fixtures.rs"]
-mod fixtures;
+use crate::stacked_fixtures as fixtures;
 
 /// Submissions and transfers since `before`, as
 /// `(h2d, d2h, copy, gemm, solver)` calls.

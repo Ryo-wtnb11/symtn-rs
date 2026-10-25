@@ -6,11 +6,7 @@ use symtn_core::{
 };
 use symtn_operations::{try_tensortrace_owned_raw, OwnedTraceTerm};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn fusion_key() -> BlockKey {
     BlockKey::from(
@@ -119,6 +115,7 @@ where
 
 #[test]
 fn warm_owned_trace_allocates_only_the_output_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: after canonical-region proof is warm, the specialized trace writer
     // allocates only its returned payload; its bounded tile stays on the stack.
     let structure = canonical_structure();
@@ -134,6 +131,7 @@ fn warm_owned_trace_allocates_only_the_output_payload() {
 
 #[test]
 fn padded_destination_declines_without_allocating_output() {
+    let _serial = crate::counting_alloc::serial();
     // What: a leading storage hole cannot claim complete physical coverage and
     // returns control to the initialized fallback before payload allocation.
     let source_structure = canonical_structure();
@@ -150,6 +148,7 @@ fn padded_destination_declines_without_allocating_output() {
 
 #[test]
 fn incomplete_coupled_grid_declines_before_output_allocation() {
+    let _serial = crate::counting_alloc::serial();
     // What: a missing tree-pair cannot claim complete coupled-sector coverage
     // and returns to the initialized caller before allocating an output.
     let (source_structure, destination_structure) = incomplete_coupled_structure();
@@ -181,6 +180,7 @@ fn incomplete_coupled_grid_declines_before_output_allocation() {
 
 #[test]
 fn rank_zero_and_zero_extent_outputs_commit_empty_or_scalar_storage() {
+    let _serial = crate::counting_alloc::serial();
     // What: empty rank-zero storage and a zero degeneracy extent complete
     // without attempting a tile iteration or exposing uninitialized elements.
     let empty = BlockStructure::empty(0);
@@ -212,6 +212,7 @@ fn rank_zero_and_zero_extent_outputs_commit_empty_or_scalar_storage() {
 
 #[test]
 fn canonical_block_without_a_producer_is_written_as_structural_zero() {
+    let _serial = crate::counting_alloc::serial();
     // What: an active canonical destination with no matching trace term is
     // initialized exactly once to structural zero rather than left untouched.
     let structure = canonical_structure();
@@ -237,6 +238,7 @@ fn canonical_block_without_a_producer_is_written_as_structural_zero() {
 
 #[test]
 fn multiple_producers_accumulate_in_compiled_stable_order() {
+    let _serial = crate::counting_alloc::serial();
     // What: producers for one destination retain compiler order; changing this
     // sequence changes the deliberately ill-conditioned result.
     let structure = canonical_structure_with_dim(1);
@@ -263,6 +265,7 @@ fn multiple_producers_accumulate_in_compiled_stable_order() {
 
 #[test]
 fn preflight_error_and_mid_write_panic_never_return_partial_output() {
+    let _serial = crate::counting_alloc::serial();
     // What: a source extent error happens before output allocation, and a panic
     // after the first tile scatter remains trapped inside the length-zero Vec.
     let structure = canonical_structure_with_dim(32);

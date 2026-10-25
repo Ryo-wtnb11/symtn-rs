@@ -1,13 +1,10 @@
 //! Allocation contract of the Host `EighFullPlan` (#1744): a warm call
 //! allocates per member exactly what the dense solver allocates for that
-//! member's coupled sectors, and nothing else. Its own binary, because it
-//! installs a counting global allocator; every dense kernel runs on the
+//! member's coupled sectors, and nothing else. The allocation target
+//! shares one counting allocator; every dense kernel runs on the
 //! caller thread, so the counter sees all of them.
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::prepared;
 
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
@@ -18,11 +15,7 @@ use symtn::typed::{EighFullPlan, HermitianTol, Runtime, StackedTensorMap};
 use prepared::eigh::hermitian_members;
 use prepared::u1_legs;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn executor() -> DefaultDenseExecutor {
     DefaultDenseExecutor::with_shared_context(&SharedCpuContext::with_threads(1).unwrap(), None)
@@ -73,6 +66,7 @@ fn solver_calls(orders: &[usize]) -> u64 {
 
 #[test]
 fn warm_execute_allocates_per_member_only_the_dense_solver_outputs() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder()
         .dense_threads(1)
         .with_dense_executor(Box::new(executor()))

@@ -27,13 +27,11 @@
 
 use std::sync::Arc;
 
-use num_complex::{Complex32, Complex64};
 use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::Truncation;
 use symtn::typed::{GradedSpace, SectorSpectrum};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn spin(twice: usize) -> SU2Irrep {
     SU2Irrep::from_twice_spin(twice)

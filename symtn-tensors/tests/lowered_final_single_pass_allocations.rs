@@ -3,11 +3,7 @@ use std::sync::Arc;
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
 use symtn_tensors::BoundDynamicFusionMapSpace;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn homspace(sector_count: i32) -> FusionTreeHomSpace {
     let sectors = (0..sector_count)
@@ -55,6 +51,7 @@ fn cold_encoded_allocations(sector_count: i32) -> usize {
 
 #[test]
 fn lowered_final_cold_build_has_no_per_tree_shape_allocation_slope() {
+    let _serial = crate::counting_alloc::serial();
     // What: growing one-sector final storage to sixteen U1 sectors does not
     // restore one heap-allocated shape vector per fusion-tree key.
     let one = cold_lowered_allocations(1);

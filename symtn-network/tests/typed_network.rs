@@ -12,15 +12,14 @@ use symtn::sector::{
     TypedSectorAdmission,
 };
 use symtn::typed::FusionAlgebraError;
-use symtn::typed::{Complex32, Complex64, TensorScalar};
+use symtn::typed::{Complex64, TensorScalar};
 use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap};
 use symtn_network::{
     GreedyDenseOptimizer, LabelOrderDenseOptimizer, Network, NetworkExecutionWorkspace,
     PlannedNetwork, TemporaryLabel, TensorId,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn pair_network() -> Network {
     Network::new(

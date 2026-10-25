@@ -18,10 +18,8 @@ use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{Error, OperationError, TensorMap, Truncation};
 use symtn::typed::{GradedSpace, SectorSpectrum};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
-#[path = "support/report.rs"]
-mod report;
+use crate::fixtures;
+use crate::report;
 use report::cause;
 
 use fixtures::host_runtime;

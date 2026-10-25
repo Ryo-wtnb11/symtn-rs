@@ -1,14 +1,11 @@
 use symtn_core::BlockStructure;
 use symtn_operations::{TreeTransformBlockSpec, TreeTransformStructure};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn overwrite_proof_allocation_is_bounded_by_layout_metadata() {
+    let _serial = crate::counting_alloc::serial();
     let logical_elements = 1_000_000;
     let structure = BlockStructure::packed_column_major(1, [vec![logical_elements]]).unwrap();
     let specs = [TreeTransformBlockSpec::single(0, 0, 1.0_f64)];
@@ -25,6 +22,7 @@ fn overwrite_proof_allocation_is_bounded_by_layout_metadata() {
 
 #[test]
 fn permuted_layout_compile_avoids_per_block_metadata_scratch() {
+    let _serial = crate::counting_alloc::serial();
     let fixture = |blocks| {
         let shapes = (0..blocks).map(|_| vec![2, 2, 1, 1]).collect::<Vec<_>>();
         let structure = BlockStructure::packed_column_major(4, shapes).unwrap();

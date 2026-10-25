@@ -58,13 +58,9 @@ use symtn::typed::{Complex64, Runtime};
 /// mistake.
 const TERMS: usize = 13;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
-use symtn::typed::Complex32;
-
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

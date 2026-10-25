@@ -38,9 +38,9 @@ jobs:
       - uses: ./symtn/.github/actions/cargo-build-script-cache
         with:
           key: test-macos
-      # Why-not serialize integration binaries: their global-state tests are
-      # single-test processes or take their own locks. `--test '*'` selects
-      # integration targets only, so the lib runs once and stays serialized.
+      # Serial targets guard every test; integration targets contain only tests
+      # that neither observe nor reset global state and retain default concurrency.
+      # `--test '*'` selects integration targets only, so the lib runs once.
       - name: Run symtn-tensors tests with isolated cache snapshots
         run: |
           cargo test --locked -p symtn-tensors --lib -- --test-threads=1

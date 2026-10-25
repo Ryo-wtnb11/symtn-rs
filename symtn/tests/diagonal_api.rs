@@ -5,8 +5,7 @@ use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::Eigh;
 use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

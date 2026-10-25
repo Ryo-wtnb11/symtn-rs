@@ -10,11 +10,7 @@ use std::sync::Arc;
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Allocations of exactly `bytes` made while `f` runs; its result is
 /// dropped after counting stops.
@@ -39,6 +35,7 @@ fn operands(runtime: &Runtime) -> (Map, Map) {
 
 #[test]
 fn warm_split_moving_eager_contract_allocates_only_its_result() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let (a, b) = operands(&runtime);
     let output_bytes = 13 * 17 * 23 * size_of::<f64>();

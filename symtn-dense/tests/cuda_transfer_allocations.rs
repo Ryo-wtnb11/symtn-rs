@@ -30,11 +30,7 @@ const OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_F64: usize = 2;
 const OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_C64: usize = 3;
 const DOWNLOAD_PAYLOAD_ALLOCATIONS: usize = 1;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 static DEVICE: Mutex<()> = Mutex::new(());
 
@@ -122,6 +118,7 @@ fn stats_delta(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn owned_f64_transfers_cost_no_redundant_host_copy() {
+    let _serial = crate::counting_alloc::serial();
     let _serialized = DEVICE.lock().unwrap_or_else(|err| err.into_inner());
     let ctx = CudaDenseContext::new(0).unwrap();
     let data: Vec<f64> = (0..ELEMENTS).map(|index| index as f64).collect();
@@ -131,6 +128,7 @@ fn owned_f64_transfers_cost_no_redundant_host_copy() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn owned_complex64_transfers_cost_no_redundant_host_copy() {
+    let _serial = crate::counting_alloc::serial();
     let _serialized = DEVICE.lock().unwrap_or_else(|err| err.into_inner());
     let ctx = CudaDenseContext::new(0).unwrap();
     let data: Vec<Complex64> = (0..ELEMENTS)

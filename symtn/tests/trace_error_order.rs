@@ -11,8 +11,7 @@
 //! select(space(tsrc), p)` comes before it. The device variants run with
 //! `--features cuda -- --ignored`.
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 
 use std::sync::Arc;
 

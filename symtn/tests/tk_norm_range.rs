@@ -40,13 +40,11 @@ use symtn::sector::{
 use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 use numerics::Numeric;
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

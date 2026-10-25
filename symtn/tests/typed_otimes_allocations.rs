@@ -7,11 +7,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measured<T>(payload_bytes: usize, operation: impl FnOnce() -> T) -> (u64, usize) {
     let (output, allocs) =
@@ -26,6 +22,7 @@ fn leg(rule: &Arc<U1FusionRule>, degeneracy: usize) -> GradedSpace<U1FusionRule>
 
 #[test]
 fn typed_otimes_allocates_one_output_payload_and_no_dense_kron_temporary() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let lhs_codomain = leg(&rule, 24);

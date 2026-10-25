@@ -31,14 +31,13 @@
 //! charges and SU(2) spins, whose TensorKit order is the label order the hand
 //! selection breaks ties in, so the kept bond is part of the exact gate.
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::{
     product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
     Z2Irrep,
@@ -48,17 +47,14 @@ use symtn::typed::{
 };
 use symtn::typed::{Error, TensorMap, Truncation};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-#[macro_use]
-mod truncation_oracle;
+use crate::numerics;
+use crate::truncation_oracle;
 
 use truncation_oracle::{
     assert_error_close, assert_kept_magnitudes, discarded_norm, select, ClosedFormDim, Policy,
 };
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes, host_runtime};
 

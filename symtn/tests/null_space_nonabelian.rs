@@ -14,8 +14,7 @@ use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

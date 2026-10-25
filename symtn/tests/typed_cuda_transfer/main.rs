@@ -1,22 +1,21 @@
 //! Real-device gates for provider-neutral typed ownership transfer.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_transfer -- --ignored` on a CUDA host.
+//! integration typed_cuda_transfer:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
 include!("../common/predicate_chains.rs");
 include!("../common/predicate_chain_coefficients.rs");
 
-#[path = "../support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 
 use symtn::sector::{
     product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, SectorId, U1FusionRule,
@@ -34,8 +33,7 @@ use symtn::typed::{
     Truncation,
 };
 
-#[path = "../../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 /// Floating terms per compared entry, per family of device gates: an
 /// elementwise combination, a contraction over the fixtures' bond, and a

@@ -4,18 +4,14 @@
 //! the caller thread. The one remaining allocation is Tenferro 0.7.1's
 //! grouped-GEMM validation (`tenferro-tensor src/backend.rs:
 //! validate_grouped_gemm`), which every grouped submission pays, eager
-//! included. Its own binary, because it installs a counting global allocator.
+//! included. The allocation target installs one shared counting allocator.
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
 // these gates do not model (#2107).
-#[path = "../../tests/support/backend.rs"]
-mod backend;
+use crate::backend;
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::prepared;
 
 use std::time::Instant;
 
@@ -25,11 +21,7 @@ use symtn::typed::{ComposePlan, Runtime, StackedTensorMap};
 
 use prepared::{filled, members, u1_legs};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn allocations(f: impl FnOnce()) -> (usize, usize, std::time::Duration) {
     let (elapsed, allocs) = counting_alloc::measure(|| {
@@ -42,6 +34,7 @@ fn allocations(f: impl FnOnce()) -> (usize, usize, std::time::Duration) {
 
 #[test]
 fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
+    let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }

@@ -26,9 +26,8 @@
 //! double-precision one.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_single_precision -- --ignored --test-threads=1` on a CUDA host.
-//! The counter gate reads the process-wide transfer counters, hence
-//! `--test-threads=1`.
+//! integration typed_cuda_single_precision:: -- --ignored --test-threads=1` on a CUDA host.
+//! Transfer counters are thread-local, so these tests run concurrently.
 
 #![cfg(feature = "cuda")]
 
@@ -43,10 +42,9 @@ use symtn::sector::{
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
 
-mod common;
+use crate::common;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 use common::{DevicePayload, DeviceRule};
 
@@ -119,8 +117,7 @@ fn assert_moved<D: DevicePayload>(source: &[D], transformed: &[D], what: &str) {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::cuda_runtime;
 

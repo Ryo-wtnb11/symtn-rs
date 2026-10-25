@@ -13,12 +13,11 @@
 
 use std::sync::Arc;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::LieGroupFusionRule;
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap, TensorScalar};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 type Space = GradedSpace<LieGroupFusionRule>;
 type Sectors = Vec<(Vec<i64>, usize)>;

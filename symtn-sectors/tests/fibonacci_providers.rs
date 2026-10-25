@@ -6,14 +6,13 @@
 
 use std::panic::{self, AssertUnwindSafe};
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn_sectors::{
     CheckedFusionAlgebra, FusionAlgebraError, FusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, SectorId, TableRule,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 const SECTORS: [SectorId; 2] = [SectorId::new(0), SectorId::new(1)];
 

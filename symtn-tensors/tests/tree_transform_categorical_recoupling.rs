@@ -8,7 +8,7 @@
 //! pins the oracle against the *host* executor replaying the same compiled
 //! structures, and proves the fixtures actually contain recoupling.
 
-mod categorical_recoupling;
+use crate::categorical_recoupling;
 
 use categorical_recoupling::{
     alphas, assert_close, compile, expected, expected_scaled, fermionic_space, fermionic_su2_rule,

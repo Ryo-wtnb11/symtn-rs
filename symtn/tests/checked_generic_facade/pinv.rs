@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn checked_generic_pinv_rectangular_moore_penrose_and_validation_precedence() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     macro_rules! assert_moore_penrose {
         ($input:expr, $pseudo:expr, $distance:expr) => {{
             let input = $input;
@@ -253,6 +253,7 @@ macro_rules! assert_sun_polar_laws {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_polar_and_pinv_accept_facade_layouts_of_rank_three_and_four() {
+    let _serial = crate::counting_alloc::serial();
     // What: polar and pinv are defined for every TensorMap (TensorKit
     // left_polar / right_polar / pinv); multi-leg SU(3) facade layouts with
     // outer multiplicity satisfy A = WP / PW, W isometric, and P Hermitian
@@ -324,7 +325,7 @@ fn sun_checked_generic_polar_and_pinv_accept_facade_layouts_of_rank_three_and_fo
 
 #[test]
 fn checked_generic_pinv_stages_svd_and_gemm_failures_without_publication() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     for (fail_svd, fail_gemm, expected_svd, expected_gemm) in [
         (None, None, 2, 2),
         (Some(1), None, 1, 0),
@@ -371,6 +372,7 @@ fn checked_generic_pinv_stages_svd_and_gemm_failures_without_publication() {
 
 #[test]
 fn checked_generic_pinv_of_a_nan_tensor_is_invalid_argument() {
+    let _serial = crate::counting_alloc::serial();
     // What: the staged checked-Generic pinv never publishes a finite answer
     // for a NaN payload; the finite-input stage answers `InvalidArgument`
     // before any provider SVD, so the kind does not depend on the provider.
@@ -423,6 +425,7 @@ fn checked_generic_pinv_of_a_nan_tensor_is_invalid_argument() {
 
 #[test]
 fn checked_generic_pinv_uses_a_strict_global_cutoff() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond =
@@ -444,7 +447,7 @@ fn checked_generic_pinv_uses_a_strict_global_cutoff() {
 
 #[test]
 fn checked_compact_diagonal_pinv_keeps_a_checked_compact_output() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let runtime = Runtime::builder()
@@ -582,6 +585,7 @@ fn checked_compact_diagonal_pinv_keeps_a_checked_compact_output() {
 /// error, as in multiplicity-free mode, not sent to the dense SVD.
 #[test]
 fn checked_compact_diagonal_pinv_refuses_nonfinite_like_multiplicity_free() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -607,6 +611,7 @@ fn checked_compact_diagonal_pinv_refuses_nonfinite_like_multiplicity_free() {
 
 #[test]
 fn checked_compact_diagonal_pinv_precision_limits_follow_multiplicity_free_semantics() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond = GradedSpace::try_new(provider, [(Label::Vacuum, 2), (Label::X, 2)]).unwrap();
@@ -771,7 +776,7 @@ fn checked_compact_diagonal_pinv_precision_limits_follow_multiplicity_free_seman
 
 #[test]
 fn checked_generic_pinv_normalized_empty_skips_dense_execution() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let runtime = Runtime::builder()
@@ -946,6 +951,7 @@ fn assert_sun_checked_generic_pinv<D>(
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_pinv_cross_mu_full_keys_for_both_dtypes() {
+    let _serial = crate::counting_alloc::serial();
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_pinv::<f64>(n, label.clone(), 1.0, |actual, expected| {
             (actual - expected).abs()
@@ -965,7 +971,7 @@ fn sun_checked_generic_pinv_cross_mu_full_keys_for_both_dtypes() {
 /// provider cannot fail it.
 #[test]
 fn checked_compact_diagonal_pinv_keeps_the_input_space_without_provider_queries() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for dual in [false, true] {
         for fault in ["fail_algebra", "invalid_style"] {

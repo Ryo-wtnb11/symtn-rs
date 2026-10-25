@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn checked_generic_compose_and_inv_powers_match_explicit_real_and_complex_oracles() {
+    let _serial = crate::counting_alloc::serial();
     // What: integer powers are compositions (`inv` first for a negative
     // exponent); the oracles are hand-computed 2x2 matrix powers.
     fn power<D: symtn::typed::AdvancedLinalgScalar>(
@@ -168,6 +169,7 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_inv_sun_outer_multiplicity_satisfies_inverse_laws() {
+    let _serial = crate::counting_alloc::serial();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_inverse_outer_multiplicity::<f64>(n, adjoint.clone());
         assert_sun_checked_generic_inverse_outer_multiplicity::<Complex64>(n, adjoint);
@@ -305,6 +307,7 @@ fn assert_sun_checked_generic_left_solve(n: usize, label: Vec<i64>) {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_left_solve_preserves_outer_multiplicity() {
+    let _serial = crate::counting_alloc::serial();
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         assert_sun_checked_generic_left_solve(n, label);
     }
@@ -313,6 +316,7 @@ fn sun_checked_generic_left_solve_preserves_outer_multiplicity() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -380,7 +384,7 @@ fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
 
 #[test]
 fn checked_generic_exp_uses_general_pade_for_nonhermitian_dense_blocks() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -446,7 +450,7 @@ fn checked_generic_exp_uses_general_pade_for_nonhermitian_dense_blocks() {
 
 #[test]
 fn checked_generic_exp_rejects_nonendomorphism_before_provider_work() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -464,6 +468,7 @@ fn checked_generic_exp_rejects_nonendomorphism_before_provider_work() {
 
 #[test]
 fn checked_generic_exp_rejects_early_and_late_nonfinite_sectors_without_publication() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =
@@ -609,12 +614,14 @@ fn assert_sun_checked_generic_exp_outer_multiplicity(n: usize, adjoint: Vec<i64>
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_exp_sun_outer_multiplicity_preserves_layout() {
+    let _serial = crate::counting_alloc::serial();
     assert_sun_checked_generic_exp_outer_multiplicity(3, vec![1, 1]);
     assert_sun_checked_generic_exp_outer_multiplicity(4, vec![1, 0, 1]);
 }
 
 #[test]
 fn checked_generic_inv_isomorphism_preflight_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -636,6 +643,7 @@ fn checked_generic_inv_isomorphism_preflight_failure_is_typed_and_nonpublishing(
 
 #[test]
 fn checked_generic_inv_destination_admission_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -657,6 +665,7 @@ fn checked_generic_inv_destination_admission_failure_is_typed_and_nonpublishing(
 
 #[test]
 fn checked_generic_inv_accepts_unequal_isomorphic_spaces_and_rejects_nonisomorphic() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -703,6 +712,7 @@ fn checked_generic_inv_accepts_unequal_isomorphic_spaces_and_rejects_nonisomorph
 
 #[test]
 fn checked_generic_inv_singular_early_and_late_sectors_preserve_source() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond =
@@ -731,6 +741,7 @@ fn checked_generic_inv_singular_early_and_late_sectors_preserve_source() {
 
 #[test]
 fn checked_generic_left_solve_accepts_distinct_provider_arcs_and_rectangular_rhs() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let lhs_provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let rhs_provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
@@ -796,7 +807,7 @@ fn checked_generic_left_solve_accepts_distinct_provider_arcs_and_rectangular_rhs
 
 #[test]
 fn checked_generic_left_solve_preflight_failures_are_nonpublishing() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -852,6 +863,7 @@ fn checked_generic_left_solve_preflight_failures_are_nonpublishing() {
 
 #[test]
 fn checked_generic_left_solve_singular_sectors_are_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond =
@@ -874,6 +886,7 @@ fn checked_generic_left_solve_singular_sectors_are_nonpublishing() {
 
 #[test]
 fn checked_generic_left_solve_covers_all_lazy_input_pairs() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
@@ -938,6 +951,7 @@ fn checked_generic_left_solve_covers_all_lazy_input_pairs() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
+    let _serial = crate::counting_alloc::serial();
     // Checked compact SVD publishes `s` as a compact diagonal on its bond.
     use symtn::sector::LieGroupFusionRule;
 
@@ -995,7 +1009,7 @@ fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
 
 #[test]
 fn checked_generic_map_diagonal_rejects_dense_before_queries_and_preserves_source() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     // What: dense storage is refused before any provider query, whether or not
     // it is bond shaped, and the source is untouched.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

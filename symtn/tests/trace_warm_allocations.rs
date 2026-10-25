@@ -9,11 +9,7 @@ use symtn::sector::{
 };
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
@@ -81,7 +77,7 @@ macro_rules! warm_trace_calls {
 /// traced pairs, a bosonic and a fermionic rule.
 #[test]
 fn warm_unique_trace_allocations_do_not_grow_with_terms() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let check = |label: &str, small: (usize, u64, u64), large: (usize, u64, u64)| {
         assert!(
             large.0 >= 10 * small.0,

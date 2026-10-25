@@ -12,13 +12,11 @@
 //! admits every braiding style while `ContractPlan` rejects non-symmetric
 //! ones.
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::common;
+use crate::numerics;
+use crate::prepared;
 
-#[path = "braiding_probe/mod.rs"]
-mod braiding_probe;
+use crate::braiding_probe;
 
 use std::fmt::Debug;
 

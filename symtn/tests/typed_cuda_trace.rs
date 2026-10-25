@@ -18,26 +18,20 @@
 //!    sum of the traces of each producer alone;
 //! 5. warm cost and rejections.
 //!
-//! The contract tests read the process-wide transfer counters, hence
-//! `--test-threads=1`. Run with `cargo test -p symtn --no-default-features
-//! --features cuda,cpu-faer --test typed_cuda_trace -- --ignored
+//! CUDA transfer counters are thread-local, so these tests run concurrently.
+//! Run with `cargo test -p symtn --no-default-features
+//! --features cuda,cpu-faer --test integration typed_cuda_trace:: -- --ignored
 //! --test-threads=1` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-#[path = "support/report.rs"]
-mod report;
+use crate::common;
+
+use crate::contract_cases;
+use crate::numerics;
+use crate::report;
+use crate::trace_cases;
 use report::Report;
-use support::numerics;
-#[allow(unused_macros)] // the fermionic contraction fixture macro
-mod contract_cases;
-mod trace_cases;
 
 use std::sync::Arc;
 

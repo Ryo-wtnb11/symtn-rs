@@ -31,7 +31,7 @@
 //! run) nor departs from Host.
 //!
 //! Run with `cargo test --release -p symtn --no-default-features --features \
-//! cuda,cpu-faer --test cuda_multi_runtime_publication -- --ignored \
+//! cuda,cpu-faer --test integration cuda_multi_runtime_publication:: -- --ignored \
 //! --nocapture --test-threads=1` on a CUDA host (release: the gate needs the
 //! write to still be in flight). A debug build also trips an
 //! unrelated `u32` overflow in CubeCL's staged-upload counter

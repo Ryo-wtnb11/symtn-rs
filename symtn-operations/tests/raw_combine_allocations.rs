@@ -8,14 +8,11 @@ use std::hint::black_box;
 use num_complex::Complex64;
 use symtn_operations::tensoradd_raw_strided_kernel;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn raw_combine_actions_allocate_nothing_at_any_rank() {
+    let _serial = crate::counting_alloc::serial();
     // What: for ranks 1..=16 (eight above the fused limit) and a transposed
     // source, conjugating copy, scale and axpy allocate nothing on the
     // caller thread. Ranks above 8 stay unfused, so Strided's parallel
@@ -65,6 +62,7 @@ fn raw_combine_actions_allocate_nothing_at_any_rank() {
 
 #[test]
 fn parallel_copy_matches_oracle_without_caller_allocations() {
+    let _serial = crate::counting_alloc::serial();
     // What: a transposed 256 x 512 copy (131072 elements, above Strided's
     // 32768-element parallel threshold), plain and conjugating, run inside an
     // explicit 4-thread Rayon pool so `CopyPlan` fans out. Every element
@@ -184,6 +182,7 @@ fn native_and_raw_twelve() -> [(Vec<usize>, Vec<isize>, Vec<isize>); 2] {
 
 #[test]
 fn raw_rank_twelve_fusing_to_eight_allocates_like_native_rank_eight() {
+    let _serial = crate::counting_alloc::serial();
     // What: issue #2230. A raw rank-12 layout that fuses to rank 8 makes the
     // same number of warm allocation calls on the caller thread as the
     // native rank-8 layout, for copy, scale, axpy and axpby, plain and
