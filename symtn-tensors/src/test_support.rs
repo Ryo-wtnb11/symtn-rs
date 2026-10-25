@@ -25,13 +25,12 @@
 #[cfg(test)]
 pub(crate) static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Re-executes exactly one test, alone, in a child process, for a test whose
-/// assertion cannot be phrased as a delta CACHE_TEST_LOCK-holding siblings
-/// cannot move: an absolute snapshot of `symtn-core`'s process-global cache
-/// or intern-table counters. `CACHE_TEST_LOCK` only serializes the small set
-/// of tests that take it; any ordinary, unlocked construction elsewhere in
-/// the same binary's cached path can still move those same counters between
-/// this test's own reads (#649/#650 first used this for
+/// Re-executes exactly one test, alone, in a child process, when it requires
+/// cache residency or an absolute snapshot of `symtn-core`'s process-global
+/// cache or intern-table counters. `CACHE_TEST_LOCK` only serializes the small
+/// set of tests that take it; ordinary, unlocked construction elsewhere in
+/// the same binary's cached path can still evict entries or move counters
+/// between this test's own reads (#649/#650 first used this for
 /// `checked_bind_failure_preserves_subset_admission_and_caches`).
 ///
 /// Call at the top of the `#[test]` fn with a name-unique env var and the
