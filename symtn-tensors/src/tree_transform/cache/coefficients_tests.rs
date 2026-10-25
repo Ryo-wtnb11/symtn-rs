@@ -320,6 +320,13 @@ fn an_entry_charges_its_recoupling_matrix_and_trees() {
 /// storage conjugation do not split entries.
 #[test]
 fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer() {
+    // Unlocked constructors can evict groups even while CACHE_TEST_LOCK is held.
+    if crate::test_support::run_isolated_or_return(
+        "SYMTN_TENSORS_COEFFICIENT_DEGENERACY_REUSE_ISOLATED",
+        "tree_transform::cache::coefficients::tests::degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer",
+    ) {
+        return;
+    }
     // Hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()

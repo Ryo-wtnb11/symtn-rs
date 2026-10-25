@@ -1316,6 +1316,9 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query() {
+    let _guard = crate::test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     use symtn_sectors::LieGroupFusionRule;
 
     let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
@@ -1342,8 +1345,8 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
     drop(transform());
     symtn_core::clear_structure_caches();
     drop(transform());
-    // Why the fewest of three calls: a concurrent test's clear may make one
-    // call rebuild its destination layout; re-admission queries every call.
+    // Why the fewest of three calls: unlocked constructors can evict the
+    // destination layout; re-admission queries every call.
     let admission_queries = (0..3)
         .map(|_| {
             provider.reset_calls();
@@ -1662,6 +1665,9 @@ fn measure_checked_generic_transform_case(
 #[test]
 #[ignore = "benchmark: run via benchmarks.yml"]
 fn measure_checked_generic_transform_phases() {
+    let _guard = crate::test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     println!("call_order=channels,dual,n,sqrt_dim,inv_sqrt_dim,frobenius_schur,f,r,dim,a,b");
     println!("spy_instrumented_phase_timings_auxiliary_only=true");
     for (n, adjoint_labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
