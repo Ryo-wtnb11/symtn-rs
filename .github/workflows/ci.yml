@@ -253,7 +253,7 @@ jobs:
       - name: test symtn (krylov)
         if: ${{ !cancelled() }}
         run: |
-          cargo test --locked -p symtn --no-default-features --features "krylov,blas-openblas" --test krylov_vector
+          cargo test --locked -p symtn --no-default-features --features "krylov,blas-openblas" --test serial krylov_vector::
           cargo test --locked -p symtn --no-default-features --features "krylov,blas-openblas" --doc krylov
         working-directory: symtn
 
@@ -341,9 +341,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test --locked -p symtn --no-default-features --features "cgc-gen,cpu-faer" --tests
         working-directory: symtn
-      - name: test symtn-network --test checked_generic_network (cgc-gen)
+      - name: test symtn-network checked_generic_network (cgc-gen)
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p symtn-network --no-default-features --features "cgc-gen,cpu-faer" --test checked_generic_network
+        run: 'cargo test --locked -p symtn-network --no-default-features --features "cgc-gen,cpu-faer" --test serial checked_generic_network::'
         working-directory: symtn
       # cgc-gen together with opt-path: the checked Generic optimizer
       # no-retry tests are gated on both, and neither single-feature job
@@ -483,10 +483,10 @@ jobs:
           set -euo pipefail
           test_output="$(mktemp)"
           trap 'rm -f "$test_output"' EXIT
-          cargo test --locked -p symtn-operations --test cuda_tree_transform --no-default-features --features cuda,cpu-faer \
-            -- --color never 2>&1 | tee "$test_output"
-          grep -Fxq 'test unit_single_member_preflight_rejects_cross_member_geometry ... ok' "$test_output"
-          grep -Fxq 'test single_member_admission_accepts_nonzero_and_rejects_zero ... ok' "$test_output"
+          cargo test --locked -p symtn-operations --test integration --no-default-features --features cuda,cpu-faer \
+            -- cuda_tree_transform:: --color never 2>&1 | tee "$test_output"
+          grep -Fxq 'test cuda_tree_transform::unit_single_member_preflight_rejects_cross_member_geometry ... ok' "$test_output"
+          grep -Fxq 'test cuda_tree_transform::single_member_admission_accepts_nonzero_and_rejects_zero ... ok' "$test_output"
           grep -Eq '^test result: ok\. ([2-9]|[1-9][0-9]+) passed;' "$test_output"
       - name: Clippy all CUDA-feature targets
         working-directory: symtn
@@ -574,10 +574,10 @@ jobs:
           # Restoring it alongside the runner image exhausted disk during link.
           cache-targets: false
       - uses: taiki-e/install-action@cargo-llvm-cov
-      # This job is the Linux unit/integration test runner (#1742). Why-not
-      # serialize integration binaries: their global-state tests are single-test
-      # processes or take their own locks. `--test '*'` selects integration
-      # targets only, so the lib runs once and stays serialized.
+      # This job is the Linux unit/integration test runner (#1742). Serial
+      # targets guard every test; integration targets contain only tests that
+      # neither observe nor reset global state and retain default concurrency.
+      # `--test '*'` selects integration targets only, so the lib runs once.
       - name: Run symtn-tensors tests with isolated cache snapshots
         run: |
           cargo llvm-cov --locked --no-report -p symtn-tensors --lib -- --test-threads=1

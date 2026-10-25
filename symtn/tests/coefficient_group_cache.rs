@@ -11,13 +11,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector};
-use symtn::typed::{Complex32, Complex64, GradedSpace, Runtime, TensorMap};
+use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
-/// The caches are process-global: a test that counts their activity clears
-/// them first and must not race another test publishing the same keys.
+/// Orders this file's cache probes; the shared guard orders probes across files.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
@@ -159,6 +157,7 @@ fn su2_leg(sectors: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
 
 #[test]
 fn su2_sector_change_rebuilds_only_changed_groups() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     check_rule!(
         "SU(2)",
@@ -171,6 +170,7 @@ fn su2_sector_change_rebuilds_only_changed_groups() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     use symtn::sector::LieGroupFusionRule;
 
@@ -196,6 +196,7 @@ fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
 
 #[test]
 fn clear_resets_the_coefficient_cache() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = su2_leg(&[(0, 1), (1, 1)]);
@@ -216,6 +217,7 @@ fn clear_resets_the_coefficient_cache() {
 /// the byte budget binds.
 #[test]
 fn shared_runtime_keeps_every_unchanged_group_across_operations() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     let (a, c) = (
         su2_leg(&[(0, 2), (1, 2), (2, 1)]),
@@ -266,6 +268,7 @@ fn shared_runtime_keeps_every_unchanged_group_across_operations() {
 /// the key's orientation jointly with the conjugated binding.
 #[test]
 fn shared_runtime_distinguishes_operations_on_the_same_groups() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     symtn::cache::clear();
     let leg = su2_leg(&[(0, 2), (1, 2), (2, 1)]);

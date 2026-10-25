@@ -1,15 +1,12 @@
 //! Warm label adaptation allocates only storage for returned channel collections.
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
 use symtn_sectors::{CheckedFusionAlgebra, FusionRule, SU2FusionRule, SectorId};
 
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
-
 #[test]
 fn warm_su2_fusion_and_dual_allocate_only_the_returned_channels() {
+    let _serial = crate::counting_alloc::serial();
     for (spin, calls, bytes) in [(7, 0, 0), (8, 1, 16 * size_of::<SectorId>() as u64)] {
         let sector = SectorId::new(spin);
         let _ = SU2FusionRule.fusion_channels(sector, sector);
@@ -29,6 +26,7 @@ fn warm_su2_fusion_and_dual_allocate_only_the_returned_channels() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     use fusion_symbols::{
         category::FusionCategory,
         lie::{GroupId, LieGroup},
@@ -60,6 +58,7 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
+    let _serial = crate::counting_alloc::serial();
     use fusion_symbols::lie::{GroupId, LieGroup};
     use symtn_sectors::{CategoryProvider, LieGroupFusionRule};
 

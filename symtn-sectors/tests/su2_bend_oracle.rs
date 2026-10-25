@@ -1,10 +1,8 @@
 //! Independent dense-CGC bends in TensorKitSectors 0.3.9's descending basis.
 
-use num_complex::{Complex32, Complex64};
 use symtn_sectors::{MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SU2FusionRule, SectorId};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 #[test]
 fn su2_bends_match_dense_cgc_contractions_with_negative_fs_phase() {

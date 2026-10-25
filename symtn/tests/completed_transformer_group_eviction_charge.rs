@@ -9,11 +9,7 @@ use symtn::cache::StructureCacheKind;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn info(kind: StructureCacheKind) -> symtn::cache::StructureCacheInfo {
     symtn::cache::stats()
@@ -32,7 +28,7 @@ fn su2(degeneracies: [usize; 4]) -> GradedSpace<SU2FusionRule> {
 
 #[test]
 fn completed_transformer_charge_covers_what_it_frees_after_group_eviction() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let (groups, completed) = (
         StructureCacheKind::TreeTransformCoefficients,
         StructureCacheKind::CompletedTreeTransformer,

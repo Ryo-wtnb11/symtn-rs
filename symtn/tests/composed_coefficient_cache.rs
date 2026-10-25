@@ -31,8 +31,7 @@ fn groups() -> StructureCacheInfo {
     cache(StructureCacheKind::TreeTransformCoefficients)
 }
 
-/// The caches are process-global: a test that counts their activity clears
-/// them first and must not race another test publishing the same keys.
+/// Orders this file's cache probes; the shared guard orders probes across files.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
@@ -130,6 +129,7 @@ macro_rules! check_rule {
 
 #[test]
 fn u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     let leg = |sectors: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -149,6 +149,7 @@ fn u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
 
 #[test]
 fn su2_degeneracy_change_reuses_the_composed_coefficients() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     let leg = |sectors: &[(usize, usize)]| {
         GradedSpace::try_new(
@@ -170,6 +171,7 @@ fn su2_degeneracy_change_reuses_the_composed_coefficients() {
 
 #[test]
 fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     let leg = |sectors: &[(i32, usize)]| {
         let rule = ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
@@ -202,6 +204,7 @@ fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_degeneracy_change_reuses_the_composed_coefficients() {
+    let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     use symtn::sector::LieGroupFusionRule;
 

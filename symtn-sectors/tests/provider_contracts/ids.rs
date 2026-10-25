@@ -24,7 +24,7 @@
 
 use symtn_sectors::*;
 
-use crate::{s, table_identity};
+use super::{s, table_identity};
 
 #[test]
 fn parity_ids_are_the_parity() {

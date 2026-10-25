@@ -1,9 +1,8 @@
 //! Device gates of `EighFullPlan`.
 //!
-//! Its own binary, with every test serialized, because `cuda_transfer_stats`
-//! and the plan-cache statistics are process- and context-wide. Run with
-//! `cargo test -p symtn --no-default-features --features cuda,cpu-faer
-//! --test prepared_eigh_cuda -- --ignored`.
+//! CUDA transfer counters are thread-local, so these tests run concurrently.
+//! Run with `cargo test -p symtn --no-default-features --features cuda,cpu-faer
+//! --test integration prepared_eigh_cuda:: -- --ignored`.
 //!
 //! The device keeps the raw cuSOLVER gauge, and with `B > 1` the batched
 //! solver may differ from eager's in the last ULPs, so eigenvectors are
@@ -13,10 +12,9 @@
 
 #![cfg(feature = "cuda")]
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::common;
+
+use crate::prepared;
 
 use std::collections::BTreeSet;
 use std::fmt::Debug;
@@ -38,10 +36,9 @@ use prepared::eigh::{
 };
 use prepared::{fz2u1_legs, members, su2_legs, u1_legs};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
-use fixtures::{codomain_axes, delta, domain_axes, plans, serial};
+use fixtures::{codomain_axes, delta, domain_axes, plans};
 
 /// Checks every member of one device execute against device eager (and at
 /// `B = 1` bit for bit), and against Host eager through the oracle.
@@ -144,7 +141,6 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_members_equal_device_eager_and_the_oracle() {
-    let _serial = serial();
     equivalence("u1", u1_legs().0);
     equivalence("su2", su2_legs().0);
     equivalence("fz2u1", fz2u1_legs().0);
@@ -153,7 +149,6 @@ fn device_members_equal_device_eager_and_the_oracle() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let leg = u1_legs().0;
     let j = SU2Irrep::from_twice_spin;
@@ -199,7 +194,6 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn submissions_transfers_and_the_ledger_do_not_depend_on_b() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (leg, _) = su2_legs();
     let mut per_b = BTreeSet::new();
@@ -308,7 +302,6 @@ fn rejected(result: Result<(), BatchError>) -> Vec<(usize, MemberFault)> {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn non_hermitian_members_are_named_before_any_solver_launch() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (leg, _) = u1_legs();
     for count in [3, 17] {
@@ -342,7 +335,6 @@ fn non_hermitian_members_are_named_before_any_solver_launch() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (leg, _) = u1_legs();
     let h = hermitian_members(&runtime, &[&leg, &leg], 1, 5).remove(0);
@@ -396,7 +388,6 @@ fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn non_finite_entries_and_eigenvalues_reject_their_members() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (leg, _) = u1_legs();
     let mut inputs = single_leg(&runtime, &leg, 5, |_, _, _| 1.0);
@@ -458,7 +449,6 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn complex_device_payloads_are_unsupported() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (leg, _) = u1_legs();
     let complex = members::<_, Complex64>(&runtime, &[&leg], &[&leg], 2, 1);
@@ -508,7 +498,6 @@ fn assert_diagonal_only<R>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_failed_batch_leaves_no_observable_output_and_the_next_call_is_whole() {
-    let _serial = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (leg, _) = u1_legs();
     let good = single_leg(&runtime, &leg, 4, |member, i, j| {

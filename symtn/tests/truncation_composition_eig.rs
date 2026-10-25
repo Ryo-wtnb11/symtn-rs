@@ -17,24 +17,21 @@
 
 use std::sync::Arc;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::{
     FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::TensorMap;
 use symtn::typed::{Eig, GradedSpace, SectorSpectrum};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-#[macro_use]
-mod truncation_oracle;
+use crate::numerics;
+use crate::truncation_oracle;
 
 use truncation_oracle::{
     discarded_norm, kept_values, select, triangular_eigenvalues, ClosedFormDim, Offer,
 };
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes, host_runtime};
 

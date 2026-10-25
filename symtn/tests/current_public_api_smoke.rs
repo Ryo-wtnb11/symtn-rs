@@ -12,10 +12,7 @@ use symtn::typed::{
     TypedTensorRootDispatch,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-
-use symtn::typed::{Complex32, Complex64};
+use crate::numerics;
 
 fn inspect_with_the_existing_root_bound<R, D>(tensor: &TensorMap<R, D>)
 where

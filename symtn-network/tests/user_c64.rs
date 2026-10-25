@@ -12,8 +12,7 @@ use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{conj, net, op};
 
 fn one() -> Complex64 {

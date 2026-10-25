@@ -9,12 +9,9 @@ use symtn::typed::{
     TensorMap,
 };
 
-#[macro_use]
-#[path = "stacked/fixtures.rs"]
-mod fixtures;
+use crate::stacked_fixtures as fixtures;
 
-#[path = "../../tests/support/fixtures.rs"]
-mod shared_fixtures;
+use crate::fixtures as shared_fixtures;
 
 use shared_fixtures::host_runtime;
 

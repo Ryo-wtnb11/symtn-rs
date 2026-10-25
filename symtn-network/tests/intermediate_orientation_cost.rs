@@ -13,27 +13,20 @@
 use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 use symtn_network::plan_cache_stats;
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 type Map = TensorMap<U1FusionRule, f64>;
 
 /// Lookups of the process-global completed-transformer cache; this
-/// binary runs one test, so only it moves them.
+/// target serializes all tests, so only this test moves them.
 fn transform_lookups(_: &Runtime) -> usize {
     let info = completed_transformers();
     (info.hits() + info.misses()) as usize
@@ -41,6 +34,7 @@ fn transform_lookups(_: &Runtime) -> usize {
 
 #[test]
 fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
+    let _serial = crate::counting_alloc::serial();
     // a[x; c] · b[c; y, z, u] runs first (x < w), giving (x | y, z, u). Its
     // consumer contracts y and z with t[y, z; w], so the next-use orientation
     // is (x, u | y, z) as lhs or (y, z | x, u) as rhs: two codomain legs where

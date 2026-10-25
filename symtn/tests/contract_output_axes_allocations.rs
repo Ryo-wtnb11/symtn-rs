@@ -7,21 +7,15 @@
 
 use std::hint::black_box;
 
-use num_complex::{Complex32, Complex64};
 use symtn::sector::{
     FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
     U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// (calls, bytes) allocated while `f` runs; the result is dropped afterwards.
 fn allocations<T>(f: impl FnOnce() -> T) -> ((u64, u64), T) {
@@ -102,7 +96,6 @@ macro_rules! assert_no_costlier_than_permute {
 /// change the split's size.
 macro_rules! assert_output_axes_cost {
     ($provider:expr, $sectors:expr $(,)?) => {{
-        let _guard = counting_alloc::serial();
         let runtime = Runtime::builder().dense_threads(1).build().unwrap();
         let v = GradedSpace::try_new(
             std::sync::Arc::new($provider),
@@ -200,16 +193,19 @@ fn centered(count: i32) -> impl Iterator<Item = i32> {
 
 #[test]
 fn warm_output_axes_u1_costs_no_more_than_contract_then_permute() {
+    let _serial = crate::counting_alloc::serial();
     assert_output_axes_cost!(U1FusionRule, centered(3).map(U1Irrep::new));
 }
 
 #[test]
 fn warm_output_axes_su2_costs_no_more_than_contract_then_permute() {
+    let _serial = crate::counting_alloc::serial();
     assert_output_axes_cost!(SU2FusionRule, (0..3).map(SU2Irrep::from_twice_spin));
 }
 
 #[test]
 fn warm_output_axes_fz2_u1_costs_no_more_than_contract_then_permute() {
+    let _serial = crate::counting_alloc::serial();
     let parity = |q: i32| {
         if q.rem_euclid(2) == 0 {
             Z2Irrep::EVEN

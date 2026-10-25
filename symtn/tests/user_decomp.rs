@@ -4,11 +4,10 @@
 use std::sync::Arc;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{Complex32, Complex64, Runtime};
+use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, Svd, TensorMap, Truncation};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 /// A truncated bond may drop a whole coupled sector, but recomposition must
 /// restore the source layout with a zero block so ordinary typed operations

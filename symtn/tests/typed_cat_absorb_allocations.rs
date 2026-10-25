@@ -13,11 +13,7 @@ use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep};
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measured_allocations<T>(payload_bytes: usize, operation: impl FnOnce() -> T) -> (u64, usize) {
     let (output, allocs) =
@@ -47,6 +43,7 @@ fn pseudo_random(state: &mut u64) -> f64 {
 
 #[test]
 fn typed_cat_uses_one_output_allocation_without_scratch() {
+    let _serial = crate::counting_alloc::serial();
     // What: a warmed typed catdomain owns exactly one output-sized payload
     // and no per-block allocations — the plan executes into the single final
     // buffer.
@@ -82,6 +79,7 @@ fn typed_cat_uses_one_output_allocation_without_scratch() {
 
 #[test]
 fn typed_absorb_clones_the_destination_once() {
+    let _serial = crate::counting_alloc::serial();
     // What: a warmed typed absorb allocates the destination clone and nothing
     // per block — the merge-join writes prefixes in place.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -117,6 +115,7 @@ fn typed_absorb_clones_the_destination_once() {
 
 #[test]
 fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
+    let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap();
@@ -147,6 +146,7 @@ fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
 
 #[test]
 fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
+    let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap();
@@ -182,6 +182,7 @@ fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
 
 #[test]
 fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(Z2FusionRule);
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 128)]).unwrap();
@@ -214,6 +215,7 @@ fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
 
 #[test]
 fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let common = u1_leg(&provider, &[(0, 64)]);
@@ -279,11 +281,11 @@ macro_rules! warm_compact_braid_calls {
 
 #[test]
 fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
+    let _serial = crate::counting_alloc::serial();
     // What (#2011): the compact braid sends sector c to its dual. For U(1)
     // charges ±1 that moves each destination to the other ordinal, and the
     // destination block is still found without an allocation, so the warm
     // call costs exactly what the self-dual Z2 braid of the same shape does.
-    let _serial = counting_alloc::serial();
     let z2 = GradedSpace::try_new(
         Arc::new(Z2FusionRule),
         [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],

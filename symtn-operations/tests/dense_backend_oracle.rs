@@ -4,7 +4,7 @@
 //! never reads the compiled structure; the per-block strided driver serves only
 //! as the bitwise dispatch witness.
 
-mod common;
+use crate::common;
 
 use common::{all_fixtures, recoupling_fixtures, Fixture, TestScalar};
 use num_complex::Complex64;

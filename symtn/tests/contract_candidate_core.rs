@@ -16,15 +16,8 @@
 //! and allocate no more than its literal Core control (C0 `A[2,3]·B[0,1]`,
 //! L4 `P'[2,3]·B[0,1]`).
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-#[allow(unused_macros)]
-mod contract_cases;
+use crate::contract_cases;
+use crate::numerics;
 
 use std::hint::black_box;
 use symtn::typed::ContractSpec;
@@ -39,11 +32,7 @@ use num_complex::{Complex32, Complex64};
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Values against `oracle`, then the warm route evidence on `f64`.
 fn check<R, D>(
@@ -110,7 +99,6 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let probes = probes::<R, f64>(&runtime, v);
     let measured: Vec<_> = probes
@@ -140,6 +128,7 @@ where
 
 #[test]
 fn zero_copy_candidates_run_no_transform_and_allocate_like_literal_core() {
+    let _serial = crate::counting_alloc::serial();
     // Its helper serializes: sibling tests read process-global lookup counts.
     assert_warm_zero_copy(&u1_non_self_dual(), "U(1)");
     assert_warm_zero_copy(&su2(), "SU(2)");
@@ -154,8 +143,8 @@ fn bosonic_values<D: Payload>() {
 
 #[test]
 fn zero_copy_candidates_match_the_tensorkit_blas_contract_sequence() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     bosonic_values::<f64>();
     bosonic_values::<Complex64>();
     bosonic_values::<f32>();
@@ -219,8 +208,8 @@ fn fermionic_values<D: Payload>() {
 
 #[test]
 fn zero_copy_fermionic_candidates_match_tensorkit_with_and_without_twist() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     fermionic_values::<f64>();
     fermionic_values::<Complex64>();
     fermionic_values::<f32>();
@@ -351,7 +340,6 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for case in mixed_cases::<R, f64>(&runtime, v, w) {
         let (_, _, lookups) = warm(&runtime, &case);
@@ -377,8 +365,8 @@ fn su2_second() -> GradedSpace<symtn::sector::SU2FusionRule> {
 
 #[test]
 fn mixed_space_candidates_match_the_blas_sequence_and_the_dense_expansion() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     fn at<D: Payload>() {
         mixed_values::<_, D>(&u1_non_self_dual(), &u1_second(), "U(1)");
         mixed_values::<_, D>(&su2(), &su2_second(), "SU(2)");
@@ -391,6 +379,7 @@ fn mixed_space_candidates_match_the_blas_sequence_and_the_dense_expansion() {
 
 #[test]
 fn mixed_space_candidates_run_no_transform() {
+    let _serial = crate::counting_alloc::serial();
     // Its helper serializes: sibling tests read process-global lookup counts.
     assert_mixed_zero_copy(&u1_non_self_dual(), &u1_second(), "U(1)");
     assert_mixed_zero_copy(&su2(), &su2_second(), "SU(2)");
@@ -491,7 +480,6 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for (case, swapped) in copy_c_probes::<R, f64>(&runtime, v) {
         let (calls, bytes, lookups) = warm(&runtime, &case);
@@ -526,6 +514,7 @@ where
 
 #[test]
 fn zero_copy_candidates_with_an_output_permute_allocate_like_contract_then_permute() {
+    let _serial = crate::counting_alloc::serial();
     // Its helper serializes: sibling tests read process-global lookup counts.
     assert_output_permute_budget(&u1_non_self_dual(), "U(1)");
     assert_output_permute_budget(&su2(), "SU(2)");
@@ -602,8 +591,8 @@ where
 
 #[test]
 fn zero_copy_candidates_with_an_output_permute_match_tensorkit_and_the_dense_expansion() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     fn at<D: Payload>() {
         output_permute_values::<_, D>(&u1_non_self_dual(), &u1_second(), "U(1)");
         output_permute_values::<_, D>(&su2(), &su2_second(), "SU(2)");
@@ -663,7 +652,6 @@ where
         + SectorCodec,
     D: Payload + PartialEq,
 {
-    let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let cases = copy_c_probes::<R, D>(&runtime, v)
         .into_iter()
@@ -728,6 +716,7 @@ where
 
 #[test]
 fn contract_into_takes_the_copy_c_route_of_contract() {
+    let _serial = crate::counting_alloc::serial();
     // Its helper serializes: sibling tests read process-global lookup counts.
     into_copy_c_bits::<_, f64>(&u1_non_self_dual(), &u1_second(), "U(1)");
     into_copy_c_bits::<_, Complex64>(&u1_non_self_dual(), &u1_second(), "U(1)");
@@ -737,15 +726,15 @@ fn contract_into_takes_the_copy_c_route_of_contract() {
 
 #[test]
 fn zero_copy_candidates_with_an_output_permute_equal_contract_then_permute_bitwise() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     output_permute_bits::<_, f64>(&u1_non_self_dual(), &u1_second(), "U(1)");
     output_permute_bits::<_, Complex64>(&su2(), &su2_second(), "SU(2)");
 }
 
 #[test]
 fn uneven_swapped_candidate_with_an_output_permute_runs_one_transform() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let case = uneven_swap::<_, f64>(&runtime, &u1_non_self_dual(), &u1_second());
     let (_, _, lookups) = warm(&runtime, &case);
@@ -808,8 +797,8 @@ fn fermionic_output_permute_values<D: Payload>() {
 
 #[test]
 fn zero_copy_fermionic_candidates_with_an_output_permute_match_tensorkit() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     fermionic_output_permute_values::<f64>();
     fermionic_output_permute_values::<Complex64>();
     fermionic_output_permute_values::<f32>();
@@ -909,7 +898,7 @@ fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionR
 
 #[test]
 fn large_output_from_small_operands_copies_the_operands_not_c() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for case in large_output_cases(&runtime)
         .into_iter()
@@ -942,7 +931,7 @@ fn large_output_from_small_operands_copies_the_operands_not_c() {
 /// per-tree cost (191 calls for X1 and X4 at d90bfd17).
 #[test]
 fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     for case in inactive_output_cases(&runtime) {
         let (calls, bytes, _) = warm(&runtime, &case);
@@ -965,7 +954,7 @@ fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
 /// Debug builds also check the shortcut against full candidate scoring.
 #[test]
 fn small_output_takes_copy_c_without_scoring() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let v = u1(&[(-1, 8), (0, 8), (1, 8)]);
     let c = u1(&[(0, 2), (1, 1)]);
@@ -1023,8 +1012,8 @@ fn small_output_takes_copy_c_without_scoring() {
 /// decision against full scoring; the value is TensorKit's.
 #[test]
 fn swapped_tie_with_an_identity_output_matches_tensorkit() {
+    let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let v = u1_non_self_dual();
     let tensor =

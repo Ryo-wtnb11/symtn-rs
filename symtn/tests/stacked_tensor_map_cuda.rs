@@ -1,8 +1,7 @@
 //! `StackedTensorMap` transfers on a real device (#1497).
 //!
-//! Its own binary with one test, because `cuda_transfer_stats` is
-//! process-wide. Run with `cargo test -p symtn --no-default-features
-//! --features cuda,cpu-faer --test stacked_tensor_map_cuda -- --ignored`.
+//! `cuda_transfer_stats` is thread-local. Run with `cargo test -p symtn --no-default-features
+//! --features cuda,cpu-faer --test integration stacked_tensor_map_cuda:: -- --ignored`.
 
 #![cfg(feature = "cuda")]
 
@@ -12,9 +11,7 @@ use symtn::expert::cuda_transfer_stats;
 use symtn::typed::Runtime;
 use symtn::typed::StackedTensorMap;
 
-#[macro_use]
-#[path = "stacked/fixtures.rs"]
-mod fixtures;
+use crate::stacked_fixtures as fixtures;
 
 macro_rules! device_round_trip {
     ($label:expr, $leg:expr) => {{

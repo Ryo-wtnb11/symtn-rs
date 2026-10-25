@@ -10,9 +10,7 @@ use num_complex::Complex64;
 use symtn::typed::{Direction, Error, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 use symtn_sectors::{TableRule, TableSector};
 
-#[allow(unused_macros)]
-#[path = "support/table_fixture.rs"]
-mod table_fixture;
+use crate::table_fixture;
 use table_fixture::*;
 
 type Table = TensorMap<TableRule, Complex64>;

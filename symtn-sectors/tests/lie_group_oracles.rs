@@ -14,15 +14,13 @@ use std::collections::BTreeMap;
 
 use fusion_symbols::category::FusionCategory;
 use fusion_symbols::lie::{GlobalForm, GroupId, LieError, RootSystem};
-use num_complex::{Complex32, Complex64};
 use symtn_sectors::{
     BraidingStyleKind, CategoryProvider, CheckedGenericFusion, CheckedGenericPivotal,
     CheckedGenericRigidSymbols, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
     SectorId,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn rule(group: GroupId) -> LieGroupFusionRule {
     LieGroupFusionRule::new(group).unwrap()

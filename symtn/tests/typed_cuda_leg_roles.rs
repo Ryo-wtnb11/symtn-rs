@@ -7,7 +7,7 @@
 //! roles, compared under a tolerance through the reconstruction.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_leg_roles -- --ignored` on a CUDA host.
+//! integration typed_cuda_leg_roles:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 

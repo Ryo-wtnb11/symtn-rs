@@ -2,19 +2,16 @@ use std::sync::{Arc, Barrier};
 use symtn::typed::ContractSpec;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     clear_plan_cache, configure_plan_cache, load_plan_cache, plan_cache_config, plan_cache_stats,
     save_plan_cache, PlanCacheConfig, ReplanPolicy,
 };
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn space(provider: Arc<U1FusionRule>, dim: usize) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(provider, [(U1Irrep::new(0), dim)]).unwrap()

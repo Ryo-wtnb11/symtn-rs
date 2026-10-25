@@ -3,6 +3,7 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_compact_svd_preserves_provider_and_reconstructs() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -51,6 +52,7 @@ fn sun_checked_generic_compact_svd_preserves_provider_and_reconstructs() {
 
 #[test]
 fn checked_generic_dense_input_svd_publishes_compact_multisector_s() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg =
@@ -154,6 +156,7 @@ fn checked_generic_dense_input_svd_publishes_compact_multisector_s() {
 
 #[test]
 fn checked_compact_diagonal_svd_matches_hand_permutation_and_phase() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond =
@@ -322,7 +325,7 @@ fn checked_compact_diagonal_svd_matches_hand_permutation_and_phase() {
 
 #[test]
 fn checked_compact_diagonal_svd_rejects_nonfinite_and_skips_the_provider_when_finite() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -395,7 +398,7 @@ fn checked_compact_diagonal_svd_rejects_nonfinite_and_skips_the_provider_when_fi
 
 #[test]
 fn checked_compact_diagonal_svd_is_direct_for_subnormal_and_overflowing_values() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -481,6 +484,7 @@ fn checked_compact_diagonal_svd_is_direct_for_subnormal_and_overflowing_values()
 
 #[test]
 fn checked_compact_diagonal_svd_preserves_dual_and_changed_roles() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let dual_bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
@@ -534,6 +538,7 @@ fn checked_compact_diagonal_svd_preserves_dual_and_changed_roles() {
 
 #[test]
 fn checked_generic_full_svd_keeps_dense_s_for_equal_total_but_unequal_sector_bonds() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let rows =
@@ -565,7 +570,7 @@ fn checked_generic_full_svd_keeps_dense_s_for_equal_total_but_unequal_sector_bon
 
 #[test]
 fn checked_compact_diagonal_svd_full_is_its_compact_svd_under_a_provider_bond_mismatch() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -621,6 +626,7 @@ fn checked_compact_diagonal_svd_full_is_its_compact_svd_under_a_provider_bond_mi
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_full_svd_preserves_provider_reconstructs_and_accepts_lazy() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -695,6 +701,7 @@ fn sun_checked_generic_full_svd_preserves_provider_reconstructs_and_accepts_lazy
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_svd_vals_matches_compact_spectrum() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -720,6 +727,7 @@ fn sun_checked_generic_svd_vals_matches_compact_spectrum() {
 
 #[test]
 fn checked_compact_svd_vals_preserves_leg_roles_and_decode_failure() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::typed::{CheckedGenericPlanError, OperationError};
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -766,6 +774,7 @@ fn checked_compact_svd_vals_preserves_leg_roles_and_decode_failure() {
 
 #[test]
 fn checked_generic_svd_truncation_reconstructs_and_preserves_provider() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -806,6 +815,7 @@ fn checked_generic_svd_truncation_reconstructs_and_preserves_provider() {
 
 #[test]
 fn checked_generic_compact_svd_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(122));
@@ -830,6 +840,7 @@ fn checked_generic_compact_svd_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_generic_full_svd_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -859,7 +870,7 @@ fn checked_generic_full_svd_failure_is_typed_and_nonpublishing() {
 /// `svd_compact` with the typed plan error and runs no dense SVD.
 #[test]
 fn checked_dual_compact_diagonal_svd_compact_propagates_provider_errors() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let runtime = Runtime::builder()
         .dense_threads(1)
@@ -1030,6 +1041,7 @@ macro_rules! assert_sun_compact_laws {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_compact_factors_and_spectra_on_facade_layouts() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

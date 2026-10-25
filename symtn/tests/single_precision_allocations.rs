@@ -26,11 +26,7 @@ use symtn::typed::FactorScalar;
 use symtn::typed::{Complex32, Complex64, GradedSpace, Runtime, TensorMap, Truncation};
 use symtn::typed::{Qr, Svd};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 // Why `counting_alloc::serial()`: the three tests here can run
 // concurrently under cargo's default in-binary test threading. The
@@ -66,7 +62,7 @@ macro_rules! permuted {
 
 #[test]
 fn runtime_construction_does_not_build_unused_dtype_lanes() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // Warm anything the process initialises once (thread pools, env parsing)
     // so every build measured below is steady state.
     black_box(build_runtime());
@@ -157,7 +153,7 @@ macro_rules! measure_pipeline {
 
 #[test]
 fn single_precision_allocates_as_often_as_double_and_half_the_payload_bytes() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let space = u1_space();
 
@@ -267,7 +263,7 @@ macro_rules! measure_factorizations {
 
 #[test]
 fn single_precision_factorizations_allocate_like_double() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let space = u1_space();
 

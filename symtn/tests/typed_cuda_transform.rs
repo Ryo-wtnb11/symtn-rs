@@ -24,17 +24,11 @@
 //! what proves a coefficient other than `1` or a recoupling block took part.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_transform -- --ignored` on a CUDA host.
+//! integration typed_cuda_transform:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
+use crate::common;
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.

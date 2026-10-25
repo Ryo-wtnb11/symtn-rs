@@ -20,11 +20,7 @@ type Fz2U1Su2Codec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
 type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, Fz2U1Su2Codec>;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize) {
     let (value, allocs) = counting_alloc::measure(operation);
@@ -66,6 +62,7 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
 
 #[test]
 fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     // What: cold region compilation is observable, while explicit warm-up
     // leaves both public reductions allocation-free on the caller thread.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -102,6 +99,7 @@ fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
 
 #[test]
 fn warmed_non_abelian_trace_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let space = non_abelian_space();
     let owned: TensorMap<Fz2U1Su2Rule, Complex64> =
@@ -121,6 +119,7 @@ fn warmed_non_abelian_trace_does_not_allocate() {
 
 #[test]
 fn warmed_lazy_adjoint_inner_does_not_allocate_in_mixed_or_double_orientation() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let space = non_abelian_space();
     let lhs_parent: TensorMap<Fz2U1Su2Rule, Complex64> =
@@ -152,6 +151,7 @@ fn warmed_lazy_adjoint_inner_does_not_allocate_in_mixed_or_double_orientation() 
 
 #[test]
 fn warmed_compact_dense_inner_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let spin0 = SU2Irrep::from_twice_spin(0);
     let spin_half = SU2Irrep::from_twice_spin(1);
@@ -190,8 +190,7 @@ fn warmed_compact_dense_inner_does_not_allocate() {
 // The shared checked Generic toy: outer multiplicity two on `X (x) X -> X`
 // and an allocation-free `dim`, so the rows below measure the reduction
 // owners and not the provider.
-#[path = "../../tests/support/toy_rules.rs"]
-mod toy_rules;
+use crate::toy_rules;
 
 use toy_rules::{GenericLabel, GenericToy};
 
@@ -227,6 +226,7 @@ macro_rules! coupled_sector_count {
 
 #[test]
 fn warmed_checked_generic_reductions_do_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     // What: checked Generic reductions take their `dim(c)` weights
     // through one fallible closure and never build a per-call weight map
     // (a std `HashMap`, #1219), for owned and lazy-adjoint inputs alike.
@@ -316,6 +316,7 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -389,6 +390,7 @@ fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
 /// once `|t|²` is `f32`-subnormal) cannot meet.
 #[test]
 fn checked_generic_single_precision_norm_accumulates_wide() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
@@ -464,6 +466,7 @@ fn checked_generic_single_precision_norm_accumulates_wide() {
 /// densified copy of the compact operand.
 #[test]
 fn warmed_checked_generic_compact_reductions_do_not_densify() {
+    let _serial = crate::counting_alloc::serial();
     const K: usize = 16;
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(GenericToy), [(GenericLabel::X, K)]).unwrap();
@@ -522,6 +525,7 @@ fn warmed_checked_generic_compact_reductions_do_not_densify() {
 
 #[test]
 fn warmed_complex_symbol_reductions_do_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol lane (#2281) reads the real quantum dimension
     // through the same seam, so warm Ising `inner`, `norm` and `tr` stay
     // allocation-free on the caller thread, owned and lazy.

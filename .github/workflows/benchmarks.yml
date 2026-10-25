@@ -72,7 +72,7 @@ jobs:
         working-directory: symtn
       - name: checked-Generic public transform measurement (cgc-gen)
         if: ${{ !cancelled() }}
-        run: cargo test --locked --release -p symtn --no-default-features --features cgc-gen,cpu-faer --test permute_overwrite_allocations -- --ignored --exact checked_generic_public_transform_measurement --nocapture
+        run: cargo test --locked --release -p symtn --no-default-features --features cgc-gen,cpu-faer --test serial -- --ignored --exact permute_overwrite_allocations::checked_generic_public_transform_measurement --nocapture
         working-directory: symtn
       - name: checked-Generic transform phase measurement (cgc-gen)
         if: ${{ !cancelled() }}

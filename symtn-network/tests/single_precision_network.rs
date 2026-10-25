@@ -16,8 +16,7 @@ use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
 const K: f64 = 32.0;

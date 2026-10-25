@@ -1,0 +1,60 @@
+    Checking symtn-dense v0.1.1 (/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/wt-symtn-2387/symtn-dense)
+    Checking symtn-macros v0.1.1 (/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/wt-symtn-2387/symtn-macros)
+    Checking symtn-sectors v0.1.1 (/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/wt-symtn-2387/symtn-sectors)
+    Checking strided-basic v0.4.4
+    Checking symtn-core v0.1.1 (/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/wt-symtn-2387/symtn-core)
+    Checking strided-fused v0.4.4
+    Checking strided-kernel v0.4.4
+    Checking symtn-operations v0.1.1 (/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/wt-symtn-2387/symtn-operations)
+    Checking symtn-production-contract v0.0.0 (/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/wt-symtn-2387/tests/production-contract)
+error: symtn-operations requires a host execution backend; enable cpu-faer, cpu-blas, a blas-* provider, or provider-inject (cuda still requires host replay)
+  --> symtn-operations/src/lib.rs:23:1
+   |
+23 | / compile_error!(
+24 | |     "symtn-operations requires a host execution backend; enable cpu-faer, cpu-blas, a blas-* provider, or provider-inject (cuda st...
+25 | | );
+   | |_^
+
+error[E0432]: unresolved import `symtn_dense::SharedCpuContext`
+  --> symtn-operations/src/host_pool.rs:29:5
+   |
+29 | use symtn_dense::SharedCpuContext;
+   |     ^^^^^^^^^^^^^----------------
+   |                  |
+   |                  no `SharedCpuContext` in the root
+   |
+note: found an item that was configured out
+  --> symtn-dense/src/lib.rs:57:5
+   |
+54 | #[cfg(feature = "tenferro")]
+   |       -------------------- the item is gated behind the `tenferro` feature
+...
+57 |     SharedCpuContext,
+   |     ^^^^^^^^^^^^^^^^
+
+error[E0432]: unresolved imports `symtn_dense::CpuBackendKind`, `symtn_dense::DefaultDenseExecutor`
+  --> symtn-operations/src/replay_backend.rs:5:19
+   |
+ 5 | use symtn_dense::{CpuBackendKind, DefaultDenseExecutor, DenseExecutor};
+   |                   ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^ no `DefaultDenseExecutor` in the root
+   |                   |
+   |                   no `CpuBackendKind` in the root
+   |
+note: found an item that was configured out
+  --> symtn-dense/src/lib.rs:64:23
+   |
+63 | #[cfg(feature = "tenferro")]
+   |       -------------------- the item is gated behind the `tenferro` feature
+64 | pub use tenferro_cpu::CpuBackendKind;
+   |                       ^^^^^^^^^^^^^^
+note: found an item that was configured out
+  --> symtn-dense/src/lib.rs:56:66
+   |
+54 | #[cfg(feature = "tenferro")]
+   |       -------------------- the item is gated behind the `tenferro` feature
+55 | pub use tenferro_adapter::{
+56 |     cpu_session_stats, reset_cpu_session_stats, CpuSessionStats, DefaultDenseExecutor,
+   |                                                                  ^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `symtn-operations` (lib) due to 3 previous errors

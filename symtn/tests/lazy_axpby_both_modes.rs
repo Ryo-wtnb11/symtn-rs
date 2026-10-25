@@ -28,8 +28,7 @@ use std::sync::Arc;
 use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{BlockFusionTrees, Complex64, GradedSpace, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

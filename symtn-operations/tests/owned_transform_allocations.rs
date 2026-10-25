@@ -7,11 +7,7 @@ use symtn_operations::{
     TreeTransformStructure, TreeTransformWorkspace,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn canonical_structure() -> Arc<BlockStructure> {
     let key = BlockKey::from(
@@ -29,6 +25,7 @@ fn canonical_structure() -> Arc<BlockStructure> {
 
 #[test]
 fn warm_owned_transform_allocates_only_the_output_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: after plan/region caches are warm, the uninitialized writer makes
     // one allocation for the returned Vec and no pre-zero scratch allocation.
     let structure = canonical_structure();

@@ -127,7 +127,7 @@ macro_rules! assert_same_typed_block_structure {
 
 #[test]
 fn typed_inverse_index_ops_pin_values_and_preserve_structure() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let simple = typed_fz2_two_block(&runtime, false);
     let dual = typed_fz2_two_block(&runtime, true);
@@ -285,7 +285,7 @@ fn typed_inverse_index_ops_pin_values_and_preserve_structure() {
 
 #[test]
 fn inverse_index_ops_cover_the_fermionic_simple_product() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = fz2_u1_su2_oracle(&runtime, 1.0);
     for legs in [&[0usize][..], &[1][..], &[0, 1][..]] {
@@ -314,13 +314,13 @@ fn inverse_index_ops_cover_the_fermionic_simple_product() {
 
 #[test]
 fn typed_multi_leg_dense_twist_is_the_per_leg_product_by_value() {
+    let _serial = crate::counting_alloc::serial();
     // What: the multi-leg dense twist coefficient is pinned by a hand-computed
     // value. A mutation that drops the per-leg product in the shared
     // `twist_block_factor` (e.g. keeping only the first leg's θ) survives
     // ordinary cross-operation parity gates, which share the same helper.
     // Fixture: fZ2 `V <- V`, even block 2.0, odd block 3.0, θ(odd) = −1;
     // both legs carry the block's coupled sector.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = typed_fz2_doctest(&runtime);
     // One leg: θ bites, the odd block negates (sanity that the factor is
@@ -344,10 +344,10 @@ fn typed_multi_leg_dense_twist_is_the_per_leg_product_by_value() {
 
 #[test]
 fn typed_flip_is_a_fourth_root_of_identity_and_flip_squared_scales_odd_blocks() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 2): the TensorKit non-involution law on the typed facade —
     // flip² returns to the original spaces but scales the odd block by
     // θ = −1; only flip⁴ = id.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = typed_fz2_doctest(&runtime);
     let f1: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
@@ -369,7 +369,7 @@ fn typed_flip_is_a_fourth_root_of_identity_and_flip_squared_scales_odd_blocks() 
 
 #[test]
 fn typed_flip_rejects_a_repeated_leg() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_leg = GradedSpace::try_new(
         Arc::new(symtn::sector::U1FusionRule),
@@ -426,13 +426,13 @@ fn typed_flip_rejects_a_repeated_leg() {
 
 #[test]
 fn typed_insert_unit_round_trips_at_every_position_and_shares_the_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 4): `insert_unit` at every legal
     // position `0..=rank` followed by `remove_unit` at the inserted axis
     // restores the spaces *and* the payload allocation — `data()` returns the
     // same buffer address, the O(1) reuse the #613 contract promises for a
     // dense payload. (The `Arc`-level gate lives with the body layout tests
     // in `typed.rs`, which can see the private fields.)
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = fz2_index(&runtime);
     for position in 0..=typed.rank() {
@@ -482,9 +482,9 @@ fn typed_insert_unit_round_trips_at_every_position_and_shares_the_payload() {
 
 #[test]
 fn typed_index_op_error_classes_and_empty_shortcuts_are_stable() {
+    let _serial = crate::counting_alloc::serial();
     // What: each rejected input returns the typed error class and operation-
     // specific message, while an empty leg list is a buffer-sharing clone.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = fz2_index(&runtime);
 
@@ -571,9 +571,9 @@ fn typed_index_op_error_classes_and_empty_shortcuts_are_stable() {
 
 #[test]
 fn typed_twist_on_a_compact_spectrum_matches_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact twist arm matches the ordinary dense tree transform
     // on an SVD spectrum whose coupled sectors include the odd one.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = fz2_index(&runtime);
     let typed_s: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
@@ -606,12 +606,12 @@ fn typed_twist_on_a_compact_spectrum_matches_the_dense_route() {
 
 #[test]
 fn external_z3_twist_flip_and_units_hold_by_value() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 7): typed-only checks on the external Z3 provider. Coverage
     // limit, on purpose: Z3 is bosonic (θ ≡ 1, χ ≡ 1), so `twist` exercises
     // only the identity short-circuit and `flip` only the structural toggle
     // with factor 1 — the θ/χ-bearing arms are covered by the built-in fZ2
     // parity gates above; the harness has no fermionic external provider.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let w = z3_leg(&provider, false);
@@ -660,13 +660,13 @@ fn external_z3_twist_flip_and_units_hold_by_value() {
 
 #[test]
 fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
+    let _serial = crate::counting_alloc::serial();
     // What: under `BraidingStyleKind::NoBraiding` the
     // twist eigenvalue is undefined, so twist/flip on a leg carrying any
     // non-unit sector must fail — TensorKit `has_shared_twist`
     // (`tensors/indexmanipulations.jl:34-41`) throws `SectorMismatch` there
     // — instead of silently applying θ ≡ 1. The compact spectrum arm must
     // hit the same preflight before its own dispatch.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(planar_z2());
     let mixed = GradedSpace::try_new(
@@ -707,6 +707,7 @@ fn external_nobraiding_twist_and_flip_reject_nontrivial_sectors() {
 
 #[test]
 fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
+    let _serial = crate::counting_alloc::serial();
     // What: the TK asymmetry on
     // vacuum-only legs under NoBraiding. `twist` carries an explicit
     // unit-sector carve-out (`has_shared_twist`,
@@ -717,7 +718,6 @@ fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
     // NoBraiding sector defines, so flip fails in TK even on the vacuum and
     // must fail here. The boundary stays: `flip(&[])` is the empty-list
     // identical clone and never reaches the guard.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(planar_z2());
     let unit_only = GradedSpace::try_new(Arc::clone(&provider), [(PlanarParity(0), 2)]).unwrap();
@@ -765,9 +765,9 @@ fn external_nobraiding_vacuum_only_legs_twist_passes_flip_rejects() {
 
 #[test]
 fn cu1_typed_rank_three_permutation_pins_the_gauge_contract_and_recoupling_values() {
+    let _serial = crate::counting_alloc::serial();
     // What: CU(1) does not certify a trivial associator gauge, and this
     // rank-three charged fixture independently pins its recoupled payload.
-    let _guard = cache_lock();
     let runtime = runtime();
     let rule = Arc::new(CU1FusionRule);
     assert!(!rule.has_trivial_associator_gauge());

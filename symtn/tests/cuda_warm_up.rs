@@ -1,16 +1,12 @@
 //! Real-device gates for #1278: building a CUDA `Runtime` pays the tenferro
 //! backend library initialization, so no user operation does.
 //!
-//! Run with `cargo test -p symtn --features cuda,cpu-faer --test cuda_warm_up \
-//! -- --ignored` on a CUDA host. These assertions read the process-wide
-//! [`symtn::expert::cuda_transfer_stats`] counters, which is why they live in
-//! their own test binary: another test submitting device work in the same
-//! process would perturb the deltas.
+//! Run with `cargo test -p symtn --features cuda,cpu-faer --test integration cuda_warm_up:: \
+//! -- --ignored` on a CUDA host. Transfer counter snapshots are thread-local.
 
 #![cfg(feature = "cuda")]
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 use std::sync::Arc;
 

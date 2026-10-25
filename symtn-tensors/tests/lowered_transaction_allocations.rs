@@ -3,15 +3,12 @@ use std::sync::Arc;
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace, U1FusionRule};
 use symtn_tensors::BoundDynamicFusionMapSpace;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn lowered_scratch_hit_matches_encoded_hit_allocation_and_identity() {
-    // What: in this single-test process, the transactional lowered warm hit
+    let _serial = crate::counting_alloc::serial();
+    // What: under the shared serial guard, the transactional lowered warm hit
     // keeps encoded allocation cost and exact retained structure identity.
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();

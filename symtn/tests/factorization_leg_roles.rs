@@ -22,22 +22,17 @@ use symtn::typed::{
     Eig, Eigh, Error, GradedSpace, LeftPolar, Lq, Qr, RightPolar, Runtime, Svd, TensorMap,
 };
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 /// `(allocations, bytes)` requested on this thread while `f` runs.
 fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize) {
     let (value, allocs) = counting_alloc::measure(f);
     (value, allocs.calls as usize, allocs.bytes as usize)
 }
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 
@@ -307,7 +302,7 @@ macro_rules! check_fixture {
 
 #[test]
 fn leg_roles_equal_the_permute_composition() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     check_fixture!(runtime, u1_legs(), f64, 1553, "u1 f64");
     check_fixture!(runtime, u1_legs(), Complex64, 1553, "u1 c64");
@@ -320,7 +315,7 @@ fn leg_roles_equal_the_permute_composition() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_leg_roles_equal_the_permute_composition() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
     let runtime = host_runtime();
     let provider =
@@ -337,7 +332,7 @@ fn checked_generic_leg_roles_equal_the_permute_composition() {
 
 #[test]
 fn lazy_adjoint_leg_roles_equal_the_permute_composition() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = su2_legs();
     let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &w], [&w, &v], 7).unwrap();
@@ -356,7 +351,7 @@ fn lazy_adjoint_leg_roles_equal_the_permute_composition() {
 /// allocations and bytes must agree: the leg roles add exactly one permute.
 #[test]
 fn space_preserving_roles_cost_the_current_split_plus_one_permute() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = su2_legs();
     let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&w, &w], 9).unwrap();
@@ -400,7 +395,7 @@ fn space_preserving_roles_cost_the_current_split_plus_one_permute() {
 /// and requested bytes as the explicit `permute` followed by the operation.
 #[test]
 fn leg_roles_cost_exactly_the_explicit_composition() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = su2_legs();
     let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &w], [&w, &v], 3).unwrap();
@@ -447,7 +442,7 @@ fn leg_roles_cost_exactly_the_explicit_composition() {
 
 #[test]
 fn solve_roles_cost_the_two_explicit_permutations() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = su2_legs();
     let a: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v, &w], [&v, &w]).unwrap();
@@ -514,7 +509,7 @@ fn solve_roles_cost_the_two_explicit_permutations() {
 
 #[test]
 fn malformed_roles_are_rejected_before_the_operation() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
     let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &w], [&w, &v], 1).unwrap();
@@ -566,7 +561,7 @@ fn malformed_roles_are_rejected_before_the_operation() {
 /// fermionic signs and dual flips into `exp`, `inv` and `eig_full`.
 #[test]
 fn fermionic_boundary_crossing_square_roles_equal_the_permute_composition() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = fz2_u1_legs();
     let t: TensorMap<_, Complex64> =

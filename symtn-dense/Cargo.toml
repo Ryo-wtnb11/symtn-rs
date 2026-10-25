@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "symtn-dense"
 version = "0.1.1"
 description = "Dense block execution for symtn"
@@ -68,3 +69,19 @@ tenferro-gpu = { version = "0.7.1", default-features = false, optional = true }
 # The version tenferro-gpu pins, named only to set its process-wide stream
 # count before the first client load (`single_cubecl_stream`, #1391).
 cubecl-runtime = { package = "t4a-cubecl-runtime", version = "=0.10.1", optional = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "serial"
+path = "tests/serial.rs"
+
+[[test]]
+name = "cuda_stream_config_conflict"
+path = "tests/cuda_stream_config_conflict.rs"
+
+[[test]]
+name = "cuda_stream_config_single"
+path = "tests/cuda_stream_config_single.rs"

@@ -6,6 +6,8 @@
 //! doubles as proof that a downstream application can drive the typed facade
 //! with its own category.
 
+use crate::{numerics, ulp};
+
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
 macro_rules! full_transpose {
@@ -44,41 +46,23 @@ use symtn::sector::{
 };
 use symtn::sector::{TableRule, TableSector};
 use symtn::typed::FusionAlgebraError;
-use symtn::typed::{Complex32, Complex64, Runtime};
+use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{
     Eig, Eigh, GradedSpace, LeftPolar, Lq, Qr, RightPolar, Svd, TensorMap, Truncation,
 };
 
-#[path = "../../../tests/support/numerics.rs"]
-mod numerics;
-#[path = "../support/report.rs"]
-mod report;
-#[path = "../ulp/mod.rs"]
-mod ulp;
+use crate::report;
+
 use report::Report;
 
-/// The fusion-tree layout and complete-structure caches are process-global, so
-/// the tests in this binary that snapshot them must not run beside a test that
-/// builds a layout. Only this binary shares those globals; other test binaries
-/// are separate processes.
+/// Orders the local cache probes in addition to the target-wide serial guard.
 static CACHE_LOCK: Mutex<()> = Mutex::new(());
 
 fn cache_lock() -> MutexGuard<'static, ()> {
     CACHE_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Re-executes exactly one test, alone, in a child process, for a test whose
-/// assertion cannot be phrased as a delta CACHE_LOCK-holding siblings cannot
-/// move: an absolute snapshot of the process-global fusion-tree-layout or
-/// complete-HomSpace-structure cache counters. `CACHE_LOCK` only serializes
-/// the tests that take it; this binary also has ordinary tests that build a
-/// fresh tensor (a cache mutation) without taking it, e.g.
-/// `graded_space_reports_labels_in_provider_sector_id_order` and
-/// `fibonacci_complex_tensor_reaches_all_checked_constructors` — confirmed by
-/// a forced-interleaving reproduction where such an unlocked build landing
-/// between this test's own reads changed its snapshot. Same technique as
-/// symtn-tensors #649/#650's `checked_bind_failure_preserves_subset_admission_and_caches`
-/// and symtn-core/symtn-tensors' #1598/#1606 fix.
+/// Re-executes exactly one cache probe with explicit fresh-process state.
 ///
 /// Call at the top of the `#[test]` fn with a name-unique env var and the
 /// test's libtest path; when it returns `true`, the child already ran the
@@ -88,7 +72,11 @@ fn run_isolated_or_return(isolated_env: &str, test_path: &str) -> bool {
         return false;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", test_path, "--include-ignored"])
+        .args([
+            "--exact",
+            &format!("typed_facade::{test_path}"),
+            "--include-ignored",
+        ])
         .env(isolated_env, "1")
         .output()
         .unwrap();
@@ -857,15 +845,9 @@ impl CategoryCodec<PlanarTrivial> for PlanarTrivialCodec {
 
 #[test]
 fn a_failing_typed_operation_publishes_no_cache_state() {
-    // Isolated like symtn-tensors #649/#650's checked_bind_failure test:
-    // this asserts an absolute process-global cache snapshot. CACHE_LOCK
-    // only serializes tests that take it, and this binary has ordinary,
-    // unlocked tests that build a fresh tensor (e.g.
-    // graded_space_reports_labels_in_provider_sector_id_order,
-    // fibonacci_complex_tensor_reaches_all_checked_constructors) that can
-    // land in the same narrow window and move the same counters; a
-    // forced-interleaving reproduction confirmed this concretely. Reported
-    // failing 1 of 5 parallel runs on qg1 (#1606 comment).
+    let _serial = crate::counting_alloc::serial();
+    // Keep the absolute process-global snapshot in an explicitly fresh child
+    // process, as in the original #1606 regression gate.
     if run_isolated_or_return(
         "SYMTN_TYPED_FACADE_FAILING_OPERATION_PUBLISHES_NO_CACHE_STATE_ISOLATED",
         "a_failing_typed_operation_publishes_no_cache_state",
@@ -944,7 +926,7 @@ mod typed_is_self_sufficient {
 
     #[test]
     fn typed_imports_run_an_end_to_end_typed_operation() {
-        let _guard = super::cache_lock();
+        let _serial = crate::counting_alloc::serial();
         let runtime: Runtime = Runtime::builder().build().expect("runtime builds");
         let provider = Arc::new(external_z3());
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 2), (Z3Charge(1), 3)])
@@ -1575,8 +1557,7 @@ impl CategoryCodec<PlanarZ2> for PlanarZ2Codec {
 // (#1355, #1372).
 // ---------------------------------------------------------------------------
 
-#[path = "../braiding_probe/mod.rs"]
-mod braiding_probe;
+use crate::braiding_probe;
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 
 mod compose;

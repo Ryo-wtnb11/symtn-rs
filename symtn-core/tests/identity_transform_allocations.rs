@@ -13,11 +13,7 @@ use symtn_core::{
     SectorLeg, SectorVec, Z2FusionRule, Z2Irrep,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[derive(Clone, Copy)]
 struct AllocationAnyonicRule;
@@ -101,6 +97,7 @@ impl MultiplicityFreeRigidSymbols for AllocationAnyonicRule {
 
 #[test]
 fn unique_identity_permute_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     // What: the identity Unique permutation returns its inline tree key
     // without constructing permutation-level scratch.
     let tree = FusionTreeKey::try_new_for_rule(
@@ -124,6 +121,7 @@ fn unique_identity_permute_does_not_allocate() {
 
 #[test]
 fn large_tree_pair_syntax_validation_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     let codomain_rank = 10;
     let domain_rank = 9;
     let codomain = (0..codomain_rank).collect::<Vec<_>>();
@@ -169,6 +167,7 @@ fn large_tree_pair_syntax_validation_does_not_allocate() {
 
 #[test]
 fn axis_validation_is_allocation_free_through_rank_128() {
+    let _serial = crate::counting_alloc::serial();
     let permutation = (0..128).rev().collect::<Vec<_>>();
     let subset = (0..128).step_by(3).collect::<Vec<_>>();
 
@@ -186,6 +185,7 @@ fn axis_validation_is_allocation_free_through_rank_128() {
 
 #[test]
 fn unique_rank_129_preparation_borrows_prebuilt_operation_metadata() {
+    let _serial = crate::counting_alloc::serial();
     let rank = 129;
     let permutation = (0..rank).rev().collect::<Vec<_>>();
     let raw_axis_positions = (0..rank).rev().collect::<Vec<_>>();
@@ -211,6 +211,7 @@ fn unique_rank_129_preparation_borrows_prebuilt_operation_metadata() {
 
 #[test]
 fn block_identity_permute_allocates_only_owned_output() {
+    let _serial = crate::counting_alloc::serial();
     let source = FusionTreePairKey::try_pair_from_sector_ids(
         [1, 1],
         [0],
@@ -254,6 +255,7 @@ fn columns(
 
 #[test]
 fn indexed_adjoint_identity_allocates_only_owned_output() {
+    let _serial = crate::counting_alloc::serial();
     let source = FusionTreePairKey::try_pair_from_sector_ids(
         [1, 1],
         [0],
@@ -300,6 +302,7 @@ fn indexed_adjoint_identity_allocates_only_owned_output() {
 
 #[test]
 fn indexed_adjoint_simple_group_allocates_only_owned_rows() {
+    let _serial = crate::counting_alloc::serial();
     let half = SU2Irrep::from_twice_spin(1).sector_id();
     let leg = || SectorLeg::new([(half, 1)], false);
     // `½^⊗3 ← ½^⊗3`: five tree pairs in one Simple group, so a per-source
@@ -362,6 +365,7 @@ fn indexed_adjoint_simple_group_allocates_only_owned_rows() {
 
 #[test]
 fn compact_block_warm_allocations_do_not_restore_per_source_scratch() {
+    let _serial = crate::counting_alloc::serial();
     let rule = SU2FusionRule;
     let spin_one = SU2Irrep::from_twice_spin(2).sector_id();
     let codomain: [SectorLeg; 8] = std::array::from_fn(|_| SectorLeg::new([(spin_one, 1)], false));
@@ -408,6 +412,7 @@ fn compact_block_warm_allocations_do_not_restore_per_source_scratch() {
 
 #[test]
 fn shared_frame_decode_does_not_allocate_per_source_above_inline_rank() {
+    let _serial = crate::counting_alloc::serial();
     for (rank, max_per_extra_source) in [(9usize, 4usize), (16, 8)] {
         let even = Z2Irrep::EVEN.sector_id();
         let source = FusionTreeKey::try_new_for_rule(
@@ -447,6 +452,7 @@ fn shared_frame_decode_does_not_allocate_per_source_above_inline_rank() {
 
 #[test]
 fn tree_pair_shared_frames_do_not_allocate_per_source_above_inline_rank() {
+    let _serial = crate::counting_alloc::serial();
     for (rank, max_per_extra_source) in [(9usize, 4usize), (16, 8)] {
         let even = Z2Irrep::EVEN.sector_id();
         let codomain = FusionTreeKey::try_new_for_rule(
@@ -507,6 +513,7 @@ fn measured_allocation_stats<T>(operation: impl FnOnce() -> T) -> (T, usize, usi
 
 #[test]
 fn prepared_nonidentity_unique_operations_have_zero_prepare_and_stable_execute_allocations() {
+    let _serial = crate::counting_alloc::serial();
     let odd = Z2Irrep::ODD.sector_id();
     let even = Z2Irrep::EVEN.sector_id();
     let tree = || {
@@ -604,6 +611,7 @@ fn prepared_nonidentity_unique_operations_have_zero_prepare_and_stable_execute_a
 
 #[test]
 fn borrowed_unique_execution_allocations_do_not_scale_with_artin_schedule() {
+    let _serial = crate::counting_alloc::serial();
     let rule = AllocationAnyonicRule;
     let rank = 9;
     let source_tree = FusionTreeKey::try_new_for_rule(
@@ -679,6 +687,7 @@ fn borrowed_unique_execution_allocations_do_not_scale_with_artin_schedule() {
 
 #[test]
 fn direct_simple_preparation_does_not_freeze_compiler_owners() {
+    let _serial = crate::counting_alloc::serial();
     let prepare = || {
         PreparedTreePairOperation::prepare_braid(&SU2FusionRule, 2, 0, &[1, 0], &[], &[0, 1], &[])
             .unwrap()
@@ -694,6 +703,7 @@ fn direct_simple_preparation_does_not_freeze_compiler_owners() {
 
 #[test]
 fn coupled_matricization_builder_allocates_per_map_growth_not_per_block() {
+    let _serial = crate::counting_alloc::serial();
     let leg = SectorLeg::new(
         (0..5).map(|spin| (SU2Irrep::from_twice_spin(spin).sector_id(), spin + 1)),
         false,

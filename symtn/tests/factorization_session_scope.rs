@@ -7,9 +7,7 @@
 //! Generic and checked-Generic QR routes are gated in
 //! `symtn-matrixalgebra/tests/factorization_session_scope.rs`.
 //!
-//! Its own test binary: `cpu_session_stats` is a process-wide counter, so a
-//! delta means something only when no unrelated test opens a session in the
-//! same process. The mutex serializes the readers inside this binary.
+//! Every test in this target takes the shared serial guard.
 
 #![cfg(all(feature = "cpu-faer", not(feature = "provider-inject")))]
 
@@ -23,8 +21,7 @@ use symtn::sector::{
 };
 use symtn::typed::{Complex64, Eigh, GradedSpace, Lq, Runtime, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 
@@ -84,6 +81,7 @@ fn centered(count: i32) -> impl Iterator<Item = i32> {
 
 #[test]
 fn u1_compact_factorizations_open_one_session() {
+    let _serial = crate::counting_alloc::serial();
     let sectors = || centered(8).map(U1Irrep::new).collect::<Vec<_>>();
     for runtime in runtimes() {
         assert_one_session_per_factorization!(&runtime, U1FusionRule, f64, sectors(), 1, 1);
@@ -93,6 +91,7 @@ fn u1_compact_factorizations_open_one_session() {
 
 #[test]
 fn su2_compact_factorizations_open_one_session() {
+    let _serial = crate::counting_alloc::serial();
     let sectors = || (0..4).map(SU2Irrep::from_twice_spin).collect::<Vec<_>>();
     for runtime in runtimes() {
         assert_one_session_per_factorization!(&runtime, SU2FusionRule, f64, sectors(), 2, 1);
@@ -102,6 +101,7 @@ fn su2_compact_factorizations_open_one_session() {
 
 #[test]
 fn fz2_u1_compact_factorizations_open_one_session() {
+    let _serial = crate::counting_alloc::serial();
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     let sectors = || {
         centered(6)
@@ -134,7 +134,7 @@ fn fz2_u1_compact_factorizations_open_one_session() {
 /// without the scope.
 #[test]
 fn streaming_factorizations_from_rayon_workers_and_threads_match_serial_results() {
-    let _guard = COUNTER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),

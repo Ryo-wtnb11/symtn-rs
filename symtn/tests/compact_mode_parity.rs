@@ -34,8 +34,7 @@
 //! multiplicity-free twist needs `Scalar = f64`). Fibonacci contract is
 //! anyonic and asserted as the unchanged `contract` rejection.
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::{cause, report};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -52,15 +51,10 @@ use symtn::typed::{
     TypedTensorModeDispatch, TypedTensorRootDispatch, TypedTensorTransformDispatch,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::counting_alloc;
+use crate::fixtures;
 
 use fixtures::host_runtime;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 const EVEN: SectorId = SectorId::new(0);
 const ODD: SectorId = SectorId::new(1);
@@ -367,6 +361,7 @@ macro_rules! twist_rows {
 
 #[test]
 fn compact_twist_stays_compact_and_agrees_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: a fermionic compact twist is one mode-free arm: both modes,
     // including the checked Generic fZ2 twin, keep the spectrum and give
     // identical values.
@@ -393,6 +388,7 @@ fn compact_twist_stays_compact_and_agrees_across_modes() {
 
 #[test]
 fn checked_anyonic_compact_twist_scales_by_theta_powers() {
+    let _serial = crate::counting_alloc::serial();
     // What: a non-unit real θ, which only the checked mode can express here,
     // scales the spectrum by θ^{|legs|}, so a two-leg twist is not the
     // identity on the bond.
@@ -414,6 +410,7 @@ fn checked_anyonic_compact_twist_scales_by_theta_powers() {
 
 #[test]
 fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact arm reuses the staged twist values; it adds no
     // provider query beyond the dense route's.
     let runtime = host_runtime();
@@ -445,6 +442,7 @@ fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: SU(2) is bosonic, so twist returns the compact receiver as is in
     // both modes.
     use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
@@ -543,10 +541,10 @@ where
 
 #[test]
 fn compact_twist_allocates_linear_in_the_spectrum_in_both_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the twist of a compact diagonal costs Σk, never a k² payload: from
     // k to 2k the bytes grow by at most the spectrum's growth, and stay below
     // one dense payload.
-    let _measurement = counting_alloc::serial();
     let dense_payload = (K * K * std::mem::size_of::<f64>()) as u64;
     let spectrum_growth = (2 * K * std::mem::size_of::<f64>()) as u64;
     let rows = [
@@ -885,6 +883,7 @@ fn parity(sector: &Z2Irrep) -> f64 {
 
 #[test]
 fn compact_compose_and_contract_agree_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: compose and one-leg contract against a compact diagonal are one
     // mode-free arm: both modes give the same storage form and values, equal to
     // the dense route, for f64 and Complex64 and for every output order.
@@ -921,6 +920,7 @@ fn compact_compose_and_contract_agree_across_modes() {
 
 #[test]
 fn fermionic_compact_compose_and_contract_agree_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the fermionic row. Composition is admitted in both modes and
     // agrees. Checked Generic fermionic contraction is unsupported on the
     // dense route, so the compact arms' values, every listed pattern
@@ -954,6 +954,7 @@ fn fermionic_compact_compose_and_contract_agree_across_modes() {
 
 #[test]
 fn multiplicity_free_u1_compact_compose_and_contract_match_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: a non-self-dual U(1) bond (charges ±1 swap under duality) takes the
     // same arms, including the bent outputs whose permute moves a dual sector.
     use symtn::sector::{U1FusionRule, U1Irrep};
@@ -979,6 +980,7 @@ fn multiplicity_free_u1_compact_compose_and_contract_match_the_dense_route() {
 
 #[test]
 fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
+    let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol coefficient lane takes the compact arms
     // (#1866); compose stays compact for `D * D` and scales for
     // `t * D` / `D * t`. Fibonacci is anyonic, so `contract` keeps rejecting
@@ -1015,6 +1017,7 @@ fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su2_compact_compose_and_contract_agree_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row. The bent outputs carry SU(2) bending
     // coefficients through the mode's own permute.
     use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
@@ -1047,6 +1050,7 @@ fn su2_compact_compose_and_contract_agree_across_modes() {
 
 #[test]
 fn declined_compact_arms_report_the_dense_route_error() {
+    let _serial = crate::counting_alloc::serial();
     // What: a pair the arms cannot answer — providers with different rule
     // identities, or a dense leg that is not the bond — falls through to the
     // dense route, so compact and materialized operands fail alike.
@@ -1138,6 +1142,7 @@ where
 
 #[test]
 fn checked_compose_and_identity_order_contract_arms_query_no_provider() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compose arms and an arm whose output needs no reordering read
     // only the stored spectrum and the admitted rule identity, so they succeed
     // even when every fallible provider query would fail.
@@ -1163,12 +1168,14 @@ fn checked_compose_and_identity_order_contract_arms_query_no_provider() {
 
 #[test]
 fn checked_reordered_contract_arm_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     // What: the reordered `t · D` arm lays its result out with one checked
     // permute staging. A provider failing there is reported as the typed
     // plan error of that staging; the operands are unchanged and no complete
     // layout or transform coefficients are published for the destination.
     const ISOLATED: &str = "SYMTN_COMPACT_CONTRACT_PUBLICATION_ISOLATED";
-    const NAME: &str = "checked_reordered_contract_arm_failure_is_typed_and_nonpublishing";
+    const NAME: &str =
+        "compact_mode_parity::checked_reordered_contract_arm_failure_is_typed_and_nonpublishing";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", NAME, "--nocapture"])
@@ -1253,8 +1260,8 @@ where
 
 #[test]
 fn compact_square_allocates_linear_in_the_spectrum_in_both_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: `D * D` of a compact diagonal costs Σk, never a k² payload.
-    let _measurement = counting_alloc::serial();
     let dense_payload = (K * K * std::mem::size_of::<f64>()) as u64;
     let spectrum_growth = (2 * K * std::mem::size_of::<f64>()) as u64;
     let rows = [
@@ -1290,6 +1297,7 @@ fn compact_square_allocates_linear_in_the_spectrum_in_both_modes() {
 
 #[test]
 fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the dense operands carry a dual open leg (`a: W ⊗ W' ← W`), so
     // the reordered arms permute a dual leg past the bond under a fermionic
     // rule; both modes agree with the multiplicity-free dense route.
@@ -1451,6 +1459,7 @@ where
 
 #[test]
 fn compact_swap_and_braid_agree_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the rank-(1,1) swap and braid of a compact diagonal are one
     // mode-free arm: both modes keep it compact on
     // `dual(domain)` with TensorKit's coefficient, and both read the braid's
@@ -1487,6 +1496,7 @@ fn compact_swap_and_braid_agree_across_modes() {
 
 #[test]
 fn checked_anyonic_compact_swap_and_braid_match_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: a checked-only anyonic rule with a non-sign R takes the same arm;
     // the result is the dense route's, whether the dense route answers or
     // rejects.
@@ -1508,6 +1518,7 @@ fn checked_anyonic_compact_swap_and_braid_match_the_dense_route() {
 
 #[test]
 fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
+    let _serial = crate::counting_alloc::serial();
     // What: U(1) charges ±1 trade places under duality, so each swapped
     // spectrum sits on the dual charge with coefficient 1.
     use symtn::sector::{U1FusionRule, U1Irrep};
@@ -1546,6 +1557,7 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su2_compact_swap_and_braid_agree_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row. TensorKit's swap coefficient is 1 on
     // j = 0, 1/2 and 1 (up to its rounding); both modes keep the spectrum and
     // agree with each other and with their dense routes.
@@ -1618,6 +1630,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: non-self-dual SU(3) irreps on a dual leg (`[1,0]^2 + [0,1]`
     // dualized): the swapped spectrum moves to the destination's dual labels,
     // read from the staged destination, and equals the dense route.
@@ -1652,6 +1665,7 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
 
 #[test]
 fn fibonacci_complex_symbol_compact_transpose_and_braid_take_the_arm() {
+    let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol coefficient lane takes the same arm (#1866
     // X6): transpose stays compact and the braid is read from the spectrum.
     // Fibonacci is anyonic, so `permute` is rejected alike for the compact
@@ -1680,6 +1694,7 @@ fn fibonacci_complex_symbol_compact_transpose_and_braid_take_the_arm() {
 
 #[test]
 fn checked_compact_braid_decline_replays_in_one_staging() {
+    let _serial = crate::counting_alloc::serial();
     // What: an R symbol beyond f32 (1e100 overflows, 1e-100 underflows)
     // declines the spectrum read; the arm replays the densified spectrum with
     // the structure it already staged, so the result is the dense route's
@@ -1729,6 +1744,7 @@ fn checked_compact_braid_decline_replays_in_one_staging() {
 
 #[test]
 fn checked_compact_swap_queries_the_provider_like_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: the swap arm stages, resolves and commits with the dense route's
     // own staging, so cold and warm provider queries are the dense route's.
     let rule = |salt| CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0).with_salt(salt);
@@ -1763,8 +1779,8 @@ where
 
 #[test]
 fn compact_swap_allocates_linear_in_the_spectrum_in_both_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the swap of a compact diagonal costs Σk, never a k² payload.
-    let _measurement = counting_alloc::serial();
     let dense_payload = (K * K * std::mem::size_of::<f64>()) as u64;
     let spectrum_growth = (2 * K * std::mem::size_of::<f64>()) as u64;
     let rows = [
@@ -1817,6 +1833,7 @@ where
 
 #[test]
 fn compact_full_trace_agrees_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the full trace of a compact bond is one mode-free arm: both
     // modes read the spectrum with the
     // dense route's compiled coefficients and agree with it, with each other
@@ -1872,6 +1889,7 @@ fn compact_full_trace_agrees_across_modes() {
 
 #[test]
 fn checked_anyonic_compact_full_trace_matches_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: a checked-only non-sign θ(odd) = 0.6 enters the compiled
     // coefficient; the compact trace is the dense route's on either pair
     // order.
@@ -1903,6 +1921,7 @@ fn checked_anyonic_compact_full_trace_matches_the_dense_route() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su2_compact_full_trace_agrees_across_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row; SU(2) is bosonic, so the hand trace is
     // `Σ_j (2j + 1) Σ_i s_j[i]`.
     use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
@@ -1959,6 +1978,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
 
 #[test]
 fn checked_compact_full_trace_queries_the_provider_like_the_dense_route() {
+    let _serial = crate::counting_alloc::serial();
     // What: the trace arm only reads the dense route's compiled terms, so
     // cold and warm provider queries are the dense route's.
     let rule = |salt| CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0).with_salt(salt);
@@ -1981,10 +2001,12 @@ fn checked_compact_full_trace_queries_the_provider_like_the_dense_route() {
 
 #[test]
 fn checked_compact_full_trace_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider failing during the trace compile fails the compact
     // trace with the dense route's typed error, and nothing is published.
     const ISOLATED: &str = "SYMTN_COMPACT_TRACE_PUBLICATION_ISOLATED";
-    const NAME: &str = "checked_compact_full_trace_failure_is_typed_and_nonpublishing";
+    const NAME: &str =
+        "compact_mode_parity::checked_compact_full_trace_failure_is_typed_and_nonpublishing";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", NAME, "--nocapture"])
@@ -2057,10 +2079,10 @@ where
 
 #[test]
 fn compact_full_trace_allocates_no_spectrum_sized_buffer_in_both_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: the full trace of a compact diagonal reads the spectrum in place:
     // from k to 2k the bytes do not grow by a spectrum, and stay below one
     // dense payload.
-    let _measurement = counting_alloc::serial();
     let dense_payload = (K * K * std::mem::size_of::<f64>()) as u64;
     let spectrum_growth = (K * std::mem::size_of::<f64>()) as u64;
     let rows = [
@@ -2102,6 +2124,7 @@ fn compact_full_trace_allocates_no_spectrum_sized_buffer_in_both_modes() {
 #[test]
 #[ignore = "needs a CUDA device"]
 fn cuda_column_matches_the_host_for_every_compact_row() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule};
     fn assert_same<D: TensorScalar + Copy>(
         what: &str,
@@ -2209,6 +2232,7 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
 /// Lives here for the `CheckedZ2` rule, whose braiding is a parameter.
 #[test]
 fn checked_transform_into_reports_the_same_error_cold_and_warm() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     for (salt, braiding, expected) in [
         // Non-planar on an anyonic rule: the preflight error wins.
@@ -2336,10 +2360,10 @@ where
 
 #[test]
 fn compact_transform_into_allocates_no_dense_source_in_both_modes() {
+    let _serial = crate::counting_alloc::serial();
     // What: a compact source's `_into` reads its diagonal from the resolved
     // structure into the caller's destination: no allocation as large as the
     // `k²` dense image the decline route would build, in either mode.
-    let _measurement = counting_alloc::serial();
     let dense_payload = K * K * std::mem::size_of::<f64>();
     let mf = odd_diagonal(FermionParityFusionRule, K);
     let checked = odd_diagonal(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0), K);
@@ -2365,11 +2389,11 @@ fn compact_transform_into_allocates_no_dense_source_in_both_modes() {
 
 #[test]
 fn compact_braid_into_decline_replays_the_densified_source() {
+    let _serial = crate::counting_alloc::serial();
     // What: a braid coefficient beyond f32 declines the diagonal read, so the
     // `_into` replays the densified spectrum through the structure it staged:
     // the dense route's value (NaN placement included), and the one
     // operation-local `k²` buffer the read otherwise avoids.
-    let _measurement = counting_alloc::serial();
     for (salt, odd_r) in [(0x81u8, 1e100), (0x83, 1e-100)] {
         let rule = CheckedZ2::new(BraidingStyleKind::Anyonic, 1.0)
             .with_odd_r(odd_r)
@@ -2413,6 +2437,7 @@ fn compact_braid_into_decline_replays_the_densified_source() {
 
 #[test]
 fn checked_compact_transform_into_queries_the_provider_like_eager() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact `_into` stages and resolves with the eager compact
     // arm's own staging, so cold and warm provider queries are eager's.
     let ledger =
@@ -2492,6 +2517,7 @@ fn lazy_z2_destination(runtime: &Runtime, salt: u8) -> TensorMap<CheckedZ2, f64>
 
 #[test]
 fn checked_lazy_transform_into_queries_no_more_than_eager() {
+    let _serial = crate::counting_alloc::serial();
     // What: eager transforms the parent and re-derives the adjoint result
     // space; the `_into` reads the parent's storage through the logical
     // source, with no result space to derive. Cold it asks the provider at
@@ -2525,12 +2551,13 @@ fn checked_lazy_transform_into_queries_no_more_than_eager() {
 
 #[test]
 fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider failing in the staging of a compact or lazy-adjoint
     // source's `_into` is the typed plan error, leaves the destination bit
     // for bit, and publishes no layout, transformer or coefficients; the
     // succeeding call after it does (#2063).
     const ISOLATED: &str = "SYMTN_COMPACT_TRANSFORM_INTO_PUBLICATION_ISOLATED";
-    const NAME: &str = "checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing";
+    const NAME: &str = "compact_mode_parity::checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", NAME, "--nocapture"])
@@ -2655,6 +2682,7 @@ fn contract_destination(
 
 #[test]
 fn checked_contract_into_queries_the_provider_like_eager() {
+    let _serial = crate::counting_alloc::serial();
     // What: the dense `contract_into` runs eager's staging and planning, and
     // the compact one eager's arm (the braiding gate, plus one permute
     // staging when reordered), so cold and warm provider queries equal
@@ -2726,13 +2754,15 @@ const DENSE_AND_ARM_CASES: [BondCase; 12] = [
 
 #[test]
 fn checked_contract_into_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider failing in the staging of a dense `contract_into`, or
     // in the permute staging of a reordered compact arm, is the typed plan
     // error, leaves the destination bit for bit and publishes nothing; so
     // does a shared destination rejected after staging. The succeeding call
     // after them publishes (#2063).
     const ISOLATED: &str = "SYMTN_CONTRACT_INTO_PUBLICATION_ISOLATED";
-    const NAME: &str = "checked_contract_into_failure_is_typed_and_nonpublishing";
+    const NAME: &str =
+        "compact_mode_parity::checked_contract_into_failure_is_typed_and_nonpublishing";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", NAME, "--nocapture"])
@@ -2816,6 +2846,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_contract_into_reports_the_same_error_cold_and_warm() {
+    let _serial = crate::counting_alloc::serial();
     // What: staging (where the checked dense route refuses a fermionic rule)
     // runs before the destination match, and no contraction staging step is
     // deferred to planning on a memo hit, so a call reports eager's staging
@@ -2903,6 +2934,7 @@ where
 
 #[test]
 fn compact_contract_into_is_alpha_eager_plus_beta_destination_in_every_mode() {
+    let _serial = crate::counting_alloc::serial();
     // What: eager and `_into` take one route on every arm pattern, reordered
     // `D . D` included, so `_into` is eager's value with `α`/`β` in the
     // multiplicity-free and checked modes, bosonic and fermionic.
@@ -2990,6 +3022,7 @@ fn trace_into_destination(runtime: &Runtime, salt: u8, kind: &str) -> TensorMap<
 
 #[test]
 fn checked_trace_pairs_into_queries_the_provider_like_eager() {
+    let _serial = crate::counting_alloc::serial();
     // What: `trace_pairs_into` runs eager's staging and compiled terms (the
     // compact read included) and compares the destination provider-free, so
     // cold and warm provider queries equal eager's for every source kind.
@@ -3027,12 +3060,14 @@ fn checked_trace_pairs_into_queries_the_provider_like_eager() {
 
 #[test]
 fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider failing in the staging of `trace_pairs_into` is the
     // typed plan error, leaves the destination bit for bit and publishes
     // nothing; so does a shared destination rejected after staging. The
     // succeeding call after them publishes (#2063).
     const ISOLATED: &str = "SYMTN_TRACE_INTO_PUBLICATION_ISOLATED";
-    const NAME: &str = "checked_trace_pairs_into_failure_is_typed_and_nonpublishing";
+    const NAME: &str =
+        "compact_mode_parity::checked_trace_pairs_into_failure_is_typed_and_nonpublishing";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", NAME, "--nocapture"])
@@ -3120,6 +3155,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
+    let _serial = crate::counting_alloc::serial();
     // What: the HomSpace comparison and the pair duality are staging, which
     // runs in full on every call, so a non-dual pair reports eager's
     // duality error (on the result's space) or the destination's space

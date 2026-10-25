@@ -47,10 +47,10 @@ fn recompose(
 
 #[test]
 fn svd_compact_reconstructs_the_source_through_the_typed_contract() {
+    let _serial = crate::counting_alloc::serial();
     // What: the factors really are a factorization in this facade's own
     // vocabulary. The composition runs through `contract`, which agrees with
     // `compose` for this bosonic rule.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -76,10 +76,10 @@ fn svd_compact_reconstructs_the_source_through_the_typed_contract() {
 
 #[test]
 fn svd_compact_reconstructs_a_complex_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: c64 takes the complex factorization route. The imaginary part is
     // deliberately not proportional to the real one, so a stray conjugation
     // or a real-only path is visible.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_complex_tensor(&runtime);
     let Svd {
@@ -124,7 +124,7 @@ fn svd_compact_reconstructs_a_complex_payload() {
 
 #[test]
 fn svd_full_reconstructs_with_unitary_outer_factors() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     for num_codomain in [2, 1] {
         let typed = z2_tensor_split(&runtime, num_codomain);
@@ -165,7 +165,7 @@ macro_rules! truncated_eigen {
 
 #[test]
 fn truncated_svd_reconstructs_and_reports_the_discarded_weight() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -224,6 +224,7 @@ fn truncated_svd_reconstructs_and_reports_the_discarded_weight() {
 
 #[test]
 fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
+    let _serial = crate::counting_alloc::serial();
     // What: a codec that cannot decode a coupled sector the engine produced
     // fails the call with the provider's own error instead of panicking inside
     // the label map.
@@ -235,7 +236,6 @@ fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
     // unreachable from outside `symtn-matrixalgebra` — their variants are
     // `#[non_exhaustive]` and their constructors are fallible. So the provider
     // is the only input to these methods a caller can actually malform.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3_with(Quirk::NarrowDecode));
     let leg =
@@ -263,7 +263,7 @@ fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
 
 #[test]
 fn svd_vals_reports_exact_per_label_spectra() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -302,12 +302,12 @@ fn svd_vals_reports_exact_per_label_spectra() {
 
 #[test]
 fn svd_vals_sorts_by_label_where_that_differs_from_the_id_order() {
+    let _serial = crate::counting_alloc::serial();
     // What: the O2' promise is *label* order, and the only way to see it is a
     // provider whose codec does not order its labels the way the engine orders
     // its ids. `Quirk::ReversedLabels` is exactly that — a valid codec, not a
     // broken one — so the seam hands the spectrum back in the reversed order
     // and only the facade's own sort puts it right.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3_with(Quirk::ReversedLabels));
     let tensor = z3_rank_four(&runtime, &provider);
@@ -324,11 +324,11 @@ fn svd_vals_sorts_by_label_where_that_differs_from_the_id_order() {
 
 #[test]
 fn qr_and_lq_reconstruct_with_the_expected_isometries_and_spaces() {
+    let _serial = crate::counting_alloc::serial();
     // Both splits are exercised deliberately: `2 <- 1` is tall in every coupled
     // sector, where LQ-compact and LQ-full return the same factors and so
     // cannot tell the two seams apart; `1 <- 2` is wide, where they differ (and
     // symmetrically for QR).
-    let _guard = cache_lock();
     let runtime = runtime();
     for num_codomain in [2, 1] {
         let typed = z2_tensor_split(&runtime, num_codomain);
@@ -385,7 +385,7 @@ fn qr_and_lq_reconstruct_with_the_expected_isometries_and_spaces() {
 
 #[test]
 fn left_and_right_null_spaces_annihilate_the_source() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     for num_codomain in [2, 1] {
         let typed = z2_tensor_split(&runtime, num_codomain);
@@ -435,12 +435,12 @@ fn left_and_right_null_spaces_annihilate_the_source() {
 
 #[test]
 fn decompositions_carry_a_fermionic_provider() {
+    let _serial = crate::counting_alloc::serial();
     // The one provider this facade can host whose braiding is not symmetric.
     // Every quantum dimension is one for `FermionParity`, and the fusion-tree
     // storage of a block *is* its coupled-sector matricization, so the sum of
     // squared singular values is the sum of squared stored elements — a
     // hand-checkable identity that no gauge convention can move.
-    let _guard = cache_lock();
     let runtime = runtime();
     let tensor = fermionic_rank_three(&runtime);
 
@@ -466,9 +466,9 @@ fn decompositions_carry_a_fermionic_provider() {
 
 #[test]
 fn decompositions_carry_an_external_provider_with_its_own_labels() {
+    let _serial = crate::counting_alloc::serial();
     // A downstream provider drives the same surface, and its spectrum comes
     // back in its own labels rather than raw ids.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -506,10 +506,10 @@ fn z2_hermitian(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64
 
 #[test]
 fn eigh_full_reconstructs_the_source_through_compose() {
+    let _serial = crate::counting_alloc::serial();
     // What: `v * d * v†` is the source. The middle composition takes the
     // compact bond-scaling arm, so this exercises the storage as well as the
     // factorization.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_hermitian(&runtime);
 
@@ -539,8 +539,8 @@ fn eigh_full_reconstructs_the_source_through_compose() {
 
 #[test]
 fn eigh_vals_follow_the_provider_label_order() {
+    let _serial = crate::counting_alloc::serial();
     // What: caller-facing spectra use provider labels in canonical order.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_hermitian(&runtime);
     let spectrum = typed.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
@@ -557,7 +557,7 @@ fn eigh_vals_follow_the_provider_label_order() {
 
 #[test]
 fn truncated_eigh_reports_the_discarded_eigenvalue_norm() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_hermitian(&runtime);
     let truncation = Truncation::rank(3);
@@ -609,7 +609,7 @@ fn truncated_eigh_reports_the_discarded_eigenvalue_norm() {
 
 #[test]
 fn eigh_reports_a_non_hermitian_input_rather_than_a_wrong_answer() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -651,8 +651,8 @@ fn z2_complex_endo(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, 
 
 #[test]
 fn eig_full_satisfies_the_eigen_equation_for_a_real_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: a real input promotes to complex factors satisfying A V = V D.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -665,9 +665,9 @@ fn eig_full_satisfies_the_eigen_equation_for_a_real_payload() {
 
 #[test]
 fn complex_eig_satisfies_the_eigen_equation_and_conjugates_its_spectrum() {
+    let _serial = crate::counting_alloc::serial();
     // What: the native complex route satisfies A V = V D, and the compact
     // spectrum's adjoint conjugates genuinely nonreal eigenvalues.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_complex_endo(&runtime);
 
@@ -702,7 +702,7 @@ fn complex_eig_satisfies_the_eigen_equation_and_conjugates_its_spectrum() {
 
 #[test]
 fn eig_vals_are_label_ordered_and_trunc_reports_the_discarded_norm() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
     let spectrum = typed.eig_vals(&[0], &[1]).unwrap();
@@ -749,9 +749,9 @@ fn eig_vals_are_label_ordered_and_trunc_reports_the_discarded_norm() {
 
 #[test]
 fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
+    let _serial = crate::counting_alloc::serial();
     // What: the complementary projections reconstruct the source and their
     // adjoint symmetries agree with the typed predicate family.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
     let tol = 1e-10;
@@ -819,10 +819,10 @@ fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
 
 #[test]
 fn isometry_and_posdef_see_their_positive_cases() {
+    let _serial = crate::counting_alloc::serial();
     // What: the two members the fixture above only ever answers `false` for.
     // `u` from an SVD is isometric by construction, and `t† t` is positive
     // definite when `t` has full rank.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
     let tol = 1e-9;
@@ -891,9 +891,9 @@ fn isometry_and_posdef_see_their_positive_cases() {
 
 #[test]
 fn a_non_endomorphism_is_never_hermitian_and_never_errors() {
+    let _serial = crate::counting_alloc::serial();
     // What: predicates are total and false; projections have no endomorphism to
     // return and therefore reject the input.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -914,9 +914,9 @@ fn a_non_endomorphism_is_never_hermitian_and_never_errors() {
 
 #[test]
 fn typed_polar_reconstructs_the_input_f64_u1_and_c64_fz2() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 1: `t = w ∘ p` (left) and `t = p ∘ w` (right) at factorization
     // tolerance, on both dtypes and on both a bosonic and a fermionic rule.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let leg = u1_typed_leg();
@@ -954,10 +954,10 @@ fn typed_polar_reconstructs_the_input_f64_u1_and_c64_fz2() {
 
 #[test]
 fn typed_polar_factor_laws_hold() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 2: `w† ∘ w = id(domain)` for `left_polar` (resp. `w ∘ w† = id` on
     // the rows for `right_polar`); `p` Hermitian with non-negative spectrum,
     // read through `eigh_vals`.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     // c64 fermionic left arm: a stray conjugation or sign is visible here.
@@ -1003,12 +1003,12 @@ fn typed_polar_factor_laws_hold() {
 
 #[test]
 fn typed_polar_factor_spaces_match_tensorkit() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 3: factor *spaces*, not just shapes — TK 0.17
     // `factorizations/matrixalgebrakit.jl:204-214`: left `W` lives on
     // `space(t)` and `P` on `domain ← domain`; right `P` on
     // `codomain ← codomain` and `Wᴴ` on `space(t)`. A dual leg sits on each
     // side so a dropped duality flag is visible.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = u1_typed_leg();
     let dual = leg.try_dual().unwrap();
@@ -1032,10 +1032,10 @@ fn typed_polar_factor_spaces_match_tensorkit() {
 
 #[test]
 fn typed_polar_wrong_side_rectangular_reports_the_requested_direction() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 4: the split-2 fixture is tall in every coupled sector, the split-1
     // one wide — so `right_polar` on the former and `left_polar` on the latter
     // return the seam's exact wrong-side errors, unfiltered.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let typed_tall = z2_tensor_split(&runtime, 2);
@@ -1065,11 +1065,11 @@ fn typed_polar_wrong_side_rectangular_reports_the_requested_direction() {
 
 #[test]
 fn typed_polar_carries_an_external_provider() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 5: `ExternalZ3` is a downstream-style provider, so this is a
     // provider-generic law check —
     // reconstruction plus the isometry law — driving the same context lane an
     // external provider reaches through `multiplicity_free_lane`.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     // Same legs on both sides (no duals): every coupled-sector matrix is
@@ -1103,8 +1103,8 @@ fn typed_polar_carries_an_external_provider() {
 
 #[test]
 fn typed_rank_accessors_on_a_mixed_fixture() {
+    let _serial = crate::counting_alloc::serial();
     // Gate 1: ranks on a mixed 2 <- 1 fixture.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
     assert_eq!(typed.codomain_rank(), 2);

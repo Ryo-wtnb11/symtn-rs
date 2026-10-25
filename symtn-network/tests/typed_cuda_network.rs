@@ -19,12 +19,10 @@ use symtn_network::{
     PlanCacheConfig, TemporaryLabel, TensorId,
 };
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{conj, net, op};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn pair_network() -> Network {
     Network::new(
@@ -2077,7 +2075,7 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
 }
 
 /// Device state a rejected or warm call must leave unchanged, or change only
-/// as its contract states: the plan cache, the process-wide transfer
+/// as its contract states: the Runtime plan cache, the calling thread's transfer
 /// counters, the cuTENSOR plan cache, the contraction scratch and the
 /// tree-transform executor.
 #[derive(Debug, PartialEq)]
@@ -2106,7 +2104,7 @@ fn device_state(runtime: &Runtime) -> DeviceState {
 /// nothing, misses and evicts no cuTENSOR plan, and grows no scratch and no
 /// executor state. Every intermediate step overwrites its retained buffer.
 ///
-/// The counters are process-wide: run with `--test-threads=1`.
+/// Transfer counters belong to this thread; the other state belongs to its Runtime.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn warm_general_cuda_networks_transfer_only_the_returned_output() {
@@ -2271,8 +2269,7 @@ fn rejected_cuda_networks_leave_every_device_state_unchanged() {
     );
 }
 
-#[path = "../../symtn/tests/braiding_probe/mod.rs"]
-mod braiding_probe;
+use crate::braiding_probe;
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 
 /// #1372: a device `Network::contract` contraction on a non-symmetric (unbraided or

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use symtn_sectors::*;
 
-use crate::table_identity;
+use super::table_identity;
 
 #[test]
 fn stateless_rules_are_identified_by_their_type() {

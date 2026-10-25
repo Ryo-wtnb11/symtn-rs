@@ -8,8 +8,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Truncation;
 use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{conj, net, op};
 
 const E_EXACT: f64 = 0.25 - std::f64::consts::LN_2;

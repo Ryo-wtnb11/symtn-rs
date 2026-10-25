@@ -9,8 +9,7 @@
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
 // these gates do not model (#2107).
-#[path = "../../tests/support/backend.rs"]
-mod backend;
+use crate::backend;
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -19,11 +18,7 @@ use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Warm `f` once, then return its allocations.
 fn warm_allocs(f: impl Fn()) -> counting_alloc::Allocs {
@@ -153,10 +148,10 @@ macro_rules! assert_excess_is_metadata {
 
 #[test]
 fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
+    let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
-    let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = |scale: usize| {
@@ -173,12 +168,12 @@ fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
+    let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
     use symtn::sector::LieGroupFusionRule;
 
-    let _measurement = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());

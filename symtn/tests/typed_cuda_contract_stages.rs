@@ -17,19 +17,12 @@
 //! `ContractPlan::execute_into`, not to counts recorded at a base revision.
 //!
 //! `cargo test -p symtn --no-default-features --features cuda,cpu-faer
-//! --test typed_cuda_contract_stages -- --ignored --test-threads=1`.
+//! --test integration typed_cuda_contract_stages:: -- --ignored --test-threads=1`.
 #![cfg(feature = "cuda")]
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-#[macro_use]
-#[allow(unused_macros)]
-mod contract_cases;
+use crate::common;
+
+use crate::contract_cases;
 
 use common::{DevicePayload, DeviceRule};
 use contract_cases::{

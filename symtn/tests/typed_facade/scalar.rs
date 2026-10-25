@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn add_carries_complex_coefficients() {
+    let _serial = crate::counting_alloc::serial();
     // What: `D` is the coefficient type too, so the c64 instantiation carries
     // genuinely complex coefficients through the same method.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_complex_tensor(&runtime);
     let alpha = Complex64::new(0.5, -2.0);
@@ -25,10 +25,10 @@ fn add_carries_complex_coefficients() {
 
 #[test]
 fn add_rejects_a_different_runtime_and_a_different_space() {
+    let _serial = crate::counting_alloc::serial();
     // What: the two checks this facade makes itself, in order — the runtime
     // identity the expert layer never sees, then the space equality that makes
     // the element-wise combination meaningful.
-    let _guard = cache_lock();
     let other_runtime = runtime();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
@@ -48,7 +48,7 @@ fn add_rejects_a_different_runtime_and_a_different_space() {
 
 #[test]
 fn scale_multiplies_every_real_and_complex_entry() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
     let scaled = typed.scale(-2.5).unwrap();
@@ -76,7 +76,7 @@ fn scale_multiplies_every_real_and_complex_entry() {
 
 #[test]
 fn scaling_by_the_inverse_norm_divides_by_the_dimension_weighted_norm() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
 
     // SU(2): normalizing by a dimension-weighted norm is what a plain
@@ -98,11 +98,11 @@ fn scaling_by_the_inverse_norm_divides_by_the_dimension_weighted_norm() {
 
 #[test]
 fn inner_uses_the_same_dimension_weight_as_norm() {
+    let _serial = crate::counting_alloc::serial();
     // What: `inner` is TensorKit's `dot(x, y)` — conjugate-linear in the first
     // argument and quantum-dimension weighted, and it comes back as a `D`.
     // SU(2) is what
     // exercises the weighted branch; Z2 alone would take the abelian fast path.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let z2_typed = z2_tensor(&runtime);
@@ -124,10 +124,10 @@ fn inner_uses_the_same_dimension_weight_as_norm() {
 
 #[test]
 fn inner_conjugates_its_first_argument() {
+    let _serial = crate::counting_alloc::serial();
     // What: the conjugation is on `self`, so for a complex payload
     // `<a, b> = conj(<b, a>)` and the two are genuinely different numbers.
     // A dropped conjugation makes both sides equal and this test fail.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_complex_tensor(&runtime);
     // The extra `i` is what makes the product genuinely complex: this fixture's
@@ -147,7 +147,7 @@ fn inner_conjugates_its_first_argument() {
 
 #[test]
 fn inner_rejects_a_different_runtime_and_a_different_space() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let other_runtime = runtime();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
@@ -167,9 +167,9 @@ fn inner_rejects_a_different_runtime_and_a_different_space() {
 
 #[test]
 fn tr_uses_the_nonabelian_dimension_weight() {
+    let _serial = crate::counting_alloc::serial();
     // What: TensorKit's positive trace `Σ_c dim(c) * tr(b_c)`. SU(2) separates
     // it from the unweighted diagonal sum.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let typed = su2_tensor(&runtime);
@@ -196,7 +196,7 @@ fn tr_uses_the_nonabelian_dimension_weight() {
 
 #[test]
 fn tr_requires_an_endomorphism() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -213,7 +213,7 @@ fn tr_requires_an_endomorphism() {
 
 #[test]
 fn adjoint_swaps_spaces_and_is_an_involution() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -229,10 +229,10 @@ fn adjoint_swaps_spaces_and_is_an_involution() {
 
 #[test]
 fn adjoint_conjugates_a_complex_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: c64 entries come back conjugated, not merely transposed. Compared
     // as multisets, because the transpose moves entries around: the point is
     // that the *values* are the conjugated ones and not the original ones.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_complex_tensor(&runtime);
 
@@ -265,7 +265,7 @@ fn adjoint_conjugates_a_complex_payload() {
 
 #[test]
 fn adjoint_carries_an_external_provider() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -286,11 +286,11 @@ fn adjoint_carries_an_external_provider() {
 
 #[test]
 fn trace_pairs_preserves_partial_trace_geometry() {
+    let _serial = crate::counting_alloc::serial();
     // What: the full trace to a rank-0 tensor and a partial trace that leaves a
     // leg open. The partial case is the one
     // that exercises the output-axis derivation and the destination's
     // codomain rank; the full case is the degenerate one.
-    let _guard = cache_lock();
     let runtime = runtime();
 
     let typed = z2_endomorphism(&runtime);
@@ -353,7 +353,7 @@ fn trace_pairs_preserves_partial_trace_geometry() {
 
 #[test]
 fn trace_pairs_of_nothing_is_the_source() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -365,8 +365,8 @@ fn trace_pairs_of_nothing_is_the_source() {
 
 #[test]
 fn trace_pairs_rejects_malformed_pairs() {
+    let _serial = crate::counting_alloc::serial();
     // Out-of-range and repeated axes are an invalid axis subset (#1873).
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -384,12 +384,12 @@ fn trace_pairs_rejects_malformed_pairs() {
 
 #[test]
 fn fermionic_trace_pairs_is_the_supertrace_and_tr_is_not() {
+    let _serial = crate::counting_alloc::serial();
     // What: the documented divergence. `tr` is TensorKit's positive trace
     // (`Σ_c dim(c) tr(b_c)`), `trace_pairs` is the tensor-contraction trace,
     // which for a fermionic rule carries the twist — the supertrace. On this
     // fixture the odd sector contributes with opposite signs, so the two
     // numbers differ.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = fermionic_endo(&runtime);
 

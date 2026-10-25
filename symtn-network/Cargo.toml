@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "symtn-network"
 version = "0.1.1"
 description = "Tensor-network contraction planning and execution for symtn"
@@ -53,3 +54,15 @@ required-features = ["cuda"]
 [[bench]]
 name = "microbench_cpu_shape_reuse"
 harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "serial"
+path = "tests/serial.rs"
+
+[[test]]
+name = "intermediate_allocations"
+path = "tests/intermediate_allocations.rs"

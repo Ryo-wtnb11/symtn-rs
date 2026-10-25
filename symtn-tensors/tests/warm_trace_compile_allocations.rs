@@ -10,11 +10,7 @@ use symtn_core::{
 };
 use symtn_tensors::{BoundDynamicFusionMapSpace, PivotalCoefficientAlgebra, TensorTraceAxisSpec};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 const OUTPUT: [usize; 3] = [1, 2, 4];
 const LHS: [usize; 1] = [0];
@@ -42,7 +38,6 @@ where
     M: PivotalCoefficientAlgebra<R>,
     M::Error: std::fmt::Debug,
 {
-    let _serial = counting_alloc::serial();
     for _ in 0..2 {
         drop(M::trace_terms(dst, src, axes()).unwrap());
     }
@@ -76,6 +71,7 @@ fn assert_bounded(label: &str, sizes: &[(u64, usize, usize)]) {
 
 #[test]
 fn warm_multiplicity_free_trace_compile_is_bounded_by_its_terms() {
+    let _serial = crate::counting_alloc::serial();
     let sizes = [vec![0, 1], vec![0, 1, 2], vec![0, 1, 2, 3]].map(|spins| {
         let sectors = spins
             .iter()
@@ -102,6 +98,7 @@ fn warm_multiplicity_free_trace_compile_is_bounded_by_its_terms() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_trace_compile_is_bounded_by_its_terms() {
+    let _serial = crate::counting_alloc::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     let rule =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());

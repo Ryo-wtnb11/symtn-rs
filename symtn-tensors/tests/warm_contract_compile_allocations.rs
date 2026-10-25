@@ -10,11 +10,7 @@ use symtn_tensors::{
     StorageContractResolution, TensorContractFusionExecutionContext, TensorContractSpec,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Allocations of one warm call, including the drop of its result.
 fn warm_allocations<T>(mut call: impl FnMut() -> T) -> usize {
@@ -181,7 +177,7 @@ fn warm_compile_allocations(codomain: usize, domain: usize) -> [usize; 3] {
 
 #[test]
 fn warm_contract_compile_allocations_do_not_scale_with_rank() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let shapes = [(2, 1), (2, 2), (3, 2), (3, 3), (4, 3)];
     let counts = shapes.map(|(codomain, domain)| warm_compile_allocations(codomain, domain));
     // What: the same allocation count of each route at every rank from 3 to
@@ -239,7 +235,7 @@ const CROSSING_SHAPES: [(usize, usize); 5] = [(2, 1), (2, 2), (3, 2), (2, 3), (3
 
 #[test]
 fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let counts = CROSSING_SHAPES
         .map(|(codomain, domain)| crossing_compile_allocations(leg, codomain, domain));
     // What: the rank-independent DynamicTree compile, and nothing per leg
@@ -256,7 +252,7 @@ fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
 /// storage too, so it allocates nothing per crossing leg either.
 #[test]
 fn warm_contract_compile_allocates_nothing_per_crossing_leg_the_dual_moves() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     for (codomain, domain) in [(1, 2)].into_iter().chain(CROSSING_SHAPES) {
         let moved = crossing_compile_allocations(asymmetric_leg, codomain, domain);
         let fixed = crossing_compile_allocations(leg, codomain, domain);
@@ -335,7 +331,7 @@ fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
 
 #[test]
 fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // Rank 6 is the largest case (#1998): its complete HomSpace, transform
     // and fusion-tree layouts must fit the 64 MiB budgets and the 8 MiB entry
     // limits, or each warm call would rebuild them (#1993).
@@ -374,7 +370,7 @@ fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
 
 #[test]
 fn rank_six_complete_owner_reuses_content_across_derivations() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What (#1998): the U(1) `V^6 <- V^6` content (73,789 blocks) fits the
     // complete owner, so independent ordinary derivations share its content.
     // Expert from_parts construction is deliberately fresh (#2044).
@@ -395,7 +391,7 @@ fn rank_six_complete_owner_reuses_content_across_derivations() {
 
 #[test]
 fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What (#2011): the rank-6 C1p working set — the
     // CopyC output transform and the DynamicTree route's transforms — fits
     // the default 64 MiB process-global completed-transformer cache, so

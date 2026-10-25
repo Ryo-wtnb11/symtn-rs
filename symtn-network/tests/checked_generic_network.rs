@@ -27,8 +27,7 @@ use symtn_network::{
     TemporaryLabel, TensorId,
 };
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
 trait OracleScalar: TensorScalar + Copy + Debug {
@@ -314,6 +313,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
 
 #[test]
 fn sun_checked_generic_network_matches_manual_explicit_greedy_cached_and_replay() {
+    let _serial = crate::counting_alloc::serial();
     // What: provider-neutral SU(N) conformance over μ=2 keys, both payload
     // dtypes, three operands, nontrivial final order, replay, and concurrency.
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
@@ -324,6 +324,7 @@ fn sun_checked_generic_network_matches_manual_explicit_greedy_cached_and_replay(
 
 #[test]
 fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(3));
     let label = vec![1, 1];
@@ -596,6 +597,7 @@ fn assert_optimizer_does_not_retry_provider_failure(
 #[cfg(feature = "opt-path")]
 #[test]
 fn checked_generic_optimizer_fallback_never_retries_provider_failures() {
+    let _serial = crate::counting_alloc::serial();
     for optimizer in [Optimizer::DynamicProgramming, Optimizer::AutoHq] {
         for failure in [PlanningFailure::Dual, PlanningFailure::Dimension] {
             assert_optimizer_does_not_retry_provider_failure(optimizer.clone(), failure);
@@ -804,18 +806,21 @@ fn cold_query_count(operands: usize, permute_output: bool) -> usize {
 
 #[test]
 fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
+    let _serial = crate::counting_alloc::serial();
     const ISOLATED: &str = "SYMTN_CHECKED_GENERIC_NETWORK_FAILURES_ISOLATED";
     if std::env::var_os(ISOLATED).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step",
+                "checked_generic_network::checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step",
             ])
             .env(ISOLATED, "1")
             .output()
             .unwrap();
         assert!(
-            output.status.success(),
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout)
+                    .contains("test result: ok. 1 passed; 0 failed;"),
             "isolated checked-Generic network failure test failed:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -863,6 +868,7 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
 
 #[test]
 fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
@@ -966,6 +972,7 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
 
 #[test]
 fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider error inside `trace_pairs`, the first step of the
     // two-step trace-then-network form, returns the typed provider error,
     // and the same trace succeeds once the provider recovers.
@@ -991,6 +998,7 @@ fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
 
 #[test]
 fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary_ops() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
@@ -1098,6 +1106,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
 
 #[test]
 fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_authority() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
@@ -1219,6 +1228,7 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
 
 #[test]
 fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
+    let _serial = crate::counting_alloc::serial();
     // What: a checked Generic replay that overwrites its retained step
     // destinations (`contract_into`) gives the eager chain's values and the
     // multiplicity-free SU(2) replay of the same spin-½ blocks.
@@ -1324,6 +1334,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
 
 #[test]
 fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_replay() {
+    let _serial = crate::counting_alloc::serial();
     // What: overwriting the kept step destinations (`contract_into`) stages
     // the same contractions as the returning replay, so a replay through a
     // kept workspace asks the provider for no more symbols than one through a
@@ -1333,13 +1344,15 @@ fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_repla
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_replay",
+                "checked_generic_network::checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_replay",
             ])
             .env(ISOLATED, "1")
             .output()
             .unwrap();
         assert!(
-            output.status.success(),
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout)
+                    .contains("test result: ok. 1 passed; 0 failed;"),
             "isolated checked-Generic reuse ledger test failed:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -1412,6 +1425,7 @@ fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_repla
 
 #[test]
 fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime() {
+    let _serial = crate::counting_alloc::serial();
     // What: a checked destination parked by the plan-cache pool keeps no
     // provider, is re-attached to the current call's provider on the next
     // lease, and the parked payload rebinds only to the Runtime it came from.

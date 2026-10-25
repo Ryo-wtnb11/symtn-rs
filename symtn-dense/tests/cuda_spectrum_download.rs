@@ -6,7 +6,7 @@
 //! The deltas read the calling thread's [`cuda_transfer_stats`] counters.
 //!
 //! Run with `cargo test -p symtn-dense --no-default-features --features \
-//! cuda,cpu-faer --test cuda_spectrum_download -- --ignored` on a CUDA host.
+//! cuda,cpu-faer --test integration cuda_spectrum_download:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 

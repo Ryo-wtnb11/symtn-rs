@@ -15,11 +15,7 @@ use symtn_tensors::{
     OutputAxisOrder, RuleIdentity, TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 type Context = TensorContractFusionExecutionContext<f64, RuleIdentity>;
 
@@ -203,7 +199,7 @@ where
 
 #[test]
 fn dynamic_tree_route_allocations_are_bounded_by_base() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let rows = [
         ("U1 transformed", row(&transformed(U1FusionRule, u1_leg))),
         (

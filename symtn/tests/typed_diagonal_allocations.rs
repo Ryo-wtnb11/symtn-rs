@@ -20,11 +20,7 @@ use symtn::sector::{Z2FusionRule, Z2Irrep};
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, Svd, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// One coupled sector of degeneracy `DEGENERACY`, so the dense payload of a
 /// bond factor is exactly `DEGENERACY²` scalars and the compact one
@@ -98,7 +94,7 @@ fn constructed_diagonal(degeneracy: usize) -> TensorMap<Z2FusionRule, f64> {
 
 #[test]
 fn public_diagonal_constructor_and_readback_stay_compact() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     black_box(constructed_diagonal(64));
     black_box(constructed_diagonal(DEGENERACY));
     let small = measured_bytes(|| constructed_diagonal(64));
@@ -139,7 +135,7 @@ fn public_diagonal_constructor_and_readback_stay_compact() {
 
 #[test]
 fn labelled_block_inspection_refuses_compact_data_and_borrows_after_materialize() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let diagonal = constructed_diagonal(DEGENERACY);
 
     let refused = measured_bytes(|| diagonal.subblocks().map(|_| ()).is_err());
@@ -170,10 +166,10 @@ fn labelled_block_inspection_refuses_compact_data_and_borrows_after_materialize(
 
 #[test]
 fn svd_compacts_s_is_built_compact_and_materializes_only_on_demand() {
+    let _serial = crate::counting_alloc::serial();
     // What: `svd_compact` stores `s` as `Σ_c k_c` values: `dense_data()`
     // refuses it, and only the explicit `materialize()` pays for the dense
     // buffer.
-    let _measurement = counting_alloc::serial();
     let tensor = source(0x5eed_0001);
 
     // Warm the factorization path itself; `s` is discarded, only caches persist.
@@ -190,9 +186,9 @@ fn svd_compacts_s_is_built_compact_and_materializes_only_on_demand() {
 
 #[test]
 fn a_truncated_s_stays_compact_too() {
+    let _serial = crate::counting_alloc::serial();
     // What: truncation is two-leg `restrict_leg` on `svd_compact`'s `s`, and the
     // restriction keeps the compact storage.
-    let _measurement = counting_alloc::serial();
     let tensor = source(0x5eed_0002);
     let truncated = |tensor: &TensorMap<Z2FusionRule, f64>| {
         let s = tensor.svd_compact(&[0], &[1]).unwrap().s;
@@ -213,9 +209,9 @@ fn a_truncated_s_stays_compact_too() {
 
 #[test]
 fn a_complex_payloads_s_is_compact_as_well() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact arm is dtype-generic — `D` is a type parameter, so a
     // c64 spectrum takes exactly the same route with no widening variant.
-    let _measurement = counting_alloc::serial();
     let tensor = complex_source(0x5eed_0003);
     black_box(tensor.svd_compact(&[0], &[1]).unwrap());
 
@@ -244,10 +240,10 @@ fn spectrum(seed: u64) -> TensorMap<Z2FusionRule, f64> {
 
 #[test]
 fn storage_local_compact_operations_never_build_a_dense_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: scale, adjoint, add(diagonal, diagonal) and compose(D, D) all stay
     // in O(Σ_c k_c). Each allocates its own compact result and nothing else, so
     // the ceiling is far below one dense payload.
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0011);
     let ceiling = dense_payload_bytes();
 
@@ -280,10 +276,10 @@ fn storage_local_compact_operations_never_build_a_dense_payload() {
 
 #[test]
 fn a_mixed_add_allocates_only_its_own_dense_result() {
+    let _serial = crate::counting_alloc::serial();
     // What: adding a spectrum to a dense tensor on the same bond space scatters
     // straight into the owned result. Materializing the spectrum first would
     // double this, which is what the ceiling rejects.
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0012);
     let dense = TensorMap::isomorphism(runtime(), &d.domain(), &d.domain()).unwrap();
     // Reading `dense` must not be what pays for the diagonal: warm nothing on
@@ -305,11 +301,11 @@ fn a_mixed_add_allocates_only_its_own_dense_result() {
 
 #[test]
 fn absorbing_a_spectrum_through_compose_scales_instead_of_densifying() {
+    let _serial = crate::counting_alloc::serial();
     // What: `u * s` and `s * vh` take the bond-scaling arms. Each allocates its
     // own dense result — `u` and `vh` are dense — but not a second dense buffer
     // for `s`, which is what the ceiling here rejects. The dense GEMM route
     // would need `s` materialized as well.
-    let _measurement = counting_alloc::serial();
     let tensor = source(0x5eed_0013);
     let Svd { u, s, vh } = tensor.svd_compact(&[0], &[1]).unwrap();
     let ceiling = dense_payload_bytes() * 3 / 2;
@@ -326,6 +322,7 @@ fn absorbing_a_spectrum_through_compose_scales_instead_of_densifying() {
 
 #[test]
 fn the_matrix_functions_have_o_rank_diagonal_arms() {
+    let _serial = crate::counting_alloc::serial();
     // What: `exp`, `inv`, `pinv` and `map_diagonal` on a spectrum factor are elementwise
     // on the `Σ_c k_c` stored values, not block work on the `Σ_c k_c²`
     // materialization. The ceiling catches a densified route: no
@@ -333,7 +330,6 @@ fn the_matrix_functions_have_o_rank_diagonal_arms() {
     //
     // `exp` needs its own probe because its dense fallback materializes a
     // diagonal payload and eigendecomposes it.
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0021);
     let ceiling = dense_payload_bytes();
 
@@ -355,9 +351,9 @@ fn the_matrix_functions_have_o_rank_diagonal_arms() {
 
 #[test]
 fn a_complex_spectrums_matrix_functions_stay_o_rank_too() {
+    let _serial = crate::counting_alloc::serial();
     // What: the arms are dtype-generic, so a c64 spectrum takes the same route
     // — at twice the byte size, which is what the ceiling here accounts for.
-    let _measurement = counting_alloc::serial();
     let d = complex_source(0x5eed_0022)
         .svd_compact(&[0], &[1])
         .unwrap()
@@ -382,6 +378,7 @@ fn a_complex_spectrums_matrix_functions_stay_o_rank_too() {
 
 #[test]
 fn contracting_a_spectrum_scales_instead_of_densifying() {
+    let _serial = crate::counting_alloc::serial();
     // What: `contract` against a compact operand takes the same scaling route
     // `compose` does (issue #584) — TensorKit's `lmul!`/`rmul!` on a
     // `DiagonalTensorMap` — rather than materializing the `Σ_c k_c²` block
@@ -392,7 +389,6 @@ fn contracting_a_spectrum_scales_instead_of_densifying() {
     // which is about what the dense route spends on the materialization plus
     // the GEMM result. The crate's representation gates probe the absence of
     // a densification directly; here the two only run as smoke checks.
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0031);
     let dense = source(0x5eed_0032);
 
@@ -449,13 +445,13 @@ fn contracting_a_spectrum_scales_instead_of_densifying() {
 
 #[test]
 fn the_rank_one_swap_keeps_its_source_and_its_result_compact() {
+    let _serial = crate::counting_alloc::serial();
     // What: re-ordering the two legs of a spectrum factor is a per-sector
     // rescaling of the stored values (#585), so it neither reads nor writes a
     // `Σ_c k_c²` payload. Two things are measured, because each catches a
     // different way of getting it wrong: the swap's own byte cost (a densified
     // route would pay for two dense buffers), and that the *result* is still
     // compact (a compact-in, dense-out route could pass the first).
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0041);
     let ceiling = dense_payload_bytes();
 
@@ -481,10 +477,10 @@ fn the_rank_one_swap_keeps_its_source_and_its_result_compact() {
 
 #[test]
 fn exact_identity_keeps_compact_storage_and_braid_publishes_dense_output() {
+    let _serial = crate::counting_alloc::serial();
     // What: exact identities return the source body without
     // allocating or materializing its compact spectrum. An explicit braid
     // reads compact input and publishes an owned dense output.
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0042);
 
     assert_eq!(
@@ -507,13 +503,13 @@ fn exact_identity_keeps_compact_storage_and_braid_publishes_dense_output() {
 
 #[test]
 fn compact_is_posdef_never_builds_a_dense_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: the positive-definiteness chain on a spectrum factor (#1557:
     // Hermiticity gate, norm, `diagview`) is a comparison over the stored
     // values (#585). It is not allocation-*free* — the Hermiticity gate it
     // opens with is `t - t†`, which owns two compact `Σ_c k_c` results, and
     // that is the route TensorKit takes too — but it must stay far below the
     // `Σ_c k_c²` materialization the eigensolver route needed.
-    let _measurement = counting_alloc::serial();
     let ceiling = dense_payload_bytes();
 
     let d = spectrum(0x5eed_0051);
@@ -536,10 +532,10 @@ fn compact_is_posdef_never_builds_a_dense_payload() {
 
 #[test]
 fn diagonal_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
+    let _serial = crate::counting_alloc::serial();
     // What: `zeros_like`, `to_c64` and `re`/`im` are one
     // element-wise pass — on a compact spectrum factor the result stays
     // compact (far below one dense payload).
-    let _measurement = counting_alloc::serial();
     let d = spectrum(0x5eed_0021);
     let complex_d = complex_source(0x5eed_0022)
         .svd_compact(&[0], &[1])
@@ -562,11 +558,11 @@ fn diagonal_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
 
 #[test]
 fn dense_conversions_allocate_only_their_own_output() {
+    let _serial = crate::counting_alloc::serial();
     // What: on a dense payload, `to_c64` allocates its c64
     // output (twice the f64 bytes) and nothing more; `re`/`im` allocate their
     // f64 output and nothing more. The ceilings reject any hidden second
     // payload.
-    let _measurement = counting_alloc::serial();
     let tensor = source(0x5eed_0023);
     let complex_tensor = complex_source(0x5eed_0024);
     let ceiling = dense_payload_bytes();
@@ -589,10 +585,10 @@ fn dense_conversions_allocate_only_their_own_output() {
 
 #[test]
 fn rank_and_leg_inspections_allocate_no_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: the rank family reads the space structure and
     // allocates nothing; `leg_dims` owns only its `Vec<usize>` of rank
     // entries, never a payload.
-    let _measurement = counting_alloc::serial();
     let tensor = source(0x5eed_0025);
 
     for (name, bytes) in [
@@ -612,11 +608,11 @@ fn rank_and_leg_inspections_allocate_no_payload() {
 
 #[test]
 fn the_full_bond_trace_reduces_the_spectrum_without_materializing() {
+    let _serial = crate::counting_alloc::serial();
     // What (issue #604): `trace_pairs` over the only pair of a compact bond
     // factor reduces the stored spectrum in O(Σ_c k_c), preserving the #585
     // regression gate. The warm-up runs on a throwaway twin, so the measured
     // run pays for everything but the process-global caches.
-    let _measurement = counting_alloc::serial();
     let ceiling = dense_payload_bytes();
 
     black_box(spectrum(0x5eed_0081).trace_pairs(&[(0, 1)]).unwrap());
@@ -650,9 +646,9 @@ fn the_full_bond_trace_reduces_the_spectrum_without_materializing() {
 
 #[test]
 fn contract_keeps_the_compact_storage_outcomes() {
+    let _serial = crate::counting_alloc::serial();
     // What: `contract` keeps the compact-storage
     // outcomes documented by its rustdoc.
-    let _measurement = counting_alloc::serial();
 
     // `s · s` with the identity order stays compact end to end: the whole
     // contraction costs less than one dense payload, and the result is

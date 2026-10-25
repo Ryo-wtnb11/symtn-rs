@@ -4,8 +4,7 @@
 //! The fixtures share their first sector, which the former first-sector
 //! comparison admitted: the trace then summed only the shared sectors.
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 
 use std::sync::Arc;
 

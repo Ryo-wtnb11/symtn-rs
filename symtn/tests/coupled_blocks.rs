@@ -10,7 +10,7 @@
 //! - the lazy adjoint `block(t', c) = block(t, c)'` over the parent's payload.
 //!
 //! The CUDA gate runs with `cargo test -p symtn --no-default-features
-//! --features cuda,cpu-faer --test coupled_blocks -- --ignored` on a CUDA host.
+//! --features cuda,cpu-faer --test integration coupled_blocks:: -- --ignored` on a CUDA host.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;

@@ -30,10 +30,7 @@ use symtn::typed::{
     BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, TensorMap,
 };
 
-#[allow(unused_macros)]
-#[macro_use]
-#[path = "support/table_fixture.rs"]
-mod table_fixture;
+use crate::table_fixture;
 use table_fixture::*;
 
 type Table = TensorMap<TableRule, Complex64>;

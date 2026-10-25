@@ -1,8 +1,7 @@
 //! `StackedTensorMap::select` on a real device (#1502).
 //!
-//! Its own binary with one test, because `cuda_transfer_stats` is
-//! process-wide. Run with `cargo test -p symtn --no-default-features
-//! --features cuda,cpu-faer --test stacked_select_cuda -- --ignored`.
+//! `cuda_transfer_stats` is thread-local. Run with `cargo test -p symtn --no-default-features
+//! --features cuda,cpu-faer --test integration stacked_select_cuda:: -- --ignored`.
 
 #![cfg(feature = "cuda")]
 
@@ -12,9 +11,7 @@ use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
 use symtn::typed::{Error, Runtime};
 use symtn::typed::{GradedSpace, StackedTensorMap, TensorMap};
 
-#[macro_use]
-#[path = "stacked/fixtures.rs"]
-mod fixtures;
+use crate::stacked_fixtures as fixtures;
 
 /// Submissions and transfers since `before`, as
 /// `(h2d, d2h, copy, gemm, solver)` calls.

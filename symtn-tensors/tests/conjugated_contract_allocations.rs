@@ -13,11 +13,7 @@ use symtn_tensors::{
     TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Allocation calls and bytes of one warm lazy-adjoint-source contraction
 /// `A† · B` over `A, B: V ← V`, plus the retained bytes of the memoized
@@ -110,7 +106,8 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
 
 #[test]
 fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
+    symtn_core::clear_structure_caches();
     let fz2_u1_rule = || {
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,

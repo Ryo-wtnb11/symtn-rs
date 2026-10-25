@@ -15,7 +15,7 @@
 
 #![cfg(feature = "cuda")]
 
-mod categorical_recoupling;
+use crate::categorical_recoupling;
 
 use std::sync::Arc;
 

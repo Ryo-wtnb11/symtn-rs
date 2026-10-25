@@ -10,7 +10,7 @@
 //! `f32` tensor must never read the `f64` lane's converted recoupling matrix
 //! for the same structure identity.
 
-mod single_precision_oracle;
+use crate::single_precision_oracle;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{U1FusionRule, U1Irrep};

@@ -24,12 +24,10 @@
 use std::sync::Arc;
 
 use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
-use symtn::typed::{Complex32, Complex64, GradedSpace, SectorSpectrum, TensorMap};
+use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::fixtures;
+use crate::numerics;
 
 use fixtures::host_runtime;
 

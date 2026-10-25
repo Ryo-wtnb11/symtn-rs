@@ -1,22 +1,18 @@
 //! S1a evidence: `DefaultDenseExecutor` opens one Tenferro CPU session per
 //! dense phase, and the phase's results are unchanged.
 //!
-//! These live in their own test binary on purpose: `cpu_session_stats` is a
-//! process-wide counter, so a delta is only meaningful when no unrelated test
-//! opens a session in the same process. Inside this binary the mutex below
-//! serializes the readers.
+//! Every test in this target takes the shared serial guard.
 
 #![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn_dense::{
     cpu_session_stats, reset_cpu_session_stats, strided_batch_runs, CpuSessionStats,
     DefaultDenseExecutor, DenseError, DenseExecutor, DenseFactorization, DenseGemmBatchJob,
     DenseRead, DenseScalar, DenseView, DenseViewMut, DenseWrite, MatrixOp,
 };
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn assert_close(got: f64, want: f64, tol: f64) {
     assert!((got - want).abs() <= tol, "{got} != {want} (tol {tol})");
@@ -24,7 +20,7 @@ fn assert_close(got: f64, want: f64, tol: f64) {
 
 // Session-scope evidence. `cpu_session_stats` is a process-wide counter,
 // so every test that reads a delta takes this lock; they must not run
-// concurrently with one another (other tests never touch the counter).
+// concurrently with one another.
 static CPU_SESSION_COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Held for the whole of each test below, not just around the measured call:
@@ -139,6 +135,7 @@ fn serial_route_is_one_session_and_bitwise_equal<T, W, R>(
 #[test]
 #[allow(clippy::redundant_closure)]
 fn op_bearing_serial_batch_uses_one_session_f64() {
+    let _serial = crate::counting_alloc::serial();
     serial_route_is_one_session_and_bitwise_equal(
         |i| 0.5 + 0.25 * i as f64,
         |i| 2.0 + 0.05 * i as f64,
@@ -158,6 +155,7 @@ fn op_bearing_serial_batch_uses_one_session_f64() {
 #[test]
 #[allow(clippy::redundant_closure)]
 fn op_bearing_serial_batch_uses_one_session_c64() {
+    let _serial = crate::counting_alloc::serial();
     for (lhs_op, rhs_op) in [
         (MatrixOp::Adjoint, MatrixOp::Identity),
         (MatrixOp::Identity, MatrixOp::Adjoint),
@@ -182,6 +180,7 @@ fn op_bearing_serial_batch_uses_one_session_c64() {
 // critical section, so it must not be taken for an empty loop.
 #[test]
 fn op_bearing_empty_batch_opens_no_session() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     let strides = [1usize];
     let mut output = [3.0f64];
@@ -210,6 +209,7 @@ fn op_bearing_empty_batch_opens_no_session() {
 // released on the error path, so a following call can enter a new one.
 #[test]
 fn op_bearing_serial_batch_error_inside_session_keeps_executor_usable() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     let good = DenseGemmBatchJob {
         rows: 2,
@@ -272,6 +272,7 @@ fn op_bearing_serial_batch_error_inside_session_keeps_executor_usable() {
 // (it opened two before), with the spectrum unchanged.
 #[test]
 fn eig_vals_uses_one_session_for_prepass_and_values() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     let shape = [2usize, 2];
     // Non-contiguous source, so the pre-pass actually copies.
@@ -306,6 +307,7 @@ fn eig_vals_uses_one_session_for_prepass_and_values() {
 
 #[test]
 fn eig_vals_uses_one_session_for_c64() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     let c = Complex64::new;
     let shape = [2usize, 2];
@@ -338,6 +340,7 @@ fn eig_vals_uses_one_session_for_c64() {
 // visible here.
 #[test]
 fn cpu_session_stats_reset_and_scope() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     reset_cpu_session_stats();
     assert_eq!(cpu_session_stats(), CpuSessionStats::default());
@@ -449,6 +452,7 @@ fn factorize_batch_is_one_session_and_matches_per_call<T: Copy>(
 #[test]
 #[allow(clippy::redundant_closure)]
 fn factorize_batch_is_one_session_and_matches_per_call_f64() {
+    let _serial = crate::counting_alloc::serial();
     factorize_batch_is_one_session_and_matches_per_call(
         |i| ((i * 7 + 3) % 11) as f64 - 4.5,
         // Constructor functions fix one lifetime; the closure stays generic.
@@ -459,6 +463,7 @@ fn factorize_batch_is_one_session_and_matches_per_call_f64() {
 #[test]
 #[allow(clippy::redundant_closure)]
 fn factorize_batch_is_one_session_and_matches_per_call_c64() {
+    let _serial = crate::counting_alloc::serial();
     factorize_batch_is_one_session_and_matches_per_call(
         |i| {
             Complex64::new(
@@ -474,6 +479,7 @@ fn factorize_batch_is_one_session_and_matches_per_call_c64() {
 // execution permit for an empty loop.
 #[test]
 fn factorize_batch_empty_opens_no_session() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     let mut executor = DefaultDenseExecutor::new();
     let before = sessions_opened();
@@ -522,6 +528,7 @@ fn partition_call(
 // and conjugation, so the output is bitwise what one call per run produces.
 #[test]
 fn mixed_partition_is_one_admission_and_bitwise_equal_to_per_run_calls() {
+    let _serial = crate::counting_alloc::serial();
     let _guard = counter_lock();
     // (partition, serial stretches, runs issued one call each: admissions)
     let cases: [(&[usize], u64, u64); 4] = [

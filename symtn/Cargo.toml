@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "symtn"
 version = "0.1.1"
 description = "Symmetric tensors and tensor-network operations"
@@ -78,3 +79,15 @@ harness = false
 [[bench]]
 name = "vector_ops"
 harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "serial"
+path = "tests/serial.rs"
+
+[[test]]
+name = "runtime_owned_cpu_pool"
+path = "tests/runtime_owned_cpu_pool.rs"

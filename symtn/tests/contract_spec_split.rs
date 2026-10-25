@@ -10,15 +10,8 @@
 //! non-self-dual legs, SU(2) and fZ2 x U(1) with dual legs, for owned, lazy
 //! adjoint and compact diagonal operands, in real and complex payloads.
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-#[allow(unused_macros)]
-mod contract_cases;
+use crate::contract_cases;
+use crate::numerics;
 
 use std::sync::Arc;
 

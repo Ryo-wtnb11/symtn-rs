@@ -5,14 +5,12 @@
 //! property, and each projection against `(x ± x†) / 2` evaluated entrywise
 //! from the fill.
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use num_complex::{Complex32, Complex64};

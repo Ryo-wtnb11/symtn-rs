@@ -1,3 +1,4 @@
+//! Separate binary: this test sizes Rayon's process-global pool with `build_global`.
 //! #1531: every Host eager operation runs its replay, plan-compile, strided
 //! and dense work on the CPU pool of the operand's own `Runtime`, whatever
 //! order runtimes with different thread counts were built in. Its own test

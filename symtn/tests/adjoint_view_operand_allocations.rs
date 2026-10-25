@@ -9,11 +9,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measure(f: impl FnOnce()) -> (u64, u64) {
     let ((), allocs) = counting_alloc::measure(f);
@@ -35,7 +31,7 @@ fn tensor(runtime: &Runtime, degeneracy: usize, seed: u64) -> TensorMap<U1Fusion
 /// payload is copied for the view.
 #[test]
 fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let mut view_costs = Vec::new();
     for degeneracy in [1, 8] {
@@ -109,7 +105,7 @@ fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
 /// What: a plain view `&t` allocates nothing beyond the operation itself.
 #[test]
 fn plain_view_operand_allocates_nothing_extra() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let a = tensor(&runtime, 4, 3);
     black_box(a.inner(&a).unwrap());

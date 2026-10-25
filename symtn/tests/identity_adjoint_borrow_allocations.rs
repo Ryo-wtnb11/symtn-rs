@@ -30,11 +30,7 @@ use std::sync::Arc;
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// `(u, spec)` of a fixture over `(runtime, V, X, fill)`.
 macro_rules! fixture {
@@ -101,7 +97,6 @@ macro_rules! assert_close {
 /// is unchanged; `$spaces(scale)` gives `(V, X)`.
 macro_rules! assert_borrowed {
     ($name:expr, $fixture:ident, $spaces:expr) => {{
-        let _serial = counting_alloc::serial();
         for scale in [1, 4] {
             let (v, x) = $spaces(scale);
             let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -211,32 +206,38 @@ fn checked_su2_spaces(
 
 #[test]
 fn su2_identity_adjoint_is_borrowed_on_the_dynamic_tree_route() {
+    let _serial = crate::counting_alloc::serial();
     assert_borrowed!("SU(2)", permuted, su2_spaces);
 }
 
 #[test]
 fn u1_identity_adjoint_is_borrowed_on_the_dynamic_tree_route() {
+    let _serial = crate::counting_alloc::serial();
     assert_borrowed!("U(1)", permuted, u1_spaces);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su2_identity_adjoint_is_borrowed_on_the_dynamic_tree_route() {
+    let _serial = crate::counting_alloc::serial();
     assert_borrowed!("checked SU(2)", permuted, checked_su2_spaces);
 }
 
 #[test]
 fn su2_selection_prices_a_borrowable_identity_adjoint_as_free() {
+    let _serial = crate::counting_alloc::serial();
     assert_borrowed!("SU(2)", reversed, su2_spaces);
 }
 
 #[test]
 fn u1_selection_prices_a_borrowable_identity_adjoint_as_free() {
+    let _serial = crate::counting_alloc::serial();
     assert_borrowed!("U(1)", reversed, u1_spaces);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su2_selection_prices_a_borrowable_identity_adjoint_as_free() {
+    let _serial = crate::counting_alloc::serial();
     assert_borrowed!("checked SU(2)", reversed, checked_su2_spaces);
 }

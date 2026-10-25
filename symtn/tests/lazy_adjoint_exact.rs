@@ -16,10 +16,9 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 use symtn::sector::{
     product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
     Z2Irrep,

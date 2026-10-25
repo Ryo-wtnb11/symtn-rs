@@ -2,23 +2,18 @@
 
 #![cfg(feature = "cgc-gen")]
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-use num_complex::{Complex32, Complex64};
+use crate::numerics;
 
 use fusion_symbols::category::{FusionCategory, SymbolBlock};
 use symtn_sectors::{
     CategoryProvider, CheckedGenericFusion, CheckedGenericRigidSymbols, LieGroupFusionRule,
 };
 
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
-
 #[test]
 fn warm_lie_group_scalar_queries_reuse_interned_handles() {
+    let _serial = crate::counting_alloc::serial();
     for (n, labels, dimension, multiplicity) in [
         (2, &[2][..], 3.0, 1),
         (3, &[1, 1][..], 8.0, 2),
@@ -43,6 +38,7 @@ fn warm_lie_group_scalar_queries_reuse_interned_handles() {
 
 #[test]
 fn warm_lie_group_symbol_queries() {
+    let _serial = crate::counting_alloc::serial();
     let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let octet = rule.encode_dynkin(&[1, 1]).unwrap();
     let object = rule.object(octet).unwrap();

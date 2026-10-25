@@ -13,8 +13,7 @@ use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64, Error, Runtime};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

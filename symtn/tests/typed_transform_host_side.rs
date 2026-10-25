@@ -13,7 +13,7 @@
 //!    without a device reports no device transform state and still clears its
 //!    Host transform store.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 use symtn::typed::Direction;
@@ -22,10 +22,7 @@ use common::permute_dense;
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-
-use symtn::typed::{Complex32, Complex64};
+use crate::numerics;
 
 /// Floating terms per physical entry: the fusion-tree expansion of a rank-4
 /// SU(2) tensor with spins up to 1 sums over at most four intermediate spins.
@@ -78,6 +75,7 @@ fn su2_leg() -> GradedSpace<SU2FusionRule> {
 
 #[test]
 fn the_dense_permute_oracle_agrees_with_the_host_for_u1_and_su2() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
 
     let u1 = u1_leg();
@@ -120,6 +118,7 @@ fn the_dense_permute_oracle_agrees_with_the_host_for_u1_and_su2() {
 
 #[test]
 fn a_runtime_without_a_device_reports_no_device_transform_state_and_still_clears() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if run_isolated_or_return(
         "SYMTN_TYPED_TRANSFORM_HOST_SIDE_ISOLATED",
@@ -176,6 +175,7 @@ fn nan_positions(data: &[f64]) -> Vec<usize> {
 /// is why this test spells them out.
 #[test]
 fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = u1_leg();
     let source: TensorMap<_, f64> =
@@ -296,6 +296,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
 
 #[test]
 fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
+    let _serial = crate::counting_alloc::serial();
     // The three Host destination semantics: Overwrite clears whatever the
     // destination held, `alpha == 0` writes zeros whatever the source holds
     // (#1438), and an identity axis list is still written rather than short
@@ -443,6 +444,7 @@ macro_rules! assert_signs_only_over {
 /// move every block rather than only the scaled ones.
 #[test]
 fn a_fermionic_twist_only_ever_keeps_or_negates_an_entry() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
 
     // The fixtures are the device gate's own: fZ2 with a dual leg, and the two
@@ -598,6 +600,7 @@ fn a_fermionic_twist_only_ever_keeps_or_negates_an_entry() {
 /// distinction and is left untested.
 #[test]
 fn a_twist_of_a_space_with_no_coupled_sector_is_the_identity_short_circuit() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let even = GradedSpace::try_new(
         Arc::new(symtn::sector::FermionParityFusionRule),
@@ -631,15 +634,17 @@ fn completed_transformers() -> symtn::cache::StructureCacheInfo {
         .expect("every structure cache kind reports")
 }
 
-/// Re-executes exactly one global-cache probe in a fresh process. This binary
-/// also contains ordinary tests that mutate the same caches without a shared
-/// lock, so test-thread serialization inside one probe is insufficient.
+/// Re-executes exactly one global-cache probe with fresh-process cache state.
 fn run_isolated_or_return(isolated_env: &str, test_path: &str) -> bool {
     if std::env::var_os(isolated_env).is_some() {
         return false;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", test_path, "--include-ignored"])
+        .args([
+            "--exact",
+            &format!("typed_transform_host_side::{test_path}"),
+            "--include-ignored",
+        ])
         .env(isolated_env, "1")
         .output()
         .unwrap();

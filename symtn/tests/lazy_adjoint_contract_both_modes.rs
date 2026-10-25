@@ -35,8 +35,7 @@ use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::__network::{network_reuse_class, NetworkReuseClass};
 use symtn::typed::{BlockFusionTrees, Complex64, ContractSpec, GradedSpace, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

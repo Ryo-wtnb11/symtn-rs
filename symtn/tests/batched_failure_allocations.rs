@@ -1,13 +1,10 @@
 //! Allocation contract of the batched failure rule (#1757): the buffers a
 //! failed call keeps are reused, so the first call after a failure allocates
-//! no more on the caller thread than a warm call. Its own binary, because it
-//! installs a counting global allocator; single-threaded runtimes, so the
+//! no more on the caller thread than a warm call. The allocation target
+//! shares one counting allocator; single-threaded runtimes mean the
 //! caller thread sees every symtn allocation.
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::prepared;
 
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
@@ -18,11 +15,7 @@ use symtn::typed::{
 use prepared::eigh::hermitian_members;
 use prepared::{members, u1_legs};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 const COUNT: usize = 5;
 
@@ -51,6 +44,7 @@ fn check(label: &str, [cold, warm, recovered]: [(u64, u64); 3]) {
 
 #[test]
 fn the_first_call_after_a_failure_allocates_no_more_than_a_warm_call() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let (v, w) = u1_legs();
     let lhs =

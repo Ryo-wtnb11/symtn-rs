@@ -59,12 +59,12 @@ fn fermionic_leg_with(
 
 #[test]
 fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
+    let _serial = crate::counting_alloc::serial();
     // What: the exact relation between the two contraction semantics —
     // `compose(a, b) == contract(a, twist(b, b's dual codomain legs))`. The
     // twisted operand is built through `from_subblock_fn` rather than through the
     // public `twist`: theta is -1 on an odd sector and +1 otherwise, so the
     // twisted tensor is a one-line independent oracle here.
-    let _guard = cache_lock();
     let runtime = runtime();
     let (typed_a, typed_b) = fermionic_compose_pair(&runtime);
 
@@ -112,9 +112,9 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
 
 #[test]
 fn bosonic_compose_is_contract_with_the_identity_output_order() {
+    let _serial = crate::counting_alloc::serial();
     // What: for a symmetric braiding the supertrace twist is the identity, so
     // the two semantics coincide.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -140,11 +140,11 @@ fn bosonic_compose_is_contract_with_the_identity_output_order() {
 
 #[test]
 fn compose_contracts_the_whole_domain_against_the_whole_codomain() {
+    let _serial = crate::counting_alloc::serial();
     // What: the derived axes. `[v, v] <- [v]` composed with `[v] <- [v, v]`
     // contracts exactly the one shared leg and leaves `[v, v] <- [v, v]`, and
     // the same tensor comes back from the explicit contraction. Perturbing
     // either axis derivation changes the shape or the numbers here.
-    let _guard = cache_lock();
     let runtime = runtime();
     let tall = z2_tensor_split(&runtime, 2);
     let wide = z2_tensor_split(&runtime, 1);
@@ -172,7 +172,7 @@ fn compose_contracts_the_whole_domain_against_the_whole_codomain() {
 
 #[test]
 fn compose_rejects_operands_from_different_runtimes() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let left = z2_endomorphism(&runtime());
     let right = z2_endomorphism(&runtime());
 
@@ -184,9 +184,9 @@ fn compose_rejects_operands_from_different_runtimes() {
 
 #[test]
 fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
+    let _serial = crate::counting_alloc::serial();
     // A rank mismatch and a matching-rank but non-dual leg mismatch, both from
     // the expert layer rather than from a pre-check here.
-    let _guard = cache_lock();
     let runtime = runtime();
     let endo = z2_endomorphism(&runtime);
     let tall = z2_tensor_split(&runtime, 2);
@@ -266,9 +266,9 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
 
 #[test]
 fn id_composes_as_the_identity_on_both_sides() {
+    let _serial = crate::counting_alloc::serial();
     // What: the defining property, as a byte oracle against the source tensor.
     // `[v, v] <- [v]`, so the two sides exercise different ranks.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
@@ -287,10 +287,10 @@ fn id_composes_as_the_identity_on_both_sides() {
 
 #[test]
 fn id_composes_as_the_identity_for_a_fermionic_provider() {
+    let _serial = crate::counting_alloc::serial();
     // What: no stray sign. A fermionic identity is still the plain diagonal —
     // the twist question belongs to the contracted legs, and composition does
     // not ask it.
-    let _guard = cache_lock();
     let runtime = runtime();
     let (typed_a, _) = fermionic_compose_pair(&runtime);
 

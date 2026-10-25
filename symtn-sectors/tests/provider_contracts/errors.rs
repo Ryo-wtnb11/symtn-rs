@@ -19,7 +19,7 @@ use std::panic::{self, AssertUnwindSafe};
 
 use symtn_sectors::*;
 
-use crate::s;
+use super::s;
 
 fn invalid(id: usize) -> Result<usize, FusionAlgebraError> {
     Err(FusionAlgebraError::InvalidSector { sector: s(id) })

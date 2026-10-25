@@ -14,11 +14,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[derive(Clone, Copy, Debug)]
 struct Sample {
@@ -151,7 +147,7 @@ fn assert_one_reused_workspace(
 
 #[test]
 fn general_exp_workspace_is_largest_sector_sized_and_reused() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
 
     for (order, scale) in [(48usize, 1.0e-4), (48, 1.0e-2), (96, 1.0e-4)] {
         let two = fixture_f64(2, order, scale);
@@ -178,7 +174,7 @@ fn general_exp_workspace_is_largest_sector_sized_and_reused() {
 
 #[test]
 fn typed_u1_general_exp_matches_the_upper_triangular_oracle() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(

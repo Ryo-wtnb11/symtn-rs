@@ -7,11 +7,7 @@ use symtn_operations::{
     Rank2Gemm, StridedHostKernelAdapter,
 };
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 struct ScalarGemm;
 
@@ -55,6 +51,7 @@ fn scalar_group() -> FusionBlockMatrixGroup {
 
 #[test]
 fn warmed_irregular_group_replay_allocates_nothing() {
+    let _serial = crate::counting_alloc::serial();
     let structure = Arc::new(BlockStructure::trivial(&[1]).unwrap());
     let plan = FusionBlockContractPlan::from_parts(
         Arc::clone(&structure),
@@ -116,6 +113,7 @@ fn warmed_irregular_group_replay_allocates_nothing() {
 /// rank 8: the per-call cost is then independent of the call count.
 #[test]
 fn a_fresh_adapter_checked_block_copy_allocates_nothing_up_to_rank_eight() {
+    let _serial = crate::counting_alloc::serial();
     let shape = [2usize; 8];
     let mut dst_strides = [0isize; 8];
     let mut src_strides = [0isize; 8];

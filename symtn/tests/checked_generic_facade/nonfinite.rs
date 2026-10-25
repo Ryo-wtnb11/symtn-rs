@@ -1,8 +1,6 @@
 use super::*;
 
-#[macro_use]
-#[path = "../support/nonfinite_factor_input.rs"]
-mod nonfinite_factor_input;
+use crate::nonfinite_factor_input;
 use nonfinite_factor_input::assert_finite_input_refusals;
 
 /// Checked Generic factorizations refuse nonfinite input through the shared
@@ -10,6 +8,7 @@ use nonfinite_factor_input::assert_finite_input_refusals;
 /// the multiplicity-free counterpart is `factorization_nonfinite_input.rs`.
 #[test]
 fn checked_generic_factorizations_refuse_nonfinite_input() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =
@@ -98,6 +97,7 @@ fn checked_generic_factorizations_refuse_nonfinite_input() {
 /// mode too.
 #[test]
 fn checked_generic_polar_reports_shape_before_values() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let row = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();

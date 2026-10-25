@@ -1,11 +1,4 @@
-#[path = "../../../tests/support/backend.rs"]
-mod backend;
-#[path = "../common/mod.rs"]
-mod common;
-#[path = "../../../tests/support/numerics.rs"]
-mod numerics;
-#[path = "../support/report.rs"]
-mod report;
+use crate::{common, numerics};
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -59,15 +52,18 @@ fn cache_exclusive() -> std::sync::RwLockWriteGuard<'static, ()> {
     CACHE_TEST_LOCK.write().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Re-executes exactly one global-cache probe in a fresh process, for
-/// assertions on absolute counters (`entries() == 0` right after a clear)
-/// that any concurrent, unguarded construction would move.
+/// Re-executes exactly one global-cache probe with explicit fresh-process
+/// state for assertions on absolute counters (`entries() == 0` after a clear).
 fn run_isolated_or_return(isolated_env: &str, test_path: &str) -> bool {
     if std::env::var_os(isolated_env).is_some() {
         return false;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", test_path, "--include-ignored"])
+        .args([
+            "--exact",
+            &format!("checked_generic_facade::{test_path}"),
+            "--include-ignored",
+        ])
         .env(isolated_env, "1")
         .output()
         .unwrap();

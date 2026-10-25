@@ -14,19 +14,16 @@ use symtn::sector::{
     TypedSectorAdmission,
 };
 use symtn::typed::FusionAlgebraError;
-use symtn::typed::{Complex32, Complex64, Error, TensorScalar};
+use symtn::typed::{Complex64, Error, TensorScalar};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::plan_cache_stats;
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{conj, net, op};
 
-#[path = "../../symtn/tests/braiding_probe/mod.rs"]
-mod braiding_probe;
+use crate::braiding_probe;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn u1_space() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(

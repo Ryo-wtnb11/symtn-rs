@@ -8,12 +8,11 @@
 //! unchanged.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_materialize -- --ignored` on a CUDA host.
+//! integration typed_cuda_materialize:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::sync::Arc;

@@ -5,6 +5,7 @@ const TAU: TableSector = TableSector::new(2);
 
 #[test]
 fn fibonacci_codec_reaches_public_graded_space_construction() {
+    let _serial = crate::counting_alloc::serial();
     // What: the table provider's public labels cross the ordinary typed
     // codec boundary and return in engine-sector order. Tensor execution has a
     // separate complex-coefficient admission boundary and is not claimed here.
@@ -18,6 +19,7 @@ fn fibonacci_codec_reaches_public_graded_space_construction() {
 
 #[test]
 fn fibonacci_complex_tensor_reaches_all_checked_constructors() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let space =
         GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(VACUUM, 1), (TAU, 1)]).unwrap();
@@ -92,8 +94,9 @@ fn fibonacci_tau_channel(tensor: &TensorMap<TableRule, Complex64>) -> [Complex64
 
 #[test]
 fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
-    if crate::run_isolated_or_return(
+    if crate::typed_facade::run_isolated_or_return(
         "SYMTN_TYPED_FACADE_FIBONACCI_FORWARD_BRAID_MATCHES_CLOSED_F",
         "space::fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture",
     ) {
@@ -103,11 +106,11 @@ fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
     let source = fibonacci_tau_braid_fixture(&runtime);
     symtn::cache::clear();
     let braided = source.braid(&[0, 2, 1], &[3], &[0, 1, 2, 3]).unwrap();
-    let cold = crate::completed_transformers();
+    let cold = crate::typed_facade::completed_transformers();
     assert_eq!((cold.entries(), cold.misses(), cold.hits()), (1, 1, 0));
     let warm = source.braid(&[0, 2, 1], &[3], &[0, 1, 2, 3]).unwrap();
     assert_eq!(warm.dense_data().unwrap(), braided.dense_data().unwrap());
-    let warm_info = crate::completed_transformers();
+    let warm_info = crate::typed_facade::completed_transformers();
     assert_eq!(
         (warm_info.entries(), warm_info.misses(), warm_info.hits()),
         (1, 1, 1)
@@ -152,6 +155,7 @@ fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
 
 #[test]
 fn fibonacci_planar_transforms_roundtrip_without_braiding() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let source = fibonacci_tau_braid_fixture(&runtime);
     assert_eq!(
@@ -254,6 +258,7 @@ fn fibonacci_planar_transforms_roundtrip_without_braiding() {
 
 #[test]
 fn fibonacci_otimes_matches_the_nontrivial_tensorkit_fixture() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let tau = GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TAU, 1)]).unwrap();
     let dual_tau = tau.try_dual().unwrap();
@@ -340,8 +345,9 @@ fn fibonacci_matrix_entry(seed: f64, sector: &TableSector, row: usize, column: u
 
 #[test]
 fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
-    if crate::run_isolated_or_return(
+    if crate::typed_facade::run_isolated_or_return(
         "SYMTN_TYPED_FACADE_FIBONACCI_COMPOSE_IS_COMPLEX_COUPLED_SEC",
         "space::fibonacci_compose_is_complex_coupled_sector_matrix_multiplication",
     ) {
@@ -366,9 +372,9 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
         })
         .unwrap();
     symtn::cache::clear();
-    let before = crate::completed_transformers();
+    let before = crate::typed_facade::completed_transformers();
     let cold = lhs.compose(&rhs).unwrap();
-    let after_cold = crate::completed_transformers();
+    let after_cold = crate::typed_facade::completed_transformers();
     let warm = lhs.compose(&rhs).unwrap();
     let expected: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(&runtime, [&rows], [&columns], |trees, indices| {
@@ -390,7 +396,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     assert_data_close_c64(warm.dense_data().unwrap(), expected.dense_data().unwrap());
     assert!(std::ptr::eq(cold.provider(), lhs.provider()));
     assert_eq!(after_cold, before);
-    assert_eq!(crate::completed_transformers(), before);
+    assert_eq!(crate::typed_facade::completed_transformers(), before);
 
     // What: the same genuinely complex blocks are associative, while ordinary
     // contraction refuses even this crossing-free boundary.
@@ -407,7 +413,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     assert_data_close_c64(left.dense_data().unwrap(), right.dense_data().unwrap());
 
     symtn::cache::clear();
-    let before = crate::completed_transformers();
+    let before = crate::typed_facade::completed_transformers();
     let error = a
         .contract(
             &b,
@@ -424,7 +430,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
         symtn::typed::Error::Operation(operation)
             if matches!(*operation, symtn::typed::OperationError::UnsupportedTensorContractScope { .. })
     ));
-    assert_eq!(crate::completed_transformers(), before);
+    assert_eq!(crate::typed_facade::completed_transformers(), before);
 
     let other_runtime = Runtime::builder().build().unwrap();
     let other: TensorMap<_, Complex64> =
@@ -453,8 +459,9 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
 
 #[test]
 fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
-    if crate::run_isolated_or_return(
+    if crate::typed_facade::run_isolated_or_return(
         "SYMTN_TYPED_FACADE_FIBONACCI_ORDINARY_PERMUTE_REJECTION_DOE",
         "space::fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry",
     ) {
@@ -463,7 +470,7 @@ fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
     let runtime = runtime();
     let source = fibonacci_tau_braid_fixture(&runtime);
     symtn::cache::clear();
-    let before = crate::completed_transformers();
+    let before = crate::typed_facade::completed_transformers();
     let error = source.permute(&[0, 2, 1], &[3]).unwrap_err();
     assert!(
         matches!(
@@ -472,11 +479,12 @@ fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
         ),
         "{error:?}"
     );
-    assert_eq!(crate::completed_transformers(), before);
+    assert_eq!(crate::typed_facade::completed_transformers(), before);
 }
 
 #[test]
 fn graded_space_drops_zero_degeneracy_sectors() {
+    let _serial = crate::counting_alloc::serial();
     // What: the leg invariant (a zero-degeneracy sector is absent) reaches the
     // typed surface unchanged.
     let provider = Arc::new(external_z3());
@@ -488,6 +496,7 @@ fn graded_space_drops_zero_degeneracy_sectors() {
 
 #[test]
 fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
+    let _serial = crate::counting_alloc::serial();
     fn generic_dim<R>(space: &GradedSpace<R>) -> f64
     where
         R: symtn::sector::TypedSectorAdmission,
@@ -668,6 +677,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
 
 #[test]
 fn graded_space_rejects_a_duplicate_label_by_name() {
+    let _serial = crate::counting_alloc::serial();
     // What: the duplicate is reported as the caller's own label, which needs
     // the check to run before the label is encoded away into a `SectorId`.
     let provider = Arc::new(external_z3());
@@ -680,6 +690,7 @@ fn graded_space_rejects_a_duplicate_label_by_name() {
 
 #[test]
 fn graded_space_reports_aliased_labels_as_a_codec_law_violation() {
+    let _serial = crate::counting_alloc::serial();
     // What: two distinct labels encoding to one id is the provider breaking
     // codec injectivity, not the caller declaring a sector twice, and the two
     // cases must not be conflated in the diagnosis.
@@ -694,6 +705,7 @@ fn graded_space_reports_aliased_labels_as_a_codec_law_violation() {
 
 #[test]
 fn graded_space_reports_an_unrepresentable_label() {
+    let _serial = crate::counting_alloc::serial();
     // What: an out-of-domain label surfaces the provider's own encode error.
     let provider = Arc::new(external_z3());
     let error = GradedSpace::try_new(provider, [(Z3Charge(7), 2)]).unwrap_err();
@@ -706,6 +718,7 @@ fn graded_space_reports_an_unrepresentable_label() {
 
 #[test]
 fn graded_space_dual_flips_the_leg_and_dualizes_non_self_dual_labels() {
+    let _serial = crate::counting_alloc::serial();
     // What: `try_dual` uses the provider's checked dual, so Z3's charge 1 and
     // charge 2 swap (with their degeneracies) and the dual flag flips.
     let provider = Arc::new(external_z3());
@@ -727,6 +740,7 @@ fn graded_space_dual_flips_the_leg_and_dualizes_non_self_dual_labels() {
 
 #[test]
 fn graded_space_dual_surfaces_a_failing_checked_dual() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider that cannot dual a sector reports its own typed error
     // rather than producing a partially dualized leg.
     let provider = Arc::new(external_z3_with(Quirk::FailDual));
@@ -737,6 +751,7 @@ fn graded_space_dual_surfaces_a_failing_checked_dual() {
 
 #[test]
 fn graded_space_dual_reports_a_non_injective_dual_instead_of_panicking() {
+    let _serial = crate::counting_alloc::serial();
     // What: a provider whose dual collapses two sectors onto one id is a
     // broken rigidity structure. The leg cannot hold the result, and the
     // failure must come back as a typed error, not a panic inside this
@@ -759,20 +774,22 @@ fn graded_space_dual_reports_a_non_injective_dual_instead_of_panicking() {
 
 #[test]
 fn graded_space_carries_a_simple_fusion_provider_too() {
+    let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
-    if crate::run_isolated_or_return(
+    if crate::typed_facade::run_isolated_or_return(
         "SYMTN_TYPED_FACADE_GRADED_SPACE_CARRIES_A_SIMPLE_FUSION_PRO",
         "space::graded_space_carries_a_simple_fusion_provider_too",
     ) {
         return;
     }
+    symtn::cache::clear();
     // What: nothing in the typed space is abelian-specific.
     let provider = Arc::new(external_su2());
     let space = su2_leg(&provider, true);
 
     assert_eq!(space.sectors().unwrap(), vec![SU2Irrep::from_twice_spin(1)]);
     assert!(space.is_dual());
-    assert_eq!(crate::completed_transformers().entries(), 0);
+    assert_eq!(crate::typed_facade::completed_transformers().entries(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -781,6 +798,7 @@ fn graded_space_carries_a_simple_fusion_provider_too() {
 
 #[test]
 fn graded_space_reports_labels_in_provider_sector_id_order() {
+    let _serial = crate::counting_alloc::serial();
     // What: `sectors()` decodes back to the caller's labels, ordered by the
     // provider's sector id (not by label order), with degeneracies parallel.
     let provider = Arc::new(external_z3());

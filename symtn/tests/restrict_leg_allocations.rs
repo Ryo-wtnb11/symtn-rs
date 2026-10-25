@@ -18,11 +18,7 @@ use symtn::typed::__network::{self, NetworkDegeneracyRestriction};
 use symtn::typed::{GradedSpace, LegSelection, Runtime, TensorMap};
 use symtn::typed::{StackedTensorMap, Svd};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[derive(Debug)]
 struct Measurement {
@@ -90,7 +86,7 @@ fn restrict_measurement(scale: usize) -> (Measurement, usize) {
 
 #[test]
 fn restrict_leg_allocates_one_unfilled_payload_and_degeneracy_independent_scratch() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let (small, small_bytes) = restrict_measurement(1);
     let (large, large_bytes) = restrict_measurement(8);
     assert!(large_bytes > small_bytes);
@@ -174,7 +170,7 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
 
 #[test]
 fn restricting_three_legs_is_one_payload_pass() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: `k` legs are restricted in one strided pass into one output
     // payload (#1561). Sequential one-leg passes would each allocate an
     // intermediate payload whose size grows with the degeneracies, so the
@@ -211,7 +207,7 @@ fn restricting_three_legs_is_one_payload_pass() {
 
 #[test]
 fn the_network_restriction_of_several_axes_fills_no_payload() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0);
@@ -291,7 +287,7 @@ fn compact_restrict_measurement(scale: usize) -> Measurement {
 
 #[test]
 fn compact_restrict_leg_costs_the_kept_values_and_nothing_per_discarded_one() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // The kept prefix is the same in both; only the discarded tail grows. A
     // compact restriction must therefore cost exactly the same, which is the
     // `O(sum_c k'_c)` contract: no dense block is ever materialized.
@@ -303,7 +299,7 @@ fn compact_restrict_leg_costs_the_kept_values_and_nothing_per_discarded_one() {
 
 #[test]
 fn lazy_adjoint_add_and_materialization_fill_no_payload() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the owned outputs of a lazy-adjoint `add` and of the first
     // lazy-adjoint `data()` tile their storage, so neither zero-fills its
     // payload before overwriting every block (#1290). For `f64` the base
@@ -394,7 +390,7 @@ fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
 
 #[test]
 fn steady_state_restrict_leg_with_several_row_trees_pays_no_layout_proof() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let (small, small_bytes) = steady_multi_row_restrict(1);
     let (large, large_bytes) = steady_multi_row_restrict(4);
     for (measurement, bytes) in [(&small, small_bytes), (&large, large_bytes)] {
@@ -456,7 +452,7 @@ fn stacked_restrict_measurement(members: usize) -> (Measurement, usize) {
 
 #[test]
 fn stacked_restrict_leg_allocates_one_unfilled_payload_independent_of_the_member_count() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let (small, small_bytes) = stacked_restrict_measurement(2);
     let (large, large_bytes) = stacked_restrict_measurement(16);
     for (measurement, bytes) in [(&small, small_bytes), (&large, large_bytes)] {
@@ -526,7 +522,7 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
 
 #[test]
 fn a_many_run_selection_allocates_nothing_per_run() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What (#2095): the run gather and scatter walk their pieces in place,
     // so the number of runs (here growing with the degeneracies) costs no
     // allocation: the restriction pays exactly what a contiguous one does,

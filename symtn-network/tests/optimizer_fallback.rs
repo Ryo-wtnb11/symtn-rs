@@ -9,8 +9,7 @@ use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{configure_plan_cache, Optimizer, PlanCacheConfig};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{conj, net, op};
 
 #[test]

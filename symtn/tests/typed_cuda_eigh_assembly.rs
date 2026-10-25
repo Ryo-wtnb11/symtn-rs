@@ -2,11 +2,10 @@
 //! cuSOLVER's order is already the published ascending one (#1985), and its
 //! uploads do not depend on the number of fusion trees (#1485).
 //!
-//! This file holds a single test because it reads the process-wide
-//! [`cuda_transfer_stats`] counters.
+//! [`cuda_transfer_stats`] snapshots count only the calling thread.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_eigh_assembly -- --ignored` on a CUDA host.
+//! integration typed_cuda_eigh_assembly:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 
@@ -17,8 +16,7 @@ use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Eigh, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 

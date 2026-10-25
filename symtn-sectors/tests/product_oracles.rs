@@ -1,10 +1,10 @@
 //! Product symbols against independent TensorKitSectors coefficients and hand values.
 
-use num_complex::{Complex32, Complex64};
+#[cfg(feature = "cgc-gen")]
+use num_complex::Complex64;
 use symtn_sectors::*;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 fn s(id: usize) -> SectorId {
     SectorId::new(id)

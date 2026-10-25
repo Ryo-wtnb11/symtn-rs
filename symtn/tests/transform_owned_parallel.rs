@@ -12,14 +12,10 @@ use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irr
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// Re-executes exactly one test, alone, in a child process. `counting_alloc::serial()`
-/// only serializes this file's own three tests against each other; it does
+/// serializes the allocation target's test bodies against each other; it does
 /// not stop a preceding test's dropped `Runtime`/pool from leaving
 /// process-global structural-cache work (symtn-core's fusion-tree-layout and
 /// complete-HomSpace caches) still in flight when the lock is re-acquired.
@@ -39,7 +35,11 @@ fn run_isolated_or_return(isolated_env: &str, test_path: &str) -> bool {
         return false;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", test_path, "--include-ignored"])
+        .args([
+            "--exact",
+            &format!("transform_owned_parallel::{test_path}"),
+            "--include-ignored",
+        ])
         .env(isolated_env, "1")
         .output()
         .unwrap();
@@ -160,7 +160,7 @@ macro_rules! assert_bit_identical {
 
 #[test]
 fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let (serial, parallel) = runtimes();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
@@ -192,7 +192,7 @@ fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
 
 #[test]
 fn u1_owned_transforms_are_bit_identical_across_thread_counts() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let (serial, parallel) = runtimes();
     let provider = Arc::new(U1FusionRule);
     let space = u1_space(&provider);
@@ -221,13 +221,13 @@ fn u1_owned_transforms_are_bit_identical_across_thread_counts() {
 
 #[test]
 fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
+    let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
         "SYMTN_PARALLEL_OWNED_PERMUTE_ALLOCATES_LIKE_SERIAL_ISOLATED",
         "parallel_owned_permute_allocates_like_the_serial_owned_path",
     ) {
         return;
     }
-    let _measurement = counting_alloc::serial();
     // What: with `recoupling_threads > 1` a warmed owned permute makes the
     // same caller-thread allocations as the serial owned path and none of them
     // is allocator-zeroed: the multi-threaded backend writes the owned output

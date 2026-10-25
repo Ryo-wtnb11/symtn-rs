@@ -26,10 +26,9 @@
 //! (a gauge-fixed factor, a null-space annihilation). Reconstruction and
 //! isometry laws are backward stable and take `kappa = 1`.
 
-mod single_precision_oracle;
+use crate::single_precision_oracle;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");

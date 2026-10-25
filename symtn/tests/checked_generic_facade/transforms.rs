@@ -3,6 +3,7 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -94,6 +95,7 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
     use symtn::sector::{U1FusionRule, U1Irrep};
 
@@ -331,7 +333,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
 
 #[test]
 fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -383,6 +385,7 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -434,6 +437,7 @@ fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
 
 #[test]
 fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
+    let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
         "SYMTN_CHECKED_UNIT_INSERT_CORRESPONDENCE_FAILURE_ISOLATED",
         "transforms::checked_unit_insert_correspondence_failure_does_not_publish_destination",
@@ -451,7 +455,9 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
     // longer corresponds to inserting an identity leg into `source`.
     provider.unit_layout_fault.store(1, Ordering::Relaxed);
     forget_cached_structures();
-    let before = crate::structure_cache_info(symtn::cache::StructureCacheKind::DegeneracyStructure);
+    let before = crate::checked_generic_facade::structure_cache_info(
+        symtn::cache::StructureCacheKind::DegeneracyStructure,
+    );
     assert_eq!(before.entries(), 0);
 
     let error = source
@@ -464,7 +470,9 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
             symtn::typed::CoreError::UnitLayoutCorrespondence
         ))
     ));
-    let after = crate::structure_cache_info(symtn::cache::StructureCacheKind::DegeneracyStructure);
+    let after = crate::checked_generic_facade::structure_cache_info(
+        symtn::cache::StructureCacheKind::DegeneracyStructure,
+    );
     assert_eq!(after.admissions(), before.admissions());
     assert_eq!(after.entries(), before.entries());
     assert_eq!(after.charged_bytes(), before.charged_bytes());
@@ -472,6 +480,7 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
 
 #[test]
 fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
+    let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
         "SYMTN_CHECKED_UNIT_REMOVE_CORRESPONDENCE_FAILURE_ISOLATED",
         "transforms::checked_unit_remove_correspondence_failure_does_not_publish_destination",
@@ -492,7 +501,9 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
     // X x X -> 1 channel that the already-built source still contains.
     provider.unit_layout_fault.store(2, Ordering::Relaxed);
     forget_cached_structures();
-    let before = crate::structure_cache_info(symtn::cache::StructureCacheKind::DegeneracyStructure);
+    let before = crate::checked_generic_facade::structure_cache_info(
+        symtn::cache::StructureCacheKind::DegeneracyStructure,
+    );
     assert_eq!(before.entries(), 0);
 
     let error = source.remove_unit(0).unwrap_err();
@@ -503,7 +514,9 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
             symtn::typed::CoreError::UnitLayoutCorrespondence
         ))
     ));
-    let after = crate::structure_cache_info(symtn::cache::StructureCacheKind::DegeneracyStructure);
+    let after = crate::checked_generic_facade::structure_cache_info(
+        symtn::cache::StructureCacheKind::DegeneracyStructure,
+    );
     assert_eq!(after.admissions(), before.admissions());
     assert_eq!(after.entries(), before.entries());
     assert_eq!(after.charged_bytes(), before.charged_bytes());
@@ -511,7 +524,7 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
 
 #[test]
 fn checked_unit_final_provider_guard_remains_structure_typed() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(243));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -543,6 +556,7 @@ fn checked_unit_final_provider_guard_remains_structure_typed() {
 
 #[test]
 fn checked_only_contract_and_compose_keep_left_authority() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let left_provider = Arc::new(CheckedOnlyToy::new(124));
@@ -655,7 +669,7 @@ fn checked_only_contract_and_compose_keep_left_authority() {
 
 #[test]
 fn checked_only_identity_transforms_make_no_provider_queries() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -704,7 +718,7 @@ fn checked_only_identity_transforms_make_no_provider_queries() {
 
 #[test]
 fn checked_only_otimes_preserves_typed_late_f_failures() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -752,7 +766,7 @@ fn checked_only_otimes_preserves_typed_late_f_failures() {
 
 #[test]
 fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
-    let _cache = cache_shared();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let first = Arc::new(CheckedOnlyToy::new(0));
@@ -813,6 +827,7 @@ fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
 
 #[test]
 fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let first = Arc::new(CheckedOnlyToy::new_product_probe(9));
@@ -960,6 +975,7 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
 
 #[test]
 fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
+    let _serial = crate::counting_alloc::serial();
     // What: successful catdomain admission uses the left provider Arc once;
     // admitted identity stamps keep the equal-identity right provider cold,
     // and copy planning performs no provider query after commit.
@@ -1072,6 +1088,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
 
 #[test]
 fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     // What: admission stamps, runtime, cat arguments, then output admission
     // reject in order; every failure leaves both admitted input payloads alone.
@@ -1327,6 +1344,7 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
+    let _serial = crate::counting_alloc::serial();
     // What: exact TensorKit direct-sum slab values, μ=2 full-key matching,
     // distinct equal-identity Arcs, left authority, and lazy-adjoint parity.
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
@@ -1340,6 +1358,7 @@ fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -1512,8 +1531,9 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
-    if crate::run_isolated_or_return(
+    if crate::checked_generic_facade::run_isolated_or_return(
         "SYMTN_CHECKED_FACADE_COMPLETED_STORE",
         "transforms::sun_checked_generic_transforms_reuse_the_runtime_completed_store",
     ) {
@@ -1541,9 +1561,9 @@ fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
                 _ => unreachable!(),
             };
             let first = apply(&source).unwrap();
-            let cold = crate::completed_transformers();
+            let cold = crate::checked_generic_facade::completed_transformers();
             let repeated = apply(&source).unwrap();
-            let warm = crate::completed_transformers();
+            let warm = crate::checked_generic_facade::completed_transformers();
 
             assert_eq!(cold.entries(), 1);
             assert_eq!(cold.misses(), 1);
@@ -1648,6 +1668,7 @@ macro_rules! assert_checked_lazy_adjoint_matches_literal {
 
 #[test]
 fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     // The toy's F-symbols are the identity on `e == f` and zero otherwise, so
@@ -1777,6 +1798,7 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
+    let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();

@@ -8,11 +8,7 @@ use symtn::typed::{GradedSpace, TensorMap};
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieGroupFusionRule;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measure(f: impl FnOnce()) -> (usize, usize) {
     let ((), allocs) = counting_alloc::measure(f);
@@ -36,7 +32,7 @@ fn measure_value<T>(f: impl FnOnce() -> T) -> (T, usize, usize, u128) {
 
 #[test]
 fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: a warmed multiplicity-free non-Abelian permutation reuses its
     // compiled plan and replay workspace without allocating on the caller.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -88,7 +84,7 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
 
 #[test]
 fn cached_u1_permute_overwrite_does_not_allocate_on_the_caller_thread() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: a warmed UniqueFusion permutation reuses its completed transformer
     // and replay workspace without allocating on the caller.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -134,7 +130,7 @@ fn warm_calls(mut into: impl FnMut()) -> usize {
 
 #[test]
 fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: a warm multiplicity-free non-Abelian `permute_into` submits each
     // Multi block's recoupling GEMM without a per-block allocation, so its
     // caller-thread allocation calls are the same for B and > 3B blocks
@@ -170,7 +166,7 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
@@ -205,7 +201,7 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
@@ -229,7 +225,7 @@ fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees(
 
 #[test]
 fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
-    let _measurement = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     // What: the shared typed destination seam also reuses admitted full,
     // explicit, and repartition transpose operations without caller allocation.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
@@ -322,8 +318,10 @@ fn assert_same_checked_tensor(
 #[test]
 #[ignore = "benchmark: run via benchmarks.yml"]
 fn checked_generic_public_transform_measurement() {
+    let _serial = crate::counting_alloc::serial();
     const CASE_ENV: &str = "SYMTN_CHECKED_GENERIC_MEASUREMENT_CASE";
-    const TEST_NAME: &str = "checked_generic_public_transform_measurement";
+    const TEST_NAME: &str =
+        "permute_overwrite_allocations::checked_generic_public_transform_measurement";
 
     let Some(case) = std::env::var_os(CASE_ENV) else {
         for case in [
@@ -349,7 +347,9 @@ fn checked_generic_public_transform_measurement() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(
-                output.status.success(),
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout)
+                        .contains("test result: ok. 1 passed; 0 failed;"),
                 "case={case} status={}\nstdout:\n{stdout}\nstderr:\n{stderr}",
                 output.status
             );
@@ -358,7 +358,6 @@ fn checked_generic_public_transform_measurement() {
         return;
     };
     let case = case.to_str().unwrap();
-    let _measurement = counting_alloc::serial();
     println!("case={case} allocation_scope=caller_thread_requested");
 
     if case == "su2_permute_control" {

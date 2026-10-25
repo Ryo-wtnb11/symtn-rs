@@ -22,23 +22,20 @@
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::LieGroupFusionRule;
 use symtn::typed::TensorMap;
 use symtn::typed::{Eig, Eigh, GradedSpace, SectorSpectrum, Svd, Truncation};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-#[macro_use]
-mod truncation_oracle;
+use crate::numerics;
+use crate::truncation_oracle;
 
 use truncation_oracle::{
     assert_error_close, assert_kept_magnitudes, discarded_norm, kept_values, select,
     triangular_eigenvalues, Offer,
 };
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

@@ -15,8 +15,7 @@ use symtn::sector::{FermionParityFusionRule, Z2Irrep};
 use symtn::typed::Complex64;
 use symtn::typed::{Eig, GradedSpace, Runtime, Svd, TensorMap};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
 /// FZ2 map `V <- V`, degeneracy 1, with `even`/`odd` block values — the exact

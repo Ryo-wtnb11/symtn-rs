@@ -40,11 +40,7 @@ type Fz2U1Rule = ProductFusionRule<
     PackedProductCodec<Fz2SectorLayout, U1SectorLayout>,
 >;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize) {
     let (value, allocs) = counting_alloc::measure(operation);
@@ -117,7 +113,7 @@ macro_rules! check_fixture {
 
 #[test]
 fn fixtures_are_equal_iff_structure_is_equal() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     check_fixture!("U1", |variant| {
         let q = U1Irrep::new;
         let pairs = match variant {
@@ -165,9 +161,9 @@ fn fixtures_are_equal_iff_structure_is_equal() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_rule_instance_separates_signatures() {
+    let _serial = crate::counting_alloc::serial();
     // What: SU(3) and SU(4) trivial legs share hom space and block structure
     // (the unit test checks the fields), so the rule alone separates them.
-    let _guard = counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let signature = |rank: usize, trivial: Vec<i64>| {
         let rule = Arc::new(
@@ -200,7 +196,7 @@ fn u1_signature(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> Structure
 
 #[test]
 fn runtime_identity_separates_signatures() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let leg = u1_leg(-1..=1, 2);
     let first = Runtime::builder().dense_threads(1).build().unwrap();
     let second = Runtime::builder().dense_threads(1).build().unwrap();
@@ -220,7 +216,7 @@ fn runtime_identity_separates_signatures() {
 
 #[test]
 fn equal_across_clear_structure_caches() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let before = u1_signature(&runtime, &u1_leg(-2..=2, 3));
     clear_structure_caches();
@@ -235,7 +231,7 @@ fn equal_across_clear_structure_caches() {
 
 #[test]
 fn equal_across_complete_owner_eviction() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let before = u1_signature(&runtime, &u1_leg(-3..=3, 5));
     let cache = StructureCacheKind::DegeneracyStructure;
@@ -258,7 +254,7 @@ fn equal_across_complete_owner_eviction() {
 
 #[test]
 fn equal_for_oversized_structures_above_the_complete_cache_budget() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     // An explicit small budget rejects this otherwise ordinary complete layout.
     // Rejected layouts receive distinct process ids but remain semantically
@@ -289,7 +285,7 @@ fn equal_for_oversized_structures_above_the_complete_cache_budget() {
 
 #[test]
 fn shared_structure_comparison_does_not_allocate() {
-    let _guard = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = u1_leg(-2..=2, 2);
     let first = u1_signature(&runtime, &leg);

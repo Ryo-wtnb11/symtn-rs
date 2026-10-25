@@ -1,24 +1,17 @@
 //! Eager warm-query allocation evidence; run alone with `--nocapture`.
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
 #[cfg(feature = "cgc-gen")]
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-#[cfg(feature = "cgc-gen")]
-use num_complex::{Complex32, Complex64};
-
+use crate::numerics;
 use symtn_sectors::{
     CheckedFusionAlgebra, FermionParityFusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSector, SectorCodec, U1FusionRule,
     U1Irrep, Z2Irrep,
 };
 
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
-
 #[test]
 fn warm_product_queries() {
+    let _serial = crate::counting_alloc::serial();
     let rule = ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
     let odd = rule
         .encode_sector(&ProductSector::new(U1Irrep::new(0), Z2Irrep::ODD))
@@ -53,6 +46,7 @@ fn warm_product_queries() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_generic_product_queries() {
+    let _serial = crate::counting_alloc::serial();
     use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
         CategoryProvider, CheckedGenericRigidSymbols, LieGroupFusionRule, TypedSectorAdmission,
@@ -135,6 +129,7 @@ fn warm_generic_product_queries() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_nested_generic_product_queries() {
+    let _serial = crate::counting_alloc::serial();
     use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
         CategoryProvider, CheckedGenericRigidSymbols, LieGroupFusionRule, TypedSectorAdmission,

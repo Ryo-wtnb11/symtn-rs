@@ -8,15 +8,10 @@
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
-#[path = "../../tests/support/network.rs"]
-mod network_support;
+use crate::network_support;
 use network_support::{net, op};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// The output payload of `operands()`'s contraction, in bytes; the distinct
 /// prime degeneracies keep it unique in the run.
@@ -47,6 +42,7 @@ fn operands() -> (Map, Map) {
 
 #[test]
 fn mixed_output_partition_costs_one_output_sized_allocation() {
+    let _serial = crate::counting_alloc::serial();
     let (a, b) = operands();
     assert_eq!(
         output_sized_allocs(|| a

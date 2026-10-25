@@ -7,11 +7,7 @@ use std::hint::black_box;
 
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, Z2FusionRule, Z2Irrep};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 /// A Z2 HomSpace of `rank` legs, split as evenly as possible. The first
 /// `even_only` legs carry only the even sector, which divides the block count
@@ -49,7 +45,7 @@ fn cold_degeneracy_build_calls(rank: usize, even_only: usize) -> (usize, u64) {
 
 #[test]
 fn cold_degeneracy_build_calls_do_not_grow_with_block_count() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let rows = [6usize, 8, 10, 12].map(|rank| {
         let small = cold_degeneracy_build_calls(rank, 2);
         let large = cold_degeneracy_build_calls(rank, 0);

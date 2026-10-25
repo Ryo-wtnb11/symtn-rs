@@ -4,13 +4,7 @@
 //! definition (`common::literal_weighted_trace`); neither touches the
 //! production adjoint kernel.
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
+use crate::common;
 
 use std::sync::Arc;
 

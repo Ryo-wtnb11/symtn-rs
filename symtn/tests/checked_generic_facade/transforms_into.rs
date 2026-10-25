@@ -51,6 +51,7 @@ const OPERATIONS: [(&str, Eager, IntoOp); 2] = [
 /// asks; the result is eager's.
 #[test]
 fn checked_transform_into_makes_the_eager_provider_queries() {
+    let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(70));
@@ -103,7 +104,8 @@ fn checked_transform_into_makes_the_eager_provider_queries() {
 /// write succeeds.
 #[test]
 fn checked_transform_into_publishes_nothing_before_the_write() {
-    if crate::run_isolated_or_return(
+    let _serial = crate::counting_alloc::serial();
+    if crate::checked_generic_facade::run_isolated_or_return(
         "SYMTN_CHECKED_FACADE_INTO_PUBLICATION",
         "transforms_into::checked_transform_into_publishes_nothing_before_the_write",
     ) {
@@ -115,7 +117,11 @@ fn checked_transform_into_publishes_nothing_before_the_write() {
     for (name, eager, into) in OPERATIONS {
         let mut destination = eager(&source).unwrap();
         forget_cached_structures();
-        assert_eq!(crate::completed_transformers().entries(), 0, "{name}");
+        assert_eq!(
+            crate::checked_generic_facade::completed_transformers().entries(),
+            0,
+            "{name}"
+        );
 
         provider.fail_algebra.store(true, Ordering::Relaxed);
         let before = bits(&destination);
@@ -132,7 +138,7 @@ fn checked_transform_into_publishes_nothing_before_the_write() {
         );
         assert_eq!(bits(&destination), before, "{name}: provider failure");
         assert_eq!(
-            crate::completed_transformers().entries(),
+            crate::checked_generic_facade::completed_transformers().entries(),
             0,
             "{name}: provider failure"
         );
@@ -149,14 +155,14 @@ fn checked_transform_into_publishes_nothing_before_the_write() {
         drop(shared);
         assert_eq!(bits(&destination), before, "{name}: shared");
         assert_eq!(
-            crate::completed_transformers().entries(),
+            crate::checked_generic_facade::completed_transformers().entries(),
             0,
             "{name}: shared"
         );
 
         into(&source, &mut destination, 1.0, 0.5).unwrap();
         assert_eq!(
-            crate::completed_transformers().entries(),
+            crate::checked_generic_facade::completed_transformers().entries(),
             1,
             "{name}: committed"
         );

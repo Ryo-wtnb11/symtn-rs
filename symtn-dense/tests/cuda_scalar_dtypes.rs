@@ -15,7 +15,7 @@
 //! absolute constant.
 //!
 //! Run with `cargo test -p symtn-dense --no-default-features --features \
-//! cuda,cpu-faer --test cuda_scalar_dtypes -- --ignored` on a CUDA host.
+//! cuda,cpu-faer --test integration cuda_scalar_dtypes:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 

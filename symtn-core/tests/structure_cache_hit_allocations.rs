@@ -3,18 +3,15 @@ use std::sync::Arc;
 
 use symtn_core::{FusionTreeHomSpace, SU2FusionRule, SU2Irrep};
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 #[test]
 fn complete_structure_cache_hit_returns_canonical_arc_without_allocating() {
+    let _serial = crate::counting_alloc::serial();
     // What: while a wrapper is live, a complete-structure lookup returns the
     // canonical Arc itself; the key is built on the stack and no wrapper,
-    // region state, or key Arc is constructed. Own test binary so no other
-    // test can evict the entry from the bounded cache between lookups.
+    // region state, or key Arc is constructed. The shared serial guard prevents
+    // another test from evicting the warmed bounded-cache entry.
     let spin = |twice: usize| SU2Irrep::from_twice_spin(twice).sector_id();
     let hom = FusionTreeHomSpace::from_sectors(
         [(spin(1), 2), (spin(3), 1)],
@@ -36,6 +33,7 @@ fn complete_structure_cache_hit_returns_canonical_arc_without_allocating() {
 
 #[test]
 fn warm_layout_cache_hit_builds_its_lookup_key_without_allocating() {
+    let _serial = crate::counting_alloc::serial();
     // What: a warm fusion-tree layout lookup constructs its cache key from the
     // HomSpace content in place, so neither the read-side lookup nor the commit
     // allocates. Uses a HomSpace of its own so the shared bounded layout cache

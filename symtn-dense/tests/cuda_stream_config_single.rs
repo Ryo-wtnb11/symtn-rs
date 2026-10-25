@@ -1,3 +1,4 @@
+//! Separate binary: CubeCL stream configuration is process-wide and set once.
 //! #1391: opening a device pins CubeCL to one stream when nothing has loaded
 //! its configuration yet, overriding a `cubecl.toml` value, and a later open
 //! accepts the already-pinned configuration. Its own binary: the

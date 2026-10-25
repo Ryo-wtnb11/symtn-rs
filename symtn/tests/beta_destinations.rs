@@ -21,8 +21,7 @@ use symtn::sector::{
 };
 use symtn::typed::{ContractSpec, Error, GradedSpace, Runtime, TensorMap, TensorScalar};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 trait Scalar: TensorScalar + numerics::Numeric + PartialEq {
     fn alpha() -> Self;

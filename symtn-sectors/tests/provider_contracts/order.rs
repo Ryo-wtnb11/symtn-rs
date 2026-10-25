@@ -8,7 +8,7 @@ use symtn_sectors::{
 #[cfg(feature = "cgc-gen")]
 use symtn_sectors::{CheckedGenericFusion, LieGroupFusionRule};
 
-use crate::s;
+use super::s;
 
 fn positions(key: SectorOrderKey) -> Vec<u64> {
     key.positions().to_vec()

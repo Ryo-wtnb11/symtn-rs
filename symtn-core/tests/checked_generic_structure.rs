@@ -60,6 +60,7 @@ impl Toy {
 
 #[test]
 fn checked_generic_late_nsymbol_failure_propagates() {
+    let _serial = crate::counting_alloc::serial();
     let error = hom()
         .fusion_tree_keys_generic_checked(&Toy::late_nsymbol(2))
         .unwrap_err();
@@ -213,6 +214,7 @@ fn matrix_hom() -> FusionTreeHomSpace {
 
 #[test]
 fn checked_generic_contract_homspace_keeps_local_errors_before_typed_duality() {
+    let _serial = crate::counting_alloc::serial();
     let invalid = Toy::new(Failure::Dual);
     let error = FusionTreeHomSpace::try_tensorcontract_homspace_generic_checked(
         &invalid,
@@ -263,6 +265,7 @@ fn checked_generic_contract_homspace_keeps_local_errors_before_typed_duality() {
 
 #[test]
 fn checked_generic_default_fold_keeps_channel_failure_live() {
+    let _serial = crate::counting_alloc::serial();
     let error = hom()
         .fusion_tree_keys_generic_checked(&DefaultFoldToy(Toy::new(Failure::Channel)))
         .unwrap_err();
@@ -274,6 +277,7 @@ fn checked_generic_default_fold_keeps_channel_failure_live() {
 
 #[test]
 fn checked_generic_tainted_fold_error_is_provider_neutral() {
+    let _serial = crate::counting_alloc::serial();
     let error = hom()
         .fusion_tree_keys_generic_for_coupled_checked(
             &TaintedFoldToy(Toy::new(Failure::None)),
@@ -290,6 +294,7 @@ fn checked_generic_tainted_fold_error_is_provider_neutral() {
 
 #[test]
 fn checked_generic_structure_preserves_order_and_never_publishes_on_provider_failure() {
+    let _serial = crate::counting_alloc::serial();
     for fail in [
         Failure::Dual,
         Failure::Channel,

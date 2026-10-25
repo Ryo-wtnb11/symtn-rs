@@ -16,8 +16,7 @@ use num_complex::{Complex32, Complex64};
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Eig, Eigh, GradedSpace, HermitianTol, SectorSpectrum, TensorMap};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

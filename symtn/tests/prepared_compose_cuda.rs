@@ -1,16 +1,14 @@
 //! Device gates of `ComposePlan` and its `ContractWorkspace` (#1639).
 //!
-//! Its own binary, with every test serialized, because `cuda_transfer_stats`
-//! and the plan-cache statistics are process- and context-wide. Run with
-//! `cargo test -p symtn --no-default-features --features cuda,cpu-faer
-//! --test prepared_compose_cuda -- --ignored`.
+//! CUDA transfer counters are thread-local, so these tests run concurrently.
+//! Run with `cargo test -p symtn --no-default-features --features cuda,cpu-faer
+//! --test integration prepared_compose_cuda:: -- --ignored`.
 
 #![cfg(feature = "cuda")]
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::common;
+use crate::numerics;
+use crate::prepared;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
@@ -25,15 +23,13 @@ use prepared::{
     compose_oracle, expected_plan_entries, filled, fz2u1_legs, members, su2_legs, u1_legs,
 };
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
-use fixtures::{delta, plans, serial};
+use fixtures::{delta, plans};
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn workspace_releases_its_claim_after_plan_is_dropped() {
-    let _guard = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let (v, w) = u1_legs();
     let lhs = device(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 2, 41));
@@ -199,7 +195,6 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_handle_equals_the_oracle_with_b_independent_submissions() {
-    let _guard = serial();
     device_gate::<_, f64>("U1", u1_legs());
     device_gate::<_, Complex64>("U1", u1_legs());
     device_gate::<_, f64>("SU2", su2_legs());
@@ -240,7 +235,6 @@ fn handles_and_an_eager_permute_past_the_default_bound_evict_no_plan() {
     // an eager permute whose executor total alone exceeds 64, then a warm
     // interleave of all three. An absolute raise by any consumer would let
     // one absorb another's reservation and evict here.
-    let _guard = serial();
     let runtime = Runtime::builder().cuda(0).build().unwrap();
     let count = 16;
     let (u1_v, u1_w) = u1_legs();
@@ -479,7 +473,6 @@ fn record_counters<R, D>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_counters_are_pinned_against_the_base() {
-    let _guard = serial();
     let mut rows = Vec::new();
     record_counters::<_, f64>("U1", u1_legs(), &mut rows);
     record_counters::<_, Complex64>("U1", u1_legs(), &mut rows);

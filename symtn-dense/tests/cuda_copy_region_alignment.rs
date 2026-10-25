@@ -21,7 +21,7 @@
 //! NaN payloads are excluded because the permutation canonicalizes `f32` NaNs.
 //!
 //! Run with `cargo test -p symtn-dense --features cuda,cpu-faer --test \
-//! cuda_copy_region_alignment -- --ignored` on a CUDA host.
+//! integration cuda_copy_region_alignment:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 

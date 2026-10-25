@@ -8,6 +8,7 @@ use symtn_tensors::{BoundDynamicFusionMapSpace, OperationError};
 
 #[test]
 fn lowered_complete_cache_preflight_preserves_statistics_and_hits() {
+    let _serial = crate::counting_alloc::serial();
     // What: a lowered leg-extent overflow is rejected without changing any
     // complete structure cache statistic or resource.
     symtn_core::clear_structure_caches();

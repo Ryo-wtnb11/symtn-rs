@@ -16,7 +16,7 @@ fn z2_invertible(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f6
 
 #[test]
 fn inv_is_a_two_sided_inverse() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_invertible(&runtime);
 
@@ -40,9 +40,9 @@ fn inv_is_a_two_sided_inverse() {
 
 #[test]
 fn inv_of_a_compact_spectrum_is_the_elementwise_reciprocal() {
+    let _serial = crate::counting_alloc::serial();
     // What: the O(rank) arm. A spectrum's inverse is `1/s_i` on the stored
     // values.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -79,11 +79,11 @@ fn inv_of_a_compact_spectrum_is_the_elementwise_reciprocal() {
 
 #[test]
 fn inv_reports_a_singular_input_as_a_typed_error() {
+    let _serial = crate::counting_alloc::serial();
     // What: singular input is a `Result`, never a panic, and both storages
     // report it as the same numerical failure although the compact arm
     // detects it by inspecting the stored value and the dense one inside the
     // LAPACK solve.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -109,12 +109,12 @@ fn inv_reports_a_singular_input_as_a_typed_error() {
 
 #[test]
 fn inv_accepts_isomorphic_but_unequal_codomain_and_domain() {
+    let _serial = crate::counting_alloc::serial();
     // What: TensorKit's `inv` asks for `codomain ≅ domain`, not `==`, and
     // returns `domain <- codomain`. The seam agrees: a rank-one codomain and a
     // rank-two domain with the same coupled-sector dimensions is accepted, and
     // the result carries the swapped spaces. This is a behavior pin — the
     // rustdoc states it, so a seam that tightened to equality must fail here.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::Z2FusionRule);
     let wide = GradedSpace::try_new(
@@ -163,9 +163,9 @@ fn inv_accepts_isomorphic_but_unequal_codomain_and_domain() {
 
 #[test]
 fn pinv_satisfies_the_moore_penrose_identities() {
+    let _serial = crate::counting_alloc::serial();
     // The fixture is deliberately rank deficient: a full-rank one would let a
     // broken cutoff pass as an ordinary inverse.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -217,9 +217,9 @@ fn pinv_satisfies_the_moore_penrose_identities() {
 
 #[test]
 fn pinv_of_a_compact_spectrum_is_the_elementwise_cutoff_reciprocal() {
+    let _serial = crate::counting_alloc::serial();
     // What: the O(rank) arm — an elementwise cutoff and reciprocal, whose own
     // singular values are `|entry|`, so no SVD runs at all.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
     let typed_s = typed.svd_compact(&[0], &[1]).unwrap().s;
@@ -251,11 +251,11 @@ fn pinv_of_a_compact_spectrum_is_the_elementwise_cutoff_reciprocal() {
 
 #[test]
 fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
+    let _serial = crate::counting_alloc::serial();
     // What: the boundary. The comparison is `sigma > rcond * sigma_max`, so a
     // singular value at *exactly* the cutoff is discarded, not kept — on both
     // storages. This is the one bit of the cutoff policy a
     // mutation to `>=` would otherwise slip past.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -333,10 +333,10 @@ fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
 
 #[test]
 fn pinv_rejects_a_nonfinite_or_negative_rcond_before_any_work() {
+    let _serial = crate::counting_alloc::serial();
     // What: `rcond` is validated at the facade, so a bad one never reaches the
     // SVD — and the compact arm validates it too, which a guard placed only on
     // the dense route would miss.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
     let spectrum = typed.svd_compact(&[0], &[1]).unwrap().s;
@@ -361,6 +361,7 @@ fn pinv_rejects_a_nonfinite_or_negative_rcond_before_any_work() {
 
 #[test]
 fn pinv_uses_one_global_sigma_max_across_every_sector() {
+    let _serial = crate::counting_alloc::serial();
     // What: the cutoff is relative to the largest singular value of the *whole*
     // tensor, not of each coupled sector — the deliberate divergence from
     // TensorKit's per-block `rtol`.
@@ -372,7 +373,6 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
     // sector at all. Both were run by hand against this fixture and both fail
     // it; with the maximum in the first sector, the first-sector-only mutant
     // survived, because there the two folds happen to agree.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -431,9 +431,9 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
 
 #[test]
 fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
+    let _serial = crate::counting_alloc::serial();
     // What: like TensorKit's `exp`, a general per-block Pade approximant
     // with no hermiticity gate (#577). `exp(A) exp(-A) = id` pins the actual exponential.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -458,9 +458,9 @@ fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
 
 #[test]
 fn exp_of_a_compact_spectrum_stays_compact_and_is_elementwise() {
+    let _serial = crate::counting_alloc::serial();
     // What: `exp(s_i)` on the `Σ_c k_c` stored values, matching TensorKit's
     // `exp(::DiagonalTensorMap)` law.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
     // Scaled down: the fixture's largest singular value is in the thousands and
@@ -519,12 +519,12 @@ where
 
 #[test]
 fn exp_of_a_complex_compact_spectrum_takes_the_complex_elementwise_branch() {
+    let _serial = crate::counting_alloc::serial();
     // What: the compact arm is TensorKit's `exp(::DiagonalTensorMap)`, which is
     // unconditionally elementwise — so a c64 spectrum with a nonreal entry, the
     // case the Hermitian dense arm would refuse, comes back as `exp` of that
     // entry. Storage therefore *does* change what `exp` accepts, exactly as it
     // does in TensorKit; the rustdoc says so and this is the pin.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -598,10 +598,10 @@ fn bits_f64(values: &[f64]) -> Vec<u64> {
 
 #[test]
 fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
+    let _serial = crate::counting_alloc::serial();
     // What: the result is the compact diagonal whose values are `f` of the
     // stored values, sector by sector, on the receiver's own (dual) bond.
     // Oracle: diagonals built from hand-computed literals.
-    let _guard = cache_lock();
     let runtime = runtime();
     let bond = GradedSpace::try_new(
         Arc::new(symtn::sector::U1FusionRule),
@@ -705,10 +705,10 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
 
 #[test]
 fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
+    let _serial = crate::counting_alloc::serial();
     // What: `f` acts on the reduced values once per degeneracy index, and the
     // physical-basis expansion repeats each result `2j + 1` times on the
     // diagonal. Oracle: the hand-listed physical diagonal.
-    let _guard = cache_lock();
     let runtime = runtime();
     let j = SU2Irrep::from_twice_spin;
     let bond =
@@ -763,9 +763,9 @@ fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
 
 #[test]
 fn map_diagonal_keeps_the_result_compact() {
+    let _serial = crate::counting_alloc::serial();
     // What: the result is stored as a compact diagonal (no dense payload), for
     // the `s` of `svd_compact` and for the compact adjoint of a c64 diagonal.
-    let _guard = cache_lock();
     let runtime = runtime();
     let s = z2_endomorphism(&runtime).svd_compact(&[0], &[1]).unwrap().s;
     assert!(symtn::expert::diagonal_spectrum(&s).unwrap().is_some());
@@ -789,10 +789,10 @@ fn map_diagonal_keeps_the_result_compact() {
 
 #[test]
 fn map_diagonal_rejects_dense_storage() {
+    let _serial = crate::counting_alloc::serial();
     // What: dense storage is refused with a typed error naming the expected
     // input, even when the dense blocks happen to be diagonal, and a lazy
     // adjoint of a dense tensor is refused the same way.
-    let _guard = cache_lock();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -822,9 +822,9 @@ fn map_diagonal_rejects_dense_storage() {
 
 #[test]
 fn c64_compact_inv_and_pinv_are_elementwise_reciprocals() {
+    let _serial = crate::counting_alloc::serial();
     // A c64 tensor's singular values are stored in the payload dtype, so both
     // compact matrix functions must apply their laws directly to those values.
-    let _guard = cache_lock();
     let runtime = runtime();
     // A full-rank c64 `[v] <- [v]` map with a wide spectrum.
     let complex = |value: f64| Complex64::new(value, 1.0 + value % 5.0);

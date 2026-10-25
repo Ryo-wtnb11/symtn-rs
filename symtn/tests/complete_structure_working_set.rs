@@ -1,6 +1,6 @@
 //! The complete-structure cache holds the working set of an E1-style op
 //! ledger and of a sweep-like loop, so warm iterations never evict (#1365).
-//! One test per process keeps the global cache statistics isolated.
+//! Every test in this target takes the shared serial guard.
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 
@@ -38,6 +38,8 @@ fn assert_warm(label: &str, hits: u64, mut call: impl FnMut()) {
 
 #[test]
 fn warm_working_sets_never_evict() {
+    let _serial = crate::counting_alloc::serial();
+    symtn::cache::clear();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let u1 = |q: i32| U1Irrep::new(q);
 

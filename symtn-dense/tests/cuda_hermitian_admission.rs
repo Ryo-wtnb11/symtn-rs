@@ -13,7 +13,7 @@
 //! half-residual Frobenius oracle ([`oracle`]).
 //!
 //! Run with `cargo test -p symtn-dense --no-default-features --features \
-//! cuda,cpu-faer --test cuda_hermitian_admission -- --ignored` on a CUDA host.
+//! cuda,cpu-faer --test integration cuda_hermitian_admission:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 

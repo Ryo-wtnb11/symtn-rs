@@ -8,17 +8,13 @@
 //! write Runtime-pooled scratch — and `planar_contract_into` must match it
 //! less the output. The hand-written sequence owns every transposed payload.
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{TableRule, TableSector};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 type Table = TensorMap<TableRule, Complex64>;
 
@@ -39,6 +35,7 @@ struct Geometry<'a> {
 
 #[test]
 fn planar_contract_owns_only_its_output() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(TableRule::fibonacci()),

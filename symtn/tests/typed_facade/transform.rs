@@ -4,11 +4,11 @@ use symtn::typed::SectorSpectrum;
 
 #[test]
 fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
+    let _serial = crate::counting_alloc::serial();
     // What: a non-identity permute of a runtime-rank multi-block external
     // provider tensor produces the reordered spaces, keeps the element count,
     // and moves the payload (this rule's F/R symbols are all 1, so the permuted
     // buffer is a rearrangement of the source, never a rescaling).
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -47,10 +47,10 @@ fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
 
 #[test]
 fn permute_round_trips_back_to_the_source_layout() {
+    let _serial = crate::counting_alloc::serial();
     // What: permuting and permuting back is the identity on both the spaces and
     // the payload — a stronger statement than "the multiset survived", since it
     // pins where each element landed.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -70,9 +70,9 @@ fn permute_round_trips_back_to_the_source_layout() {
 
 #[test]
 fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
+    let _serial = crate::counting_alloc::serial();
     // What: nothing in the typed transform is abelian- or real-specific; the
     // SU(2) recoupling coefficients reach a `Complex64` payload.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
@@ -99,9 +99,9 @@ fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
 
 #[test]
 fn permute_rejects_malformed_axes_without_panicking() {
+    let _serial = crate::counting_alloc::serial();
     // What: the expert layer's typed errors are the contract — an out-of-range
     // axis, a repeated axis and a wrong-length axis list all come back as `Err`.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -119,9 +119,9 @@ fn permute_rejects_malformed_axes_without_panicking() {
 
 #[test]
 fn braid_rejects_a_wrong_length_levels_list() {
+    let _serial = crate::counting_alloc::serial();
     // What: the public pre-check — `levels` must name every source axis — in
     // both directions.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -139,10 +139,10 @@ fn braid_rejects_a_wrong_length_levels_list() {
 
 #[test]
 fn transpose_twice_returns_the_source_layout() {
+    let _serial = crate::counting_alloc::serial();
     // What: the planar transpose is an involution — it rotates every leg once
     // round the boundary, so applying it twice restores the source spaces,
     // block order and bytes exactly.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -164,10 +164,10 @@ fn transpose_twice_returns_the_source_layout() {
 
 #[test]
 fn transpose_rejects_malformed_axes_without_panicking() {
+    let _serial = crate::counting_alloc::serial();
     // What: out-of-range axes, a wrong-length list and a non-planar
     // re-arrangement (a permute, which `transpose` must refuse rather than
     // silently braid) all come back as `Err`.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -189,11 +189,11 @@ fn transpose_rejects_malformed_axes_without_panicking() {
 
 #[test]
 fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
+    let _serial = crate::counting_alloc::serial();
     // What: every split point of a rank-4 tensor map is reachable, reports the
     // requested codomain/domain sizes, and comes back to the source layout —
     // spaces, block identities and bytes — when repartitioned to the original
     // split.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -221,9 +221,9 @@ fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
 
 #[test]
 fn repartition_rejects_a_split_beyond_the_rank() {
+    let _serial = crate::counting_alloc::serial();
     // What: `num_codomain > rank` has no planar reading at all, so it is
     // rejected rather than clamped.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
@@ -235,13 +235,13 @@ fn repartition_rejects_a_split_beyond_the_rank() {
 
 #[test]
 fn planar_transposes_bend_where_permute_braids_for_a_fermionic_provider() {
+    let _serial = crate::counting_alloc::serial();
     // What: for a provider whose braiding is not symmetric, a planar transpose
     // and a permute of the *same* axes are different morphisms — the permute
     // crosses strands and picks up the fermionic sign, the planar bend does
     // not. Every other test in this suite is blind to the difference, because
     // every other provider it can host is bosonic; spelling `transpose` as a
     // `permute` would pass all of them and be wrong here.
-    let _guard = cache_lock();
     let runtime = runtime();
     let tensor = fermionic_rank_three(&runtime);
     assert_eq!(tensor.dense_data().unwrap(), [1.0, 2.0, 3.0, 4.0]);
@@ -273,6 +273,7 @@ fn planar_transposes_bend_where_permute_braids_for_a_fermionic_provider() {
 
 #[test]
 fn repartition_is_sign_free_even_for_a_fermionic_provider() {
+    let _serial = crate::counting_alloc::serial();
     // What: moving the planar boundary never crosses two strands — the cyclic
     // order of the legs is what `repartition` preserves by definition — so
     // unlike the transposes above, its result carries no braiding phase and
@@ -283,7 +284,6 @@ fn repartition_is_sign_free_even_for_a_fermionic_provider() {
     // of the planar transform by a braided one observable. The two transposes
     // above are what guard the shared planar helper the three methods route
     // through.
-    let _guard = cache_lock();
     let runtime = runtime();
     let tensor = fermionic_rank_three(&runtime);
 
@@ -347,9 +347,9 @@ fn u1_cat_tensor(
 
 #[test]
 fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
+    let _serial = crate::counting_alloc::serial();
     // What: the typed direct sum preserves the changed leg's duality, sector
     // union, degeneracies, and lhs-then-rhs slab order directly.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::FermionParityFusionRule);
     let lw = GradedSpace::try_new(
@@ -401,11 +401,11 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
 
 #[test]
 fn typed_cat_pins_the_slab_order_by_value() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 2): hand-computed payloads pin adjacent column slabs for
     // catdomain and adjacent
     // row slabs for catcodomain — so the slab order is pinned by value, not
     // only by structural parity.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let w = u1_leg(&provider, &[(0, 2)]);
@@ -439,10 +439,10 @@ fn typed_cat_pins_the_slab_order_by_value() {
 
 #[test]
 fn typed_absorb_pins_the_common_prefix_by_value() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 3): absorb's common-prefix semantics against a hand-computed
     // payload. Destination block is 2x3, source block is 3x2; the shared
     // prefix is 2x2, so exactly those four column-major entries change.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let destination: TensorMap<symtn::sector::U1FusionRule, f64> = TensorMap::from_subblock_fn(
@@ -471,7 +471,7 @@ fn typed_absorb_pins_the_common_prefix_by_value() {
 
 #[test]
 fn typed_absorb_is_total_for_disjoint_zero_extent_and_rank_zero() {
-    let _guard = cache_lock();
+    let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let zero = u1_leg(&provider, &[(0, 2)]);
@@ -518,8 +518,8 @@ fn typed_absorb_is_total_for_disjoint_zero_extent_and_rank_zero() {
 
 #[test]
 fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
+    let _serial = crate::counting_alloc::serial();
     // What: each operation keeps its own validation classes and order.
-    let _guard = cache_lock();
     let runtime = runtime();
     let typed_lhs = u1_cat_tensor(&runtime, &[(0, 1), (1, 1)]);
     let assert_invalid = |error: symtn::typed::Error, fragment: &str| {
@@ -642,10 +642,10 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
 
 #[test]
 fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 4): the rule-identity check fires before any space validation:
     // two providers of the same Rust type but different identities cannot be
     // concatenated or absorbed and report `RuleMismatch`.
-    let _guard = cache_lock();
     let runtime = runtime();
     let build = |provider: &Arc<ExternalZ3Rule>| {
         let leg = GradedSpace::try_new(Arc::clone(provider), [(Z3Charge(0), 1), (Z3Charge(1), 1)])
@@ -691,10 +691,10 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
 
 #[test]
 fn external_z3_cat_and_absorb_hold_by_value() {
+    let _serial = crate::counting_alloc::serial();
     // What (gate 6): typed-only law/value checks on the external Z3 provider.
     // The expected payloads are computed by hand rather than through another
     // facade.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let w =
@@ -742,6 +742,7 @@ fn external_z3_cat_and_absorb_hold_by_value() {
 
 #[test]
 fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
+    let _serial = crate::counting_alloc::serial();
     fn compare<const R_SCALE: u8>(values: [f32; 2]) {
         let runtime = runtime();
         let leg = GradedSpace::try_new(
@@ -790,7 +791,6 @@ fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
             }
         }
     }
-    let _guard = cache_lock();
     compare::<1>([f32::INFINITY, 2.0]);
     compare::<2>([1.0, 2.0]);
 }
@@ -807,6 +807,7 @@ fn catcodomain_oracle<D: Copy>(lhs: &[D], lhs_rows: usize, rhs: &[D], rhs_rows: 
 
 #[test]
 fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let leg = u1_leg(&Arc::new(U1FusionRule), &[(0, 0), (1, 2)]);
     let diagonal: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
@@ -826,6 +827,7 @@ fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
 
 #[test]
 fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let common = u1_leg(&provider, &[(0, 3)]);
@@ -987,12 +989,12 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
 
 #[test]
 fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
+    let _serial = crate::counting_alloc::serial();
     // What: an explicit braid with a full level assignment produces the same
     // reordered spaces a permute of the same axes does, and moves the payload.
     //
     // This symmetric fixture pins how levels are split and validated; the
     // Fibonacci tests above pin genuinely anyonic level values.
-    let _guard = cache_lock();
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);

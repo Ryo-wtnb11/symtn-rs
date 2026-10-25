@@ -10,13 +10,11 @@
 //! The non-canonical (irregular-core) tilings are checked in the lib test
 //! `typed::contract_stacking_tests`, where an expert layout can be built.
 
-mod common;
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-mod prepared;
+use crate::common;
 
-#[path = "braiding_probe/mod.rs"]
-mod braiding_probe;
+use crate::prepared;
+
+use crate::braiding_probe;
 
 use std::fmt::Debug;
 use std::sync::Arc;

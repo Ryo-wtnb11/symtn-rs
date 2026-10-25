@@ -30,14 +30,12 @@
 //! holds exactly the widening of it.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_single_precision_factorizations -- --ignored --test-threads=1`
-//! on a CUDA host. The cost gate reads the process-wide transfer counters,
-//! hence `--test-threads=1`.
+//! integration typed_cuda_single_precision_factorizations:: -- --ignored --test-threads=1`
+//! on a CUDA host. Transfer counter snapshots are thread-local.
 
 #![cfg(feature = "cuda")]
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::sync::Arc;
@@ -53,20 +51,15 @@ use symtn::typed::{
     Truncation,
 };
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-mod single_precision_oracle;
+use crate::common;
+
+use crate::numerics;
+use crate::single_precision_oracle;
 
 use common::{DevicePayload, DeviceRule};
 use single_precision_oracle::{fermion_su2_leg_with, K};
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::{codomain_axes, cuda_runtime, domain_axes};
 

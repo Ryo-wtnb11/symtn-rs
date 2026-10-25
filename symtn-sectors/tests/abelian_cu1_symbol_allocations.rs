@@ -2,16 +2,12 @@
 //! labels on every call (#2278); that decode, and the symbol itself, must not
 //! allocate, on admissible and inadmissible labels alike.
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
+use crate::counting_alloc;
 
 use symtn_sectors::{
     CU1FusionRule, CU1Irrep, FermionParityFusionRule, MultiplicityFreeRigidSymbols, SectorId,
     U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
 };
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 /// Every symbol over every tuple of `ids`, summed so nothing is optimized out.
 fn sweep<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(rule: &R, ids: &[SectorId]) -> f64 {
@@ -49,6 +45,7 @@ fn assert_no_allocation<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(rule: &R,
 
 #[test]
 fn symbols_do_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
     let parity = [Z2Irrep::EVEN.sector_id(), Z2Irrep::ODD.sector_id()];
     assert_no_allocation(&Z2FusionRule, &parity);
     assert_no_allocation(&FermionParityFusionRule, &parity);

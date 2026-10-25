@@ -76,14 +76,9 @@ use symtn::typed::{
     BlockFusionTrees, Complex64, ContractSpec, GradedSpace, SectorSpectrum, TensorMap,
 };
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
-#[path = "../../tests/support/counting_alloc.rs"]
-mod counting_alloc;
-
-#[global_allocator]
-static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+use crate::counting_alloc;
 
 use fixtures::host_runtime;
 
@@ -590,6 +585,7 @@ macro_rules! bond_lanes {
 
 #[test]
 fn multiplicity_free_real_symbol_transform_into_is_alpha_eager_plus_beta_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
     both_lanes!(&runtime, v, w, debug_key::<U1Irrep>);
@@ -603,6 +599,7 @@ fn multiplicity_free_real_symbol_transform_into_is_alpha_eager_plus_beta_destina
 
 #[test]
 fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     // Non-self-dual U(1): a swap moves each spectrum to the dual sector.
     let (v, _) = u1_legs();
@@ -638,6 +635,7 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
 
 #[test]
 fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(
         Arc::new(TableRule::fibonacci()),
@@ -753,6 +751,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
 #[test]
 fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_matches_multiplicity_free(
 ) {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
@@ -836,7 +835,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_warm_transform_into_allocates_no_result_payload() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let v = sun2_leg();
     let source = source!(&runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| twice(
@@ -891,7 +890,7 @@ macro_rules! lazy_into_allocations {
 
 #[test]
 fn lazy_adjoint_transform_into_allocates_no_parent_sized_buffer() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
@@ -1009,6 +1008,7 @@ macro_rules! trace_lanes {
 
 #[test]
 fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
     trace_lanes!(
@@ -1048,6 +1048,7 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
 #[test]
 fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_matches_multiplicity_free(
 ) {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
@@ -1111,7 +1112,7 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
 /// spectrum is read from the compiled terms).
 #[test]
 fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
@@ -1502,6 +1503,7 @@ macro_rules! compact_contract_lanes {
 
 #[test]
 fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destination() {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
     contract_lanes!(&runtime, v, w, debug_key::<U1Irrep>);
@@ -1560,6 +1562,7 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
 #[test]
 fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matches_multiplicity_free(
 ) {
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
@@ -1803,7 +1806,7 @@ macro_rules! compact_contract_allocations {
 
 #[test]
 fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
-    let _serial = counting_alloc::serial();
+    let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 4)]).unwrap();
@@ -2165,6 +2168,7 @@ fn complex_value(key: &str, index: &[usize]) -> Complex64 {
 
 #[test]
 fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
+    let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol lane contracts (eager and `_into`), and on
     // the `Complex64` embedding of U(1) it is the real-symbol lane's value,
     // exactly up to the sign of zero, in every output order and operand
@@ -2353,6 +2357,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
 
 #[test]
 fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
+    let _serial = crate::counting_alloc::serial();
     // What: `[v, w] ← [x]` contracted with `[x] ← [y]` over `x`, with the
     // output codomain legs swapped, is TensorKit's `blas_contract!` followed
     // by `artin_braid` on the codomain tree (`braiding_manipulations.jl:56`,
@@ -2461,6 +2466,7 @@ fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
 
 #[test]
 fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
+    let _serial = crate::counting_alloc::serial();
     // Fibonacci stays outside `contract` (anyonic), and `_into` refuses it
     // with eager's error, before touching the destination.
     let runtime = host_runtime();

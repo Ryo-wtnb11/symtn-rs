@@ -29,7 +29,7 @@
 //! keeps two contexts but skips step 2.
 //!
 //! Run with `cargo test -p symtn-dense --features cuda,cpu-faer --test \
-//! cuda_multi_context_publication -- --ignored --nocapture --test-threads=1`.
+//! integration cuda_multi_context_publication:: -- --ignored --nocapture --test-threads=1`.
 
 #![cfg(feature = "cuda")]
 

@@ -13,14 +13,14 @@
 //!    hand-computed oracles (`typed_facade.rs`, `semantic_suite.rs`,
 //!    `checked_generic_braiding.rs`);
 //! 3. the transfer, allocation and rejection contracts are in
-//!    `typed_cuda_transform_contracts.rs`, which owns the process-wide
-//!    counters.
+//!    `typed_cuda_transform_contracts.rs`, which checks the thread-local
+//!    transfer counters of the calling thread.
 //!
 //! Every fermionic fixture asserts non-vacuity: at least one block really is
 //! negated, so a device path that copied its source would fail.
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test \
-//! typed_cuda_twist -- --ignored` on a CUDA host.
+//! integration typed_cuda_twist:: -- --ignored` on a CUDA host.
 
 #![cfg(feature = "cuda")]
 

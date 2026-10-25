@@ -12,8 +12,7 @@
 //!   twist to every dual contracted right-hand axis, so it would test a
 //!   different map on odd sectors.
 
-#[path = "support/report.rs"]
-mod report;
+use crate::report;
 use report::Report;
 
 use std::ops::Range;
@@ -144,10 +143,7 @@ fn scattered<D: Copy>(shape: &[usize], source: &[D], maps: &[Vec<usize>], zero: 
     out
 }
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
-
-use num_complex::Complex32;
+use crate::numerics;
 
 /// Floating terms reaching one compared entry: a fusion-tree expansion to
 /// the physical basis, or a composition with an inclusion isometry over a

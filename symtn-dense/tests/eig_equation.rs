@@ -8,11 +8,10 @@
 
 #![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn_dense::{DefaultDenseExecutor, DenseDType, DenseExecutor, DenseRead, DenseView};
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 const N: usize = 3;
 

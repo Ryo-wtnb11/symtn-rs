@@ -133,8 +133,7 @@ impl TypedPersistenceCodec<U1FusionRule> for U1Codec {
     }
 }
 
-#[path = "../../tests/support/toy_rules.rs"]
-mod toy_rules;
+use crate::toy_rules;
 
 use toy_rules::{GenericError, GenericLabel, GenericToy};
 
@@ -181,8 +180,7 @@ impl TypedPersistenceCodec<GenericToy> for GenericCodec {
     }
 }
 
-#[path = "../../tests/support/fixtures.rs"]
-mod fixtures;
+use crate::fixtures;
 
 use fixtures::host_runtime;
 

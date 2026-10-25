@@ -4,16 +4,9 @@
 //! providers) agree with Host `trace_pairs` on every fixture and payload
 //! dtype, without a device, so ordinary CI holds them.
 
-mod common;
-#[path = "../../tests/support"]
-mod support {
-    use num_complex::{Complex32, Complex64};
-    pub mod numerics;
-}
-use support::numerics;
-#[allow(unused_macros)] // the fermionic contraction fixture macro
-mod contract_cases;
-mod trace_cases;
+use crate::contract_cases;
+use crate::numerics;
+use crate::trace_cases;
 
 use contract_cases::Payload;
 use num_complex::{Complex32, Complex64};

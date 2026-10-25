@@ -16,11 +16,10 @@ use fusion_symbols::category::{
 use fusion_symbols::finite::{ZNIrrep, ZN};
 use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep, U1Irrep as FsU1Irrep, U1};
 use fusion_symbols::table::TableCategory;
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn_sectors::*;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 
 type MF = MultiplicityFreeAdmissionMode;
 type CG = CheckedGenericAdmissionMode;

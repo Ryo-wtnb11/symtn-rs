@@ -14,10 +14,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 
-#[path = "../../tests/support/numerics.rs"]
-mod numerics;
+use crate::numerics;
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap, TensorScalar};
