@@ -168,11 +168,6 @@ impl std::hash::Hash for RuleIdentityNode {
 }
 
 impl RuleIdentity {
-    #[cfg(all(test, feature = "cgc-gen"))]
-    pub(crate) fn same_content_allocation(&self, other: &Self) -> bool {
-        matches!((&self.0, &other.0), (RuleIdentityNode::Content { bytes: a, .. }, RuleIdentityNode::Content { bytes: b, .. }) if Arc::ptr_eq(a, b))
-    }
-
     pub fn of_type<R: 'static + ?Sized>() -> Self {
         Self(RuleIdentityNode::Type(std::any::TypeId::of::<R>()))
     }

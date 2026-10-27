@@ -165,19 +165,24 @@ fn checked_generic_rule_instance_separates_signatures() {
     // What: SU(3) and SU(4) trivial legs share hom space and block structure
     // (the unit test checks the fields), so the rule alone separates them.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let signature = |rank: usize, trivial: Vec<i64>| {
-        let rule = Arc::new(
+    let rule = |rank: usize| {
+        Arc::new(
             symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
                 .unwrap(),
-        );
-        let leg = GradedSpace::try_new(rule, [(trivial, 2)]).unwrap();
+        )
+    };
+    // Why the rules outlive their signatures: a rule identity holds its group
+    // weakly, so signatures of dropped rules equal nothing but their clones.
+    let (first_su3, second_su3, su4) = (rule(3), rule(3), rule(4));
+    let signature = |rule: &Arc<symtn::sector::LieGroupFusionRule>, trivial: Vec<i64>| {
+        let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };
-    let su3 = signature(3, vec![0, 0]);
-    assert_same(&su3, &signature(3, vec![0, 0]), "SU3 instances");
-    assert_differ(&su3, &signature(4, vec![0, 0, 0]), "SU3 vs SU4");
+    let su3 = signature(&first_su3, vec![0, 0]);
+    assert_same(&su3, &signature(&second_su3, vec![0, 0]), "SU3 instances");
+    assert_differ(&su3, &signature(&su4, vec![0, 0, 0]), "SU3 vs SU4");
 }
 
 fn u1_leg(charges: std::ops::RangeInclusive<i32>, degeneracy: usize) -> GradedSpace<U1FusionRule> {

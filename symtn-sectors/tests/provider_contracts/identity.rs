@@ -2,9 +2,9 @@
 //!
 //! Already pinned elsewhere:
 //! - SU(2) canonical bytes: `src/su2.rs` `identity_and_label_boundary_are_unchanged`.
-//! - SU(N) rank distinction and shared allocation: `src/lie.rs`
-//!   `stored_identity_is_shared_and_distinguishes_rank` (the public
-//!   `rule_identity()` value itself is pinned below).
+//! - Lie identity follows `GroupId` equality (SU(3) = SU(3)/Z1 != PSU(3)):
+//!   `src/lie.rs` `validation_and_identity_are_typed_and_stable`; rank
+//!   distinction: `stored_identity_is_shared_and_distinguishes_rank`.
 //! - Every shipped table entry distinct, stable, and unequal to Z2 / Z_2:
 //!   `tests/table_rule.rs` `every_shipped_entry_constructs_with_its_own_identity`.
 //! - Product identity keeps child order, codec and stateful children:
@@ -178,57 +178,18 @@ fn table_identity_is_the_fingerprint_under_the_table_tag() {
     );
 }
 
-/// SU(n) identity oracle: the A_(n-1) root system, the center classes the
-/// simply-connected lattice retains, 64-bit graded Dynkin codec conventions
-/// and literal provider fingerprints.
-#[cfg(all(feature = "cgc-gen", target_pointer_width = "64"))]
-fn lie_group_identity(n: usize, fingerprint: &[u8]) -> RuleIdentity {
-    let mut bytes = b"symtn:lie:dynkin:graded-total-then-lex:v1".to_vec();
-    bytes.extend_from_slice(&64u32.to_le_bytes());
-    bytes.push(0); // A root system.
-    bytes.extend_from_slice(&((n - 1) as u64).to_le_bytes());
-    bytes.extend_from_slice(b":center-probes");
-    // For n = 2, 3 the only divisor of n below n is 1: probe w_1, which the
-    // simply-connected cover retains.
-    assert!(matches!(n, 2 | 3));
-    bytes.extend_from_slice(&1u64.to_le_bytes());
-    bytes.extend_from_slice(&1u64.to_le_bytes());
-    bytes.push(1);
-    bytes.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
-    bytes.extend_from_slice(
-        b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
-    );
-    bytes.extend_from_slice(fingerprint);
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (
-        0x4c49_455f_434f_4445_u64,
-        fusion_symbols::lie::GroupId::su(n).unwrap(),
-    )
-        .hash(&mut hasher);
-    RuleIdentity::from_canonical_bytes::<LieGroupFusionRule>(hasher.finish(), Arc::from(bytes))
-}
-
-#[cfg(all(feature = "cgc-gen", target_pointer_width = "64"))]
+/// The identity holds its group weakly, as a `CategoryRule` identity holds its
+/// category: sharing lasts while a clone of the rule is alive.
+#[cfg(feature = "cgc-gen")]
 #[test]
-fn lie_group_public_identity_has_explicit_canonical_group_metadata() {
-    let a1 = b"racah:su2-exact:model=bigrational-round-once:3j=condon-shortley:cg=condon-shortley:6j=racah-single-sum:f=tks-su2irrep:r=tks-su2irrep:fs=tks-su2irrep:epoch=1";
-    let higher_a = b"racah:sun-gt:ref=sunrep-0.4:basis=gt-order:gauge=qrpos-cref:descent=ladder-lstsq:tol=sunrep-tol-tier:epoch=1";
-    assert_eq!(
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
-            .unwrap()
-            .rule_identity(),
-        lie_group_identity(2, a1)
-    );
-    assert_eq!(
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-            .unwrap()
-            .rule_identity(),
-        lie_group_identity(3, higher_a)
-    );
-    assert_ne!(
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-            .unwrap()
-            .rule_identity(),
-        lie_group_identity(3, a1)
-    );
+fn lie_group_identity_shares_only_while_a_rule_is_alive() {
+    let su3 = || LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let rule = su3();
+    let clone = rule.clone();
+    let identity = rule.rule_identity();
+    drop(rule);
+    assert_eq!(identity, su3().rule_identity());
+    drop(clone);
+    assert_ne!(identity, su3().rule_identity());
+    assert_eq!(identity.clone(), identity);
 }

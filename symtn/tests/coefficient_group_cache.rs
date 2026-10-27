@@ -194,6 +194,63 @@ fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
     );
 }
 
+/// Two rules built from equal `GroupId`s have one identity, so the second
+/// rule's transform is served from the first rule's structure entries.
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn equal_lie_groups_share_structure_cache_entries() {
+    let _serial = crate::counting_alloc::serial();
+    let _serial = serial();
+    use symtn::sector::LieGroupFusionRule;
+
+    let totals = || {
+        symtn::cache::stats()
+            .iter()
+            .fold((0, 0), |(hits, misses), info| {
+                (hits + info.hits(), misses + info.misses())
+            })
+    };
+    let leg = |provider: &Arc<LieGroupFusionRule>| {
+        GradedSpace::try_new(Arc::clone(provider), [(vec![1i64, 0], 2), (vec![1, 1], 1)]).unwrap()
+    };
+    // The quotient by the trivial subgroup is the same group from another
+    // constructor.
+    let (first, second) = (
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
+        Arc::new(
+            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su_quotient(3, 1).unwrap())
+                .unwrap(),
+        ),
+    );
+    symtn::cache::clear();
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let _ = tensor!(&runtime, &leg(&first))
+        .permute(&[2, 0], &[3, 1])
+        .unwrap();
+    let (hits, misses) = totals();
+    assert!(misses > 0, "the first transform must build its structures");
+    let _ = tensor!(&runtime, &leg(&second))
+        .permute(&[2, 0], &[3, 1])
+        .unwrap();
+    let (warm_hits, warm_misses) = totals();
+    assert_eq!(warm_misses, misses, "an equal group must not rebuild");
+    assert!(warm_hits > hits);
+
+    // The identity holds its group weakly: once both rules are dropped, a new
+    // rule over an equal group no longer reaches their entries.
+    drop((first, second));
+    let third =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let _ = tensor!(&runtime, &leg(&third))
+        .permute(&[2, 0], &[3, 1])
+        .unwrap();
+    let (_, cold_misses) = totals();
+    assert!(
+        cold_misses > warm_misses,
+        "sharing ends when every rule over the group is dropped"
+    );
+}
+
 #[test]
 fn clear_resets_the_coefficient_cache() {
     let _serial = crate::counting_alloc::serial();
