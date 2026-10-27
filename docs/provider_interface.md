@@ -141,6 +141,10 @@ and each charge's `U1Irrep` `findindex - 1`), so the rule orders sectors as
 TensorKit orders the matching `ProductSector` and as a `ProductFusionRule` of
 the same factors does. A warm key reads the interned irrep and allocates
 nothing up to four positions, the key's inline capacity.
+A cover such as `GroupId::cover(&[A(1), A(2)], 0)` gives bitwise-identical
+channels, N, dimensions, duals, FS phases and F/R blocks (including the
+multiplicity axis order) to the `ProductFusionRule` of its factor rules, with
+`U1FusionRule` for each torus factor, but the two rules have distinct identities.
 Global-form restrictions, including torus congruences such as U(n)'s, leave
 holes in that numbering: encoding or decoding an excluded label returns
 `LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`, unless the
