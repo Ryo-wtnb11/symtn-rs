@@ -129,14 +129,16 @@ lexicographically using the root-system rank. Global-form restrictions leave
 holes in that numbering: encoding or decoding an excluded label returns
 `LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`. Object conversion
 checks the complete category membership before using an interned label.
-Identities include the target width, the root system, the center classes its
-character lattice retains (probed through `GroupId::admits` on a few
-fundamental weights, in `O(rank)` time per probe without building the
-lattice), codec/admission/scalar conventions and the actual category
-fingerprint. Equal lattices share one identity whatever constructor built
-them; full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups
-even when their provider fingerprints agree. Persist semantic labels and rebuild caches
-when provider identity or codec conventions change.
+The identity is the `GroupId` value under the rule type: codec, admission and
+scalar conventions are fixed by the type, and the category fingerprint by the
+group and the build. Construction hashes the sparse canonical `GroupId` once
+and comparison uses its equality, without building the character lattice.
+Equal lattices share one identity whatever constructor or basis built them;
+full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups even when
+their provider fingerprints agree. As for `CategoryRule`, the group is held
+weakly: after all rules over it are dropped, old cache identities are not
+reused. Persist semantic labels and rebuild caches when provider identity or
+codec conventions change.
 
 symtn retains only the bounded codec interner (65,536 label/object pairs and
 its dual lookup), with uncached conversion after capacity is reached. It

@@ -327,21 +327,24 @@ fn checked_generic_rule_instance_alone_separates_signatures() {
     use symtn_core::LieGroupFusionRule;
 
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let signature = |rank: usize, trivial: Vec<i64>| {
-        let rule = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap()).unwrap(),
-        );
-        let leg = GradedSpace::try_new(rule, [(trivial, 2)]).unwrap();
+    let rule = |rank: usize| {
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap()).unwrap())
+    };
+    // Why the rules outlive their signatures: a rule identity holds its group
+    // weakly, so signatures of dropped rules equal nothing but their clones.
+    let (first_su3, second_su3, su4_rule) = (rule(3), rule(3), rule(4));
+    let signature = |rule: &Arc<LieGroupFusionRule>, trivial: Vec<i64>| {
+        let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };
-    let su3 = signature(3, vec![0, 0]);
-    let su4 = signature(4, vec![0, 0, 0]);
+    let su3 = signature(&first_su3, vec![0, 0]);
+    let su4 = signature(&su4_rule, vec![0, 0, 0]);
     assert!(su3.homspace == su4.homspace);
     assert!(*su3.structure == *su4.structure);
     assert!(su3.placement == su4.placement && su3.runtime == su4.runtime);
     assert!(su3.rule != su4.rule);
     assert!(su3 != su4);
-    assert!(su3 == signature(3, vec![0, 0]));
+    assert!(su3 == signature(&second_su3, vec![0, 0]));
 }

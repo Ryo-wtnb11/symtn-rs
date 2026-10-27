@@ -75,6 +75,11 @@ mod tests;
 /// signatures that differ only in block structure share a bucket and are
 /// separated by `Eq`. A signature holds a non-owning Runtime handle and does
 /// not keep the Runtime alive.
+///
+/// Likewise, a rule whose identity is a category or group value (such as
+/// `CategoryRule` or `LieGroupFusionRule`) is held weakly: once every rule
+/// over that value is dropped, its signatures equal only their own clones,
+/// never a signature built later over an equal value.
 #[derive(Clone)]
 pub struct StructureSignature {
     rule: RuleIdentity,
@@ -189,9 +194,8 @@ impl StructureSignature {
         runtime: &Runtime,
     ) -> Self {
         // Why the admission's identity first: it is the identity the layout
-        // was validated against and clones without allocating, whereas
-        // `typed_rule_identity` rebuilds canonical bytes for content-keyed
-        // checked Generic providers. Every bound space carries one.
+        // was validated against. Every bound space carries one; the provider
+        // fallback clones the identity the rule stored at construction.
         let rule = match space.space().admission().rule_identity() {
             Some(identity) => identity.clone(),
             None => TypedSectorAdmission::typed_rule_identity(space.provider()),

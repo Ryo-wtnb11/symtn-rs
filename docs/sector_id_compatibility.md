@@ -59,10 +59,11 @@ Implementation and reference pointers are in
 The Lie-group codec uses the root-system rank, preserves quotient holes and
 rejects excluded labels on encode and decode. Rank-one labels are bounded by
 `u32::MAX`; higher-rank labels share the target `usize` ID budget. The
-root system, the center classes its character lattice retains and the actual
-category fingerprint enter identity, so equal labels or fingerprints across
-different groups are insufficient for compatibility, while one group built by
-different constructors (for example SU(n)/Z1 and SU(n)) has one identity.
+identity is the `GroupId` value (root systems, torus rank and canonical
+character lattice), so equal labels or fingerprints across different groups
+are insufficient for compatibility, while one group built by different
+constructors (for example SU(n)/Z1 and SU(n)) has one identity while a rule
+over it is alive.
 
 ## Caches
 

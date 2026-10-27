@@ -15,15 +15,18 @@ use crate::{
     GenericRMatrix, RuleIdentity, SectorId, SectorVec, SymbolShapeError, TypedSectorAdmission,
 };
 
-const CODEC_VERSION: &[u8] = b"symtn:lie:dynkin:graded-total-then-lex:v1";
-const IDENTITY_SCHEMA: u64 = 0x4c49_455f_434f_4445;
-
 /// Checked compact Lie-group rule over the fusion-symbols category adapter.
 ///
 /// The private Dynkin codec retains graded-total-then-lex ids, encoded-id
 /// channel ordering, bounded interning and eager category construction.
 /// Every rank, including rank one, uses checked Generic admission; no physical
 /// expansion is provided.
+///
+/// The rule's [`RuleIdentity`] is its [`GroupId`] value: rules over equal
+/// groups have equal identities whatever constructor or lattice basis built
+/// them, and share structure-cache entries. Like a
+/// [`CategoryRule`](crate::CategoryRule) identity, it holds the group weakly,
+/// so that sharing ends once every clone of the rule is dropped.
 #[derive(Clone, Debug)]
 pub struct LieGroupFusionRule {
     codec: LieCodec,
@@ -33,7 +36,8 @@ pub struct LieGroupFusionRule {
 
 #[derive(Clone, Debug)]
 pub(crate) struct LieCodec {
-    group: GroupId,
+    // Why an `Arc`: the value identity refers to the group weakly.
+    group: Arc<GroupId>,
     irreps: Arc<IrrepTable>,
 }
 
@@ -225,10 +229,10 @@ impl LieGroupFusionRule {
     /// target's `usize` ID budget. Excluded global-form labels leave ID holes.
     ///
     /// The `RankNotRepresentable` bound covers this rule's label buffers only.
-    /// The rule's own identity costs `O(r · d(r + 1))` time for `A_r` (with
-    /// `d` the divisor count) and `O(r)` otherwise, without materializing the
-    /// character lattice; the fusion-symbols category's own construction cost
-    /// for a large rank is fusion-symbols' (fusion-symbols#187).
+    /// The rule's identity hashes the canonical [`GroupId`] once and compares
+    /// groups by value, without materializing the character lattice; the
+    /// fusion-symbols category's own construction cost for a large rank is
+    /// fusion-symbols' (fusion-symbols#187).
     pub fn new(group: GroupId) -> Result<Self, LieGroupFusionRuleError> {
         // The Dynkin codec covers one simple factor without torus charges;
         // products, tori and D2 = A1 x A1 would otherwise drop or misorder labels.
@@ -250,12 +254,11 @@ impl LieGroupFusionRule {
             return Err(LieGroupFusionRuleError::RankNotRepresentable { rank });
         }
         let category = LieGroup::new(group.clone()).map_err(provider_error)?;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&(IDENTITY_SCHEMA, &group), &mut hasher);
-        let identity = RuleIdentity::from_canonical_bytes::<Self>(
-            std::hash::Hasher::finish(&hasher),
-            Self::identity_bytes(&group, &category)?,
-        );
+        // Why the group alone is a complete key: the codec and its conventions
+        // are fixed by the rule type, and the provider fingerprint by the
+        // group and this build.
+        let group = Arc::new(group);
+        let identity = RuleIdentity::value_of::<Self, GroupId>().resolve_value(&group);
         Ok(Self {
             codec: LieCodec {
                 group,
@@ -283,74 +286,6 @@ impl LieGroupFusionRule {
     /// Decodes an admitted ID with bounded binary searches over the grade and each label.
     pub fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, LieGroupFusionRuleError> {
         self.codec.decode_dynkin(sector)
-    }
-
-    /// Canonical bytes: the simple root system and the center classes its
-    /// character lattice retains, so equal groups share one identity whatever
-    /// basis built them.
-    fn identity_bytes(
-        group: &GroupId,
-        category: &LieGroup,
-    ) -> Result<Arc<[u8]>, LieGroupFusionRuleError> {
-        // `new` admits exactly one simple root system and no torus.
-        let &[root] = group.root_systems() else {
-            return Err(provider_error(LieError::Unsupported {
-                requires: "a single simple root system without torus charges",
-            }));
-        };
-        let (root_tag, rank) = match root {
-            RootSystem::A(r) => (0, r),
-            RootSystem::B(r) => (1, r),
-            RootSystem::C(r) => (2, r),
-            RootSystem::D(r) => (3, r),
-            RootSystem::G2 => (4, 2),
-            RootSystem::F4 => (5, 4),
-            RootSystem::E6 => (6, 6),
-            RootSystem::E7 => (7, 7),
-            RootSystem::E8 => (8, 8),
-            _ => {
-                return Err(provider_error(LieError::Unsupported {
-                    requires: "root-system identity encoding",
-                }))
-            }
-        };
-        // Why these probes are injective: with one simple root system the
-        // lattice L satisfies Q <= L <= P, so L is fixed by the subgroup L/Q of
-        // the center P/Q, and a fundamental weight w_i lies in L iff its class
-        // does. A_r: P/Q = Z_(r+1), w_i has class i, and a subgroup is d Z with
-        // d | r+1, recovered as the least probed divisor d <= r whose w_d lies
-        // in L (none: L = Q). B_r: Z_2 = <[w_r]>. C_r: Z_2 = <[w_1]>. D_r:
-        // even r has Z_2 x Z_2 with nonzero classes [w_1], [w_(r-1)], [w_r];
-        // odd r has Z_4 = <[w_r]> with [w_1] its element of order 2. Every
-        // subgroup is determined by which of those classes it contains.
-        // Exceptional ranks are at most 8, so all of their weights are probed.
-        // Probing every w_i instead would cost O(r^2): one `admits` is O(r).
-        let probes: Vec<usize> = match root {
-            RootSystem::A(r) => (1..=r).filter(|d| (r + 1) % d == 0).collect(),
-            RootSystem::B(r) => vec![r],
-            RootSystem::C(_) => vec![1],
-            RootSystem::D(r) => vec![1, r - 1, r],
-            _ => (1..=rank).collect(),
-        };
-        let mut weight = vec![0; rank];
-        let mut bytes = CODEC_VERSION.to_vec();
-        bytes.extend_from_slice(&usize::BITS.to_le_bytes());
-        bytes.push(root_tag);
-        bytes.extend_from_slice(&rank.to_le_bytes());
-        bytes.extend_from_slice(b":center-probes");
-        bytes.extend_from_slice(&probes.len().to_le_bytes());
-        for index in probes {
-            weight[index - 1] = 1;
-            bytes.extend_from_slice(&index.to_le_bytes());
-            bytes.push(u8::from(group.admits(&weight, &[])));
-            weight[index - 1] = 0;
-        }
-        bytes.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
-        bytes.extend_from_slice(
-            b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
-        );
-        bytes.extend_from_slice(category.authority_fingerprint());
-        Ok(Arc::from(bytes))
     }
 }
 
@@ -1157,7 +1092,7 @@ mod tests {
         // Exercise the codec's fallible allocation independently: production
         // rejects this rank before constructing eager provider state.
         let codec = LieCodec {
-            group: too_large,
+            group: Arc::new(too_large),
             irreps: Arc::default(),
         };
         assert!(matches!(
@@ -1178,64 +1113,21 @@ mod tests {
                 .decode_dynkin(SectorId::new(usize::MAX)),
             Err(LieGroupFusionRuleError::DecodeOverflow { .. })
         ));
-        assert_eq!(
-            rule.rule_identity(),
-            LieGroupFusionRule::new(GroupId::su(3).unwrap())
-                .unwrap()
-                .rule_identity()
-        );
-        assert_ne!(
-            rule.rule_identity(),
-            LieGroupFusionRule::new(GroupId::su(4).unwrap())
-                .unwrap()
-                .rule_identity()
-        );
-        // Identity follows the canonical lattice, not the constructor or basis.
-        let identity_of = |group| LieGroupFusionRule::new(group).unwrap().rule_identity();
-        assert_eq!(
-            rule.rule_identity(),
-            identity_of(GroupId::su_quotient(3, 1).unwrap())
-        );
-        let psu3 = identity_of(GroupId::psu(3).unwrap());
-        assert_eq!(
-            psu3,
-            identity_of(GroupId::new(&[RootSystem::A(2)], 0, &[vec![1, 4], vec![1, 1]]).unwrap())
-        );
-        assert_ne!(psu3, rule.rule_identity());
-        let original =
-            LieGroupFusionRule::identity_bytes(rule.group_id(), rule.category()).unwrap();
-        let mut expected = b"symtn:lie:dynkin:graded-total-then-lex:v1".to_vec();
-        expected.extend_from_slice(&usize::BITS.to_le_bytes());
-        expected.push(0); // A-series
-        expected.extend_from_slice(&2usize.to_le_bytes());
-        expected.extend_from_slice(b":center-probes");
-        expected.extend_from_slice(&1usize.to_le_bytes()); // divisors of 3 up to 2: {1}
-        expected.extend_from_slice(&1usize.to_le_bytes()); // w_1
-        expected.push(1); // SU(3) retains [w_1]
-        expected.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
-        expected.extend_from_slice(
-            b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
-        );
-        expected.extend_from_slice(b"racah:sun-gt:ref=sunrep-0.4:basis=gt-order:gauge=qrpos-cref:descent=ladder-lstsq:tol=sunrep-tol-tier:epoch=1");
-        assert_eq!(original.as_ref(), expected);
-        let mut changed = original.to_vec();
-        changed[0] ^= 1;
-        assert_ne!(
-            RuleIdentity::from_canonical_bytes::<LieGroupFusionRule>(IDENTITY_SCHEMA, original),
-            RuleIdentity::from_canonical_bytes::<LieGroupFusionRule>(
-                IDENTITY_SCHEMA,
-                Arc::from(changed)
-            )
-        );
+        // Identity follows `GroupId` equality, not the constructor. The rules
+        // stay alive: an identity whose rules are all dropped equals nothing
+        // but its clones.
+        let quotient = LieGroupFusionRule::new(GroupId::su_quotient(3, 1).unwrap()).unwrap();
+        assert_eq!(rule.rule_identity(), quotient.rule_identity());
+        let psu3 = LieGroupFusionRule::new(GroupId::psu(3).unwrap()).unwrap();
+        assert_ne!(psu3.rule_identity(), rule.rule_identity());
     }
 
     #[test]
     fn stored_identity_is_shared_and_distinguishes_rank() {
         let su3 = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let su4 = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
-        let (a, b) = (su3.rule_identity(), su3.rule_identity());
-        assert!(a.same_content_allocation(&b));
-        assert_ne!(a, su4.rule_identity());
+        assert_eq!(su3.rule_identity(), su3.clone().rule_identity());
+        assert_ne!(su3.rule_identity(), su4.rule_identity());
         let hash = |rule: &LieGroupFusionRule| {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
