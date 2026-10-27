@@ -457,8 +457,10 @@ where
     /// The Deligne product of `left` and `right`.
     ///
     /// Fails with `MissingCanonicalUnit` when a factor's category does not
-    /// certify a canonical unit. Products of multiplicity-free factors are
-    /// multiplicity-free, so no fusion-style check is needed.
+    /// certify a canonical unit, and with `IncompatibleFusionStyle` or
+    /// `UnsupportedBraidingStyle` when the product reports a style symtn does
+    /// not know. Products of multiplicity-free factors are multiplicity-free,
+    /// so admitted factors already fix the mode's multiplicity check.
     pub fn try_new(
         left: L,
         right: R,
@@ -467,6 +469,11 @@ where
             left.category().clone(),
             right.category().clone(),
         )));
+        crate::category_rule::admit_styles(
+            category.fusion_style(),
+            category.braiding_style(),
+            false,
+        )?;
         if !category.has_canonical_unit() {
             return Err(crate::CategoryAdmissionError::MissingCanonicalUnit);
         }

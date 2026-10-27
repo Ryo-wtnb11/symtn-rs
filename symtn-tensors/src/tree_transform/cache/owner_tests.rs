@@ -593,8 +593,12 @@ fn core_and_racah_resets_have_separate_owners() {
         sector(0),
         sector(0),
     );
-    let populated = fusion_symbols::cache::base_cache_stats();
-    assert_ne!(populated.total().entries, 0);
+    let base_tiers = || {
+        use fusion_symbols::cache::{tier_stats, CoefficientCacheTier as Tier};
+        [Tier::ThreeJ, Tier::SixJ, Tier::DerivedF].map(tier_stats)
+    };
+    let populated = base_tiers();
+    assert_ne!(populated.iter().map(|tier| tier.entries).sum::<usize>(), 0);
     symtn_core::clear_structure_caches();
-    assert_eq!(fusion_symbols::cache::base_cache_stats(), populated);
+    assert_eq!(base_tiers(), populated);
 }

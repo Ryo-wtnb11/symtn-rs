@@ -427,13 +427,16 @@ fn sun_irrep(
     sector: SectorId,
 ) -> fusion_symbols::lie::LieIrrep {
     category
-        .irrep(&rule.decode_dynkin(sector).unwrap())
+        .irrep(&rule.decode_dynkin(sector).unwrap(), &[])
         .unwrap()
 }
 
 fn cgc_dense(rule: &LieGroupFusionRule, a: SectorId, b: SectorId, c: SectorId) -> DenseTensor {
-    use fusion_symbols::{category::GroupRepresentations, lie::LieGroup};
-    let category = LieGroup::new(rule.group_id()).unwrap();
+    use fusion_symbols::{
+        category::{CgcBlock, GroupRepresentations},
+        lie::LieGroup,
+    };
+    let category = LieGroup::new(rule.group_id().clone()).unwrap();
     let cgc = category
         .cgc(
             &sun_irrep(&category, rule, a),
@@ -447,7 +450,7 @@ fn cgc_dense(rule: &LieGroupFusionRule, a: SectorId, b: SectorId, c: SectorId) -
         for m2 in 0..dims[1] {
             for m3 in 0..dims[2] {
                 for mu in 0..dims[3] {
-                    data.push(cgc.at(m1, m2, m3, mu));
+                    data.push(cgc.at([m1, m2, m3, mu]));
                 }
             }
         }

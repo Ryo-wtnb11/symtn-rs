@@ -1174,14 +1174,15 @@ dependencies = [
 
 [[package]]
 name = "fusion-symbols"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726979f0b4db8fe3381a5b9a4c7351766383ba0551d987fb09107614d6159b84"
+checksum = "4086f46eeb6b8f6eec13b90c329cc64a3078ef402fa404e6068a9ea451b75aa2"
 dependencies = [
  "num-bigint",
  "num-complex",
  "num-rational",
  "num-traits",
+ "quick_cache",
  "t4a-faer",
 ]
 
@@ -2667,7 +2668,9 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "403c1a912fec895cafb223201e368234842acb9220aaf08ab042ae89ba5f135c"
 dependencies = [
+ "crossbeam-utils",
  "equivalent",
+ "foldhash 0.2.0",
  "hashbrown 0.17.1",
 ]
 
