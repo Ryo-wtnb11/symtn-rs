@@ -436,7 +436,7 @@ fn a_and_b_blocks_are_the_category_authority() {
     let sun = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     let octet = su3.irrep(&[1, 1], &[]).unwrap();
     let rule_octet = rule.try_encode_label(&octet).unwrap();
-    let lie_group_octet = sun.encode_dynkin(&[1, 1]).unwrap();
+    let lie_group_octet = sun.encode_irrep(&[1, 1], &[]).unwrap();
     let authority_a = su3.a_symbol(&octet, &octet, &octet).unwrap();
     let authority_b = su3.b_symbol(&octet, &octet, &octet).unwrap();
     for block in [

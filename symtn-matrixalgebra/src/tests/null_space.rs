@@ -836,9 +836,9 @@ fn su3_checked_input<D: FactorScalar>(
     BoundDynamicFusionMapSpace<symtn_core::LieGroupFusionRule>,
     Vec<D>,
 ) {
-    let adjoint = provider.encode_dynkin(&[1, 1]).unwrap();
-    let trivial = provider.encode_dynkin(&[0, 0]).unwrap();
-    let fundamental = provider.encode_dynkin(&[1, 0]).unwrap();
+    let adjoint = provider.encode_irrep(&[1, 1], &[]).unwrap();
+    let trivial = provider.encode_irrep(&[0, 0], &[]).unwrap();
+    let fundamental = provider.encode_irrep(&[1, 0], &[]).unwrap();
     let leg = || SectorLeg::new([(adjoint, 2), (trivial, 1), (fundamental, 1)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),

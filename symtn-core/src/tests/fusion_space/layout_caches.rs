@@ -697,8 +697,8 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
     #[cfg(feature = "cgc-gen")]
     {
         let checked = symtn_sectors::testing::su_lie_rule(3);
-        let vacuum = checked.encode_dynkin(&[0, 0]).unwrap();
-        let fundamental = checked.encode_dynkin(&[1, 0]).unwrap();
+        let vacuum = checked.encode_irrep(&[0, 0], &[]).unwrap();
+        let fundamental = checked.encode_irrep(&[1, 0], &[]).unwrap();
         let hom = |deg: usize| {
             let leg = SectorLeg::new([(vacuum, deg), (fundamental, deg + 1)], false);
             FusionTreeHomSpace::new(
@@ -778,8 +778,8 @@ fn generic_complete_owner_keeps_canonical_identity_regions_and_budget() {
     ) { return; }
     clear_structure_caches();
     let rule = symtn_sectors::testing::su_lie_rule(3);
-    let adjoint = rule.encode_dynkin(&[1, 1]).unwrap();
-    let vacuum = rule.encode_dynkin(&[0, 0]).unwrap();
+    let adjoint = rule.encode_irrep(&[1, 1], &[]).unwrap();
+    let vacuum = rule.encode_irrep(&[0, 0], &[]).unwrap();
     let hom = || {
         let leg = || SectorLeg::new([(adjoint, 2), (vacuum, 3)], false);
         FusionTreeHomSpace::new(

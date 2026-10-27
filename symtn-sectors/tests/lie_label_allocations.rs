@@ -33,25 +33,48 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
     };
     use symtn_sectors::LieGroupFusionRule;
 
-    for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
-        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
-        let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
-        let adjoint = category.irrep(labels, &[]).unwrap();
+    use fusion_symbols::lie::RootSystem;
+    let su2_su3_u1 = GroupId::cover(&[RootSystem::A(1), RootSystem::A(2)], 1).unwrap();
+    for (group, dynkin, charges) in [
+        (GroupId::su(3).unwrap(), &[1, 1][..], &[][..]),
+        (GroupId::su(4).unwrap(), &[1, 0, 1][..], &[][..]),
+        (GroupId::u(2).unwrap(), &[1][..], &[-3][..]),
+        (su2_su3_u1, &[1, 1, 1][..], &[2][..]),
+    ] {
+        let rule = LieGroupFusionRule::new(group.clone()).unwrap();
+        let category = LieGroup::new(group).unwrap();
+        let adjoint = category.irrep(dynkin, charges).unwrap();
         let channel_labels: Vec<_> = category
             .fusion(&adjoint, &adjoint)
             .unwrap()
-            .map(|channel| channel.dynkin())
+            .map(|channel| (channel.dynkin(), channel.charges().collect::<Vec<_>>()))
             .collect();
         let encode = || {
-            channel_labels.iter().fold(0usize, |sum, labels| {
-                sum + rule.encode_dynkin(labels).unwrap().id()
-            })
+            channel_labels
+                .iter()
+                .fold(0usize, |sum, (dynkin, charges)| {
+                    sum + rule.encode_irrep(dynkin, charges).unwrap().id()
+                })
         };
+        // The first pass interns each sector's irrep (fusion-symbols checks
+        // representability once); later passes are arithmetic and lookups.
         let expected = encode();
         let (encoded, allocs) = counting_alloc::measure(encode);
         assert_eq!(encoded, expected);
-        // The shared slice/iterator codec only: provider fusion and interning are outside.
         assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
+        // A warm decode allocates only the returned label vectors.
+        let sector = rule.encode_irrep(dynkin, charges).unwrap();
+        let (decoded, allocs) = counting_alloc::measure(|| rule.decode_irrep(sector).unwrap());
+        assert_eq!(decoded, (dynkin.to_vec(), charges.to_vec()));
+        let returned = [dynkin.len(), charges.len()];
+        assert_eq!(
+            (allocs.calls, allocs.bytes),
+            (
+                returned.iter().filter(|&&len| len > 0).count() as u64,
+                (returned.iter().sum::<usize>() * size_of::<i64>()) as u64
+            ),
+            "{allocs:?}"
+        );
     }
 }
 
@@ -66,7 +89,11 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
         let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
         let object = category.irrep(labels, &[]).unwrap();
-        let expected = rule.encode_dynkin(labels).unwrap();
+        // A separate rule: encoding interns, and this rule's table must stay cold.
+        let expected = LieGroupFusionRule::new(GroupId::su(n).unwrap())
+            .unwrap()
+            .encode_irrep(labels, &[])
+            .unwrap();
         let _ = CategoryProvider::category(&rule);
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
         assert_eq!(sector, expected);

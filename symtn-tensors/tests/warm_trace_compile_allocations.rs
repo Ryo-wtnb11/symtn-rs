@@ -105,7 +105,7 @@ fn warm_checked_generic_trace_compile_is_bounded_by_its_terms() {
     let sizes = [&[[0, 0], [1, 0]][..], &[[0, 0], [1, 0], [1, 1]][..]].map(|dynkins| {
         let sectors = dynkins
             .iter()
-            .map(|dynkin| rule.encode_dynkin(dynkin).unwrap())
+            .map(|dynkin| rule.encode_irrep(dynkin, &[]).unwrap())
             .collect::<Vec<_>>();
         let src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
             Arc::clone(&rule),

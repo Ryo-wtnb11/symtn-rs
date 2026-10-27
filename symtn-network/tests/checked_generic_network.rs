@@ -679,8 +679,7 @@ impl TypedSectorAdmission for InjectedGeneric {
         if self.fail_encode.load(Ordering::SeqCst) {
             return Err(InjectedError::Encode);
         }
-        self.inner
-            .encode_dynkin(sector)
+        TypedSectorAdmission::try_encode_label(&self.inner, sector)
             .map_err(|_| InjectedError::Provider)
     }
 
@@ -689,8 +688,7 @@ impl TypedSectorAdmission for InjectedGeneric {
         if self.fail_decode_at.load(Ordering::SeqCst) == ordinal {
             return Err(InjectedError::Decode);
         }
-        self.inner
-            .decode_dynkin(sector)
+        TypedSectorAdmission::try_decode_label(&self.inner, sector)
             .map_err(|_| InjectedError::Provider)
     }
 

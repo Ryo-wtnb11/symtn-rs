@@ -188,9 +188,9 @@ fn axes() -> TensorTraceAxisSpec<'static> {
 #[allow(clippy::arc_with_non_send_sync)]
 fn fixture() -> Fixture {
     let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let vacuum = inner.encode_dynkin(&[0, 0]).unwrap();
-    let adjoint = inner.encode_dynkin(&[1, 1]).unwrap();
-    let fundamental = inner.encode_dynkin(&[1, 0]).unwrap();
+    let vacuum = inner.encode_irrep(&[0, 0], &[]).unwrap();
+    let adjoint = inner.encode_irrep(&[1, 1], &[]).unwrap();
+    let fundamental = inner.encode_irrep(&[1, 0], &[]).unwrap();
     let provider = Arc::new(Ledger {
         inner,
         identity: RefCell::new(RuleIdentity::new_unique::<Ledger>()),
@@ -709,12 +709,12 @@ fn checked_trace_channel_factor_is_the_exact_dimension_quotient() {
     let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     // Hand Weyl formula for SU(3) `(p, q)`, independent of the provider.
     let weyl = |sector: SectorId| {
-        let label = rule.decode_dynkin(sector).unwrap();
+        let label = rule.decode_irrep(sector).unwrap().0;
         let (p, q) = (label[0], label[1]);
         ((p + 1) * (q + 1) * (p + q + 2) / 2) as f64
     };
-    let fundamental = rule.encode_dynkin(&[1, 0]).unwrap();
-    let adjoint = rule.encode_dynkin(&[1, 1]).unwrap();
+    let fundamental = rule.encode_irrep(&[1, 0], &[]).unwrap();
+    let adjoint = rule.encode_irrep(&[1, 1], &[]).unwrap();
     let provider = Arc::new(rule.clone());
     let v = || SectorLeg::new([(fundamental, 2), (adjoint, 1)], false);
     let src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
@@ -808,8 +808,8 @@ fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {
     let checked_src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
         Arc::new(sun.clone()),
         homspace(
-            sun.encode_dynkin(&[2]).unwrap(),
-            sun.encode_dynkin(&[4]).unwrap(),
+            sun.encode_irrep(&[2], &[]).unwrap(),
+            sun.encode_irrep(&[4], &[]).unwrap(),
         ),
     )
     .unwrap();
@@ -830,7 +830,7 @@ fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {
 
     // Hand dimensions `2j + 1`, independent of either provider.
     let mf_dim = |s: SectorId| (SU2Irrep::from_sector_id(s).twice_spin() + 1) as f64;
-    let sun_dim = |s: SectorId| (sun.decode_dynkin(s).unwrap()[0] + 1) as f64;
+    let sun_dim = |s: SectorId| (sun.decode_irrep(s).unwrap().0[0] + 1) as f64;
     let factors = |structure: &TensorTraceFusionStructure<f64>,
                    src: &BlockStructure,
                    dim: &dyn Fn(SectorId) -> f64| {

@@ -13,11 +13,11 @@
 use std::collections::BTreeMap;
 
 use fusion_symbols::category::FusionCategory;
-use fusion_symbols::lie::{GroupId, LieError, RootSystem};
+use fusion_symbols::lie::{GroupId, LieError, LieGroup, RootSystem};
 use symtn_sectors::{
     BraidingStyleKind, CategoryProvider, CheckedGenericFusion, CheckedGenericPivotal,
     CheckedGenericRigidSymbols, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
-    SectorId,
+    SectorId, TypedSectorAdmission,
 };
 
 use crate::numerics;
@@ -105,17 +105,17 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         assert_eq!(r.group_id(), &group);
         assert_eq!(r.fusion_style(), FusionStyleKind::Generic);
         assert_eq!(r.braiding_style(), BraidingStyleKind::Bosonic);
-        let id = r.encode_dynkin(&accepted).unwrap();
-        assert_eq!(r.decode_dynkin(id).unwrap(), accepted);
+        let id = r.encode_irrep(&accepted, &[]).unwrap();
+        assert_eq!(r.decode_irrep(id).unwrap().0, accepted);
         assert_eq!(r.sector_id(&r.object(id).unwrap()).unwrap(), id);
         assert!(matches!(
-            r.encode_dynkin(&[]),
+            r.encode_irrep(&[], &[]),
             Err(LieGroupFusionRuleError::LabelLength { .. })
         ));
         let mut negative = accepted.clone();
         negative[0] = -1;
         assert!(matches!(
-            r.encode_dynkin(&negative),
+            r.encode_irrep(&negative, &[]),
             Err(LieGroupFusionRuleError::NegativeLabel {
                 index: 0,
                 value: -1
@@ -123,17 +123,17 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         ));
         let cover = rule(GroupId::cover(group.root_systems(), 0).unwrap());
         for label in rejected {
-            let raw_id = cover.encode_dynkin(&label).unwrap();
+            let raw_id = cover.encode_irrep(&label, &[]).unwrap();
             assert!(
                 matches!(
-                    r.encode_dynkin(&label),
+                    r.encode_irrep(&label, &[]),
                     Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
                 ),
                 "{group:?}: {label:?}"
             );
             assert!(
                 matches!(
-                    r.decode_dynkin(raw_id),
+                    r.decode_irrep(raw_id),
                     Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
                 ),
                 "{group:?}: raw {label:?}"
@@ -151,24 +151,6 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         }
     }
     assert_eq!(GroupId::so(5).unwrap(), GroupId::pso(5).unwrap());
-    // D2, products and torus charges are outside the single-factor Dynkin
-    // codec; rejecting them keeps charges and factor order from being dropped.
-    for group in [
-        GroupId::spin(4).unwrap(),
-        GroupId::so(4).unwrap(),
-        GroupId::pso(4).unwrap(),
-        GroupId::u(1).unwrap(),
-        GroupId::u(2).unwrap(),
-        GroupId::cover(&[RootSystem::A(1)], 1).unwrap(),
-        GroupId::cover(&[RootSystem::A(1), RootSystem::A(2)], 0).unwrap(),
-    ] {
-        assert!(matches!(
-            LieGroupFusionRule::new(group),
-            Err(LieGroupFusionRuleError::Provider(
-                LieError::Unsupported { .. }
-            ))
-        ));
-    }
     for root_system in [
         RootSystem::G2,
         RootSystem::F4,
@@ -186,16 +168,24 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
 }
 
 fn fusion(r: &LieGroupFusionRule, a: &[i64], b: &[i64]) -> BTreeMap<Vec<i64>, usize> {
-    let (a, b) = (r.encode_dynkin(a).unwrap(), r.encode_dynkin(b).unwrap());
+    let (a, b) = (
+        r.encode_irrep(a, &[]).unwrap(),
+        r.encode_irrep(b, &[]).unwrap(),
+    );
     r.try_fusion_channels(a, b)
         .unwrap()
         .into_iter()
-        .map(|c| (r.decode_dynkin(c).unwrap(), r.try_nsymbol(a, b, c).unwrap()))
+        .map(|c| {
+            (
+                r.decode_irrep(c).unwrap().0,
+                r.try_nsymbol(a, b, c).unwrap(),
+            )
+        })
         .collect()
 }
 
 fn exact_dimension(r: &LieGroupFusionRule, label: &[i64], dimension: u64) {
-    let id = r.encode_dynkin(label).unwrap();
+    let id = r.encode_irrep(label, &[]).unwrap();
     assert_eq!(
         r.object(id).unwrap().dim_exact().to_string(),
         dimension.to_string()
@@ -214,7 +204,7 @@ fn rank_one_isomorphisms_match_su2_triangle_oracle() {
         let r = rule(group.clone());
         for a in 0..=3 {
             exact_dimension(&r, &[a], a as u64 + 1);
-            let id = r.encode_dynkin(&[a]).unwrap();
+            let id = r.encode_irrep(&[a], &[]).unwrap();
             assert_eq!(r.try_dual(id).unwrap(), id);
             for b in 0..=3 {
                 let expected = ((a - b).abs()..=a + b)
@@ -242,7 +232,7 @@ fn b2_c2_isomorphism_has_fixed_swapped_labels_and_complete_products() {
         exact_dimension(&b, &label, dim);
         exact_dimension(&c, &[label[1], label[0]], dim);
         for (r, l) in [(&b, label), (&c, [label[1], label[0]])] {
-            let id = r.encode_dynkin(&l).unwrap();
+            let id = r.encode_irrep(&l, &[]).unwrap();
             assert_eq!(r.try_dual(id).unwrap(), id);
         }
     }
@@ -277,13 +267,18 @@ fn d3_a3_isomorphism_has_fixed_cyclic_labels_products_and_duals() {
         exact_dimension(&a, &map(label), dim);
         let dual = [label[0], label[2], label[1]];
         assert_eq!(
-            d.decode_dynkin(d.try_dual(d.encode_dynkin(&label).unwrap()).unwrap())
-                .unwrap(),
+            d.decode_irrep(d.try_dual(d.encode_irrep(&label, &[]).unwrap()).unwrap())
+                .unwrap()
+                .0,
             dual
         );
         assert_eq!(
-            a.decode_dynkin(a.try_dual(a.encode_dynkin(&map(label)).unwrap()).unwrap())
-                .unwrap(),
+            a.decode_irrep(
+                a.try_dual(a.encode_irrep(&map(label), &[]).unwrap())
+                    .unwrap()
+            )
+            .unwrap()
+            .0,
             map(dual)
         );
     }
@@ -308,16 +303,16 @@ fn d3_a3_isomorphism_has_fixed_cyclic_labels_products_and_duals() {
 fn codec_holes_width_foreign_objects_and_full_group_identity() {
     let su2 = rule(GroupId::su(2).unwrap());
     assert_eq!(
-        su2.encode_dynkin(&[u32::MAX as i64]).unwrap().id(),
+        su2.encode_irrep(&[u32::MAX as i64], &[]).unwrap().id(),
         u32::MAX as usize
     );
     assert!(matches!(
-        su2.encode_dynkin(&[u32::MAX as i64 + 1]),
+        su2.encode_irrep(&[u32::MAX as i64 + 1], &[]),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
     ));
     if usize::BITS > 32 {
         assert!(matches!(
-            su2.decode_dynkin(SectorId::new(u32::MAX as usize + 1)),
+            su2.decode_irrep(SectorId::new(u32::MAX as usize + 1)),
             Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
     }
@@ -329,20 +324,23 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
         let r = rule(group);
         for raw in 0..100 {
             let id = SectorId::new(raw);
-            assert_eq!(r.encode_dynkin(&r.decode_dynkin(id).unwrap()).unwrap(), id);
+            assert_eq!(
+                r.encode_irrep(&r.decode_irrep(id).unwrap().0, &[]).unwrap(),
+                id
+            );
         }
         assert!(matches!(
-            r.encode_dynkin(&vec![i64::MAX; r.group_id().semisimple_rank()]),
+            r.encode_irrep(&vec![i64::MAX; r.group_id().semisimple_rank()], &[]),
             Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
     }
     let quotient = rule(GroupId::psu(2).unwrap());
-    assert_eq!(quotient.encode_dynkin(&[2]).unwrap(), SectorId::new(2));
+    assert_eq!(quotient.encode_irrep(&[2], &[]).unwrap(), SectorId::new(2));
     assert!(matches!(
-        quotient.decode_dynkin(SectorId::new(1)),
+        quotient.decode_irrep(SectorId::new(1)),
         Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
     ));
-    let warm = quotient.encode_dynkin(&[2]).unwrap();
+    let warm = quotient.encode_irrep(&[2], &[]).unwrap();
     let member = quotient.object(warm).unwrap();
     assert_eq!(quotient.sector_id(&member).unwrap(), warm);
     assert!(matches!(
@@ -367,7 +365,7 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
             );
             assert_ne!(rules[i], rules[j]);
             assert_ne!(rules[i].rule_identity(), rules[j].rule_identity());
-            let id = rules[i].encode_dynkin(&[1]).unwrap();
+            let id = rules[i].encode_irrep(&[1], &[]).unwrap();
             assert!(matches!(
                 rules[i].sector_id(&rules[j].object(id).unwrap()),
                 Err(LieGroupFusionRuleError::Provider(LieError::InvalidLabel))
@@ -406,7 +404,7 @@ fn gauge_invariant_closed_braid_traces_fs_and_twists() {
     ];
     for (group, label, n, trace, cycle, fs) in cases {
         let r = rule(group);
-        let a = r.encode_dynkin(&label).unwrap();
+        let a = r.encode_irrep(&label, &[]).unwrap();
         assert_eq!(
             r.category()
                 .frobenius_schur_indicator(&r.object(a).unwrap()),
@@ -455,7 +453,7 @@ fn gauge_invariant_closed_braid_traces_fs_and_twists() {
         );
     }
     let d = rule(GroupId::spin(6).unwrap());
-    let spinor = d.encode_dynkin(&[0, 0, 1]).unwrap();
+    let spinor = d.encode_irrep(&[0, 0, 1], &[]).unwrap();
     assert_ne!(d.try_dual(spinor).unwrap(), spinor);
     assert_eq!(
         d.category()
@@ -511,7 +509,7 @@ fn multiplicity_two_sp4_and_so6_have_nonscalar_f_r_a_b() {
         ),
     ] {
         let r = rule(group);
-        let a = r.encode_dynkin(&label).unwrap();
+        let a = r.encode_irrep(&label, &[]).unwrap();
         exact_dimension(&r, &label, dimension);
         assert_eq!(
             fusion(&r, &label, &label),
@@ -528,7 +526,7 @@ fn multiplicity_two_sp4_and_so6_have_nonscalar_f_r_a_b() {
             dimension * dimension
         );
         for channel in channels {
-            let c = r.encode_dynkin(&channel).unwrap();
+            let c = r.encode_irrep(&channel, &[]).unwrap();
             assert_eq!(r.try_nsymbol(a, a, c).unwrap(), 2);
             // A unit leg makes the F entries independently fixed delta_mu,lambda,
             // while retaining both outer-multiplicity axes (no scalar shortcut).
@@ -575,4 +573,346 @@ fn multiplicity_two_sp4_and_so6_have_nonscalar_f_r_a_b() {
             }
         }
     }
+}
+
+fn ids(r: &LieGroupFusionRule, labels: &[(&[i64], &[i64], usize)]) {
+    for &(dynkin, charges, id) in labels {
+        let group = r.group_id();
+        assert_eq!(
+            r.encode_irrep(dynkin, charges).unwrap(),
+            SectorId::new(id),
+            "{group:?}: {dynkin:?}; {charges:?}"
+        );
+        assert_eq!(
+            r.decode_irrep(SectorId::new(id)).unwrap(),
+            (dynkin.to_vec(), charges.to_vec())
+        );
+    }
+}
+
+fn holes(r: &LieGroupFusionRule, ids: impl IntoIterator<Item = usize>) {
+    for id in ids {
+        assert!(
+            matches!(
+                r.decode_irrep(SectorId::new(id)),
+                Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+            ),
+            "{:?}: {id}",
+            r.group_id()
+        );
+    }
+}
+
+/// Hand-ranked ids: coordinates are the Dynkin labels, then each charge mapped
+/// by `0, 1, -1, 2, -2, ... -> 0, 1, 2, 3, 4, ...`; ids order by coordinate
+/// total, then lexicographically, and excluded labels leave holes.
+#[test]
+fn multi_coordinate_ids_rank_dynkin_then_zigzag_charges() {
+    // D2 = A1 x A1, every label admitted: grade 0 (0,0); grade 1 (0,1) < (1,0); (0,2) opens grade 2.
+    let spin4 = rule(GroupId::spin(4).unwrap());
+    ids(
+        &spin4,
+        &[
+            (&[0, 0], &[], 0),
+            (&[0, 1], &[], 1),
+            (&[1, 0], &[], 2),
+            (&[0, 2], &[], 3),
+        ],
+    );
+    // U(1): the single coordinate is the zigzag charge.
+    let u1 = rule(GroupId::u(1).unwrap());
+    ids(
+        &u1,
+        &[
+            (&[], &[0], 0),
+            (&[], &[1], 1),
+            (&[], &[-1], 2),
+            (&[], &[2], 3),
+        ],
+    );
+    // U(2) admits q = a (mod 2). Coordinates (a, z(q)) in rank order:
+    // (0,0) = (0; 0) id 0; (0,1) = (0; 1) id 1 and (1,0) = (1; 0) id 2 are odd;
+    // (0,2) = (0; -1) id 3 is odd; (1,1) = (1; 1) id 4; (2,0) = (2; 0) id 5.
+    let u2 = rule(GroupId::u(2).unwrap());
+    ids(&u2, &[(&[0], &[0], 0), (&[1], &[1], 4), (&[2], &[0], 5)]);
+    holes(&u2, 1..=3);
+    assert!(matches!(
+        u2.encode_irrep(&[0], &[1]),
+        Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+    ));
+    // SO(4) admits even a1 + a2: grades 1 (ids 1, 2) and 3 (ids 6..=9) are holes.
+    let so4 = rule(GroupId::so(4).unwrap());
+    ids(
+        &so4,
+        &[
+            (&[0, 0], &[], 0),
+            (&[0, 2], &[], 3),
+            (&[1, 1], &[], 4),
+            (&[2, 0], &[], 5),
+        ],
+    );
+    holes(&so4, [1, 2, 6, 7, 8, 9]);
+    // The coordinate-free trivial group has the single id 0.
+    let trivial = rule(GroupId::cover(&[], 0).unwrap());
+    ids(&trivial, &[(&[], &[], 0)]);
+    assert!(matches!(
+        trivial.decode_irrep(SectorId::new(1)),
+        Err(LieGroupFusionRuleError::DecodeOverflow { .. })
+    ));
+}
+
+/// Dynkin labels and torus charges, as `LieGroup::irrep` takes them.
+type Irrep = (Vec<i64>, Vec<i64>);
+
+fn shapes() -> Vec<(GroupId, Option<Irrep>)> {
+    let a1 = RootSystem::A(1);
+    vec![
+        (GroupId::spin(4).unwrap(), None),
+        (GroupId::u(1).unwrap(), None),
+        (GroupId::u(2).unwrap(), Some((vec![0], vec![1]))),
+        // U(3) admits q = a1 + 2 a2 (mod 3).
+        (GroupId::u(3).unwrap(), Some((vec![1, 0], vec![0]))),
+        (GroupId::torus(2).unwrap(), None),
+        (GroupId::cover(&[a1], 1).unwrap(), None),
+        (GroupId::cover(&[a1, RootSystem::A(2)], 0).unwrap(), None),
+        // (SU(2) x SU(2) x U(1)) / Z2 with a1 + a2 + q even.
+        (
+            GroupId::new(&[a1, a1], 1, &[vec![1, 0, 1], vec![0, 1, 1], vec![0, 0, 2]]).unwrap(),
+            Some((vec![1, 0], vec![0])),
+        ),
+    ]
+}
+
+#[test]
+fn every_group_shape_round_trips_admitted_labels_and_rejects_the_rest() {
+    for (group, rejected) in shapes() {
+        let r = rule(group.clone());
+        let mut admitted = 0;
+        for raw in 0..64 {
+            let id = SectorId::new(raw);
+            match r.decode_irrep(id) {
+                Ok((dynkin, charges)) => {
+                    assert!(group.admits(&dynkin, &charges), "{group:?}: {raw}");
+                    assert_eq!(r.encode_irrep(&dynkin, &charges).unwrap(), id);
+                    let typed = [dynkin, charges].concat();
+                    assert_eq!(r.try_decode_label(id).unwrap(), typed);
+                    assert_eq!(r.try_encode_label(&typed).unwrap(), id);
+                    assert_eq!(r.sector_id(&r.object(id).unwrap()).unwrap(), id);
+                    admitted += 1;
+                }
+                Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible)) => {}
+                Err(error) => panic!("{group:?}: {raw}: {error}"),
+            }
+        }
+        assert!(admitted > 8, "{group:?}: {admitted}");
+        if let Some((dynkin, charges)) = rejected {
+            assert!(!group.admits(&dynkin, &charges));
+            assert!(matches!(
+                r.encode_irrep(&dynkin, &charges),
+                Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+            ));
+        }
+        let (r_rank, t_rank) = (group.semisimple_rank(), group.torus_rank());
+        assert!(matches!(
+            r.encode_irrep(&vec![0; r_rank], &vec![0; t_rank + 1]),
+            Err(LieGroupFusionRuleError::LabelLength { .. })
+        ));
+        assert!(matches!(
+            r.try_encode_label(&vec![0; r_rank + t_rank + 1]),
+            Err(LieGroupFusionRuleError::LabelLength { .. })
+        ));
+    }
+}
+
+/// The rule forwards to the fusion-symbols category: it does not re-derive
+/// fusion data, so its answers equal direct `LieGroup` calls.
+#[test]
+fn multi_factor_and_torus_queries_forward_to_fusion_symbols() {
+    let a1 = RootSystem::A(1);
+    for group in [
+        GroupId::u(2).unwrap(),
+        GroupId::cover(&[a1], 1).unwrap(),
+        GroupId::cover(&[a1, RootSystem::A(2)], 0).unwrap(),
+    ] {
+        let r = rule(group.clone());
+        let fs = LieGroup::new(group.clone()).unwrap();
+        let sectors: Vec<SectorId> = (0..16)
+            .map(SectorId::new)
+            .filter(|&id| r.decode_irrep(id).is_ok())
+            .take(4)
+            .collect();
+        let object = |id: SectorId| {
+            let (dynkin, charges) = r.decode_irrep(id).unwrap();
+            fs.irrep(&dynkin, &charges).unwrap()
+        };
+        let labels =
+            |x: &fusion_symbols::lie::LieIrrep| (x.dynkin(), x.charges().collect::<Vec<_>>());
+        for &a in &sectors {
+            let oa = object(a);
+            assert_eq!(
+                r.try_dim_scalar(a).unwrap().to_bits(),
+                fs.dim(&oa).to_bits()
+            );
+            assert_eq!(
+                r.decode_irrep(r.try_dual(a).unwrap()).unwrap(),
+                labels(&fs.dual(&oa))
+            );
+            for &b in &sectors {
+                let ob = object(b);
+                let mut expected: Vec<_> =
+                    fs.fusion(&oa, &ob).unwrap().map(|c| labels(&c)).collect();
+                expected.sort();
+                let channels = r.try_fusion_channels(a, b).unwrap();
+                let mut decoded: Vec<_> = channels
+                    .iter()
+                    .map(|&c| r.decode_irrep(c).unwrap())
+                    .collect();
+                decoded.sort();
+                assert_eq!(decoded, expected, "{group:?}");
+                for &c in &channels {
+                    let oc = object(c);
+                    assert_eq!(
+                        r.try_nsymbol(a, b, c).unwrap(),
+                        fs.try_nsymbol(&oa, &ob, &oc).unwrap() as usize
+                    );
+                    let rs = r.try_r_symbol_generic(a, b, c).unwrap();
+                    let rf = fs.r_symbol(&oa, &ob, &oc).unwrap();
+                    let (rows, cols) = rs.shape();
+                    assert_eq!([rows, cols], [rf.dim(); 2]);
+                    for i in 0..rows {
+                        for j in 0..cols {
+                            assert_eq!(rs.get(i, j).to_bits(), rf.at(i, j).to_bits());
+                        }
+                    }
+                }
+            }
+        }
+        // F[a,b,c;d](e,f) over the first three sectors and every admissible e, d, f.
+        let [a, b, c] = [sectors[1], sectors[2], sectors[3]];
+        let (oa, ob, oc) = (object(a), object(b), object(c));
+        let mut checked = 0;
+        for e in r.try_fusion_channels(a, b).unwrap() {
+            for d in r.try_fusion_channels(e, c).unwrap() {
+                for f in r.try_fusion_channels(b, c).unwrap() {
+                    let fs_block = fs
+                        .f_symbol(&oa, &ob, &oc, &object(d), &object(e), &object(f))
+                        .unwrap();
+                    let block = r.try_f_symbol_generic(a, b, c, d, e, f).unwrap();
+                    let (m, n, k, l) = block.shape();
+                    assert_eq!([m, n, k, l], fs_block.dims());
+                    for index in (0..m).flat_map(|i| (0..n).map(move |j| (i, j))) {
+                        for (x, y) in (0..k).flat_map(|x| (0..l).map(move |y| (x, y))) {
+                            assert_eq!(
+                                block.get(index.0, index.1, x, y).to_bits(),
+                                fs_block.at(index.0, index.1, x, y).to_bits()
+                            );
+                        }
+                    }
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "{group:?}");
+    }
+}
+
+/// Id overflow is detected before lattice admission; an in-budget hole is
+/// `NotAdmissible`.
+#[test]
+fn id_overflow_precedes_admission() {
+    let group = GroupId::u(2).unwrap();
+    let u2 = rule(group.clone());
+    let (dynkin, charges) = ([1_i64 << 40], [1]);
+    assert!(!group.admits(&dynkin, &charges));
+    assert!(matches!(
+        u2.encode_irrep(&dynkin, &charges),
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [1 << 40, 1]
+    ));
+    assert!(matches!(
+        u2.encode_irrep(&[0], &[1]),
+        Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+    ));
+    assert!(matches!(
+        u2.decode_irrep(SectorId::new(1)),
+        Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+    ));
+}
+
+#[test]
+fn label_length_mismatch_names_the_mismatched_slice() {
+    let u2 = rule(GroupId::u(2).unwrap());
+    // The Dynkin slice is right; the charge slice has one entry too many.
+    let error = u2.encode_irrep(&[0], &[0, 0]).unwrap_err();
+    assert!(matches!(
+        error,
+        LieGroupFusionRuleError::LabelLength {
+            expected: 1,
+            found: 2
+        }
+    ));
+    assert_eq!(
+        error.to_string(),
+        "expected 1 entries in the first mismatched label slice (Dynkin labels, then charges), got 2"
+    );
+    assert!(matches!(
+        u2.encode_irrep(&[0, 0], &[0]),
+        Err(LieGroupFusionRuleError::LabelLength {
+            expected: 1,
+            found: 2
+        })
+    ));
+}
+
+#[test]
+fn unrepresentable_charges_ids_and_fusions_are_typed() {
+    let max = i64::from(i32::MAX);
+    let u1 = rule(GroupId::u(1).unwrap());
+    for q in [max, -max] {
+        let id = u1.encode_irrep(&[], &[q]).unwrap();
+        assert_eq!(u1.decode_irrep(id).unwrap(), (vec![], vec![q]));
+    }
+    // Beyond fusion-symbols' charge range, and beyond i64 zigzag.
+    for q in [max + 1, -max - 1, i64::MAX, i64::MIN] {
+        assert!(
+            matches!(
+                u1.encode_irrep(&[], &[q]),
+                Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [q]
+            ),
+            "{q}"
+        );
+    }
+    // An A1 coordinate inside a product is bounded by fusion-symbols' u32
+    // doubled spin, not by the id budget.
+    let spin4 = rule(GroupId::spin(4).unwrap());
+    let past = i64::from(u32::MAX) + 1;
+    assert!(spin4.encode_irrep(&[past - 1, 0], &[]).is_ok());
+    assert!(matches!(
+        spin4.encode_irrep(&[past, 0], &[]),
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [past, 0]
+    ));
+    // In-range charges whose id count overflows usize.
+    let torus = rule(GroupId::torus(3).unwrap());
+    let charges = [max; 3];
+    assert!(LieGroup::new(GroupId::torus(3).unwrap())
+        .unwrap()
+        .irrep(&[], &charges)
+        .is_ok());
+    assert!(matches!(
+        torus.encode_irrep(&[], &charges),
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == charges
+    ));
+    // A fusion that overflows a coordinate names the product's highest weight.
+    let top = u1.encode_irrep(&[], &[max]).unwrap();
+    let one = u1.encode_irrep(&[], &[1]).unwrap();
+    assert!(matches!(
+        u1.try_fusion_channels(top, one),
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [max + 1]
+    ));
+    let su2_u1 = rule(GroupId::cover(&[RootSystem::A(1)], 1).unwrap());
+    let top = su2_u1.encode_irrep(&[1], &[max]).unwrap();
+    let one = su2_u1.encode_irrep(&[1], &[1]).unwrap();
+    assert!(matches!(
+        su2_u1.try_fusion_channels(top, one),
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [2, max + 1]
+    ));
 }
