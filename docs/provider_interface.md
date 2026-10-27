@@ -56,8 +56,9 @@ The codec's type parameters select the admission:
 `EnumeratedCodec<M, U = CanonicalUnitAdmission>` takes the mode and the unit
 selector as `M` and `U`. Every rule implements `TypedSectorAdmission` with its
 codec's labels, error, and mode. `CategoryRule::try_new` refuses
-multiplicity-free admission of a category whose fusion has multiplicity,
-canonical-unit admission of a category without the `has_canonical_unit`
+multiplicity-free admission of a category whose fusion has multiplicity, a
+fusion or braiding style symtn does not know (`IncompatibleFusionStyle`,
+`UnsupportedBraidingStyle`), canonical-unit admission of a category without the `has_canonical_unit`
 certificate (`UncertifiedUnitAdmission` admits it without the markers), and a
 unit the codec cannot encode or round-trip; an invalid mode, error, or marker
 combination does not compile.
@@ -99,7 +100,7 @@ category's `frobenius_schur_phase`.
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
-| `LieGroupFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, rank-one labels `0..=u32::MAX`; no physical expansion | A/B/C/D `LieGroup`, with full `GroupId` global-form admission; exact A1/B1/C1 symbols |
+| `LieGroupFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, rank-one labels `0..=u32::MAX`; no physical expansion | A/B/C/D `LieGroup`, with full `GroupId` character-lattice admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
@@ -113,29 +114,37 @@ For a `LieGroupFusionRule` over `GroupId::su(2)`, fusion whose largest doubled-s
 an input label above that bound.
 
 Construct it with `LieGroupFusionRule::new(group)`, where `group` is a
-`fusion_symbols::lie::GroupId`; `group_id()` returns that complete metadata.
+`fusion_symbols::lie::GroupId`; `group_id()` borrows that complete metadata.
 Supported families are SU(n), Sp(m), Spin(n), SO(n), their adjoint forms and
 fs's supported central quotients, including half-spin forms. Sp's argument is
-the even matrix dimension. D2 forms (Spin(4), SO(4), PSO(4)) return
-`LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })` from the
-pinned provider. No product substitute is constructed.
+the even matrix dimension. The Dynkin codec covers one simple root system
+without torus charges, so D2 forms (Spin(4), SO(4), PSO(4)), semisimple
+products, tori and U(n) return
+`LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })` at
+construction even where fusion-symbols executes them. No product substitute is
+constructed and no torus charge is dropped.
 
 The codec ranks all nonnegative Dynkin labels by total grade then
 lexicographically using the root-system rank. Global-form restrictions leave
 holes in that numbering: encoding or decoding an excluded label returns
 `LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`. Object conversion
 checks the complete category membership before using an interned label.
-Identities include the target width, explicit root/global-form metadata,
-codec/admission/scalar conventions and the actual category fingerprint;
-full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups even when
-their provider fingerprints agree. Persist semantic labels and rebuild caches
+Identities include the target width, the root system, the center classes its
+character lattice retains (probed through `GroupId::admits` on a few
+fundamental weights, in `O(rank)` time per probe without building the
+lattice), codec/admission/scalar conventions and the actual category
+fingerprint. Equal lattices share one identity whatever constructor built
+them; full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups
+even when their provider fingerprints agree. Persist semantic labels and rebuild caches
 when provider identity or codec conventions change.
 
 symtn retains only the bounded codec interner (65,536 label/object pairs and
 its dual lookup), with uncached conversion after capacity is reached. It
 computes no symbols and stores no symbol cache. fusion-symbols owns generated
 coefficients and its B/C/D catalog's default 256 MiB retention budget; that
-budget does not bound temporary generation memory. The categorical scalar is
+budget also charges the trivial and defining seeds, so construction fails for
+B/C/D ranks whose defining generators exceed it (roughly rank 200), and it
+does not bound temporary generation memory. The categorical scalar is
 `f64`, and tensor execution uses the ordinary supported real/complex Host
 payloads; physical expansion and CUDA execution are not provided by this rule.
 Sp fundamental representations have FS indicator -1 and twist +1; this is
@@ -313,7 +322,8 @@ See [backend policy](backend_policy.md) for device bounds.
 `ProductFusionRule<Left, Right, Codec>` adapts
 `fusion_symbols::product::Product<(Left::Category, Right::Category)>`.
 Construct it with `ProductFusionRule::try_new(left, right)`; construction
-requires the category's canonical-unit certificate. Every built-in rule,
+requires the category's canonical-unit certificate and fusion and braiding
+styles symtn knows. Every built-in rule,
 `CategoryRule` and product implements the sealed `CategoryProvider` interface,
 so products nest. Factor access and component-id packing remain in symtn.
 

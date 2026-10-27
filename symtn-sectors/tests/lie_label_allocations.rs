@@ -36,7 +36,7 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
     for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
         let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
-        let adjoint = category.irrep(labels).unwrap();
+        let adjoint = category.irrep(labels, &[]).unwrap();
         let channel_labels: Vec<_> = category
             .fusion(&adjoint, &adjoint)
             .unwrap()
@@ -65,7 +65,7 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
     for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
         let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
-        let object = category.irrep(labels).unwrap();
+        let object = category.irrep(labels, &[]).unwrap();
         let expected = rule.encode_dynkin(labels).unwrap();
         let _ = CategoryProvider::category(&rule);
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());

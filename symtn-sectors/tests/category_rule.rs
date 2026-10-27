@@ -381,7 +381,7 @@ fn su3_is_refused_as_multiplicity_free_and_admitted_as_checked_generic() {
     // Octet (1,1) is enumeration index 4 (grade 2: (0,2), (1,1), (2,0) after
     // grade 1's (0,1), (1,0)); 8 x 8 contains the octet twice.
     let octet = rule
-        .try_encode_label(&rule.category().irrep(&[1, 1]).unwrap())
+        .try_encode_label(&rule.category().irrep(&[1, 1], &[]).unwrap())
         .unwrap();
     assert_eq!(octet, s(4));
     assert_eq!(rule.try_nsymbol(octet, octet, octet), Ok(2));
@@ -434,7 +434,7 @@ fn a_and_b_blocks_are_the_category_authority() {
     let su3 = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
     let rule = cg(su3.clone());
     let sun = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let octet = su3.irrep(&[1, 1]).unwrap();
+    let octet = su3.irrep(&[1, 1], &[]).unwrap();
     let rule_octet = rule.try_encode_label(&octet).unwrap();
     let lie_group_octet = sun.encode_dynkin(&[1, 1]).unwrap();
     let authority_a = su3.a_symbol(&octet, &octet, &octet).unwrap();
@@ -629,14 +629,20 @@ fn identity_separates_mode_unit_codec_table_and_factor_structure() {
     );
 
     let z2 = || ZN::new(2).unwrap();
-    let left_first = FusionRule::rule_identity(&mf(fusion_symbols::product(z2(), z3())));
-    let right_first = FusionRule::rule_identity(&mf(fusion_symbols::product(z3(), z2())));
+    let left_first =
+        FusionRule::rule_identity(&mf(fusion_symbols::product::Product::new((z2(), z3()))));
+    let right_first =
+        FusionRule::rule_identity(&mf(fusion_symbols::product::Product::new((z3(), z2()))));
     assert_ne!(left_first, right_first);
-    let nested = FusionRule::rule_identity(&mf(fusion_symbols::product(
-        fusion_symbols::product(z2(), z3()),
+    let nested = FusionRule::rule_identity(&mf(fusion_symbols::product::Product::new((
+        fusion_symbols::product::Product::new((z2(), z3())),
         z2(),
-    )));
-    let flat = FusionRule::rule_identity(&mf(fusion_symbols::product![z2(), z3(), z2()]));
+    ))));
+    let flat = FusionRule::rule_identity(&mf(fusion_symbols::product::Product::new((
+        z2(),
+        z3(),
+        z2(),
+    ))));
     assert_ne!(nested, flat);
 }
 
@@ -936,7 +942,7 @@ fn enumeration_ids_round_trip_and_reach_past_32_bits() {
 
     // (-2^16, -2^16) in U(1) x U(1) is the coordinate pair (2^17, 2^17):
     // sum 2^18, index 2^18 (2^18 + 1) / 2 + 2^17, past every 32-bit id.
-    let pair = mf(fusion_symbols::product(U1, U1));
+    let pair = mf(fusion_symbols::product::Product::new((U1, U1)));
     let label = (u1(-65_536), u1(-65_536));
     #[cfg(target_pointer_width = "64")]
     {
@@ -965,7 +971,7 @@ fn enumeration_ids_round_trip_and_reach_past_32_bits() {
 fn a_product_category_is_numbered_in_bounded_manhattan_order() {
     let z2 = ZN::new(2).unwrap();
     let z3 = ZN::new(3).unwrap();
-    let rule = mf(fusion_symbols::product(z2, z3));
+    let rule = mf(fusion_symbols::product::Product::new((z2, z3)));
     let label = |a: u32, b: u32| {
         (
             ZNIrrep::from_canonical(a, 2).unwrap(),
@@ -987,7 +993,7 @@ fn a_product_category_is_numbered_in_bounded_manhattan_order() {
     assert_eq!(rule.try_dual_sector(s(5)), Ok(s(4)));
 
     // An unbounded factor: (2, ∞) with U(1)'s 0, +1, -1, ... second.
-    let mixed = mf(fusion_symbols::product(z2, U1));
+    let mixed = mf(fusion_symbols::product::Product::new((z2, U1)));
     let pair = |a: u32, q: i32| {
         (
             ZNIrrep::from_canonical(a, 2).unwrap(),
@@ -1427,15 +1433,18 @@ fn adapter_n_query_budgets_cover_leaf_and_both_product_nestings() {
     // fs checks product construction and leaf outputs; the adapter adds one
     // logical-axis pass. Nesting does not multiply the number of leaf queries.
     check(
-        fusion_symbols::product(
-            fusion_symbols::product(leaf.clone(), leaf.clone()),
+        fusion_symbols::product::Product::new((
+            fusion_symbols::product::Product::new((leaf.clone(), leaf.clone())),
             leaf.clone(),
-        ),
+        )),
         s(7),
         [36, 18, 21, 21],
     );
     check(
-        fusion_symbols::product(leaf.clone(), fusion_symbols::product(leaf.clone(), leaf)),
+        fusion_symbols::product::Product::new((
+            leaf.clone(),
+            fusion_symbols::product::Product::new((leaf.clone(), leaf)),
+        )),
         s(7),
         [36, 18, 21, 21],
     );
@@ -2069,7 +2078,7 @@ impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
     ) -> Result<LieIrrep, FusionAlgebraError> {
         let twice_spin = Self::checked(id)?;
         category()
-            .irrep(&[twice_spin])
+            .irrep(&[twice_spin], &[])
             .map_err(|_| FusionAlgebraError::InvalidSector { sector: id })
     }
     fn sector_id<'a>(
@@ -2105,7 +2114,7 @@ impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
             }
         }
         let group = category();
-        Ok(twice_spins.map(|twice_spin| group.irrep(&[twice_spin.unwrap()]).unwrap()))
+        Ok(twice_spins.map(|twice_spin| group.irrep(&[twice_spin.unwrap()], &[]).unwrap()))
     }
     fn admit_r<'a>(
         &self,
@@ -2371,7 +2380,10 @@ impl CategoryCodec<Z2Z2> for CantorZ2Z2 {
         for (pair, id) in pairs.iter_mut().zip(ids) {
             *pair = TensorKitProductCodec::decode_checked(id)?;
         }
-        let mut objects = [(ZNIrrep::unit(2).unwrap(), ZNIrrep::unit(2).unwrap()); N];
+        let mut objects = [{
+            let unit = FusionCategory::unit(&ZN::new(2).unwrap());
+            (unit, unit)
+        }; N];
         for (object, pair) in objects.iter_mut().zip(pairs) {
             object.0 = Self::factor(pair.0)?;
         }
@@ -2392,7 +2404,11 @@ impl CategoryCodec<Z2Z2> for CantorZ2Z2 {
 #[test]
 fn admission_expresses_the_product_schedule() {
     let z2 = || ZN::new(2).unwrap();
-    let rule = CategoryRule::try_new(fusion_symbols::product(z2(), z2()), CantorZ2Z2).unwrap();
+    let rule = CategoryRule::try_new(
+        fusion_symbols::product::Product::new((z2(), z2())),
+        CantorZ2Z2,
+    )
+    .unwrap();
     // Cantor (2, 3) = 17: both components invalid; the left factor wins.
     assert_eq!(rule.try_nsymbol(s(17), s(0), s(0)), invalid(2));
     assert_eq!(rule.try_fusion_channels(s(17), s(0)), invalid(2));

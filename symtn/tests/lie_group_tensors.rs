@@ -93,7 +93,7 @@ fn graded_space_preserves_typed_global_form_rejections() {
         ),
     ];
     for (group, accepted, rejected) in cases {
-        let provider = Arc::new(LieGroupFusionRule::new(group).unwrap());
+        let provider = Arc::new(LieGroupFusionRule::new(group.clone()).unwrap());
         GradedSpace::try_new(Arc::clone(&provider), [(accepted.clone(), 2)]).unwrap();
         assert!(matches!(
             GradedSpace::try_new(Arc::clone(&provider), [(vec![], 2)]),
@@ -189,7 +189,9 @@ fn host_real_and_complex_lie_tensors_preserve_fs_multiplicity_and_duality() {
         // D3 chiral 4 is non-self-dual, and 4x4 -> 6 is allowed.
         (GroupId::spin(6).unwrap(), vec![0, 0, 1], vec![1, 0, 0], 1),
     ] {
-        host_round_trips(group, &label, &coupled, multiplicity, |i| i as f64 / 8.0);
+        host_round_trips(group.clone(), &label, &coupled, multiplicity, |i| {
+            i as f64 / 8.0
+        });
         host_round_trips(group, &label, &coupled, multiplicity, |i| {
             Complex64::new(i as f64 / 8.0, (i + 1) as f64 / 16.0)
         });

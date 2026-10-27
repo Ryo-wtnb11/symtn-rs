@@ -147,7 +147,14 @@ impl TableRule {
 
     /// Number of simple objects.
     pub fn rank(&self) -> usize {
-        self.category.rank()
+        table_rank(&self.category)
+    }
+}
+
+fn table_rank(category: &TableCategory) -> usize {
+    match category.object_count() {
+        Ok(Some(count)) => usize::try_from(count).expect("table ranks fit u16 labels"),
+        _ => unreachable!("table categories enumerate a finite object list"),
     }
 }
 
@@ -179,7 +186,7 @@ impl CategoryCodec<TableCategory> for TableCodec {
         rule: &RuleIdentity,
         label: &TableSector,
     ) -> Result<SectorId, FusionAlgebraError> {
-        let rank = category().rank();
+        let rank = table_rank(category());
         let label = usize::from(label.label());
         if (1..=rank).contains(&label) {
             Ok(SectorId::new(label - 1))

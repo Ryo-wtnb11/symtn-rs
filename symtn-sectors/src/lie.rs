@@ -1,6 +1,6 @@
 use fusion_symbols::{
     category::FusionCategory,
-    lie::{CenterSubgroup, GlobalForm, GroupId, LieError, LieGroup, LieIrrep, RootSystem},
+    lie::{GroupId, LieError, LieGroup, LieIrrep, RootSystem},
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -217,24 +217,44 @@ fn provider_error(error: LieError) -> LieGroupFusionRuleError {
 
 impl LieGroupFusionRule {
     /// Constructs a rule and eagerly checks provider support for the full group.
+    /// Only one simple root system without torus charges is supported; D2,
+    /// semisimple products, tori and U(n) return
+    /// [`LieGroupFusionRuleError::Provider`] with `LieError::Unsupported`.
     /// Rank-one labels span `0..=u32::MAX`; larger labels return
     /// [`LieGroupFusionRuleError::UnrepresentableLabel`]. Other ranks use the
     /// target's `usize` ID budget. Excluded global-form labels leave ID holes.
     ///
-    /// The `RankNotRepresentable` bound covers this rule's label buffers only;
-    /// constructing the fusion-symbols category for an absurdly large rank is
-    /// fusion-symbols' allocation (fusion-symbols#187).
+    /// The `RankNotRepresentable` bound covers this rule's label buffers only.
+    /// The rule's own identity costs `O(r · d(r + 1))` time for `A_r` (with
+    /// `d` the divisor count) and `O(r)` otherwise, without materializing the
+    /// character lattice; the fusion-symbols category's own construction cost
+    /// for a large rank is fusion-symbols' (fusion-symbols#187).
     pub fn new(group: GroupId) -> Result<Self, LieGroupFusionRuleError> {
-        let rank = group.root_system.rank();
+        // The Dynkin codec covers one simple factor without torus charges;
+        // products, tori and D2 = A1 x A1 would otherwise drop or misorder labels.
+        match group.root_systems() {
+            [RootSystem::D(2)] => {
+                return Err(provider_error(LieError::Unsupported {
+                    requires: "Spin(4) = SU(2) × SU(2) product",
+                }))
+            }
+            [_] if group.torus_rank() == 0 => {}
+            _ => {
+                return Err(provider_error(LieError::Unsupported {
+                    requires: "a single simple root system without torus charges",
+                }))
+            }
+        }
+        let rank = group.semisimple_rank();
         if rank > isize::MAX as usize / size_of::<i64>() {
             return Err(LieGroupFusionRuleError::RankNotRepresentable { rank });
         }
-        let category = LieGroup::new(group).map_err(provider_error)?;
+        let category = LieGroup::new(group.clone()).map_err(provider_error)?;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&(IDENTITY_SCHEMA, group), &mut hasher);
+        std::hash::Hash::hash(&(IDENTITY_SCHEMA, &group), &mut hasher);
         let identity = RuleIdentity::from_canonical_bytes::<Self>(
             std::hash::Hasher::finish(&hasher),
-            Self::identity_bytes(group, &category)?,
+            Self::identity_bytes(&group, &category)?,
         );
         Ok(Self {
             codec: LieCodec {
@@ -250,9 +270,9 @@ impl LieGroupFusionRule {
         &self.category
     }
 
-    /// Returns the complete root datum, including the global form.
-    pub const fn group_id(&self) -> GroupId {
-        self.codec.group
+    /// Returns the complete root datum and character lattice.
+    pub fn group_id(&self) -> &GroupId {
+        &self.codec.group
     }
 
     /// Encodes admitted nonnegative Dynkin labels by total grade then lexicographic order.
@@ -265,11 +285,20 @@ impl LieGroupFusionRule {
         self.codec.decode_dynkin(sector)
     }
 
+    /// Canonical bytes: the simple root system and the center classes its
+    /// character lattice retains, so equal groups share one identity whatever
+    /// basis built them.
     fn identity_bytes(
-        group: GroupId,
+        group: &GroupId,
         category: &LieGroup,
     ) -> Result<Arc<[u8]>, LieGroupFusionRuleError> {
-        let (root_tag, rank) = match group.root_system {
+        // `new` admits exactly one simple root system and no torus.
+        let &[root] = group.root_systems() else {
+            return Err(provider_error(LieError::Unsupported {
+                requires: "a single simple root system without torus charges",
+            }));
+        };
+        let (root_tag, rank) = match root {
             RootSystem::A(r) => (0, r),
             RootSystem::B(r) => (1, r),
             RootSystem::C(r) => (2, r),
@@ -285,29 +314,37 @@ impl LieGroupFusionRule {
                 }))
             }
         };
-        let (form_tag, parameter) = match group.form {
-            GlobalForm::SimplyConnected => (0, 0),
-            GlobalForm::Quotient(subgroup) => match subgroup {
-                CenterSubgroup::Zk(k) => (1, k),
-                CenterSubgroup::Z2 => (2, 0),
-                CenterSubgroup::Z4 => (3, 0),
-                CenterSubgroup::DVector => (4, 0),
-                CenterSubgroup::DHalfSpinPlus => (5, 0),
-                CenterSubgroup::DHalfSpinMinus => (6, 0),
-                CenterSubgroup::DFull => (7, 0),
-                _ => {
-                    return Err(provider_error(LieError::Unsupported {
-                        requires: "global-form identity encoding",
-                    }))
-                }
-            },
+        // Why these probes are injective: with one simple root system the
+        // lattice L satisfies Q <= L <= P, so L is fixed by the subgroup L/Q of
+        // the center P/Q, and a fundamental weight w_i lies in L iff its class
+        // does. A_r: P/Q = Z_(r+1), w_i has class i, and a subgroup is d Z with
+        // d | r+1, recovered as the least probed divisor d <= r whose w_d lies
+        // in L (none: L = Q). B_r: Z_2 = <[w_r]>. C_r: Z_2 = <[w_1]>. D_r:
+        // even r has Z_2 x Z_2 with nonzero classes [w_1], [w_(r-1)], [w_r];
+        // odd r has Z_4 = <[w_r]> with [w_1] its element of order 2. Every
+        // subgroup is determined by which of those classes it contains.
+        // Exceptional ranks are at most 8, so all of their weights are probed.
+        // Probing every w_i instead would cost O(r^2): one `admits` is O(r).
+        let probes: Vec<usize> = match root {
+            RootSystem::A(r) => (1..=r).filter(|d| (r + 1) % d == 0).collect(),
+            RootSystem::B(r) => vec![r],
+            RootSystem::C(_) => vec![1],
+            RootSystem::D(r) => vec![1, r - 1, r],
+            _ => (1..=rank).collect(),
         };
+        let mut weight = vec![0; rank];
         let mut bytes = CODEC_VERSION.to_vec();
         bytes.extend_from_slice(&usize::BITS.to_le_bytes());
         bytes.push(root_tag);
         bytes.extend_from_slice(&rank.to_le_bytes());
-        bytes.push(form_tag);
-        bytes.extend_from_slice(&parameter.to_le_bytes());
+        bytes.extend_from_slice(b":center-probes");
+        bytes.extend_from_slice(&probes.len().to_le_bytes());
+        for index in probes {
+            weight[index - 1] = 1;
+            bytes.extend_from_slice(&index.to_le_bytes());
+            bytes.push(u8::from(group.admits(&weight, &[])));
+            weight[index - 1] = 0;
+        }
         bytes.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
         bytes.extend_from_slice(
             b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
@@ -320,7 +357,7 @@ impl LieGroupFusionRule {
 impl LieCodec {
     fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, LieGroupFusionRuleError> {
         self.check_labels(labels.iter().copied())?;
-        if !self.group.admits(labels) {
+        if !self.group.admits(labels, &[]) {
             return Err(provider_error(LieError::NotAdmissible));
         }
         self.encode_dynkin_iter(|| labels.iter().copied())
@@ -338,13 +375,13 @@ impl LieCodec {
         let grade = labels()
             .try_fold(0usize, |sum, x| sum.checked_add(usize::try_from(x).ok()?))
             .ok_or_else(unrepresentable)?;
-        let mut rank = count_before_grade(grade, self.group.root_system.rank(), usize::MAX)
+        let mut rank = count_before_grade(grade, self.group.semisimple_rank(), usize::MAX)
             .exact()
             .ok_or_else(unrepresentable)?;
         let mut remaining = grade;
         for (index, label) in labels().enumerate() {
             let label = label as usize;
-            let tail = self.group.root_system.rank() - 1 - index;
+            let tail = self.group.semisimple_rank() - 1 - index;
             rank = rank
                 .checked_add(
                     prefix_count(remaining, tail, label, usize::MAX)
@@ -361,7 +398,7 @@ impl LieCodec {
     /// Rank-one ids above `u32::MAX` are unrepresentable.
     fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, LieGroupFusionRuleError> {
         let id = sector.id();
-        let r = self.group.root_system.rank();
+        let r = self.group.semisimple_rank();
         let mut low = 0usize;
         let mut high = id;
         while low < high {
@@ -411,7 +448,7 @@ impl LieCodec {
             return Err(LieGroupFusionRuleError::DecodeOverflow { sector });
         }
         self.check_labels(labels.iter().copied())?;
-        if !self.group.admits(&labels) {
+        if !self.group.admits(&labels, &[]) {
             return Err(provider_error(LieError::NotAdmissible));
         }
         Ok(labels)
@@ -421,9 +458,9 @@ impl LieCodec {
         &self,
         labels: impl ExactSizeIterator<Item = i64>,
     ) -> Result<(), LieGroupFusionRuleError> {
-        if labels.len() != self.group.root_system.rank() {
+        if labels.len() != self.group.semisimple_rank() {
             return Err(LieGroupFusionRuleError::LabelLength {
-                expected: self.group.root_system.rank(),
+                expected: self.group.semisimple_rank(),
                 found: labels.len(),
             });
         }
@@ -431,7 +468,7 @@ impl LieCodec {
             if value < 0 {
                 return Err(LieGroupFusionRuleError::NegativeLabel { index, value });
             }
-            if self.group.root_system.rank() == 1 && value > i64::from(u32::MAX) {
+            if self.group.semisimple_rank() == 1 && value > i64::from(u32::MAX) {
                 return Err(LieGroupFusionRuleError::UnrepresentableLabel {
                     labels: vec![value],
                 });
@@ -449,7 +486,7 @@ impl LieCodec {
             return Ok(irrep);
         }
         let labels = self.decode_dynkin(sector)?;
-        let irrep = category().irrep(&labels).map_err(provider_error)?;
+        let irrep = category().irrep(&labels, &[]).map_err(provider_error)?;
         Ok(self.irreps.insert(sector, Arc::new(irrep)))
     }
 
@@ -566,7 +603,7 @@ impl CategoryCodec<LieGroup> for LieCodec {
     ) -> LieGroupFusionRuleError {
         match error {
             CategoryAdapterError::Provider(fusion_symbols::lie::LieError::LabelOverflow)
-                if self.group.root_system.rank() == 1
+                if self.group.semisimple_rank() == 1
                     && matches!(inputs, [left, right] if left.id() <= u32::MAX as usize && right.id() <= u32::MAX as usize) =>
             {
                 LieGroupFusionRuleError::UnrepresentableLabel {
@@ -985,7 +1022,7 @@ mod tests {
                 if labels.iter().sum::<i64>() > max_total {
                     break;
                 }
-                let a = rule.category().irrep(&labels).unwrap();
+                let a = rule.category().irrep(&labels, &[]).unwrap();
                 let dual = rule.category().dual(&a);
                 let block = rule
                     .category()
@@ -1108,12 +1145,13 @@ mod tests {
             rule.encode_dynkin(&[i64::MAX, i64::MAX]),
             Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
-        let too_large = GroupId {
-            root_system: RootSystem::A(isize::MAX as usize / size_of::<i64>() + 1),
-            form: GlobalForm::SimplyConnected,
-        };
+        let too_large = GroupId::cover(
+            &[RootSystem::A(isize::MAX as usize / size_of::<i64>() + 1)],
+            0,
+        )
+        .unwrap();
         assert!(matches!(
-            LieGroupFusionRule::new(too_large),
+            LieGroupFusionRule::new(too_large.clone()),
             Err(LieGroupFusionRuleError::RankNotRepresentable { .. })
         ));
         // Exercise the codec's fallible allocation independently: production
@@ -1152,14 +1190,28 @@ mod tests {
                 .unwrap()
                 .rule_identity()
         );
+        // Identity follows the canonical lattice, not the constructor or basis.
+        let identity_of = |group| LieGroupFusionRule::new(group).unwrap().rule_identity();
+        assert_eq!(
+            rule.rule_identity(),
+            identity_of(GroupId::su_quotient(3, 1).unwrap())
+        );
+        let psu3 = identity_of(GroupId::psu(3).unwrap());
+        assert_eq!(
+            psu3,
+            identity_of(GroupId::new(&[RootSystem::A(2)], 0, &[vec![1, 4], vec![1, 1]]).unwrap())
+        );
+        assert_ne!(psu3, rule.rule_identity());
         let original =
             LieGroupFusionRule::identity_bytes(rule.group_id(), rule.category()).unwrap();
         let mut expected = b"symtn:lie:dynkin:graded-total-then-lex:v1".to_vec();
         expected.extend_from_slice(&usize::BITS.to_le_bytes());
         expected.push(0); // A-series
         expected.extend_from_slice(&2usize.to_le_bytes());
-        expected.push(0); // simply connected
-        expected.extend_from_slice(&0usize.to_le_bytes());
+        expected.extend_from_slice(b":center-probes");
+        expected.extend_from_slice(&1usize.to_le_bytes()); // divisors of 3 up to 2: {1}
+        expected.extend_from_slice(&1usize.to_le_bytes()); // w_1
+        expected.push(1); // SU(3) retains [w_1]
         expected.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
         expected.extend_from_slice(
             b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",
@@ -1211,7 +1263,7 @@ mod tests {
                 .irrep(|| cloned_rule.category(), three)
                 .unwrap()
         ));
-        assert_eq!(*first, rule.category().irrep(&[1, 0]).unwrap());
+        assert_eq!(*first, rule.category().irrep(&[1, 0], &[]).unwrap());
         assert_ne!(
             *rule.codec.irrep(|| rule.category(), eight).unwrap(),
             *first

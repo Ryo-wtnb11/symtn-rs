@@ -56,7 +56,7 @@ fn every_shipped_entry_constructs_with_its_own_identity() {
         assert_eq!(rule.uuid(), uuid);
         assert_eq!(
             rule.braiding_style().has_braiding(),
-            TableCategory::by_uuid(uuid).unwrap().is_braided()
+            TableCategory::by_uuid(uuid).unwrap().braiding_style() != BraidingStyle::None
         );
         assert_eq!(
             rule.rule_identity(),
@@ -92,6 +92,7 @@ fn every_shipped_entry_reports_the_category_style_and_certificates() {
             BraidingStyle::Bosonic => BraidingStyleKind::Bosonic,
             BraidingStyle::Fermionic => BraidingStyleKind::Fermionic,
             BraidingStyle::Anyonic => BraidingStyleKind::Anyonic,
+            other => panic!("{uuid}: unexpected braiding style {other:?}"),
         };
         assert_eq!(rule.braiding_style(), expected, "{uuid}");
         trivial += usize::from(category.has_trivial_associator_gauge());

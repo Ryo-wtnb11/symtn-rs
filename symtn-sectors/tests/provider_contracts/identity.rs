@@ -178,16 +178,22 @@ fn table_identity_is_the_fingerprint_under_the_table_tag() {
     );
 }
 
-/// SU(n) identity oracle: explicit A_(n-1), simply-connected metadata,
-/// 64-bit graded Dynkin codec conventions and literal provider fingerprints.
+/// SU(n) identity oracle: the A_(n-1) root system, the center classes the
+/// simply-connected lattice retains, 64-bit graded Dynkin codec conventions
+/// and literal provider fingerprints.
 #[cfg(all(feature = "cgc-gen", target_pointer_width = "64"))]
 fn lie_group_identity(n: usize, fingerprint: &[u8]) -> RuleIdentity {
     let mut bytes = b"symtn:lie:dynkin:graded-total-then-lex:v1".to_vec();
     bytes.extend_from_slice(&64u32.to_le_bytes());
     bytes.push(0); // A root system.
     bytes.extend_from_slice(&((n - 1) as u64).to_le_bytes());
-    bytes.push(0); // Simply connected.
-    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(b":center-probes");
+    // For n = 2, 3 the only divisor of n below n is 1: probe w_1, which the
+    // simply-connected cover retains.
+    assert!(matches!(n, 2 | 3));
+    bytes.extend_from_slice(&1u64.to_le_bytes());
+    bytes.extend_from_slice(&1u64.to_le_bytes());
+    bytes.push(1);
     bytes.extend_from_slice(b":generic:bosonic:rank-one-max=u32::MAX");
     bytes.extend_from_slice(
         b":rigid=f64-finite-exact-dim:f-axes=mu-nu-kappa-lambda:r-axes=mu-nu:pivotal=f-sign-0000",

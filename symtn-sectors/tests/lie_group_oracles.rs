@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use fusion_symbols::category::FusionCategory;
-use fusion_symbols::lie::{GlobalForm, GroupId, LieError, RootSystem};
+use fusion_symbols::lie::{GroupId, LieError, RootSystem};
 use symtn_sectors::{
     BraidingStyleKind, CategoryProvider, CheckedGenericFusion, CheckedGenericPivotal,
     CheckedGenericRigidSymbols, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
@@ -101,8 +101,8 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         ),
     ];
     for (group, accepted, rejected) in cases {
-        let r = rule(group);
-        assert_eq!(r.group_id(), group);
+        let r = rule(group.clone());
+        assert_eq!(r.group_id(), &group);
         assert_eq!(r.fusion_style(), FusionStyleKind::Generic);
         assert_eq!(r.braiding_style(), BraidingStyleKind::Bosonic);
         let id = r.encode_dynkin(&accepted).unwrap();
@@ -121,10 +121,7 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
                 value: -1
             })
         ));
-        let cover = rule(GroupId {
-            form: GlobalForm::SimplyConnected,
-            ..group
-        });
+        let cover = rule(GroupId::cover(group.root_systems(), 0).unwrap());
         for label in rejected {
             let raw_id = cover.encode_dynkin(&label).unwrap();
             assert!(
@@ -154,10 +151,16 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         }
     }
     assert_eq!(GroupId::so(5).unwrap(), GroupId::pso(5).unwrap());
+    // D2, products and torus charges are outside the single-factor Dynkin
+    // codec; rejecting them keeps charges and factor order from being dropped.
     for group in [
         GroupId::spin(4).unwrap(),
         GroupId::so(4).unwrap(),
         GroupId::pso(4).unwrap(),
+        GroupId::u(1).unwrap(),
+        GroupId::u(2).unwrap(),
+        GroupId::cover(&[RootSystem::A(1)], 1).unwrap(),
+        GroupId::cover(&[RootSystem::A(1), RootSystem::A(2)], 0).unwrap(),
     ] {
         assert!(matches!(
             LieGroupFusionRule::new(group),
@@ -174,10 +177,7 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         RootSystem::E8,
     ] {
         assert!(matches!(
-            LieGroupFusionRule::new(GroupId {
-                root_system,
-                form: GlobalForm::SimplyConnected
-            }),
+            LieGroupFusionRule::new(GroupId::cover(&[root_system], 0).unwrap()),
             Err(LieGroupFusionRuleError::Provider(
                 LieError::Unsupported { .. }
             ))
@@ -211,7 +211,7 @@ fn rank_one_isomorphisms_match_su2_triangle_oracle() {
         GroupId::spin(3).unwrap(),
         GroupId::sp(2).unwrap(),
     ] {
-        let r = rule(group);
+        let r = rule(group.clone());
         for a in 0..=3 {
             exact_dimension(&r, &[a], a as u64 + 1);
             let id = r.encode_dynkin(&[a]).unwrap();
@@ -332,7 +332,7 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
             assert_eq!(r.encode_dynkin(&r.decode_dynkin(id).unwrap()).unwrap(), id);
         }
         assert!(matches!(
-            r.encode_dynkin(&vec![i64::MAX; group.root_system.rank()]),
+            r.encode_dynkin(&vec![i64::MAX; r.group_id().semisimple_rank()]),
             Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
     }
@@ -354,9 +354,12 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
         GroupId::spin(3).unwrap(),
         GroupId::sp(2).unwrap(),
     ];
-    let rules = ids.map(rule);
+    let rules = ids.clone().map(rule);
     for i in 0..rules.len() {
-        assert_eq!(rules[i].rule_identity(), rule(ids[i]).rule_identity());
+        assert_eq!(
+            rules[i].rule_identity(),
+            rule(ids[i].clone()).rule_identity()
+        );
         for j in 0..i {
             assert_eq!(
                 rules[i].category().authority_fingerprint(),
@@ -371,8 +374,9 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
             ));
         }
     }
-    // Equal quotient subcategories still have distinct full GroupId metadata.
-    assert_ne!(
+    // SU(2)/Z1 has the same character lattice as SU(2), so it is the same
+    // group and shares its identity.
+    assert_eq!(
         rule(GroupId::su_quotient(2, 1).unwrap()).rule_identity(),
         su2.rule_identity()
     );
@@ -570,5 +574,65 @@ fn multiplicity_two_sp4_and_so6_have_nonscalar_f_r_a_b() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn identity_separates_every_named_global_form_and_ignores_the_basis() {
+    // Covers every probe branch: A with one and three divisor probes, B, C,
+    // odd and even D.
+    let families = [
+        vec![
+            GroupId::su(4).unwrap(),
+            GroupId::su_quotient(4, 2).unwrap(),
+            GroupId::psu(4).unwrap(),
+        ],
+        vec![
+            GroupId::su(6).unwrap(),
+            GroupId::su_quotient(6, 2).unwrap(),
+            GroupId::su_quotient(6, 3).unwrap(),
+            GroupId::psu(6).unwrap(),
+        ],
+        vec![GroupId::sp(6).unwrap(), GroupId::psp(6).unwrap()],
+        vec![
+            GroupId::spin(6).unwrap(),
+            GroupId::so(6).unwrap(),
+            GroupId::pso(6).unwrap(),
+        ],
+        vec![
+            GroupId::spin(8).unwrap(),
+            GroupId::so(8).unwrap(),
+            GroupId::pso(8).unwrap(),
+            GroupId::half_spin_plus(8).unwrap(),
+            GroupId::half_spin_minus(8).unwrap(),
+        ],
+        vec![
+            GroupId::spin(10).unwrap(),
+            GroupId::so(10).unwrap(),
+            GroupId::pso(10).unwrap(),
+        ],
+        vec![GroupId::spin(5).unwrap(), GroupId::so(5).unwrap()],
+    ];
+    let mut identities = Vec::new();
+    for group in families.iter().flatten() {
+        let identity = rule(group.clone()).rule_identity();
+        // The same lattice from another basis (rows reversed) is the same group.
+        let mut basis = group.character_lattice();
+        basis.reverse();
+        let rebuilt = GroupId::new(group.root_systems(), 0, &basis).unwrap();
+        assert_eq!(rule(rebuilt).rule_identity(), identity, "{group:?}");
+        assert!(!identities.contains(&identity), "{group:?}");
+        identities.push(identity);
+    }
+    // Equal lattices from different constructors share one identity.
+    for (a, b) in [
+        (
+            GroupId::psu(4).unwrap(),
+            GroupId::su_quotient(4, 4).unwrap(),
+        ),
+        (GroupId::so(5).unwrap(), GroupId::pso(5).unwrap()),
+        (GroupId::su(4).unwrap(), GroupId::su_quotient(4, 1).unwrap()),
+    ] {
+        assert_eq!(rule(a).rule_identity(), rule(b).rule_identity());
     }
 }

@@ -484,7 +484,7 @@ mod generated {
     #[test]
     fn rotated_gauge_a_detects_transposition_and_complex_conjugation() {
         let group = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
-        let objects = [[2, 1], [1, 2], [2, 2]].map(|labels| group.irrep(&labels).unwrap());
+        let objects = [[2, 1], [1, 2], [2, 2]].map(|labels| group.irrep(&labels, &[]).unwrap());
         for complex in [false, true] {
             let rule = CategoryRule::try_new(
                 Rotated {

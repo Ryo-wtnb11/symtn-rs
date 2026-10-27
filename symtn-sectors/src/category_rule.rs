@@ -87,9 +87,11 @@ impl private::UnitAdmission for UncertifiedUnitAdmission {
 /// Why [`CategoryRule::try_new`] refused a category.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CategoryAdmissionError<E> {
-    /// Multiplicity-free admission was requested for a category value whose
-    /// fusion has multiplicity.
+    /// The category's fusion style is not admitted: `Generic` under
+    /// multiplicity-free admission, or a style symtn does not know.
     IncompatibleFusionStyle { actual: FusionStyle },
+    /// The category reports a braiding style symtn does not know.
+    UnsupportedBraidingStyle { actual: BraidingStyle },
     /// Canonical-unit admission was requested, but the category does not
     /// certify a canonical unit.
     MissingCanonicalUnit,
@@ -100,15 +102,44 @@ pub enum CategoryAdmissionError<E> {
 impl<E: fmt::Display> fmt::Display for CategoryAdmissionError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IncompatibleFusionStyle { actual } => write!(
-                formatter,
-                "multiplicity-free admission requires a multiplicity-free category, got {actual:?} fusion"
+            Self::IncompatibleFusionStyle {
+                actual: FusionStyle::Generic,
+            } => formatter.write_str(
+                "multiplicity-free admission requires a multiplicity-free category, got Generic fusion",
             ),
+            Self::IncompatibleFusionStyle { actual } => {
+                write!(formatter, "unsupported {actual:?} fusion style")
+            }
+            Self::UnsupportedBraidingStyle { actual } => {
+                write!(formatter, "unsupported {actual:?} braiding style")
+            }
             Self::MissingCanonicalUnit => {
                 formatter.write_str("canonical-unit admission requires a canonical-unit category")
             }
             Self::Codec(_) => formatter.write_str("the category codec rejected the unit"),
         }
+    }
+}
+
+/// Admission's style gate. Every style a rule later maps to a symtn kind
+/// passes here first, so those maps never meet a style fusion-symbols adds
+/// after this release.
+pub(crate) fn admit_styles<E>(
+    fusion: FusionStyle,
+    braiding: BraidingStyle,
+    multiplicity_free: bool,
+) -> Result<(), CategoryAdmissionError<E>> {
+    match fusion {
+        FusionStyle::Unique | FusionStyle::Simple => {}
+        FusionStyle::Generic if !multiplicity_free => {}
+        actual => return Err(CategoryAdmissionError::IncompatibleFusionStyle { actual }),
+    }
+    match braiding {
+        BraidingStyle::None
+        | BraidingStyle::Bosonic
+        | BraidingStyle::Fermionic
+        | BraidingStyle::Anyonic => Ok(()),
+        actual => Err(CategoryAdmissionError::UnsupportedBraidingStyle { actual }),
     }
 }
 
@@ -794,16 +825,16 @@ where
     /// # Errors
     ///
     /// Multiplicity-free admission of a category whose fusion has
-    /// multiplicity, canonical-unit admission of a category without the
+    /// multiplicity, a fusion or braiding style symtn does not know,
+    /// canonical-unit admission of a category without the
     /// canonical-unit certificate, and a unit the codec cannot encode or
     /// round-trip through its id and label.
     pub fn try_new(category: C, codec: K) -> Result<Self, CategoryAdmissionError<K::Error>> {
-        let actual = category.fusion_style();
-        if <K::Mode as private::AdmissionMode<K::Error>>::MULTIPLICITY_FREE
-            && actual == FusionStyle::Generic
-        {
-            return Err(CategoryAdmissionError::IncompatibleFusionStyle { actual });
-        }
+        admit_styles(
+            category.fusion_style(),
+            category.braiding_style(),
+            <K::Mode as private::AdmissionMode<K::Error>>::MULTIPLICITY_FREE,
+        )?;
         if <K::Unit as private::UnitAdmission>::CANONICAL && !category.has_canonical_unit() {
             return Err(CategoryAdmissionError::MissingCanonicalUnit);
         }
@@ -1122,13 +1153,15 @@ pub(crate) mod forward {
         }
     }
 
-    /// The style of a multiplicity-free admitted category, which admission
-    /// guarantees is not Generic.
+    /// The style of a multiplicity-free admitted category.
     pub(crate) fn multiplicity_free_style<A: AdapterAccess>(rule: &A) -> FusionStyleKind {
-        if rule.category().fusion_style() == FusionStyle::Unique {
-            FusionStyleKind::Unique
-        } else {
-            FusionStyleKind::Simple
+        match rule.category().fusion_style() {
+            FusionStyle::Unique => FusionStyleKind::Unique,
+            FusionStyle::Simple => FusionStyleKind::Simple,
+            // `admit_styles` rejects Generic and unknown styles under
+            // multiplicity-free admission; built-in rules wrap categories
+            // whose styles are fixed by construction.
+            style => unreachable!("multiplicity-free admission excludes {style:?} fusion"),
         }
     }
 
@@ -1138,6 +1171,10 @@ pub(crate) mod forward {
             BraidingStyle::Bosonic => BraidingStyleKind::Bosonic,
             BraidingStyle::Fermionic => BraidingStyleKind::Fermionic,
             BraidingStyle::Anyonic => BraidingStyleKind::Anyonic,
+            // `admit_styles` rejects unknown styles in CategoryRule and
+            // ProductFusionRule admission; built-in rules wrap categories
+            // whose styles are fixed by construction.
+            style => unreachable!("admission excludes the {style:?} braiding style"),
         }
     }
 
@@ -2099,3 +2136,49 @@ macro_rules! multiplicity_free_adapter_impls {
     };
 }
 pub(crate) use multiplicity_free_adapter_impls;
+
+#[cfg(test)]
+mod style_admission_tests {
+    use super::*;
+
+    type Result = core::result::Result<(), CategoryAdmissionError<FusionAlgebraError>>;
+
+    // A style fusion-symbols does not define cannot be constructed, so the
+    // rejecting wildcard arms are covered by construction, not by a value.
+    #[test]
+    fn admission_accepts_exactly_the_known_styles_for_each_mode() {
+        let braidings = [
+            BraidingStyle::None,
+            BraidingStyle::Bosonic,
+            BraidingStyle::Fermionic,
+            BraidingStyle::Anyonic,
+        ];
+        for braiding in braidings {
+            for fusion in [FusionStyle::Unique, FusionStyle::Simple] {
+                for multiplicity_free in [false, true] {
+                    let result: Result = admit_styles(fusion, braiding, multiplicity_free);
+                    assert_eq!(result, Ok(()));
+                }
+            }
+            let result: Result = admit_styles(FusionStyle::Generic, braiding, false);
+            assert_eq!(result, Ok(()));
+            let result: Result = admit_styles(FusionStyle::Generic, braiding, true);
+            assert_eq!(
+                result,
+                Err(CategoryAdmissionError::IncompatibleFusionStyle {
+                    actual: FusionStyle::Generic
+                })
+            );
+        }
+    }
+
+    // The variant's own Display; no known style reaches it through admission.
+    #[test]
+    fn style_rejections_name_the_style() {
+        let braiding = CategoryAdmissionError::<FusionAlgebraError>::UnsupportedBraidingStyle {
+            actual: BraidingStyle::Anyonic,
+        };
+        assert_eq!(braiding.to_string(), "unsupported Anyonic braiding style");
+        assert!(std::error::Error::source(&braiding).is_none());
+    }
+}
