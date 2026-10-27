@@ -102,10 +102,10 @@ impl TypedSectorAdmission for RejectingTraceTwist {
         self.rule_identity()
     }
     fn try_encode_label(&self, sector: &Self::Sector) -> Result<SectorId, Self::Error> {
-        self.inner.encode_dynkin(sector)
+        TypedSectorAdmission::try_encode_label(&self.inner, sector)
     }
     fn try_decode_label(&self, sector: SectorId) -> Result<Self::Sector, Self::Error> {
-        self.inner.decode_dynkin(sector)
+        TypedSectorAdmission::try_decode_label(&self.inner, sector)
     }
     fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
         self.inner.try_dual(sector)

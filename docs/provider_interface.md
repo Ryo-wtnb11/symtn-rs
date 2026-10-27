@@ -100,34 +100,46 @@ category's `frobenius_schur_phase`.
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
-| `LieGroupFusionRule` | Dynkin grade then lexicographic ids, channels sorted by encoded id, checked `Generic` at every rank, rank-one labels `0..=u32::MAX`; no physical expansion | A/B/C/D `LieGroup`, with full `GroupId` character-lattice admission; exact A1/B1/C1 symbols |
+| `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (A/B/C/D factors, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
 nonfinite dimensions. It constructs the category eagerly, so unsupported
 groups fail at construction, and reuses its bounded irrep interner: a warm hit clones
 the provider's allocation-free handle, without a Dynkin-label `Vec`. The adapter
-has no separate object cache. Provider generation and returned symbol/channel
+has no separate object cache. Encoding interns the irrep on a miss, so fusion-symbols checks
+representability once per interned sector; while the sector is interned, a
+warm encode is arithmetic and one lookup, without allocation; admission runs
+in fusion-symbols on a miss. The interner holds at most `IRREP_TABLE_CAPACITY` (65,536)
+sectors; past it, each encode or decode miss builds a fusion-symbols irrep
+again. Provider generation and returned symbol/channel
 storage have their own allocation costs; Generic blocks copy provider data.
-For a `LieGroupFusionRule` over `GroupId::su(2)`, fusion whose largest doubled-spin label exceeds
-`u32::MAX` returns `LieGroupFusionRuleError::UnrepresentableLabel`, as does encoding
-an input label above that bound.
+Labels that fusion-symbols cannot represent (for example a rank-one doubled
+spin above `u32::MAX` or a torus charge beyond `±i32::MAX`), and labels whose id
+overflows `usize`, return `LieGroupFusionRuleError::UnrepresentableLabel`, both
+on encoding and when a fusion produces them; a fusion overflow names the
+coordinate-wise sum of its inputs, the product's highest weight.
 
 Construct it with `LieGroupFusionRule::new(group)`, where `group` is a
 `fusion_symbols::lie::GroupId`; `group_id()` borrows that complete metadata.
 Supported families are SU(n), Sp(m), Spin(n), SO(n), their adjoint forms and
 fs's supported central quotients, including half-spin forms. Sp's argument is
-the even matrix dimension. The Dynkin codec covers one simple root system
-without torus charges, so D2 forms (Spin(4), SO(4), PSO(4)), semisimple
-products, tori and U(n) return
-`LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })` at
-construction even where fusion-symbols executes them. No product substitute is
-constructed and no torus charge is dropped.
+the even matrix dimension. D2 forms (Spin(4), SO(4), PSO(4)), semisimple
+products, tori, U(n) and semisimple×torus quotients are admitted wherever
+fusion-symbols executes them; groups it does not execute, such as exceptional
+factors, return `LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })`
+at construction.
 
-The codec ranks all nonnegative Dynkin labels by total grade then
-lexicographically using the root-system rank. Global-form restrictions leave
+`encode_irrep(dynkin, charges)` and `decode_irrep(id)` take the label as
+`LieGroup::irrep` does; the typed label is the single vector of Dynkin labels
+followed by charges. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
+to `0, 1, 2, 3, 4, …`) and ranks the whole coordinate vector by total grade
+then lexicographically, so a single simple factor keeps its Dynkin-only ids.
+Global-form restrictions, including torus congruences such as U(n)'s, leave
 holes in that numbering: encoding or decoding an excluded label returns
-`LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`. Object conversion
+`LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`, unless the
+label's id already overflows, which returns
+`LieGroupFusionRuleError::UnrepresentableLabel`. Object conversion
 checks the complete category membership before using an interned label.
 The identity is the `GroupId` value under the rule type: codec, admission and
 scalar conventions are fixed by the type, and the category fingerprint by the

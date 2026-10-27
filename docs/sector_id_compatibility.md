@@ -47,7 +47,7 @@ Storage uses ID order. Two operations instead need a semantic basis order:
 | CU(1) | Charge magnitude, with `0+` before `0-` |
 | TableRule | AnyonWiki object order; Ising is `1, ψ, σ`, unlike TensorKit |
 | Products | Total enumeration degree, then lexicographic over flattened factors |
-| `LieGroupFusionRule` | Dynkin-label sum, then lexicographic; quotient exclusions leave holes |
+| `LieGroupFusionRule` | Coordinate sum, then lexicographic, over Dynkin labels then zigzag charges (`0, 1, -1, 2, …`); quotient and congruence exclusions leave holes |
 
 A provider without a TensorKit counterpart defaults to ID order. A codec whose
 IDs disagree with its intended semantic order must override `sector_order_key`.
@@ -56,9 +56,14 @@ Implementation and reference pointers are in
 [`product_rule.rs`](../symtn-sectors/src/product_rule.rs) and the
 [basis-order tests](../symtn-core/src/tests/fusion_space/tensorkit_tree_order.rs).
 
-The Lie-group codec uses the root-system rank, preserves quotient holes and
-rejects excluded labels on encode and decode. Rank-one labels are bounded by
-`u32::MAX`; higher-rank labels share the target `usize` ID budget. The
+The Lie-group codec ranks semisimple rank + torus rank coordinates (Dynkin
+labels, then zigzag-mapped charges), preserves quotient and congruence holes
+and rejects excluded labels on encode and decode. fusion-symbols bounds the
+representable labels: every A1/B1/C1 coordinate, including one inside a
+product, is at most `u32::MAX`, and every torus charge satisfies
+`|q| <= i32::MAX`. Within those bounds all labels share the target `usize` ID
+budget; a label past either bound or past that budget returns
+`UnrepresentableLabel`. The
 identity is the `GroupId` value (root systems, torus rank and canonical
 character lattice), so equal labels or fingerprints across different groups
 are insufficient for compatibility, while one group built by different

@@ -293,7 +293,7 @@ mod generated {
     fn category_authority_a_b_match_octet_and_asymmetric_product_literals() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let [octet, fifteen, fifteen_bar, twenty_seven] =
-            [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_dynkin(&labels).unwrap());
+            [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_irrep(&labels, &[]).unwrap());
         for block in [
             su3.try_a_symbol_generic(octet, octet, octet).unwrap(),
             su3.try_b_symbol_generic(octet, octet, octet).unwrap(),
@@ -520,9 +520,9 @@ mod generated {
     #[test]
     fn checked_generic_product_surface_preserves_hand_derived_factor_data() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let three = su3.encode_dynkin(&[1, 0]).unwrap();
-        let anti_three = su3.encode_dynkin(&[0, 1]).unwrap();
-        let six = su3.encode_dynkin(&[2, 0]).unwrap();
+        let three = su3.encode_irrep(&[1, 0], &[]).unwrap();
+        let anti_three = su3.encode_irrep(&[0, 1], &[]).unwrap();
+        let six = su3.encode_irrep(&[2, 0], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, su3.clone()).unwrap();
         let swapped = ProductFusionRule::<_, _>::try_new(su3, SU2FusionRule).unwrap();
         assert_eq!(rule.rule_identity(), rule.clone().rule_identity());
@@ -694,8 +694,8 @@ mod generated {
     #[test]
     fn su3_u1_keeps_the_full_octet_blocks_and_nonselfdual_phase() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_dynkin(&[1, 1]).unwrap();
-        let three = su3.encode_dynkin(&[1, 0]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
+        let three = su3.encode_irrep(&[1, 0], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, U1FusionRule).unwrap();
         let oq = |q| rule.encode_component_ids(octet, U1Irrep::new(q).sector_id());
         let f = rule
@@ -753,7 +753,7 @@ mod generated {
     #[test]
     fn su3_fermion_product_negates_every_octet_r_entry() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_dynkin(&[1, 1]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule).unwrap();
         let odd = rule.encode_component_ids(octet, s(1));
         let even = rule.encode_component_ids(octet, s(0));
@@ -774,7 +774,7 @@ mod generated {
     #[test]
     fn su3_su3_octet_checks_every_entry_of_the_fourfold_multiplicity_blocks() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_dynkin(&[1, 1]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let x = rule.encode_component_ids(octet, octet);
         assert_eq!(rule.try_nsymbol(x, x, x).unwrap(), 4);
@@ -816,11 +816,11 @@ mod generated {
     #[test]
     fn asymmetric_su3_product_pins_unequal_f_and_r_digit_orders() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_dynkin(&[1, 1]).unwrap();
-        let twenty_seven = su3.encode_dynkin(&[2, 2]).unwrap();
-        let anti_three = su3.encode_dynkin(&[0, 1]).unwrap();
-        let twenty_four = su3.encode_dynkin(&[3, 1]).unwrap();
-        let forty_two = su3.encode_dynkin(&[2, 3]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
+        let twenty_seven = su3.encode_irrep(&[2, 2], &[]).unwrap();
+        let anti_three = su3.encode_irrep(&[0, 1], &[]).unwrap();
+        let twenty_four = su3.encode_irrep(&[3, 1], &[]).unwrap();
+        let forty_two = su3.encode_irrep(&[2, 3], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let pair = |right| rule.encode_component_ids(octet, right);
         // TensorKitSectors Fsymbol(p,p,b,b,o,c), with p=(2,2), b=(0,1),

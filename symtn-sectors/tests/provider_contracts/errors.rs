@@ -134,14 +134,14 @@ fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
     ));
     let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
     assert!(matches!(
-        su3.encode_dynkin(&[1, 0, 0]),
+        su3.encode_irrep(&[1, 0, 0], &[]),
         Err(LieGroupFusionRuleError::LabelLength {
             expected: 2,
             found: 3
         })
     ));
     assert!(matches!(
-        su3.encode_dynkin(&[0, -1]),
+        su3.encode_irrep(&[0, -1], &[]),
         Err(LieGroupFusionRuleError::NegativeLabel {
             index: 1,
             value: -1

@@ -137,8 +137,8 @@ struct OrderFixture {
 /// B (`[adj, adj]`), all vertices one.
 fn order_fixture() -> OrderFixture {
     let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let v = inner.encode_dynkin(&[0, 0]).unwrap();
-    let a = inner.encode_dynkin(&[1, 1]).unwrap();
+    let v = inner.encode_irrep(&[0, 0], &[]).unwrap();
+    let a = inner.encode_irrep(&[1, 1], &[]).unwrap();
     assert_eq!(inner.try_nsymbol(a, a, v).unwrap(), 1);
     assert_eq!(inner.try_nsymbol(a, a, a).unwrap(), 2);
     assert_eq!(inner.try_nsymbol(v, a, a).unwrap(), 1);

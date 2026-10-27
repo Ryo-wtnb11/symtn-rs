@@ -41,7 +41,7 @@ symtn disables its default features; `cgc-gen` opts into `lie-generated`.
 Built-in rules retain their own types over the shared adapter; they are not
 `CategoryRule` aliases. SU2 retains its compact doubled-spin codec and checked
 scalar CGC entries in descending magnetic order. `LieGroupFusionRule` retains
-its graded Dynkin codec and bounded irrep interner, constructs its `LieGroup`
+its graded codec over Dynkin labels then zigzag torus charges and its bounded irrep interner, constructs its `LieGroup`
 eagerly, validates complete `GroupId` admission and uses checked `Generic`
 admission at every rank. Its identity is the `GroupId` value, held weakly as
 for `CategoryRule`; equal fingerprints do not merge groups. Warm interner hits clone allocation-free

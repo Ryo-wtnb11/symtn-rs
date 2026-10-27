@@ -1,6 +1,6 @@
 use fusion_symbols::{
     category::FusionCategory,
-    lie::{GroupId, LieError, LieGroup, LieIrrep, RootSystem},
+    lie::{GroupId, LieError, LieGroup, LieIrrep},
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -17,8 +17,10 @@ use crate::{
 
 /// Checked compact Lie-group rule over the fusion-symbols category adapter.
 ///
-/// The private Dynkin codec retains graded-total-then-lex ids, encoded-id
-/// channel ordering, bounded interning and eager category construction.
+/// The private codec ranks Dynkin labels then zigzag-mapped torus charges by
+/// graded total then lexicographic order (see [`Self::encode_irrep`]), orders
+/// channels by encoded id, interns irreps boundedly and constructs the
+/// category eagerly.
 /// Every rank, including rank one, uses checked Generic admission; no physical
 /// expansion is provided.
 ///
@@ -81,6 +83,11 @@ impl IrrepTable {
         maps.by_irrep.get(irrep).copied()
     }
 
+    fn contains(&self, sector: SectorId) -> bool {
+        let maps = self.0.read().unwrap_or_else(PoisonError::into_inner);
+        maps.by_id.contains_key(&sector)
+    }
+
     fn dual(&self, sector: SectorId) -> Option<SectorId> {
         let maps = self.0.read().unwrap_or_else(PoisonError::into_inner);
         maps.duals.get(&sector).copied()
@@ -97,6 +104,11 @@ impl IrrepTable {
 
     /// Records a pair and returns the interned irrep (the first one inserted
     /// when threads race on the same sector).
+    ///
+    /// Why callers insert only fusion-symbols-admitted irreps (built by
+    /// `LieGroup::irrep` or returned by the category): encode and decode skip
+    /// lattice admission on a hit, so an excluded label in this table would
+    /// silently become a sector. Every path's hole rejection rests on it.
     fn insert(&self, sector: SectorId, irrep: Arc<LieIrrep>) -> Arc<LieIrrep> {
         let mut maps = self.0.write().unwrap_or_else(PoisonError::into_inner);
         if let Some(existing) = maps.by_id.get(&sector) {
@@ -127,6 +139,7 @@ impl std::hash::Hash for LieGroupFusionRule {
 /// Failure at the Lie-group label/provider boundary.
 #[derive(Debug)]
 pub enum LieGroupFusionRuleError {
+    /// Semisimple plus torus rank exceeds this platform's label buffers.
     RankNotRepresentable {
         rank: usize,
     },
@@ -134,6 +147,8 @@ pub enum LieGroupFusionRuleError {
         len: usize,
         source: std::collections::TryReserveError,
     },
+    /// A label slice has the wrong length: the Dynkin labels are checked
+    /// first, then the charges, and the first mismatch is reported.
     LabelLength {
         expected: usize,
         found: usize,
@@ -142,6 +157,8 @@ pub enum LieGroupFusionRuleError {
         index: usize,
         value: i64,
     },
+    /// The label (Dynkin labels, then charges) is representable neither by
+    /// this codec's `usize` ids nor by fusion-symbols.
     UnrepresentableLabel {
         labels: Vec<i64>,
     },
@@ -165,13 +182,20 @@ impl fmt::Display for LieGroupFusionRuleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RankNotRepresentable { rank } => {
-                write!(f, "rank {rank} Dynkin labels exceed this platform's Vec limit")
+                write!(
+                    f,
+                    "{rank} label coordinates exceed this platform's Vec limit"
+                )
             }
             Self::LabelAllocation { len, .. } => {
-                write!(f, "could not allocate {len} Dynkin labels")
+                write!(f, "could not allocate {len} label coordinates")
             }
             Self::LabelLength { expected, found } => {
-                write!(f, "expected {expected} Dynkin labels, got {found}")
+                write!(
+                    f,
+                    "expected {expected} entries in the first mismatched label slice \
+                     (Dynkin labels, then charges), got {found}"
+                )
             }
             Self::NegativeLabel { index, value } => {
                 write!(f, "Dynkin label {index} is negative ({value})")
@@ -179,13 +203,14 @@ impl fmt::Display for LieGroupFusionRuleError {
             Self::UnrepresentableLabel { labels } => {
                 write!(
                     f,
-                    "Dynkin label is not representable as a SectorId: {labels:?}"
+                    "label {labels:?} (Dynkin labels, then charges) is not representable \
+                     by this codec or fusion-symbols"
                 )
             }
             Self::DecodeOverflow { sector } => {
                 write!(
                     f,
-                    "SectorId {} cannot be decoded by this Dynkin codec",
+                    "SectorId {} cannot be decoded by this Lie-group codec",
                     sector.id()
                 )
             }
@@ -221,12 +246,11 @@ fn provider_error(error: LieError) -> LieGroupFusionRuleError {
 
 impl LieGroupFusionRule {
     /// Constructs a rule and eagerly checks provider support for the full group.
-    /// Only one simple root system without torus charges is supported; D2,
-    /// semisimple products, tori and U(n) return
-    /// [`LieGroupFusionRuleError::Provider`] with `LieError::Unsupported`.
-    /// Rank-one labels span `0..=u32::MAX`; larger labels return
-    /// [`LieGroupFusionRuleError::UnrepresentableLabel`]. Other ranks use the
-    /// target's `usize` ID budget. Excluded global-form labels leave ID holes.
+    /// Every group that fusion-symbols' [`LieGroup::new`] executes is admitted:
+    /// simple and semisimple groups (D2 included), tori, U(n) and
+    /// semisimple×torus central quotients. Groups it does not execute, such as
+    /// exceptional factors, return [`LieGroupFusionRuleError::Provider`] with
+    /// its `LieError::Unsupported`.
     ///
     /// The `RankNotRepresentable` bound covers this rule's label buffers only.
     /// The rule's identity hashes the canonical [`GroupId`] once and compares
@@ -234,22 +258,7 @@ impl LieGroupFusionRule {
     /// fusion-symbols category's own construction cost for a large rank is
     /// fusion-symbols' (fusion-symbols#187).
     pub fn new(group: GroupId) -> Result<Self, LieGroupFusionRuleError> {
-        // The Dynkin codec covers one simple factor without torus charges;
-        // products, tori and D2 = A1 x A1 would otherwise drop or misorder labels.
-        match group.root_systems() {
-            [RootSystem::D(2)] => {
-                return Err(provider_error(LieError::Unsupported {
-                    requires: "Spin(4) = SU(2) × SU(2) product",
-                }))
-            }
-            [_] if group.torus_rank() == 0 => {}
-            _ => {
-                return Err(provider_error(LieError::Unsupported {
-                    requires: "a single simple root system without torus charges",
-                }))
-            }
-        }
-        let rank = group.semisimple_rank();
+        let rank = group.semisimple_rank().saturating_add(group.torus_rank());
         if rank > isize::MAX as usize / size_of::<i64>() {
             return Err(LieGroupFusionRuleError::RankNotRepresentable { rank });
         }
@@ -278,67 +287,220 @@ impl LieGroupFusionRule {
         &self.codec.group
     }
 
-    /// Encodes admitted nonnegative Dynkin labels by total grade then lexicographic order.
-    pub fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, LieGroupFusionRuleError> {
-        self.codec.encode_dynkin(labels)
+    /// Encodes an admitted irrep, given as fusion-symbols'
+    /// [`LieGroup::irrep`] takes it: nonnegative Dynkin labels in root-system
+    /// order and signed torus charges.
+    ///
+    /// Ids rank all coordinates by total grade, then lexicographically: the
+    /// Dynkin labels as they are, then each charge zigzag-mapped
+    /// (`0, 1, -1, 2, -2, ...` to `0, 1, 2, 3, 4, ...`). Labels the group's
+    /// character lattice excludes are holes in the id space. Labels whose id
+    /// overflows `usize`, or that fusion-symbols cannot represent, return
+    /// [`LieGroupFusionRuleError::UnrepresentableLabel`].
+    pub fn encode_irrep(
+        &self,
+        dynkin: &[i64],
+        charges: &[i64],
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
+        self.codec.encode_irrep(self.category(), dynkin, charges)
     }
 
-    /// Decodes an admitted ID with bounded binary searches over the grade and each label.
-    pub fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, LieGroupFusionRuleError> {
-        self.codec.decode_dynkin(sector)
+    /// Decodes an admitted id to its Dynkin labels and torus charges, the
+    /// inverse of [`Self::encode_irrep`].
+    pub fn decode_irrep(
+        &self,
+        sector: SectorId,
+    ) -> Result<(Vec<i64>, Vec<i64>), LieGroupFusionRuleError> {
+        self.codec.decode_irrep(self.category(), sector)
     }
 }
 
+/// Graded-lexicographic coordinate of a torus charge: `0, 1, -1, 2, -2, ...`
+/// map to `0, 1, 2, 3, 4, ...`, the index of fusion-symbols' U(1) enumeration
+/// (TensorKitSectors' `U1Irrep` order, not its `findindex`).
+fn zigzag(charge: i64) -> Option<usize> {
+    let doubled = usize::try_from(charge.unsigned_abs())
+        .ok()?
+        .checked_mul(2)?;
+    Some(if charge > 0 { doubled - 1 } else { doubled })
+}
+
+fn unzigzag(coordinate: usize) -> Option<i64> {
+    let magnitude = i64::try_from(coordinate.div_ceil(2)).ok()?;
+    Some(if coordinate % 2 == 1 {
+        magnitude
+    } else {
+        -magnitude
+    })
+}
+
+fn joined(dynkin: &[i64], charges: &[i64]) -> Vec<i64> {
+    dynkin.iter().chain(charges).copied().collect()
+}
+
+/// fusion-symbols' `LabelOverflow` on a label is this codec's unrepresentable label.
+fn label_error(error: LieError, dynkin: &[i64], charges: &[i64]) -> LieGroupFusionRuleError {
+    match error {
+        LieError::LabelOverflow => LieGroupFusionRuleError::UnrepresentableLabel {
+            labels: joined(dynkin, charges),
+        },
+        error => provider_error(error),
+    }
+}
+
+fn try_collect_labels(
+    labels: impl ExactSizeIterator<Item = i64>,
+) -> Result<Vec<i64>, LieGroupFusionRuleError> {
+    let len = labels.len();
+    let mut out = Vec::new();
+    out.try_reserve_exact(len)
+        .map_err(|source| LieGroupFusionRuleError::LabelAllocation { len, source })?;
+    out.extend(labels);
+    Ok(out)
+}
+
 impl LieCodec {
-    fn encode_dynkin(&self, labels: &[i64]) -> Result<SectorId, LieGroupFusionRuleError> {
-        self.check_labels(labels.iter().copied())?;
-        if !self.group.admits(labels, &[]) {
-            return Err(provider_error(LieError::NotAdmissible));
-        }
-        self.encode_dynkin_iter(|| labels.iter().copied())
+    fn semisimple_rank(&self) -> usize {
+        self.group.semisimple_rank()
     }
 
-    // Validate, then compute the grade and lexicographic rank without materializing labels.
-    fn encode_dynkin_iter<I: ExactSizeIterator<Item = i64>>(
+    fn coordinate_count(&self) -> usize {
+        self.group.semisimple_rank() + self.group.torus_rank()
+    }
+
+    // Arithmetic gives the id. Lattice admission and representability are
+    // fusion-symbols' `irrep`, run once per interned sector: the rank is a
+    // bijection on all coordinate vectors, so an interned id names this very,
+    // already admitted, label, and a warm encode allocates nothing.
+    fn encode_irrep(
         &self,
-        labels: impl Fn() -> I,
+        category: &LieGroup,
+        dynkin: &[i64],
+        charges: &[i64],
     ) -> Result<SectorId, LieGroupFusionRuleError> {
-        self.check_labels(labels())?;
-        let unrepresentable = || LieGroupFusionRuleError::UnrepresentableLabel {
-            labels: labels().collect(),
-        };
-        let grade = labels()
-            .try_fold(0usize, |sum, x| sum.checked_add(usize::try_from(x).ok()?))
+        self.check_labels(dynkin, charges)?;
+        let sector = self.encode_coordinates(
+            || {
+                let dynkin = dynkin.iter().map(|&x| usize::try_from(x).ok());
+                dynkin.chain(charges.iter().map(|&q| zigzag(q)))
+            },
+            || joined(dynkin, charges),
+        )?;
+        if !self.irreps.contains(sector) {
+            self.intern(category, sector, dynkin, charges)?;
+        }
+        Ok(sector)
+    }
+
+    // The typed label is the coordinate vector: Dynkin labels, then charges.
+    fn encode_typed(
+        &self,
+        category: &LieGroup,
+        label: &[i64],
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
+        let expected = self.coordinate_count();
+        if label.len() != expected {
+            return Err(LieGroupFusionRuleError::LabelLength {
+                expected,
+                found: label.len(),
+            });
+        }
+        let (dynkin, charges) = label.split_at(self.semisimple_rank());
+        self.encode_irrep(category, dynkin, charges)
+    }
+
+    fn decode_typed(
+        &self,
+        category: &LieGroup,
+        sector: SectorId,
+    ) -> Result<Vec<i64>, LieGroupFusionRuleError> {
+        let irrep = self.irrep(|| category, sector)?;
+        let len = self.coordinate_count();
+        let mut label = Vec::new();
+        label
+            .try_reserve_exact(len)
+            .map_err(|source| LieGroupFusionRuleError::LabelAllocation { len, source })?;
+        label.extend(irrep.dynkin_labels().chain(irrep.charges()));
+        Ok(label)
+    }
+
+    fn intern(
+        &self,
+        category: &LieGroup,
+        sector: SectorId,
+        dynkin: &[i64],
+        charges: &[i64],
+    ) -> Result<Arc<LieIrrep>, LieGroupFusionRuleError> {
+        let irrep = category
+            .irrep(dynkin, charges)
+            .map_err(|error| label_error(error, dynkin, charges))?;
+        Ok(self.irreps.insert(sector, Arc::new(irrep)))
+    }
+
+    // Compute the grade and lexicographic rank without materializing labels.
+    // `None` coordinates are unrepresentable.
+    fn encode_coordinates<I: Iterator<Item = Option<usize>>>(
+        &self,
+        coordinates: impl Fn() -> I,
+        labels: impl Fn() -> Vec<i64>,
+    ) -> Result<SectorId, LieGroupFusionRuleError> {
+        let n = self.coordinate_count();
+        let unrepresentable = || LieGroupFusionRuleError::UnrepresentableLabel { labels: labels() };
+        let grade = coordinates()
+            .try_fold(0usize, |sum, x| sum.checked_add(x?))
             .ok_or_else(unrepresentable)?;
-        let mut rank = count_before_grade(grade, self.group.semisimple_rank(), usize::MAX)
+        let mut rank = count_before_grade(grade, n, usize::MAX)
             .exact()
             .ok_or_else(unrepresentable)?;
         let mut remaining = grade;
-        for (index, label) in labels().enumerate() {
-            let label = label as usize;
-            let tail = self.group.semisimple_rank() - 1 - index;
+        for (index, coordinate) in coordinates().enumerate() {
+            let Some(coordinate) = coordinate else {
+                return Err(unrepresentable());
+            };
+            let tail = n - 1 - index;
             rank = rank
                 .checked_add(
-                    prefix_count(remaining, tail, label, usize::MAX)
+                    prefix_count(remaining, tail, coordinate, usize::MAX)
                         .and_then(Capped::exact)
                         .ok_or_else(unrepresentable)?,
                 )
                 .ok_or_else(unrepresentable)?;
-            remaining -= label;
+            remaining -= coordinate;
         }
         Ok(SectorId::new(rank))
     }
 
-    /// Decodes a `SectorId` with bounded binary searches over the grade and each label.
-    /// Rank-one ids above `u32::MAX` are unrepresentable.
-    fn decode_dynkin(&self, sector: SectorId) -> Result<Vec<i64>, LieGroupFusionRuleError> {
+    fn decode_irrep(
+        &self,
+        category: &LieGroup,
+        sector: SectorId,
+    ) -> Result<(Vec<i64>, Vec<i64>), LieGroupFusionRuleError> {
+        if let Some(irrep) = self.irreps.by_id(sector) {
+            return Ok((
+                try_collect_labels(irrep.dynkin_labels())?,
+                try_collect_labels(irrep.charges())?,
+            ));
+        }
+        let (dynkin, charges) = self.decode_coordinates(sector)?;
+        self.intern(category, sector, &dynkin, &charges)?;
+        Ok((dynkin, charges))
+    }
+
+    /// Decodes a `SectorId` with bounded binary searches over the grade and
+    /// each coordinate. Lattice admission and representability are the
+    /// caller's, through fusion-symbols' `irrep`.
+    fn decode_coordinates(
+        &self,
+        sector: SectorId,
+    ) -> Result<(Vec<i64>, Vec<i64>), LieGroupFusionRuleError> {
         let id = sector.id();
-        let r = self.group.semisimple_rank();
+        let r = self.semisimple_rank();
+        let n = self.coordinate_count();
         let mut low = 0usize;
         let mut high = id;
         while low < high {
             let mid = low + (high - low) / 2;
-            if count_before_grade(mid + 1, r, id).is_exceeded() {
+            if count_before_grade(mid + 1, n, id).is_exceeded() {
                 high = mid;
             } else {
                 low = mid + 1;
@@ -348,18 +510,22 @@ impl LieCodec {
         let before = if grade == 0 {
             0
         } else {
-            count_before_grade(grade, r, id)
+            count_before_grade(grade, n, id)
                 .exact()
                 .ok_or(LieGroupFusionRuleError::DecodeOverflow { sector })?
         };
         let mut residual = id - before;
         let mut remaining = grade;
-        let mut labels = Vec::new();
-        labels
+        let mut dynkin = Vec::new();
+        dynkin
             .try_reserve_exact(r)
             .map_err(|source| LieGroupFusionRuleError::LabelAllocation { len: r, source })?;
-        for index in 0..r {
-            let tail = r - index - 1;
+        let mut charges = Vec::new();
+        charges
+            .try_reserve_exact(n - r)
+            .map_err(|source| LieGroupFusionRuleError::LabelAllocation { len: n - r, source })?;
+        for index in 0..n {
+            let tail = n - index - 1;
             let mut low = 0usize;
             let mut high = remaining;
             while low < high {
@@ -373,41 +539,40 @@ impl LieCodec {
                 .and_then(Capped::exact)
                 .ok_or(LieGroupFusionRuleError::DecodeOverflow { sector })?;
             residual -= skipped;
-            labels.push(
-                i64::try_from(low)
-                    .map_err(|_| LieGroupFusionRuleError::DecodeOverflow { sector })?,
-            );
+            let label = if index < r {
+                i64::try_from(low).ok()
+            } else {
+                unzigzag(low)
+            };
+            let label = label.ok_or(LieGroupFusionRuleError::DecodeOverflow { sector })?;
+            if index < r {
+                dynkin.push(label);
+            } else {
+                charges.push(label);
+            }
             remaining -= low;
         }
-        if residual != 0 {
+        // A coordinate-free (trivial) group has the single id 0.
+        if residual != 0 || remaining != 0 {
             return Err(LieGroupFusionRuleError::DecodeOverflow { sector });
         }
-        self.check_labels(labels.iter().copied())?;
-        if !self.group.admits(&labels, &[]) {
-            return Err(provider_error(LieError::NotAdmissible));
-        }
-        Ok(labels)
+        Ok((dynkin, charges))
     }
 
-    fn check_labels(
-        &self,
-        labels: impl ExactSizeIterator<Item = i64>,
-    ) -> Result<(), LieGroupFusionRuleError> {
-        if labels.len() != self.group.semisimple_rank() {
-            return Err(LieGroupFusionRuleError::LabelLength {
-                expected: self.group.semisimple_rank(),
-                found: labels.len(),
-            });
-        }
-        for (index, value) in labels.enumerate() {
-            if value < 0 {
-                return Err(LieGroupFusionRuleError::NegativeLabel { index, value });
-            }
-            if self.group.semisimple_rank() == 1 && value > i64::from(u32::MAX) {
-                return Err(LieGroupFusionRuleError::UnrepresentableLabel {
-                    labels: vec![value],
+    fn check_labels(&self, dynkin: &[i64], charges: &[i64]) -> Result<(), LieGroupFusionRuleError> {
+        for (labels, expected) in [
+            (dynkin, self.semisimple_rank()),
+            (charges, self.group.torus_rank()),
+        ] {
+            if labels.len() != expected {
+                return Err(LieGroupFusionRuleError::LabelLength {
+                    expected,
+                    found: labels.len(),
                 });
             }
+        }
+        if let Some((index, &value)) = dynkin.iter().enumerate().find(|(_, &x)| x < 0) {
+            return Err(LieGroupFusionRuleError::NegativeLabel { index, value });
         }
         Ok(())
     }
@@ -420,9 +585,8 @@ impl LieCodec {
         if let Some(irrep) = self.irreps.by_id(sector) {
             return Ok(irrep);
         }
-        let labels = self.decode_dynkin(sector)?;
-        let irrep = category().irrep(&labels, &[]).map_err(provider_error)?;
-        Ok(self.irreps.insert(sector, Arc::new(irrep)))
+        let (dynkin, charges) = self.decode_coordinates(sector)?;
+        self.intern(category(), sector, &dynkin, &charges)
     }
 
     fn sector(
@@ -436,9 +600,28 @@ impl LieCodec {
         if let Some(sector) = self.irreps.by_irrep(&irrep) {
             return Ok(sector);
         }
-        let sector = self.encode_dynkin_iter(|| irrep.dynkin_labels())?;
+        let sector = self.encode_coordinates(
+            || {
+                let dynkin = irrep.dynkin_labels().map(|x| usize::try_from(x).ok());
+                dynkin.chain(irrep.charges().map(zigzag))
+            },
+            || irrep.dynkin_labels().chain(irrep.charges()).collect(),
+        )?;
         self.irreps.insert(sector, Arc::new(irrep.into_owned()));
         Ok(sector)
+    }
+
+    /// Coordinate-wise sum of two decoded labels: the highest weight of their
+    /// tensor product, which carries any coordinate a fusion overflowed.
+    fn highest_weight_sum(&self, left: SectorId, right: SectorId) -> Option<Vec<i64>> {
+        let (left_dynkin, left_charges) = self.decode_coordinates(left).ok()?;
+        let (right_dynkin, right_charges) = self.decode_coordinates(right).ok()?;
+        left_dynkin
+            .iter()
+            .chain(&left_charges)
+            .zip(right_dynkin.iter().chain(&right_charges))
+            .map(|(a, b)| a.checked_add(*b))
+            .collect()
     }
 
     fn dual<'a>(
@@ -464,19 +647,19 @@ impl CategoryCodec<LieGroup> for LieCodec {
 
     fn encode_label<'a>(
         &self,
-        _category: impl Fn() -> &'a LieGroup + Copy,
+        category: impl Fn() -> &'a LieGroup + Copy,
         _rule: &RuleIdentity,
         label: &Vec<i64>,
     ) -> Result<SectorId, LieGroupFusionRuleError> {
-        self.encode_dynkin(label)
+        self.encode_typed(category(), label)
     }
 
     fn decode_label<'a>(
         &self,
-        _category: impl Fn() -> &'a LieGroup + Copy,
+        category: impl Fn() -> &'a LieGroup + Copy,
         id: SectorId,
     ) -> Result<Vec<i64>, LieGroupFusionRuleError> {
-        self.decode_dynkin(id)
+        self.decode_typed(category(), id)
     }
 
     fn object<'a>(
@@ -537,14 +720,14 @@ impl CategoryCodec<LieGroup> for LieCodec {
         error: CategoryAdapterError<fusion_symbols::lie::LieError>,
     ) -> LieGroupFusionRuleError {
         match error {
-            CategoryAdapterError::Provider(fusion_symbols::lie::LieError::LabelOverflow)
-                if self.group.semisimple_rank() == 1
-                    && matches!(inputs, [left, right] if left.id() <= u32::MAX as usize && right.id() <= u32::MAX as usize) =>
-            {
-                LieGroupFusionRuleError::UnrepresentableLabel {
-                    labels: vec![inputs[0].id() as i64 + inputs[1].id() as i64],
-                }
-            }
+            CategoryAdapterError::Provider(LieError::LabelOverflow) => match inputs {
+                &[left, right] => self
+                    .highest_weight_sum(left, right)
+                    .map_or(provider_error(LieError::LabelOverflow), |labels| {
+                        LieGroupFusionRuleError::UnrepresentableLabel { labels }
+                    }),
+                _ => provider_error(LieError::LabelOverflow),
+            },
             CategoryAdapterError::Provider(error) => provider_error(error),
             CategoryAdapterError::DimensionNotRepresentable { sector } => {
                 LieGroupFusionRuleError::DimensionNotRepresentable { sector }
@@ -658,6 +841,9 @@ impl CheckedGenericFusion for LieGroupFusionRule {
 /// Lie groups use the canonical trivial representation as their tensor unit.
 impl CheckedCanonicalUnitFusionRule for LieGroupFusionRule {}
 
+/// The typed label is one coordinate vector: the Dynkin labels, then the torus
+/// charges, in [`GroupId`] coordinate order, encoded as by
+/// [`LieGroupFusionRule::encode_irrep`].
 impl TypedSectorAdmission for LieGroupFusionRule {
     type Sector = Vec<i64>;
     type Error = LieGroupFusionRuleError;
@@ -668,11 +854,11 @@ impl TypedSectorAdmission for LieGroupFusionRule {
     }
 
     fn try_encode_label(&self, sector: &Self::Sector) -> Result<SectorId, Self::Error> {
-        self.encode_dynkin(sector)
+        self.codec.encode_typed(self.category(), sector)
     }
 
     fn try_decode_label(&self, sector: SectorId) -> Result<Self::Sector, Self::Error> {
-        self.decode_dynkin(sector)
+        self.codec.decode_typed(self.category(), sector)
     }
 
     fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
@@ -812,6 +998,10 @@ impl Capped {
 }
 
 fn count_before_grade(grade: usize, parts: usize, cap: usize) -> Capped {
+    if parts == 0 {
+        // The coordinate-free label has grade zero.
+        return Capped::Exact(usize::from(grade > 0));
+    }
     match grade.checked_add(parts.saturating_sub(1)) {
         Some(n) => binomial(n, parts, cap),
         None => Capped::Exceeded,
@@ -883,6 +1073,27 @@ const fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fusion_symbols::lie::RootSystem;
+
+    #[test]
+    fn past_capacity_misses_still_admit_through_fusion_symbols() {
+        let rule = LieGroupFusionRule::new(GroupId::u(2).unwrap()).unwrap();
+        let mut id = 0;
+        while rule.codec.irreps.0.read().unwrap().by_id.len() < IRREP_TABLE_CAPACITY {
+            let _ = rule.decode_irrep(SectorId::new(id));
+            id += 1;
+        }
+        // Full table: these labels are never interned and run fusion-symbols per call.
+        for _ in 0..2 {
+            let sector = rule.encode_irrep(&[1], &[1001]).unwrap();
+            assert_eq!(rule.codec.irreps.by_id(sector), None);
+            assert_eq!(rule.decode_irrep(sector).unwrap(), (vec![1], vec![1001]));
+            assert!(matches!(
+                rule.encode_irrep(&[1], &[1000]),
+                Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+            ));
+        }
+    }
 
     #[test]
     fn dual_interner_keeps_both_directions_within_capacity() {
@@ -953,7 +1164,7 @@ mod tests {
             let mut swept = 0;
             for id in 0.. {
                 let sector = SectorId::new(id);
-                let mut labels = rule.decode_dynkin(sector).unwrap();
+                let mut labels = rule.decode_irrep(sector).unwrap().0;
                 if labels.iter().sum::<i64>() > max_total {
                     break;
                 }
@@ -975,7 +1186,7 @@ mod tests {
                 labels.reverse();
                 assert_eq!(
                     rule.try_dual(sector).unwrap(),
-                    rule.encode_dynkin(&labels).unwrap()
+                    rule.encode_irrep(&labels, &[]).unwrap()
                 );
                 assert_eq!(
                     rule.try_twist_scalar(sector).unwrap().to_bits(),
@@ -987,7 +1198,7 @@ mod tests {
         }
         // A complex irrep whose phase is not +1 in this gauge.
         let su4 = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
-        let fundamental = su4.encode_dynkin(&[1, 0, 0]).unwrap();
+        let fundamental = su4.encode_irrep(&[1, 0, 0], &[]).unwrap();
         assert_eq!(
             su4.try_frobenius_schur_phase_scalar(fundamental).unwrap(),
             -1.0
@@ -999,20 +1210,20 @@ mod tests {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         let labels = [[0, 0], [0, 1], [1, 0], [0, 2], [1, 1], [2, 0]];
         for (id, label) in labels.into_iter().enumerate() {
-            assert_eq!(rule.encode_dynkin(&label).unwrap(), SectorId::new(id));
-            assert_eq!(rule.decode_dynkin(SectorId::new(id)).unwrap(), label);
+            assert_eq!(rule.encode_irrep(&label, &[]).unwrap(), SectorId::new(id));
+            assert_eq!(rule.decode_irrep(SectorId::new(id)).unwrap().0, label);
         }
         let su2 = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
         let edge = [i64::from(u32::MAX)];
-        let id = su2.encode_dynkin(&edge).unwrap();
+        let id = su2.encode_irrep(&edge, &[]).unwrap();
         assert_eq!(id, SectorId::new(u32::MAX as usize));
-        assert_eq!(su2.decode_dynkin(id).unwrap(), edge);
+        assert_eq!(su2.decode_irrep(id).unwrap().0, edge);
     }
 
     #[test]
     fn checked_rigid_dimension_accepts_the_largest_su2_dynkin_label() {
         let rule = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
-        let sector = rule.encode_dynkin(&[i64::from(u32::MAX)]).unwrap();
+        let sector = rule.encode_irrep(&[i64::from(u32::MAX)], &[]).unwrap();
         let expected_dimension = 2.0_f64.powi(32);
         let sqrt_dimension = rule.try_sqrt_dim_scalar(sector).unwrap();
         assert_eq!(sqrt_dimension, expected_dimension.sqrt());
@@ -1023,11 +1234,11 @@ mod tests {
         assert_eq!(rule.try_dim_scalar(sector).unwrap(), expected_dimension);
         for label in [i64::from(u32::MAX) + 1, i64::MAX] {
             assert!(matches!(
-                rule.encode_dynkin(&[label]),
+                rule.encode_irrep(&[label], &[]),
                 Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
             ));
             assert!(matches!(
-                rule.decode_dynkin(SectorId::new(label as usize)),
+                rule.decode_irrep(SectorId::new(label as usize)),
                 Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
             ));
             assert!(matches!(
@@ -1044,7 +1255,7 @@ mod tests {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         for p in 0..6_i64 {
             for q in 0..6_i64 {
-                let sector = rule.encode_dynkin(&[p, q]).unwrap();
+                let sector = rule.encode_irrep(&[p, q], &[]).unwrap();
                 let weyl = (p + 1) * (q + 1) * (p + q + 2) / 2;
                 assert_eq!(rule.try_dim_scalar(sector).unwrap(), weyl as f64);
             }
@@ -1060,8 +1271,8 @@ mod tests {
         let sector = SectorId::new(usize::try_from(17_876_288_714_431_443_296u64).unwrap());
         let mut expected = vec![0; 38];
         expected[37] = 31;
-        assert_eq!(rule.decode_dynkin(sector).unwrap(), expected);
-        assert_eq!(rule.encode_dynkin(&expected).unwrap(), sector);
+        assert_eq!(rule.decode_irrep(sector).unwrap().0, expected);
+        assert_eq!(rule.encode_irrep(&expected, &[]).unwrap(), sector);
     }
 
     #[test]
@@ -1069,15 +1280,15 @@ mod tests {
         assert!(GroupId::su(1).is_err());
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
         assert!(matches!(
-            rule.encode_dynkin(&[1]),
+            rule.encode_irrep(&[1], &[]),
             Err(LieGroupFusionRuleError::LabelLength { .. })
         ));
         assert!(matches!(
-            rule.encode_dynkin(&[-1, 0]),
+            rule.encode_irrep(&[-1, 0], &[]),
             Err(LieGroupFusionRuleError::NegativeLabel { .. })
         ));
         assert!(matches!(
-            rule.encode_dynkin(&[i64::MAX, i64::MAX]),
+            rule.encode_irrep(&[i64::MAX, i64::MAX], &[]),
             Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
         let too_large = GroupId::cover(
@@ -1096,21 +1307,21 @@ mod tests {
             irreps: Arc::default(),
         };
         assert!(matches!(
-            codec.decode_dynkin(SectorId::new(0)),
+            codec.decode_coordinates(SectorId::new(0)),
             Err(LieGroupFusionRuleError::LabelAllocation { .. })
         ));
         for n in [3, 4] {
             let rule = LieGroupFusionRule::new(GroupId::su(n).unwrap()).unwrap();
-            let labels = rule.decode_dynkin(SectorId::new(usize::MAX)).unwrap();
+            let labels = rule.decode_irrep(SectorId::new(usize::MAX)).unwrap().0;
             assert_eq!(
-                rule.encode_dynkin(&labels).unwrap(),
+                rule.encode_irrep(&labels, &[]).unwrap(),
                 SectorId::new(usize::MAX)
             );
         }
         assert!(matches!(
             LieGroupFusionRule::new(GroupId::su(2).unwrap())
                 .unwrap()
-                .decode_dynkin(SectorId::new(usize::MAX)),
+                .decode_irrep(SectorId::new(usize::MAX)),
             Err(LieGroupFusionRuleError::DecodeOverflow { .. })
         ));
         // Identity follows `GroupId` equality, not the constructor. The rules
@@ -1140,8 +1351,8 @@ mod tests {
     #[test]
     fn irreps_and_duals_are_interned_once_per_sector() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
-        let three = rule.encode_dynkin(&[1, 0]).unwrap();
-        let eight = rule.encode_dynkin(&[1, 1]).unwrap();
+        let three = rule.encode_irrep(&[1, 0], &[]).unwrap();
+        let eight = rule.encode_irrep(&[1, 1], &[]).unwrap();
         let first = rule.codec.irrep(|| rule.category(), three).unwrap();
         assert!(Arc::ptr_eq(
             &first,
@@ -1167,7 +1378,7 @@ mod tests {
             three
         );
 
-        let anti_three = rule.encode_dynkin(&[0, 1]).unwrap();
+        let anti_three = rule.encode_irrep(&[0, 1], &[]).unwrap();
         assert_eq!(rule.codec.irreps.dual(three), None);
         assert_eq!(rule.try_dual(three).unwrap(), anti_three);
         assert_eq!(rule.codec.irreps.dual(three), Some(anti_three));
@@ -1190,13 +1401,14 @@ mod tests {
     #[test]
     fn su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
-        let eight = rule.encode_dynkin(&[1, 1]).unwrap();
+        let eight = rule.encode_irrep(&[1, 1], &[]).unwrap();
         assert_eq!(rule.fusion_style(), FusionStyleKind::Generic);
         assert_eq!(rule.braiding_style(), BraidingStyleKind::Bosonic);
         assert_eq!(rule.try_nsymbol(eight, eight, eight).unwrap(), 2);
         assert_eq!(
-            rule.try_dual(rule.encode_dynkin(&[2, 1]).unwrap()).unwrap(),
-            rule.encode_dynkin(&[1, 2]).unwrap()
+            rule.try_dual(rule.encode_irrep(&[2, 1], &[]).unwrap())
+                .unwrap(),
+            rule.encode_irrep(&[1, 2], &[]).unwrap()
         );
         let channels = rule.try_fusion_channels(eight, eight).unwrap();
         assert_eq!(
@@ -1209,7 +1421,7 @@ mod tests {
         assert_eq!(
             channels
                 .iter()
-                .map(|&sector| rule.decode_dynkin(sector).unwrap())
+                .map(|&sector| rule.decode_irrep(sector).unwrap().0)
                 .collect::<Vec<_>>(),
             [[0, 0], [1, 1], [0, 3], [3, 0], [2, 2]]
         );
@@ -1225,13 +1437,13 @@ mod tests {
             ([2, 2], 1),
         ] {
             assert_eq!(
-                rule.try_nsymbol(eight, eight, rule.encode_dynkin(&labels).unwrap())
+                rule.try_nsymbol(eight, eight, rule.encode_irrep(&labels, &[]).unwrap())
                     .unwrap(),
                 multiplicity
             );
         }
         assert_eq!(
-            rule.try_nsymbol(eight, eight, rule.encode_dynkin(&[1, 0]).unwrap())
+            rule.try_nsymbol(eight, eight, rule.encode_irrep(&[1, 0], &[]).unwrap())
                 .unwrap(),
             0
         );
@@ -1240,9 +1452,9 @@ mod tests {
     #[test]
     fn su3_rigid_symbols_match_sunrepresentations_fixtures() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
-        let three = rule.encode_dynkin(&[1, 0]).unwrap();
-        let anti_three = rule.encode_dynkin(&[0, 1]).unwrap();
-        let eight = rule.encode_dynkin(&[1, 1]).unwrap();
+        let three = rule.encode_irrep(&[1, 0], &[]).unwrap();
+        let anti_three = rule.encode_irrep(&[0, 1], &[]).unwrap();
+        let eight = rule.encode_irrep(&[1, 1], &[]).unwrap();
 
         for (sector, dimension) in [(three, 3.0), (anti_three, 3.0), (eight, 8.0)] {
             let sqrt = rule.try_sqrt_dim_scalar(sector).unwrap();
@@ -1266,7 +1478,7 @@ mod tests {
             assert!((*f.get(mu, nu, kappa, lambda) - expected).abs() < 1e-12);
         }
 
-        let twenty_seven = rule.encode_dynkin(&[2, 2]).unwrap();
+        let twenty_seven = rule.encode_irrep(&[2, 2], &[]).unwrap();
         let asymmetric = rule
             .try_f_symbol_generic(
                 twenty_seven,
@@ -1274,7 +1486,7 @@ mod tests {
                 anti_three,
                 anti_three,
                 eight,
-                rule.encode_dynkin(&[3, 1]).unwrap(),
+                rule.encode_irrep(&[3, 1], &[]).unwrap(),
             )
             .unwrap();
         assert_eq!(asymmetric.shape(), (2, 1, 1, 1));
@@ -1291,8 +1503,8 @@ mod tests {
             assert!((*r.get(index.0, index.1) - expected).abs() < 1e-12);
         }
 
-        let left = rule.encode_dynkin(&[2, 2]).unwrap();
-        let right = rule.encode_dynkin(&[2, 3]).unwrap();
+        let left = rule.encode_irrep(&[2, 2], &[]).unwrap();
+        let right = rule.encode_irrep(&[2, 3], &[]).unwrap();
         let asymmetric_r = rule.try_r_symbol_generic(left, right, right).unwrap();
         assert_eq!(asymmetric_r.shape(), (3, 3));
         for (index, expected) in [
@@ -1308,7 +1520,7 @@ mod tests {
     #[test]
     fn su2_fundamental_pivotal_phase_matches_f_gauge() {
         let rule = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
-        let fundamental = rule.encode_dynkin(&[1]).unwrap();
+        let fundamental = rule.encode_irrep(&[1], &[]).unwrap();
         assert_eq!(
             rule.try_frobenius_schur_phase_scalar(fundamental).unwrap(),
             -1.0
@@ -1318,7 +1530,7 @@ mod tests {
     #[test]
     fn su4_adjoint_rigid_shape_smoke() {
         let rule = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
-        let adjoint = rule.encode_dynkin(&[1, 0, 1]).unwrap();
+        let adjoint = rule.encode_irrep(&[1, 0, 1], &[]).unwrap();
         assert_eq!(rule.try_dim_scalar(adjoint).unwrap(), 15.0);
         assert_eq!(
             rule.try_f_symbol_generic(adjoint, adjoint, adjoint, adjoint, adjoint, adjoint)
@@ -1337,8 +1549,8 @@ mod tests {
     #[test]
     fn rigid_failures_remain_typed() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
-        let three = rule.encode_dynkin(&[1, 0]).unwrap();
-        let eight = rule.encode_dynkin(&[1, 1]).unwrap();
+        let three = rule.encode_irrep(&[1, 0], &[]).unwrap();
+        let eight = rule.encode_irrep(&[1, 1], &[]).unwrap();
         let r = rule.try_r_symbol_generic(three, three, eight).unwrap();
         assert_eq!(r.shape(), (0, 0));
         assert!(r.data().is_empty());
@@ -1351,7 +1563,7 @@ mod tests {
         let rule = LieGroupFusionRule::new(GroupId::su(78).unwrap()).unwrap();
         let mut labels = vec![0; 77];
         labels[36] = 19;
-        let sector = rule.encode_dynkin(&labels).unwrap();
+        let sector = rule.encode_irrep(&labels, &[]).unwrap();
         assert!(matches!(
             rule.try_sqrt_dim_scalar(sector),
             Err(LieGroupFusionRuleError::DimensionNotRepresentable { .. })

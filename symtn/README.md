@@ -26,8 +26,9 @@ its CPU build enables `cpu-blas`, otherwise `cpu-faer`; see the
 [backend policy](../docs/backend_policy.md) and [`Cargo.toml`](Cargo.toml) for
 alternatives. `cuda` and `cgc-gen` add
 the typed CUDA surface and `LieGroupFusionRule`, respectively. The latter uses
-fusion-symbols A/B/C/D categories with checked Generic Host execution,
-Dynkin-vector labels and explicit `GroupId` global forms. `SU2FusionRule`
+fusion-symbols A/B/C/D categories, their products, tori and U(n) with checked
+Generic Host execution, Dynkin-label-then-charge labels and explicit `GroupId`
+global forms. `SU2FusionRule`
 retains its compact multiplicity-free and physical-basis capabilities.
 Contraction-order planners and their configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
 
