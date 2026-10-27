@@ -1,6 +1,6 @@
 use fusion_symbols::{
     category::FusionCategory,
-    lie::{GroupId, LieError, LieGroup, LieIrrep},
+    lie::{GroupId, LieError, LieGroup, LieIrrep, RootSystem},
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -12,7 +12,8 @@ use crate::{
     BraidingStyleKind, CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec,
     CheckedCanonicalUnitFusionRule, CheckedGenericAdmissionMode, CheckedGenericFusion,
     CheckedGenericPivotal, CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray,
-    GenericRMatrix, RuleIdentity, SectorId, SectorVec, SymbolShapeError, TypedSectorAdmission,
+    GenericRMatrix, RuleIdentity, SectorId, SectorOrderKey, SectorVec, SymbolShapeError,
+    TypedSectorAdmission,
 };
 
 /// Checked compact Lie-group rule over the fusion-symbols category adapter.
@@ -21,6 +22,14 @@ use crate::{
 /// graded total then lexicographic order (see [`Self::encode_irrep`]), orders
 /// channels by encoded id, interns irreps boundedly and constructs the
 /// category eagerly.
+///
+/// [`CheckedGenericFusion::sector_order_key`] is not the id: it is the
+/// TensorKit `ProductSector` key of the group's factors in [`GroupId`] order.
+/// A simple factor contributes its own graded-lexicographic Dynkin rank
+/// (SUNRepresentations' `findindex - 1` for SU(N), the Dynkin label for
+/// SU(2)), D(2) its two A1 labels, and each torus charge its TensorKit
+/// `U1Irrep` `findindex - 1` (`4q - 1` for `q > 0`, else `4|q|`). A single
+/// simple factor's key is therefore its id.
 /// Every rank, including rank one, uses checked Generic admission; no physical
 /// expansion is provided.
 ///
@@ -444,30 +453,51 @@ impl LieCodec {
         coordinates: impl Fn() -> I,
         labels: impl Fn() -> Vec<i64>,
     ) -> Result<SectorId, LieGroupFusionRuleError> {
-        let n = self.coordinate_count();
-        let unrepresentable = || LieGroupFusionRuleError::UnrepresentableLabel { labels: labels() };
-        let grade = coordinates()
-            .try_fold(0usize, |sum, x| sum.checked_add(x?))
-            .ok_or_else(unrepresentable)?;
-        let mut rank = count_before_grade(grade, n, usize::MAX)
-            .exact()
-            .ok_or_else(unrepresentable)?;
-        let mut remaining = grade;
-        for (index, coordinate) in coordinates().enumerate() {
-            let Some(coordinate) = coordinate else {
-                return Err(unrepresentable());
+        graded_lex_rank(self.coordinate_count(), coordinates)
+            .map(SectorId::new)
+            .ok_or_else(|| LieGroupFusionRuleError::UnrepresentableLabel { labels: labels() })
+    }
+
+    /// TensorKit `ProductSector` positions of the factors, in [`GroupId`]
+    /// order: each simple factor's graded-lexicographic Dynkin rank (D(2) as
+    /// its two A1 labels), then each charge's `U1Irrep` `findindex - 1`.
+    /// `None` when a position does not fit.
+    fn order_key<D: Iterator<Item = i64>, Q: Iterator<Item = i64>>(
+        &self,
+        dynkin: impl Fn() -> D,
+        charges: Q,
+    ) -> Option<SectorOrderKey> {
+        let mut key: Option<SectorOrderKey> = None;
+        let mut push = |position: u64| {
+            let factor = SectorOrderKey::position(position);
+            key = Some(match key.take() {
+                Some(key) => SectorOrderKey::product(key, factor),
+                None => factor,
+            });
+        };
+        let mut offset = 0;
+        for &root in self.group.root_systems() {
+            let rank = root.rank();
+            let block = || {
+                dynkin()
+                    .skip(offset)
+                    .take(rank)
+                    .map(|x| usize::try_from(x).ok())
             };
-            let tail = n - 1 - index;
-            rank = rank
-                .checked_add(
-                    prefix_count(remaining, tail, coordinate, usize::MAX)
-                        .and_then(Capped::exact)
-                        .ok_or_else(unrepresentable)?,
-                )
-                .ok_or_else(unrepresentable)?;
-            remaining -= coordinate;
+            if root == RootSystem::D(2) {
+                for label in block() {
+                    push(u64::try_from(label?).ok()?);
+                }
+            } else {
+                push(u64::try_from(graded_lex_rank(rank, block)?).ok()?);
+            }
+            offset += rank;
         }
-        Ok(SectorId::new(rank))
+        for charge in charges {
+            push(crate::abelian::u1_order_position(charge)?);
+        }
+        // The coordinate-free group's only sector.
+        Some(key.unwrap_or_else(|| SectorOrderKey::position(0)))
     }
 
     fn decode_irrep(
@@ -700,6 +730,32 @@ impl CategoryCodec<LieGroup> for LieCodec {
         Ok(objects)
     }
 
+    /// Why the key, unlike the id, is per factor: TensorKit orders a
+    /// `ProductSector` by its factors' `findindex` sum, which the id's
+    /// flattened graded rank does not reproduce once a factor has rank ≥ 2 or
+    /// a torus charge is present. A warm call reads the interned irrep; a miss
+    /// decodes the id.
+    fn sector_order_key(&self, id: SectorId) -> SectorOrderKey {
+        let key = match self.irreps.by_id(id) {
+            Some(irrep) => self.order_key(|| irrep.dynkin_labels(), irrep.charges()),
+            None => self
+                .decode_coordinates(id)
+                .ok()
+                .and_then(|(dynkin, charges)| {
+                    self.order_key(|| dynkin.iter().copied(), charges.into_iter())
+                }),
+        };
+        // Why an admitted sector always has a key: a factor's rank is at most
+        // the id (its lower-ranked sub-vectors embed injectively below the
+        // full vector) and admitted charges lie within `±i32::MAX`. A
+        // congruence-hole id still decodes and gets its excluded label's key;
+        // only an undecodable id, or a decoded charge whose position passes
+        // `u64`, has none.
+        key.unwrap_or_else(|| {
+            panic!("Lie-group rule cannot order id {id:?}: it decodes to no label with a key")
+        })
+    }
+
     fn encode_channels(
         &self,
         category: &LieGroup,
@@ -835,6 +891,10 @@ impl CheckedGenericFusion for LieGroupFusionRule {
         coupled: SectorId,
     ) -> Result<usize, Self::Error> {
         forward::nsymbol(self, left, right, coupled)
+    }
+
+    fn sector_order_key(&self, sector: SectorId) -> SectorOrderKey {
+        self.codec.sector_order_key(sector)
     }
 }
 
@@ -978,6 +1038,26 @@ impl CheckedGenericPivotal for LieGroupFusionRule {
     fn try_twist_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
         forward::twist(self, sector)
     }
+}
+
+/// Rank of `parts` coordinates by total grade, then lexicographically.
+/// `None` when a coordinate is unrepresentable or the rank overflows `usize`.
+fn graded_lex_rank<I: Iterator<Item = Option<usize>>>(
+    parts: usize,
+    coordinates: impl Fn() -> I,
+) -> Option<usize> {
+    let grade = coordinates().try_fold(0usize, |sum, x| sum.checked_add(x?))?;
+    let mut rank = count_before_grade(grade, parts, usize::MAX).exact()?;
+    let mut remaining = grade;
+    for (index, coordinate) in coordinates().enumerate() {
+        let coordinate = coordinate?;
+        let tail = parts - 1 - index;
+        rank = rank.checked_add(
+            prefix_count(remaining, tail, coordinate, usize::MAX).and_then(Capped::exact)?,
+        )?;
+        remaining -= coordinate;
+    }
+    Some(rank)
 }
 
 enum Capped {

@@ -105,3 +105,27 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
         assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
     }
 }
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn warm_lie_group_order_key_does_not_allocate() {
+    let _serial = crate::counting_alloc::serial();
+    use fusion_symbols::lie::{GroupId, RootSystem};
+    use symtn_sectors::{CheckedGenericFusion, LieGroupFusionRule};
+
+    // Up to four factor positions fit the key's inline storage.
+    let su2_su3_u1 = GroupId::cover(&[RootSystem::A(1), RootSystem::A(2)], 1).unwrap();
+    for (group, dynkin, charges, len) in [
+        (GroupId::su(3).unwrap(), &[1, 1][..], &[][..], 1),
+        (GroupId::u(2).unwrap(), &[1][..], &[-3][..], 2),
+        (GroupId::spin(4).unwrap(), &[2, 1][..], &[][..], 2),
+        (su2_su3_u1, &[1, 1, 1][..], &[2][..], 3),
+    ] {
+        let rule = LieGroupFusionRule::new(group).unwrap();
+        let sector = rule.encode_irrep(dynkin, charges).unwrap();
+        let (key, allocs) =
+            counting_alloc::measure(|| CheckedGenericFusion::sector_order_key(&rule, sector));
+        assert_eq!(key.positions().len(), len);
+        assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
+    }
+}

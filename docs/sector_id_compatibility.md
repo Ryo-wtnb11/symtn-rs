@@ -47,7 +47,7 @@ Storage uses ID order. Two operations instead need a semantic basis order:
 | CU(1) | Charge magnitude, with `0+` before `0-` |
 | TableRule | AnyonWiki object order; Ising is `1, ψ, σ`, unlike TensorKit |
 | Products | Total enumeration degree, then lexicographic over flattened factors |
-| `LieGroupFusionRule` | Coordinate sum, then lexicographic, over Dynkin labels then zigzag charges (`0, 1, -1, 2, …`); quotient and congruence exclusions leave holes |
+| `LieGroupFusionRule` | TensorKit `ProductSector` order over the `GroupId` factors: sum of factor positions, then lexicographic. A simple factor's position is its graded-lexicographic Dynkin rank (SUNRepresentations' SU(N) order; the Dynkin label for SU(2)), D2 contributes two SU(2) positions and a torus charge its U(1) position above. A single simple factor's key is its ID; IDs remain the codec rank |
 
 A provider without a TensorKit counterpart defaults to ID order. A codec whose
 IDs disagree with its intended semantic order must override `sector_order_key`.

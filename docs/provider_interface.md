@@ -100,7 +100,7 @@ category's `frobenius_schur_phase`.
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
-| `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (A/B/C/D factors, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
+| `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (A/B/C/D factors, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
@@ -135,6 +135,12 @@ at construction.
 followed by charges. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
 to `0, 1, 2, 3, 4, …`) and ranks the whole coordinate vector by total grade
 then lexicographically, so a single simple factor keeps its Dynkin-only ids.
+`sector_order_key` does not use that rank: it lists one TensorKit position per
+`GroupId` factor (a simple factor's own Dynkin rank, two SU(2) labels for D2,
+and each charge's `U1Irrep` `findindex - 1`), so the rule orders sectors as
+TensorKit orders the matching `ProductSector` and as a `ProductFusionRule` of
+the same factors does. A warm key reads the interned irrep and allocates
+nothing up to four positions, the key's inline capacity.
 Global-form restrictions, including torus congruences such as U(n)'s, leave
 holes in that numbering: encoding or decoding an excluded label returns
 `LieGroupFusionRuleError::Provider(LieError::NotAdmissible)`, unless the
