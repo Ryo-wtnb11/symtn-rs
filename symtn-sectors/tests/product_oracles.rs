@@ -925,6 +925,179 @@ mod generated {
             ))
         ));
     }
+
+    /// Sector, R-block, F-block, and multiplicity-axis F-block counts checked.
+    type Checked = (usize, usize, usize, usize);
+
+    /// Asserts bitwise-identical category data from a composite Lie rule and a
+    /// product rule over the same fusion-symbols factors. Every pair of
+    /// `sectors` checks channels, N, and R; F checks `a, b` in `outer`, `c` in
+    /// `sectors`, and every admissible `e, d, f` (including zero blocks).
+    fn assert_lie_matches_product<P: CheckedGenericRigidSymbols<Scalar = f64>>(
+        lie: &LieGroupFusionRule,
+        product: &P,
+        to_product: impl Fn(SectorId) -> SectorId,
+        sectors: &[SectorId],
+        outer: &[SectorId],
+    ) -> Checked {
+        let channels = |a, b| {
+            let mut mapped: Vec<_> = lie
+                .try_fusion_channels(a, b)
+                .unwrap()
+                .iter()
+                .map(|&c| to_product(c))
+                .collect();
+            let mut expected = product
+                .try_fusion_channels(to_product(a), to_product(b))
+                .unwrap()
+                .to_vec();
+            mapped.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(mapped, expected, "channels {a:?} x {b:?}");
+        };
+        let mut r_blocks = 0;
+        for &a in sectors {
+            let pa = to_product(a);
+            assert_eq!(
+                CheckedGenericFusion::sector_order_key(lie, a).positions(),
+                product.sector_order_key(pa).positions()
+            );
+            assert_eq!(
+                lie.try_dim_scalar(a).unwrap().to_bits(),
+                product.try_dim_scalar(pa).unwrap().to_bits()
+            );
+            assert_eq!(
+                to_product(lie.try_dual(a).unwrap()),
+                product.try_dual(pa).unwrap()
+            );
+            assert_eq!(
+                lie.try_frobenius_schur_phase_scalar(a).unwrap().to_bits(),
+                product
+                    .try_frobenius_schur_phase_scalar(pa)
+                    .unwrap()
+                    .to_bits()
+            );
+            for &b in sectors {
+                channels(a, b);
+                for c in lie.try_fusion_channels(a, b).unwrap() {
+                    let (pb, pc) = (to_product(b), to_product(c));
+                    assert_eq!(
+                        lie.try_nsymbol(a, b, c).unwrap(),
+                        product.try_nsymbol(pa, pb, pc).unwrap()
+                    );
+                    let (x, y) = (
+                        lie.try_r_symbol_generic(a, b, c).unwrap(),
+                        product.try_r_symbol_generic(pa, pb, pc).unwrap(),
+                    );
+                    assert_eq!(x.shape(), y.shape(), "R {a:?} {b:?} {c:?}");
+                    assert!(
+                        x.data()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .eq(y.data().iter().map(|v| v.to_bits())),
+                        "R {a:?} {b:?} {c:?}"
+                    );
+                    r_blocks += 1;
+                }
+            }
+        }
+        let (mut f_blocks, mut multiplicity_blocks) = (0, 0);
+        for &a in outer {
+            for &b in outer {
+                for &c in sectors {
+                    for e in lie.try_fusion_channels(a, b).unwrap() {
+                        for d in lie.try_fusion_channels(e, c).unwrap() {
+                            for f in lie.try_fusion_channels(b, c).unwrap() {
+                                let x = lie.try_f_symbol_generic(a, b, c, d, e, f).unwrap();
+                                let y = product
+                                    .try_f_symbol_generic(
+                                        to_product(a),
+                                        to_product(b),
+                                        to_product(c),
+                                        to_product(d),
+                                        to_product(e),
+                                        to_product(f),
+                                    )
+                                    .unwrap();
+                                let at = [a, b, c, d, e, f];
+                                assert_eq!(x.shape(), y.shape(), "F {at:?}");
+                                assert!(
+                                    x.data()
+                                        .iter()
+                                        .map(|v| v.to_bits())
+                                        .eq(y.data().iter().map(|v| v.to_bits())),
+                                    "F {at:?}"
+                                );
+                                let (m, n, k, l) = x.shape();
+                                f_blocks += 1;
+                                multiplicity_blocks += usize::from(m.max(n).max(k).max(l) > 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (sectors.len(), r_blocks, f_blocks, multiplicity_blocks)
+    }
+
+    /// A composite `LieGroupFusionRule` and the `ProductFusionRule` over its
+    /// factor rules wire the same fusion-symbols math (`Product<Vec<_>>` versus
+    /// `Product<(L, R)>`), so they agree bit for bit, including the
+    /// right-fastest multiplicity axis order, while keeping distinct identities.
+    #[test]
+    fn composite_lie_rules_match_the_product_of_their_factor_rules() {
+        use fusion_symbols::lie::RootSystem::A;
+        let su2 = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
+
+        let lie = LieGroupFusionRule::new(GroupId::cover(&[A(1), A(2)], 0).unwrap()).unwrap();
+        let product = ProductFusionRule::<_, _>::try_new(su2.clone(), su3.clone()).unwrap();
+        assert_ne!(
+            CheckedGenericFusion::rule_identity(&lie),
+            product.rule_identity()
+        );
+        let to_product = |id| {
+            let (dynkin, _) = lie.decode_irrep(id).unwrap();
+            product.encode_component_ids(
+                su2.encode_irrep(&dynkin[..1], &[]).unwrap(),
+                su3.encode_irrep(&dynkin[1..], &[]).unwrap(),
+            )
+        };
+        let su3_box = [[0, 0], [1, 0], [0, 1], [2, 0], [1, 1], [0, 2]];
+        let label = |j: i64, [p, q]: [i64; 2]| lie.encode_irrep(&[j, p, q], &[]).unwrap();
+        let sectors: Vec<_> = (0..4)
+            .flat_map(|j| su3_box.map(|pq| label(j, pq)))
+            .collect();
+        let outer: Vec<_> = (0..2)
+            .flat_map(|j| su3_box[..3].iter().map(move |&pq| (j, pq)))
+            .map(|(j, pq)| label(j, pq))
+            .collect();
+        let checked = assert_lie_matches_product(&lie, &product, to_product, &sectors, &outer);
+        // Includes F blocks with N(8 x 8 -> 8) = 2 multiplicity axes.
+        assert_eq!(checked, (24, 2400, 14976, 288));
+
+        // U1FusionRule and the fs rank-one torus factor share the trivial gauge.
+        let lie = LieGroupFusionRule::new(GroupId::cover(&[A(1)], 1).unwrap()).unwrap();
+        let product = ProductFusionRule::<_, _>::try_new(su2.clone(), U1FusionRule).unwrap();
+        let to_product = |id| {
+            let (dynkin, charges) = lie.decode_irrep(id).unwrap();
+            product.encode_component_ids(
+                su2.encode_irrep(&dynkin, &[]).unwrap(),
+                U1Irrep::new(i32::try_from(charges[0]).unwrap()).sector_id(),
+            )
+        };
+        let label = |j: i64, q: i64| lie.encode_irrep(&[j], &[q]).unwrap();
+        let sectors: Vec<_> = (0..4)
+            .flat_map(|j| (-2..=2).map(move |q| (j, q)))
+            .map(|(j, q)| label(j, q))
+            .collect();
+        let outer: Vec<_> = (0..3)
+            .flat_map(|j| (-1..=1).map(move |q| (j, q)))
+            .map(|(j, q)| label(j, q))
+            .collect();
+        let checked = assert_lie_matches_product(&lie, &product, to_product, &sectors, &outer);
+        assert_eq!(checked, (20, 750, 9585, 0));
+    }
 }
 
 mod storage {
