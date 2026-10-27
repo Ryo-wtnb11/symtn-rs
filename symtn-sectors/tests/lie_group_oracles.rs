@@ -152,7 +152,6 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
     }
     assert_eq!(GroupId::so(5).unwrap(), GroupId::pso(5).unwrap());
     for root_system in [
-        RootSystem::G2,
         RootSystem::F4,
         RootSystem::E6,
         RootSystem::E7,
@@ -165,6 +164,19 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
             ))
         ));
     }
+}
+
+#[test]
+fn g2_is_constructible_and_admits_a_sector_while_f4_stays_unsupported() {
+    let g2 = rule(GroupId::g2());
+    let id = g2.encode_irrep(&[1, 0], &[]).unwrap();
+    assert_eq!(g2.decode_irrep(id).unwrap(), (vec![1, 0], vec![]));
+    assert!(matches!(
+        LieGroupFusionRule::new(GroupId::f4()),
+        Err(LieGroupFusionRuleError::Provider(
+            LieError::Unsupported { .. }
+        ))
+    ));
 }
 
 fn fusion(r: &LieGroupFusionRule, a: &[i64], b: &[i64]) -> BTreeMap<Vec<i64>, usize> {

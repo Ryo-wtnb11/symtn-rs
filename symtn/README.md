@@ -26,7 +26,7 @@ its CPU build enables `cpu-blas`, otherwise `cpu-faer`; see the
 [backend policy](../docs/backend_policy.md) and [`Cargo.toml`](Cargo.toml) for
 alternatives. `cuda` and `cgc-gen` add
 the typed CUDA surface and `LieGroupFusionRule`, respectively. The latter uses
-fusion-symbols A/B/C/D categories, their products, tori and U(n) with checked
+fusion-symbols A/B/C/D and G2 categories, their products, tori and U(n) with checked
 Generic Host execution, Dynkin-label-then-charge labels and explicit `GroupId`
 global forms. `SU2FusionRule`
 retains its compact multiplicity-free and physical-basis capabilities.
