@@ -256,9 +256,9 @@ fn provider_error(error: LieError) -> LieGroupFusionRuleError {
 impl LieGroupFusionRule {
     /// Constructs a rule and eagerly checks provider support for the full group.
     /// Every group that fusion-symbols' [`LieGroup::new`] executes is admitted:
-    /// simple and semisimple groups (D2 included), tori, U(n) and
+    /// simple and semisimple groups (D2 and G2 included), tori, U(n) and
     /// semisimple×torus central quotients. Groups it does not execute, such as
-    /// exceptional factors, return [`LieGroupFusionRuleError::Provider`] with
+    /// F4, E6, E7 and E8 factors, return [`LieGroupFusionRuleError::Provider`] with
     /// its `LieError::Unsupported`.
     ///
     /// The `RankNotRepresentable` bound covers this rule's label buffers only.

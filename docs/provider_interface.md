@@ -100,7 +100,7 @@ category's `frobenius_schur_phase`.
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
-| `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (A/B/C/D factors, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
+| `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (A/B/C/D and G2 factors, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
@@ -123,11 +123,11 @@ coordinate-wise sum of its inputs, the product's highest weight.
 Construct it with `LieGroupFusionRule::new(group)`, where `group` is a
 `fusion_symbols::lie::GroupId`; `group_id()` borrows that complete metadata.
 Supported families are SU(n), Sp(m), Spin(n), SO(n), their adjoint forms and
-fs's supported central quotients, including half-spin forms. Sp's argument is
+fs's supported central quotients, including half-spin forms, and G2. Sp's argument is
 the even matrix dimension. D2 forms (Spin(4), SO(4), PSO(4)), semisimple
 products, tori, U(n) and semisimple×torus quotients are admitted wherever
-fusion-symbols executes them; groups it does not execute, such as exceptional
-factors, return `LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })`
+fusion-symbols executes them; groups it does not execute, such as F4, E6, E7 and
+E8 factors, return `LieGroupFusionRuleError::Provider(LieError::Unsupported { .. })`
 at construction.
 
 `encode_irrep(dynkin, charges)` and `decode_irrep(id)` take the label as
