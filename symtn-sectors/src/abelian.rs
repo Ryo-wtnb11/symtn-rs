@@ -488,6 +488,13 @@ impl U1Codec {
     }
 }
 
+/// TensorKit `findindex - 1` of an integer U(1) charge, shared by
+/// [`U1FusionRule`] and the Lie-group rule's torus charges; `None` past `u64`.
+pub(crate) fn u1_order_position(charge: i64) -> Option<u64> {
+    4u64.checked_mul(charge.unsigned_abs())
+        .map(|position| position - u64::from(charge > 0))
+}
+
 impl CategoryCodec<U1> for U1Codec {
     type Sector = U1Irrep;
     type Error = FusionAlgebraError;
@@ -546,7 +553,9 @@ impl CategoryCodec<U1> for U1Codec {
             Ok(irrep) => irrep.charge(),
             Err(error) => panic!("{error}"),
         };
-        SectorOrderKey::position(4 * u64::from(charge.unsigned_abs()) - u64::from(charge > 0))
+        SectorOrderKey::position(
+            u1_order_position(i64::from(charge)).expect("an i32 charge's position fits u64"),
+        )
     }
 
     fn admit<'a, const N: usize>(
