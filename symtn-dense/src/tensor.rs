@@ -113,7 +113,11 @@ impl DenseTensor {
             #[cfg(feature = "tenferro")]
             DenseTensorInner::Tenferro(tensor) => {
                 <f64 as tenferro_tensor::TensorScalar>::into_typed(tensor)
-                    .and_then(tenferro_tensor::TypedTensor::into_host_vec)
+                    .map_err(|failure| failure.into_parts().1)
+                    .and_then(|typed| {
+                        tenferro_tensor::TypedTensor::<f64>::into_host_vec(typed)
+                            .map_err(|failure| failure.into_parts().1)
+                    })
                     .map_err(|err| tenferro_error("DenseTensor::into_f64_vec", err))
             }
             #[cfg(not(feature = "tenferro"))]
@@ -128,7 +132,11 @@ impl DenseTensor {
             #[cfg(feature = "tenferro")]
             DenseTensorInner::Tenferro(tensor) => {
                 <f32 as tenferro_tensor::TensorScalar>::into_typed(tensor)
-                    .and_then(tenferro_tensor::TypedTensor::into_host_vec)
+                    .map_err(|failure| failure.into_parts().1)
+                    .and_then(|typed| {
+                        tenferro_tensor::TypedTensor::<f32>::into_host_vec(typed)
+                            .map_err(|failure| failure.into_parts().1)
+                    })
                     .map_err(|err| tenferro_error("DenseTensor::into_f32_vec", err))
             }
             #[cfg(not(feature = "tenferro"))]
@@ -143,7 +151,11 @@ impl DenseTensor {
             #[cfg(feature = "tenferro")]
             DenseTensorInner::Tenferro(tensor) => {
                 <Complex32 as tenferro_tensor::TensorScalar>::into_typed(tensor)
-                    .and_then(tenferro_tensor::TypedTensor::into_host_vec)
+                    .map_err(|failure| failure.into_parts().1)
+                    .and_then(|typed| {
+                        tenferro_tensor::TypedTensor::<Complex32>::into_host_vec(typed)
+                            .map_err(|failure| failure.into_parts().1)
+                    })
                     .map_err(|err| tenferro_error("DenseTensor::into_c32_vec", err))
             }
             #[cfg(not(feature = "tenferro"))]
@@ -158,7 +170,11 @@ impl DenseTensor {
             #[cfg(feature = "tenferro")]
             DenseTensorInner::Tenferro(tensor) => {
                 <Complex64 as tenferro_tensor::TensorScalar>::into_typed(tensor)
-                    .and_then(tenferro_tensor::TypedTensor::into_host_vec)
+                    .map_err(|failure| failure.into_parts().1)
+                    .and_then(|typed| {
+                        tenferro_tensor::TypedTensor::<Complex64>::into_host_vec(typed)
+                            .map_err(|failure| failure.into_parts().1)
+                    })
                     .map_err(|err| tenferro_error("DenseTensor::into_c64_vec", err))
             }
             #[cfg(not(feature = "tenferro"))]

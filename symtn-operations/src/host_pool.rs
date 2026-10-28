@@ -118,6 +118,16 @@ pub fn install_region<R: Send>(site: HostPoolSite, op: impl FnOnce() -> R + Send
                 op()
             })
         }
+        // Already on a pool worker (a nested region): `install` holds the
+        // engine lock for the outer region, so re-entering it would deadlock;
+        // the nested Rayon work stays on the current pool anyway.
+        // ponytail: any Rayon worker counts, so a caller inside a foreign Rayon
+        // pool runs the region there; check the engine pool identity once
+        // threadteam exposes it.
+        Some(pool) if rayon::current_thread_index().is_some() => {
+            observe(site, Some(&pool));
+            op()
+        }
         Some(pool) => pool.install(|| {
             with_host_pool(&pool, || {
                 observe(site, Some(&pool));

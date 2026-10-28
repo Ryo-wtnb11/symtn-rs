@@ -77,18 +77,47 @@ fn note_backend_admission() {
     }
 }
 
-#[cfg(not(feature = "provider-inject"))]
-use tenferro_cpu::with_cpu_exec_session;
-use tenferro_cpu::{CpuBackend, CpuBackendKind, CpuContext};
+use std::sync::{Mutex, MutexGuard};
+use tenferro_cpu::{CpuEngine, Pool};
 #[cfg(not(feature = "provider-inject"))]
 use tenferro_linalg::{LinalgBackend, TensorLinalgExt, TensorReadLinalgExt};
-use tenferro_tensor::backend::{
-    BackendSession, BackendSessionHost, GroupedGemmConfig, GroupedGemmJob,
-};
 use tenferro_tensor::{
-    BackendCachedDot, BackendRuntimeCache, DotGeneralConfig, TensorDot, TensorRead, TensorView,
-    TensorViewMut, TensorWrite, TypedTensorView, TypedTensorViewMut,
+    DotGeneralConfig, Engine, SessionCachedDot, TensorDot, TensorRead, TensorView, TensorViewMut,
+    TensorWrite, TypedTensorView, TypedTensorViewMut,
 };
+
+/// CPU linear-algebra provider. Tenferro now fixes it at compile time
+/// (`native` xor `blas`), so only the compiled kind can be constructed.
+// ponytail: symtn-local stand-in for the removed `tenferro_cpu::CpuBackendKind`;
+// drop the runtime selector entirely once the public API is redesigned.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub enum CpuBackendKind {
+    #[cfg_attr(not(feature = "cpu-blas-core"), default)]
+    Faer,
+    #[cfg_attr(feature = "cpu-blas-core", default)]
+    Blas,
+}
+
+impl CpuBackendKind {
+    pub fn default_compiled() -> Self {
+        Self::default()
+    }
+}
+
+fn check_kind(op: &'static str, kind: CpuBackendKind) -> Result<(), DenseError> {
+    if kind == CpuBackendKind::default_compiled() {
+        Ok(())
+    } else {
+        Err(DenseError::Unsupported {
+            op,
+            message: match kind {
+                CpuBackendKind::Faer => "the faer CPU provider needs the cpu-faer feature",
+                CpuBackendKind::Blas => "the BLAS CPU provider needs a cpu-blas feature",
+            }
+            .to_string(),
+        })
+    }
+}
 
 #[derive(Clone, Copy)]
 struct StridedBatchRunLayout {
@@ -120,242 +149,223 @@ fn run_partition_covers(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
     start == jobs.len()
 }
 
-/// One CPU execution context — a parallelism hint plus resources for
-/// multi-threaded CPU work — shared by runtime-built executors using the
-/// compiled default provider kind. An explicitly requested nondefault kind
-/// uses a private provider context, while a custom executor owns its own
-/// configuration. The wrapper keeps callers independent of Tenferro types.
+/// One CPU engine shared by runtime-built executors: a tenferro
+/// [`CpuEngine`] that owns the runtime's `threadteam` pool, behind a mutex.
 ///
-/// Each executor keeps its own `CpuBackend` and `BufferPool`; scratch reuse,
-/// synchronization, and thread behavior remain provider concerns.
+/// Experimental (tenferro main d346af90): tenferro removed its process-wide
+/// execution arbiter, and a `threadteam::Pool` belongs to exactly one engine,
+/// so the runtime's executors share one engine and serialize on its lock for
+/// each dense call — the same serialization the removed arbiter imposed.
+// ponytail: global-per-runtime engine mutex. The approved end state (engine
+// option A) passes `&mut CpuEngine` through every op instead.
 #[derive(Clone, Debug)]
 pub struct SharedCpuContext {
-    ctx: Arc<CpuContext>,
+    inner: Arc<SharedEngine>,
+}
+
+#[derive(Debug)]
+struct SharedEngine {
+    engine: Mutex<CpuEngine>,
+    threads: usize,
 }
 
 impl SharedCpuContext {
-    /// Environment-driven context (`RAYON_NUM_THREADS`, else the machine's
-    /// available parallelism) — matches what `CpuBackend::new` reads per call.
-    pub fn from_env() -> Self {
+    fn from_engine(engine: CpuEngine) -> Self {
+        let threads = engine.num_threads();
         Self {
-            ctx: Arc::new(CpuContext::from_env()),
+            inner: Arc::new(SharedEngine {
+                engine: Mutex::new(engine),
+                threads,
+            }),
         }
     }
 
-    /// Fixed thread count; `1` builds no pool at all (fully serial), same as
-    /// the per-executor constructors it replaces.
+    /// `RAYON_NUM_THREADS` if set, else the machine's available parallelism.
+    pub fn from_env() -> Self {
+        let threads = std::env::var("RAYON_NUM_THREADS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|&threads| threads > 0)
+            .unwrap_or_else(available_parallelism);
+        Self::with_threads(threads).unwrap_or_else(|_| Self::from_engine(CpuEngine::serial()))
+    }
+
+    /// Fixed thread count; `1` builds no pool at all (fully serial).
     pub fn with_threads(threads: usize) -> Result<Self, DenseError> {
-        CpuContext::with_threads(threads)
-            .map(|ctx| Self { ctx: Arc::new(ctx) })
-            .map_err(|err| tenferro_error("SharedCpuContext::with_threads", err))
+        if threads <= 1 {
+            return Ok(Self::from_engine(CpuEngine::serial()));
+        }
+        Pool::builder()
+            .threads(threads)
+            .build()
+            .map(|pool| Self::from_engine(CpuEngine::new(pool)))
+            .map_err(|err| DenseError::Backend {
+                backend: DenseBackend::Tenferro,
+                op: "SharedCpuContext::with_threads",
+                message: err.to_string(),
+            })
     }
 
     pub fn num_threads(&self) -> usize {
-        self.ctx.num_threads()
+        self.inner.threads
     }
 
-    /// One thread per CPU the process may run on (affinity-aware), and no
-    /// environment read: the default size of a runtime's CPU pool.
+    /// One thread per CPU the process may run on.
     pub fn with_available_parallelism() -> Result<Self, DenseError> {
-        Self::with_threads(tenferro_cpu::available_parallelism())
+        Self::with_threads(available_parallelism())
     }
 
-    /// Runs `op` on this context's Rayon pool, the pool its dense kernels use.
-    /// A one-thread context has no pool and runs `op` on the calling thread.
-    /// Called from a worker of the same pool, `op` runs inline.
+    fn lock(&self) -> MutexGuard<'_, CpuEngine> {
+        // The engine tracks its own broken state after a panic.
+        self.inner
+            .engine
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Runs `op` on this context's pool (the engine's `threadteam` pool, which
+    /// Rayon work inside `op` then uses). A serial context runs `op` inline.
     ///
-    /// Only for backend-free parallel regions (symtn's `host_pool`). Why not a
-    /// whole operation: the pool's workers are registered with this context's
-    /// Tenferro execution scope, so a dense backend call started on a worker
-    /// while another operation's dense call on the same context is active
-    /// panics with Tenferro's re-entry error (`BACKEND_REENTRY_PANIC`), even
-    /// without work stealing.
+    /// Holds the engine lock for the region, so `op` must not call a dense
+    /// executor on this context, and a caller already on a pool worker must
+    /// run inline instead of calling this (it would deadlock).
     #[doc(hidden)]
     pub fn install<R: Send>(&self, op: impl FnOnce() -> R + Send) -> R {
-        self.ctx.install(op)
+        if self.inner.threads <= 1 {
+            return op();
+        }
+        let mut engine = self.lock();
+        let result = match engine.exec() {
+            Ok(exec) => exec.into_token().external(|_width| op()),
+            // A broken engine refuses tokens; the region itself is still
+            // correct on the calling thread.
+            Err(_) => op(),
+        };
+        result
     }
 
-    /// Identity check for regression tests: do two handles share one context
-    /// (hence one rayon pool)?
+    /// Identity check for regression tests: do two handles share one engine?
     #[doc(hidden)]
     pub fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.ctx, &other.ctx)
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     /// Address identity of the shared context, for observation probes only.
     #[doc(hidden)]
     pub fn identity(&self) -> usize {
-        Arc::as_ptr(&self.ctx) as usize
+        Arc::as_ptr(&self.inner) as usize
     }
+}
+
+fn available_parallelism() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
 
 #[derive(Debug)]
 pub struct DefaultDenseExecutor {
-    backend: CpuBackend,
+    ctx: SharedCpuContext,
+    // Whether `ctx` came from `with_shared_context` (a runtime's engine).
+    shared: bool,
     matmul_config: DotGeneralConfig,
     strided_batch_matmul_config: DotGeneralConfig,
-    grouped_cache: <CpuBackend as BackendRuntimeCache>::RuntimeCache,
-    grouped_jobs: Vec<GroupedGemmJob>,
-    // The runtime-shared context this executor was built on, if any (see
-    // `with_shared_context`). Kept here rather than read back off the backend:
-    // tenferro's `CpuBackend::linalg_context` accessor is `cpu-faer`-gated, so
-    // a hook based on it does not compile on BLAS-provider builds.
-    shared_ctx: Option<SharedCpuContext>,
-    // Test-only count of low-level batch seam submissions: one per grouped or
-    // strided call and one per job in the op-bearing serial fallback.
+    // Test-only count of low-level batch seam submissions: one per strided
+    // call and one per job in the serial route.
     #[cfg(test)]
     seam_dispatches: usize,
+    // Test-only: jobs of the last batch routed where the grouped entry was.
+    #[cfg(test)]
+    grouped_route_jobs: usize,
 }
 
 impl DefaultDenseExecutor {
     pub fn new() -> Self {
-        Self::from_backend(CpuBackend::new())
+        Self::from_context(SharedCpuContext::from_env(), false)
     }
 
     pub fn with_threads(threads: usize) -> Result<Self, DenseError> {
-        // `.into()`: since tenferro #1376 the BLAS-provider builds of these
-        // constructors return `CpuBackendError`, while faer builds return the
-        // crate `Error`; `Into` is identity on the latter, so one spelling
-        // compiles under every provider feature.
-        CpuBackend::with_threads(threads)
-            .map(Self::from_backend)
-            .map_err(|err| tenferro_error("CpuBackend::with_threads", err.into()))
+        SharedCpuContext::with_threads(threads).map(|ctx| Self::from_context(ctx, false))
     }
 
-    /// Builds an executor on a specific CPU linear-algebra provider
-    /// ([`CpuBackendKind::Faer`] or [`CpuBackendKind::Blas`]). Fails if the
-    /// requested provider was not compiled in (e.g. `Blas` without a
-    /// `cpu-blas`/`blas-*` feature) — the check happens here, not at first use.
+    /// Builds an executor on a specific CPU linear-algebra provider. Fails if
+    /// the requested provider was not compiled in.
     pub fn with_kind(kind: CpuBackendKind) -> Result<Self, DenseError> {
-        CpuBackend::with_kind(kind)
-            .map(Self::from_backend)
-            .map_err(|err| tenferro_error("CpuBackend::with_kind", err.into()))
+        check_kind("DefaultDenseExecutor::with_kind", kind)?;
+        Ok(Self::new())
     }
 
     /// [`Self::with_kind`] plus an explicit thread count for the provider.
     pub fn with_threads_and_kind(threads: usize, kind: CpuBackendKind) -> Result<Self, DenseError> {
-        CpuBackend::with_threads_and_kind(threads, kind)
-            .map(Self::from_backend)
-            .map_err(|err| tenferro_error("CpuBackend::with_threads_and_kind", err.into()))
+        check_kind("DefaultDenseExecutor::with_threads_and_kind", kind)?;
+        Self::with_threads(threads)
     }
 
-    /// Builds an executor with an optional provider kind. `None` uses Tenferro's
-    /// resolved compiled default — BLAS when its CPU build enables `cpu-blas`,
-    /// otherwise faer — on the runtime's shared [`SharedCpuContext`]; an
-    /// explicit nondefault kind uses a private provider context. Each executor
-    /// retains its own backend and buffer pool; this does not promise lock-free
-    /// scratch access or a provider thread policy.
+    /// Builds an executor on the runtime's shared engine. A kind other than the
+    /// compiled one is unsupported (tenferro selects it at compile time).
     pub fn with_shared_context(
         ctx: &SharedCpuContext,
         kind: Option<CpuBackendKind>,
     ) -> Result<Self, DenseError> {
-        match kind {
-            // ponytail: tenferro has no pub context+kind constructor, so the
-            // one non-default-kind combination (explicit Faer while a BLAS
-            // provider is compiled in) keeps a private context/pool exactly as
-            // before this seam existed (`shared_ctx` stays `None`). Lift when
-            // tenferro exposes `from_context` with a kind.
-            Some(kind) if kind != CpuBackendKind::default_compiled() => {
-                Self::with_threads_and_kind(ctx.num_threads(), kind)
-            }
-            // `from_context` fixes the kind at `default_compiled`, so it also
-            // covers an explicit request FOR that default.
-            _ => {
-                let mut executor =
-                    Self::from_backend(CpuBackend::from_context(Arc::clone(&ctx.ctx)));
-                executor.shared_ctx = Some(ctx.clone());
-                Ok(executor)
-            }
+        if let Some(kind) = kind {
+            check_kind("DefaultDenseExecutor::with_shared_context", kind)?;
         }
+        Ok(Self::from_context(ctx.clone(), true))
     }
 
-    /// Regression-test hook: does this executor run on `ctx`'s rayon pool?
+    /// Regression-test hook: does this executor run on `ctx`'s engine?
     #[doc(hidden)]
     pub fn shares_cpu_context(&self, ctx: &SharedCpuContext) -> bool {
-        self.shared_ctx.as_ref().is_some_and(|own| own.ptr_eq(ctx))
+        self.shared && self.ctx.ptr_eq(ctx)
     }
 
-    fn from_backend(backend: CpuBackend) -> Self {
+    /// The compiled provider kind this executor runs on.
+    pub fn kind(&self) -> CpuBackendKind {
+        CpuBackendKind::default_compiled()
+    }
+
+    fn from_context(ctx: SharedCpuContext, shared: bool) -> Self {
         Self {
-            backend,
+            ctx,
+            shared,
             matmul_config: DotGeneralConfig {
-                lhs_contracting_dims: vec![1],
-                rhs_contracting_dims: vec![0],
-                lhs_batch_dims: Vec::new(),
-                rhs_batch_dims: Vec::new(),
+                lhs_contracting_dims: [1].into_iter().collect(),
+                rhs_contracting_dims: [0].into_iter().collect(),
+                lhs_batch_dims: Default::default(),
+                rhs_batch_dims: Default::default(),
             },
             strided_batch_matmul_config: DotGeneralConfig {
-                lhs_contracting_dims: vec![1],
-                rhs_contracting_dims: vec![0],
-                lhs_batch_dims: vec![2],
-                rhs_batch_dims: vec![2],
+                lhs_contracting_dims: [1].into_iter().collect(),
+                rhs_contracting_dims: [0].into_iter().collect(),
+                lhs_batch_dims: [2].into_iter().collect(),
+                rhs_batch_dims: [2].into_iter().collect(),
             },
-            grouped_cache: <CpuBackend as BackendRuntimeCache>::RuntimeCache::default(),
-            grouped_jobs: Vec::new(),
-            shared_ctx: None,
             #[cfg(test)]
             seam_dispatches: 0,
+            #[cfg(test)]
+            grouped_route_jobs: 0,
         }
     }
 
-    /// Runs `body` once inside one Tenferro execution scope on this
-    /// executor's backend, so every session it opens shares one permit and
-    /// pool install. Inside an active symtn scope it runs inline; where
-    /// Tenferro cannot enter a scope it runs unscoped, paying one admission
-    /// per session as without a scope.
-    #[cfg(not(feature = "provider-inject"))]
+    /// Runs `body` as one linear-algebra scope. Tenferro no longer has an
+    /// execution scope or per-call admission (the caller owns the engine), so
+    /// this only marks the scope for the observation counters: one admission
+    /// for the whole body, none for the calls inside it. Nested scopes run
+    /// inline.
     fn in_execution_scope(
         &mut self,
-        mut body: impl FnMut(&mut Self) -> Result<(), DenseError> + Send,
+        mut body: impl FnMut(&mut Self) -> Result<(), DenseError>,
     ) -> Result<(), DenseError> {
         if IN_LINALG_SCOPE.get() {
             return body(self);
         }
-        // `with_execution_scope` borrows its backend while the body needs
-        // `&mut self`; a clone keeps the runtime identity, engine and domain,
-        // which is what the scope matches sessions against.
-        let witness = self.backend.clone();
-        let mut entered = false;
-        let scoped = witness.with_execution_scope(|| {
-            entered = true;
-            ADMISSIONS.fetch_add(1, Ordering::Relaxed);
-            IN_LINALG_SCOPE.set(true);
-            struct Leave;
-            impl Drop for Leave {
-                fn drop(&mut self) {
-                    IN_LINALG_SCOPE.set(false);
-                }
+        ADMISSIONS.fetch_add(1, Ordering::Relaxed);
+        IN_LINALG_SCOPE.set(true);
+        struct Leave;
+        impl Drop for Leave {
+            fn drop(&mut self) {
+                IN_LINALG_SCOPE.set(false);
             }
-            let _leave = Leave;
-            body(&mut *self)
-        });
-        match scoped {
-            Ok(result) => result,
-            // Not entered because the domain is caller-owned (`Unsupported`)
-            // or a Tenferro execution is already active on this thread
-            // (`RuntimeState`): per-session admission is still correct, only
-            // slower, so run the body unscoped.
-            Err(err)
-                if !entered
-                    && matches!(
-                        err.kind(),
-                        tenferro_tensor::ErrorKind::Unsupported
-                            | tenferro_tensor::ErrorKind::RuntimeState
-                    ) =>
-            {
-                body(self)
-            }
-            Err(err) => Err(tenferro_error("with_execution_scope", err)),
         }
-    }
-
-    // provider-inject has no linear-algebra scope (see `with_linalg_scope`);
-    // each session admits itself.
-    #[cfg(feature = "provider-inject")]
-    fn in_execution_scope(
-        &mut self,
-        mut body: impl FnMut(&mut Self) -> Result<(), DenseError> + Send,
-    ) -> Result<(), DenseError> {
+        let _leave = Leave;
         body(self)
     }
 
@@ -369,11 +379,9 @@ impl DefaultDenseExecutor {
         self.seam_dispatches
     }
 
-    /// Jobs staged for the last grouped submission; zero on a fresh executor
-    /// whose identity batches all took the strided route.
     #[cfg(test)]
     pub(crate) fn staged_grouped_jobs(&self) -> usize {
-        self.grouped_jobs.len()
+        self.grouped_route_jobs
     }
 
     /// Routes one typed identity batch by what the two tenferro entries can
@@ -448,69 +456,27 @@ impl DefaultDenseExecutor {
                 wrap_read,
             );
         }
-        self.grouped_jobs.clear();
-        self.grouped_jobs.extend(jobs.iter().map(|job| {
-            GroupedGemmJob::new(
-                job.dst_offset,
-                job.lhs_offset,
-                job.rhs_offset,
-                job.rows,
-                job.contracted,
-                job.cols,
-            )
-        }));
-        self.matmul_grouped_bundle_typed(output, lhs, rhs, alpha, beta, wrap_write, wrap_read)
-    }
-
-    /// Single grouped-gemm call over the jobs staged in `self.grouped_jobs`.
-    /// One seam dispatch regardless of how many runs fed it.
-    #[allow(clippy::too_many_arguments)]
-    fn matmul_grouped_bundle_typed<T, W, R>(
-        &mut self,
-        output: &mut DenseViewMut<'_, T>,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-        wrap_write: W,
-        wrap_read: R,
-    ) -> Result<(), DenseError>
-    where
-        T: 'static,
-        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x>,
-        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
-    {
+        // ponytail: tenferro retired its grouped-GEMM entry; the GroupedPlan
+        // replacement lives in `cpueinsum`, which symtn does not depend on.
+        // Until that dependency is approved every job runs in order on the
+        // serial route (same jobs, same order; no grouped lane fan-out).
         #[cfg(test)]
         {
-            self.seam_dispatches += 1;
+            self.grouped_route_jobs = jobs.len();
         }
-        // shape/strides carry the view's own 'a lifetime, so capture them before
-        // the mutable data borrow when rebuilding the full-buffer write view.
-        let shape = output.shape();
-        let strides = output.strides();
-        let offset = output.offset();
-        let out_view = DenseViewMut::new(output.data_mut(), shape, strides, offset)?;
-        let lhs = TensorRead::from_view(tenferro_view(wrap_read(lhs))?);
-        let rhs = TensorRead::from_view(tenferro_view(wrap_read(rhs))?);
-        let output = TensorWrite::from_view(tenferro_view_mut(wrap_write(out_view))?);
-        let accumulation = tenferro_tensor::DotGeneralAccumulation {
-            lhs_conj: false,
-            rhs_conj: false,
-            alpha: tenferro_scalar(alpha),
-            beta: tenferro_scalar(beta),
-        };
-        let config = GroupedGemmConfig::new(&self.grouped_jobs, accumulation);
-        note_backend_admission();
-        BackendCachedDot::grouped_gemm_cached(
-            &mut self.backend,
-            &mut self.grouped_cache,
-            None,
+        self.matmul_batch_axpby_ops_serial_typed(
+            output,
             lhs,
             rhs,
-            &config,
-            output,
+            jobs,
+            0,
+            MatrixOp::Identity,
+            MatrixOp::Identity,
+            alpha,
+            beta,
+            wrap_write,
+            wrap_read,
         )
-        .map_err(|err| tenferro_error("grouped_gemm", err))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -670,9 +636,9 @@ impl DefaultDenseExecutor {
         wrap_read: R,
     ) -> Result<(), DenseError>
     where
-        T: 'static + Send + Sync,
-        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x> + Send,
-        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x> + Send,
+        T: 'static,
+        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x>,
+        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
     {
         if jobs.is_empty() {
             // A session is a process-wide critical section; do not take it for
@@ -680,56 +646,35 @@ impl DefaultDenseExecutor {
             return Ok(());
         }
         let output_base = output.offset();
-        // One session for the whole job loop instead of one per job: Tenferro
-        // charges execution-domain admission, the engine mutex, and (on faer) a
-        // synchronous Rayon worker handoff per session, and that cost is what
-        // dominates a batch of small GEMMs. The jobs, their kernels, their
-        // submission order, their alpha/beta and their conjugation flags are
-        // unchanged, and each still uses the executor's own plan-cache slot, so
-        // the results are bitwise identical to the per-job path.
-        //
-        // A CPU session is a process-wide critical section: it holds the global
-        // execution permit (faer: CpuSet compatibility; BLAS: provider
-        // exclusive, so every other thread's Tenferro call blocks) and, on
-        // faer, runs this closure on Tenferro's Rayon pool for the whole scope.
-        // The scope therefore covers the numerical loop only. Nothing inside it
-        // compiles a plan, runs a provider callback, reads an
-        // allocation-observing thread-local, forks with `rayon::join`, or waits
-        // on another thread, and nothing inside it calls a backend-level entry
-        // — that re-entry panics in release.
+        // One engine lock for the whole job loop; each job keeps its own
+        // plan-cache slot, order, alpha/beta and conjugation flags.
         let Self {
-            backend,
+            ctx,
             matmul_config,
-            grouped_cache,
             #[cfg(test)]
             seam_dispatches,
             ..
         } = self;
         note_session_opened();
-        #[cfg(test)]
-        let (key, caller) = (session_key(backend), std::thread::current().id());
-        backend.with_backend_session_cached(grouped_cache, |session| {
+        let mut engine = ctx.lock();
+        Self::run_batch_jobs_in_session(
+            &mut engine,
+            matmul_config,
             #[cfg(test)]
-            record_session_thread(key, caller);
-            Self::run_batch_jobs_in_session(
-                session,
-                matmul_config,
-                #[cfg(test)]
-                seam_dispatches,
-                output,
-                output_base,
-                lhs,
-                rhs,
-                jobs,
-                cache_start,
-                lhs_op,
-                rhs_op,
-                alpha,
-                beta,
-                wrap_write,
-                wrap_read,
-            )
-        })
+            seam_dispatches,
+            output,
+            output_base,
+            lhs,
+            rhs,
+            jobs,
+            cache_start,
+            lhs_op,
+            rhs_op,
+            alpha,
+            beta,
+            wrap_write,
+            wrap_read,
+        )
     }
 
     /// The numerical body of [`Self::matmul_batch_axpby_ops_serial_typed`],
@@ -738,7 +683,7 @@ impl DefaultDenseExecutor {
     /// re-enter the execution arbiter and panic.
     #[allow(clippy::too_many_arguments)]
     fn run_batch_jobs_in_session<T, W, R>(
-        session: &mut dyn BackendSession,
+        session: &mut CpuEngine,
         matmul_config: &DotGeneralConfig,
         #[cfg(test)] seam_dispatches: &mut usize,
         output: &mut DenseViewMut<'_, T>,
@@ -1011,9 +956,7 @@ impl DefaultDenseExecutor {
             self.seam_dispatches += 1;
         }
         note_backend_admission();
-        BackendCachedDot::dot_general_read_into_accum_cached(
-            &mut self.backend,
-            &mut self.grouped_cache,
+        self.ctx.lock().dot_general_read_into_accum_cached(
             Some(cache_slot),
             lhs,
             rhs,
@@ -1040,10 +983,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         {
             // Both compiled CPU providers factorize the full matrices
             // natively, so neither reaches the `[U1 | I]` QR completion.
-            matches!(
-                self.backend.kind(),
-                CpuBackendKind::Faer | CpuBackendKind::Blas
-            )
+            matches!(self.kind(), CpuBackendKind::Faer | CpuBackendKind::Blas)
         }
         #[cfg(any(
             not(any(feature = "cpu-faer", feature = "cpu-blas-core")),
@@ -1134,15 +1074,7 @@ impl DenseExecutor for DefaultDenseExecutor {
                 crate::probe::owned_full_svd_input(pointer);
             }
             note_session_opened();
-            let outputs = self
-                .backend
-                .with_backend_session(|session| {
-                    with_cpu_exec_session(session, |exec| exec.svd_full(&input))
-                })
-                .ok_or_else(|| DenseError::Unsupported {
-                    op: "svd_full_owned",
-                    message: "CPU backend session unavailable".to_string(),
-                })?
+            let outputs = LinalgBackend::svd_full(&mut *self.ctx.lock(), &input)
                 .map_err(|err| tenferro_error("svd_full_owned", err))?;
             if outputs.len() != 3 {
                 return Err(crate::executor::arity_mismatch(
@@ -1167,7 +1099,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(not(feature = "provider-inject"))]
         {
             let input = tenferro_view(input)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(input).svd_read(exec)
             })
             .map_err(|err| tenferro_error("svd_read", err))
@@ -1189,7 +1121,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(not(feature = "provider-inject"))]
         {
             let input = tenferro_view(input)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(input).qr_read(exec)
             })
             .map_err(|err| tenferro_error("qr_read", err))
@@ -1211,7 +1143,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(not(feature = "provider-inject"))]
         {
             let input = tenferro_view(input)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(input).eig_read(exec)
             })
             .map_err(|err| tenferro_error("eig_read", err))
@@ -1233,7 +1165,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(not(feature = "provider-inject"))]
         {
             let input = tenferro_view(input)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(input).eigh_read(exec)
             })
             .map_err(|err| tenferro_error("eigh_read", err))
@@ -1267,7 +1199,7 @@ impl DenseExecutor for DefaultDenseExecutor {
             DenseFactorization::Qr => (2, "qr_read"),
         };
         let mut flat = Vec::with_capacity(arity * inputs.len());
-        with_cpu_linalg(&mut self.backend, |exec| {
+        with_cpu_linalg(&self.ctx, |exec| {
             let mut run = || -> Result<(), DenseError> {
                 for &input in inputs {
                     let input = TensorRead::from_view(tenferro_view(input)?);
@@ -1342,7 +1274,7 @@ impl DenseExecutor for DefaultDenseExecutor {
             let a = tenferro_view(a)?;
             let b = tenferro_view(b)?;
             let x = tenferro_view_mut(x)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(a).solve_read_into(
                     TensorRead::from_view(b),
                     TensorWrite::from_view(x),
@@ -1364,7 +1296,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(not(feature = "provider-inject"))]
         {
             let input = tenferro_view(input)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(input).svdvals_read(exec)
             })
             .map_err(|err| tenferro_error("svd_values", err))
@@ -1381,7 +1313,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(not(feature = "provider-inject"))]
         {
             let input = tenferro_view(input)?;
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 TensorRead::from_view(input).eigvalsh_read(exec)
             })
             .map_err(|err| tenferro_error("eigh_values", err))
@@ -1406,7 +1338,7 @@ impl DenseExecutor for DefaultDenseExecutor {
             // allocation-observing thread-local, forks with `rayon::join`, or
             // waits on another thread, and nothing inside it calls a
             // backend-level entry (that re-entry panics in release).
-            with_cpu_linalg(&mut self.backend, |exec| {
+            with_cpu_linalg(&self.ctx, |exec| {
                 let owned = exec.to_contiguous_read(TensorRead::from_view(input))?;
                 owned.eigvals(exec)
             })
@@ -1436,11 +1368,13 @@ impl DenseExecutor for DefaultDenseExecutor {
                 .map_err(|err| tenferro_error("dot_general_accum", err))?;
             accumulation.lhs_conj = config.lhs_conj();
             accumulation.rhs_conj = config.rhs_conj();
-            self.backend
+            self.ctx
+                .lock()
                 .dot_general_read_into_accum(lhs, rhs, &dot_config, accumulation, output)
                 .map_err(|err| tenferro_error("dot_general_accum", err))
         } else {
-            self.backend
+            self.ctx
+                .lock()
                 .dot_general_read_into(lhs, rhs, &dot_config, output)
                 .map_err(|err| tenferro_error("dot_general_read_into", err))
         }
@@ -1457,7 +1391,8 @@ impl DenseExecutor for DefaultDenseExecutor {
         let lhs = TensorRead::from_view(tenferro_view(lhs)?);
         let rhs = TensorRead::from_view(tenferro_view(rhs)?);
         let output = TensorWrite::from_view(tenferro_view_mut(output)?);
-        self.backend
+        self.ctx
+            .lock()
             .dot_general_read_into(lhs, rhs, &self.matmul_config, output)
             .map_err(|err| tenferro_error("dot_general_read_into", err))
     }
@@ -1483,7 +1418,8 @@ impl DenseExecutor for DefaultDenseExecutor {
             alpha: tenferro_scalar(alpha),
             beta: tenferro_scalar(beta),
         };
-        self.backend
+        self.ctx
+            .lock()
             .dot_general_read_into_accum(lhs, rhs, &self.matmul_config, accumulation, output)
             .map_err(|err| tenferro_error("dot_general_accum", err))
     }
@@ -1713,10 +1649,10 @@ fn typed_tenferro_view_mut<'a, T: 'static>(
 
 fn tenferro_dot_config(config: &DenseDotConfig) -> DotGeneralConfig {
     DotGeneralConfig {
-        lhs_contracting_dims: config.lhs_contracting_dims().to_vec(),
-        rhs_contracting_dims: config.rhs_contracting_dims().to_vec(),
-        lhs_batch_dims: config.lhs_batch_dims().to_vec(),
-        rhs_batch_dims: config.rhs_batch_dims().to_vec(),
+        lhs_contracting_dims: config.lhs_contracting_dims().iter().copied().collect(),
+        rhs_contracting_dims: config.rhs_contracting_dims().iter().copied().collect(),
+        lhs_batch_dims: config.lhs_batch_dims().iter().copied().collect(),
+        rhs_batch_dims: config.rhs_batch_dims().iter().copied().collect(),
     }
 }
 
@@ -1748,44 +1684,12 @@ fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
 }
 
 #[cfg(not(feature = "provider-inject"))]
-fn with_cpu_linalg<R: Send>(
-    backend: &mut CpuBackend,
-    f: impl FnOnce(&mut dyn BackendSession) -> tenferro_tensor::Result<R> + Send,
+fn with_cpu_linalg<R>(
+    ctx: &SharedCpuContext,
+    f: impl FnOnce(&mut dyn Engine) -> tenferro_tensor::Result<R>,
 ) -> tenferro_tensor::Result<R> {
     note_session_opened();
-    #[cfg(test)]
-    {
-        let (key, caller) = (session_key(backend), std::thread::current().id());
-        backend.with_backend_session(|s| {
-            record_session_thread(key, caller);
-            f(s)
-        })
-    }
-    #[cfg(not(test))]
-    backend.with_backend_session(f)
-}
-
-// Test-only record of (backend, caller thread, thread the Tenferro session
-// closure ran on) for each `with_cpu_linalg` and serial-batch session. It is
-// process-wide because the closure may run on a pool worker, so tests read it
-// filtered by their own executor's backend.
-#[cfg(test)]
-type SessionThreads = Vec<(usize, std::thread::ThreadId, std::thread::ThreadId)>;
-
-#[cfg(test)]
-static SESSION_THREADS: std::sync::Mutex<SessionThreads> = std::sync::Mutex::new(Vec::new());
-
-#[cfg(test)]
-fn session_key(backend: &CpuBackend) -> usize {
-    std::ptr::from_ref(backend) as usize
-}
-
-#[cfg(test)]
-fn record_session_thread(key: usize, caller: std::thread::ThreadId) {
-    SESSION_THREADS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push((key, caller, std::thread::current().id()));
+    f(&mut *ctx.lock())
 }
 
 #[cfg(feature = "provider-inject")]
@@ -1802,6 +1706,9 @@ fn linalg_unavailable(op: &'static str) -> DenseError {
     not(feature = "provider-inject")
 ))]
 mod linalg_scope_tests {
+    // The Tenferro session/scope thread-hop and caller-owned-domain tests were
+    // removed: tenferro main has no execution arbiter, sessions or external
+    // domains any more, so there is no hop to observe.
     use super::*;
 
     const ROWS: usize = 5;
@@ -1813,7 +1720,6 @@ mod linalg_scope_tests {
             .collect()
     }
 
-    /// Every output bit of an SVD then a QR of each of three matrices.
     fn factor_bits(dense: &mut dyn DenseExecutor) -> Vec<u64> {
         let mut bits = Vec::new();
         for seed in 0..3 {
@@ -1832,21 +1738,6 @@ mod linalg_scope_tests {
         bits
     }
 
-    /// Runs [`factor_bits`] in a scope; also reports whether the Tenferro
-    /// execution scope was entered for the body.
-    fn scoped_bits(executor: &mut DefaultDenseExecutor) -> (bool, Vec<u64>) {
-        let mut entered = None;
-        let mut bits = Vec::new();
-        executor
-            .with_linalg_scope(&mut |dense| {
-                entered = Some(IN_LINALG_SCOPE.get());
-                bits = factor_bits(dense);
-                Ok(())
-            })
-            .unwrap();
-        (entered.expect("scope body runs"), bits)
-    }
-
     fn executors() -> [DefaultDenseExecutor; 2] {
         [
             DefaultDenseExecutor::new(),
@@ -1855,72 +1746,7 @@ mod linalg_scope_tests {
     }
 
     #[test]
-    fn managed_scope_is_entered_and_bitwise_matches_per_call_sessions() {
-        for mut executor in executors() {
-            let unscoped = factor_bits(&mut executor);
-            let (entered, scoped) = scoped_bits(&mut executor);
-            assert!(entered);
-            assert_eq!(scoped, unscoped);
-            assert!(!IN_LINALG_SCOPE.get(), "scope flag leaks past the call");
-        }
-    }
-
-    /// (caller, session) threads of the sessions the executor whose backend
-    /// is `key` opens during `run`.
-    fn session_threads_of(
-        key: usize,
-        run: impl FnOnce(),
-    ) -> Vec<(std::thread::ThreadId, std::thread::ThreadId)> {
-        let lock = || SESSION_THREADS.lock().unwrap_or_else(|p| p.into_inner());
-        let before = lock().len();
-        run();
-        lock()[before..]
-            .iter()
-            .filter(|&&(recorded, ..)| recorded == key)
-            .map(|&(_, caller, session)| (caller, session))
-            .collect()
-    }
-
-    /// Tenferro-side evidence, not symtn bookkeeping: inside the scope every
-    /// session closure runs on the body's own thread, so no session installs
-    /// onto the pool again; outside it each session hops to a pool worker.
-    #[test]
-    fn scoped_sessions_run_on_the_body_thread_and_unscoped_ones_hop() {
-        let mut executor = DefaultDenseExecutor::new();
-        let key = session_key(&executor.backend);
-        let mut body_thread = None;
-        let mut scoped = Vec::new();
-        executor
-            .with_linalg_scope(&mut |dense| {
-                body_thread = Some(std::thread::current().id());
-                scoped = session_threads_of(key, || {
-                    factor_bits(dense);
-                });
-                Ok(())
-            })
-            .unwrap();
-        let body_thread = body_thread.unwrap();
-        assert_ne!(
-            body_thread,
-            std::thread::current().id(),
-            "body runs on a pool worker"
-        );
-        assert_eq!(scoped.len(), 6);
-        assert!(scoped
-            .iter()
-            .all(|&(caller, session)| caller == body_thread && session == body_thread));
-
-        let unscoped = session_threads_of(key, || {
-            factor_bits(&mut executor);
-        });
-        assert_eq!(unscoped.len(), 6);
-        assert!(unscoped
-            .iter()
-            .all(|&(caller, session)| caller == std::thread::current().id() && session != caller));
-    }
-
-    #[test]
-    fn nested_scope_runs_inline_in_the_outer_scope() {
+    fn scope_bitwise_matches_per_call_and_nests_inline() {
         for mut executor in executors() {
             let unscoped = factor_bits(&mut executor);
             let mut inner = None;
@@ -1933,269 +1759,7 @@ mod linalg_scope_tests {
                 })
                 .unwrap();
             assert_eq!(inner, Some((true, unscoped)));
-        }
-    }
-
-    #[test]
-    fn active_tenferro_scope_falls_back_to_per_call_sessions() {
-        for mut executor in executors() {
-            let unscoped = factor_bits(&mut executor);
-            let witness = executor.backend.clone();
-            let (entered, scoped) = witness
-                .with_execution_scope(|| scoped_bits(&mut executor))
-                .unwrap();
-            assert!(
-                !entered,
-                "Tenferro rejects a nested scope; body runs unscoped"
-            );
-            assert_eq!(scoped, unscoped);
-        }
-    }
-
-    /// A `DefaultDenseExecutor` on a caller-owned CPU domain, or `None` where
-    /// the provider refuses such a domain with the typed error it must use.
-    fn caller_owned_executor() -> Option<DefaultDenseExecutor> {
-        use std::num::NonZeroUsize;
-        use tenferro_cpu::{
-            discover_cpu_topology, CpuPlacementGuarantee, ExternalCpuDomain, ResolvedCpuPlacement,
-        };
-        let id = tenferro_tensor::CpuDomainId::new(1389);
-        let domain = ExternalCpuDomain::new(
-            id,
-            ResolvedCpuPlacement::AllAllowed {
-                cpus: discover_cpu_topology().unwrap().allowed_cpus().clone(),
-            },
-            Arc::new(CpuContext::with_threads(2).unwrap()),
-            NonZeroUsize::new(2).unwrap(),
-            CpuPlacementGuarantee::AdvisoryDeclared,
-        )
-        .unwrap();
-        match CpuBackend::from_external_managed_domains(id, [domain]) {
-            Ok(backend) => Some(DefaultDenseExecutor::from_backend(backend)),
-            // A provider whose thread count is process-global (Accelerate)
-            // cannot serve a caller-owned domain at all, so there is no
-            // fallback to exercise; the refusal itself must be typed.
-            Err(tenferro_cpu::CpuBackendError::Tensor(error)) => {
-                let source = std::error::Error::source(&error)
-                    .and_then(|source| {
-                        source.downcast_ref::<tenferro_cpu::CpuProviderBundleInstallError>()
-                    })
-                    .expect("caller-owned domain refusal carries its provider install error");
-                assert!(
-                    matches!(
-                        source,
-                        tenferro_cpu::CpuProviderBundleInstallError::IncompatibleDomain {
-                            source:
-                                tenferro_cpu::CpuProviderDomainError::ThreadCountNotEnforceable { .. },
-                            ..
-                        }
-                    ),
-                    "unexpected refusal: {source}"
-                );
-                None
-            }
-            Err(error) => panic!("caller-owned domain construction failed: {error}"),
-        }
-    }
-
-    #[test]
-    fn caller_owned_cpu_domain_falls_back_to_per_call_sessions() {
-        let Some(mut executor) = caller_owned_executor() else {
-            return;
-        };
-        let (entered, scoped) = scoped_bits(&mut executor);
-        assert!(
-            !entered,
-            "Tenferro scopes need a managed domain; body runs unscoped"
-        );
-        assert_eq!(scoped, factor_bits(&mut DefaultDenseExecutor::new()));
-    }
-
-    const PARTITIONS: [&[usize]; 2] = [&[4, 1, 1, 1], &[1, 4, 1, 4]];
-
-    /// An op-bearing c64 GEMM phase with run partition `pattern`: a run of
-    /// length >= 2 is equal-shape, constant-stride (batchable) jobs, and a
-    /// singleton differs in shape from its neighbours.
-    struct Partition {
-        jobs: Vec<DenseGemmBatchJob>,
-        runs: Vec<usize>,
-        lhs: Vec<Complex64>,
-        rhs: Vec<Complex64>,
-        dst: Vec<Complex64>,
-    }
-
-    impl Partition {
-        fn new(pattern: &[usize]) -> Self {
-            let mut jobs = Vec::new();
-            let (mut l, mut r, mut d) = (0usize, 0usize, 0usize);
-            for (index, &len) in pattern.iter().enumerate() {
-                let (rows, contracted, cols) = if len >= 2 {
-                    (3, 4, 2)
-                } else {
-                    (2 + index % 2, 3, 4)
-                };
-                for _ in 0..len {
-                    jobs.push(DenseGemmBatchJob {
-                        dst_offset: d,
-                        lhs_offset: l,
-                        rhs_offset: r,
-                        rows,
-                        contracted,
-                        cols,
-                    });
-                    l += rows * contracted;
-                    r += contracted * cols;
-                    d += rows * cols;
-                }
-            }
-            let value = |i: usize| {
-                Complex64::new(
-                    ((i * 7 + 3) % 11) as f64 * 0.25 - 1.0,
-                    ((i * 5) % 7) as f64 * 0.125,
-                )
-            };
-            Self {
-                jobs,
-                runs: pattern.to_vec(),
-                lhs: (0..l).map(value).collect(),
-                rhs: (0..r).map(|i| value(i + 5)).collect(),
-                dst: (0..d).map(|i| value(i + 9)).collect(),
-            }
-        }
-
-        /// Output bits after one call with `jobs`/`runs`, from the fixture's
-        /// accumulator, with nonzero alpha and beta.
-        fn run(
-            &self,
-            dense: &mut dyn DenseExecutor,
-            jobs: &[DenseGemmBatchJob],
-            runs: &[usize],
-            dst: &mut [Complex64],
-        ) {
-            let s = [1usize];
-            let dl = dst.len();
-            dense
-                .matmul_batch_axpby_with_ops_into(
-                    DenseWrite::C64(DenseViewMut::new(dst, &[dl], &s, 0).unwrap()),
-                    DenseRead::C64(DenseView::new(&self.lhs, &[self.lhs.len()], &s, 0).unwrap()),
-                    DenseRead::C64(DenseView::new(&self.rhs, &[self.rhs.len()], &s, 0).unwrap()),
-                    jobs,
-                    runs,
-                    MatrixOp::Adjoint,
-                    MatrixOp::Identity,
-                    DenseScalar::C64(Complex64::new(0.75, -0.5)),
-                    DenseScalar::C64(Complex64::new(-0.25, 0.125)),
-                )
-                .unwrap();
-        }
-
-        fn whole(&self, dense: &mut dyn DenseExecutor) -> Vec<u64> {
-            let mut dst = self.dst.clone();
-            self.run(dense, &self.jobs, &self.runs, &mut dst);
-            bits_c64(&dst)
-        }
-
-        /// The same GEMMs issued one run per call.
-        fn per_run(&self, dense: &mut dyn DenseExecutor) -> Vec<u64> {
-            let mut dst = self.dst.clone();
-            let mut start = 0;
-            for &len in &self.runs {
-                self.run(dense, &self.jobs[start..start + len], &[len], &mut dst);
-                start += len;
-            }
-            bits_c64(&dst)
-        }
-    }
-
-    fn bits_c64(values: &[Complex64]) -> Vec<u64> {
-        values
-            .iter()
-            .flat_map(|v| [v.re.to_bits(), v.im.to_bits()])
-            .collect()
-    }
-
-    /// Tenferro-side evidence for the scoped partition: at default threads
-    /// every serial session of the phase runs on the scope body's thread (no
-    /// second pool install), while one call per run hops for each session.
-    #[test]
-    fn mixed_partition_sessions_run_in_one_scope_without_a_pool_hop() {
-        for pattern in PARTITIONS {
-            let fixture = Partition::new(pattern);
-            let mut executor = DefaultDenseExecutor::new();
-            let key = session_key(&executor.backend);
-            let here = std::thread::current().id();
-            let mut whole = Vec::new();
-            let scoped = session_threads_of(key, || whole = fixture.whole(&mut executor));
-            let serial_stretches = if pattern == [4, 1, 1, 1] { 1 } else { 2 };
-            assert_eq!(scoped.len(), serial_stretches, "{pattern:?}");
-            assert!(
-                scoped
-                    .iter()
-                    .all(|&(caller, session)| caller != here && session == caller),
-                "{pattern:?}: sessions must run inline on the scope body's worker"
-            );
-
-            let mut per_run = Vec::new();
-            let unscoped = session_threads_of(key, || per_run = fixture.per_run(&mut executor));
-            assert_eq!(
-                unscoped.len(),
-                pattern.iter().filter(|&&len| len == 1).count()
-            );
-            assert!(unscoped
-                .iter()
-                .all(|&(caller, session)| caller == here && session != caller));
-            assert_eq!(whole, per_run, "{pattern:?}");
-        }
-    }
-
-    /// A single-run partition is one dispatch, so it enters no scope: its one
-    /// serial session is admitted (and hops to the pool) like any other.
-    #[test]
-    fn single_run_partition_enters_no_scope() {
-        let singletons = Partition::new(&[1, 1]);
-        // Two jobs of different shapes as one non-batchable run.
-        let fixture = Partition {
-            runs: vec![2],
-            ..singletons
-        };
-        let mut executor = DefaultDenseExecutor::new();
-        let key = session_key(&executor.backend);
-        let here = std::thread::current().id();
-        let mut whole = Vec::new();
-        let sessions = session_threads_of(key, || whole = fixture.whole(&mut executor));
-        assert_eq!(sessions.len(), 1);
-        assert!(sessions
-            .iter()
-            .all(|&(caller, session)| caller == here && session != caller));
-        let mut reference = fixture.dst.clone();
-        for job in &fixture.jobs {
-            fixture.run(
-                &mut executor,
-                std::slice::from_ref(job),
-                &[1],
-                &mut reference,
-            );
-        }
-        assert_eq!(whole, bits_c64(&reference));
-    }
-
-    /// A caller-owned domain cannot enter a scope: the phase runs unscoped on
-    /// the calling thread, still coalesced, with the per-run result.
-    #[test]
-    fn mixed_partition_on_a_caller_owned_domain_runs_unscoped() {
-        for pattern in PARTITIONS {
-            let Some(mut executor) = caller_owned_executor() else {
-                return;
-            };
-            let fixture = Partition::new(pattern);
-            let key = session_key(&executor.backend);
-            let here = std::thread::current().id();
-            let mut whole = Vec::new();
-            let sessions = session_threads_of(key, || whole = fixture.whole(&mut executor));
-            let serial_stretches = if pattern == [4, 1, 1, 1] { 1 } else { 2 };
-            assert_eq!(sessions.len(), serial_stretches, "{pattern:?}");
-            assert!(sessions.iter().all(|&(caller, _)| caller == here));
-            assert_eq!(whole, fixture.per_run(&mut DefaultDenseExecutor::new()));
+            assert!(!IN_LINALG_SCOPE.get(), "scope flag leaks past the call");
         }
     }
 }
@@ -2210,6 +1774,7 @@ mod tests {
         let executor =
             DefaultDenseExecutor::with_shared_context(&context, None).expect("default provider");
 
-        assert_eq!(executor.backend.kind(), CpuBackendKind::default_compiled());
+        assert_eq!(executor.kind(), CpuBackendKind::default_compiled());
+        assert!(executor.shares_cpu_context(&context));
     }
 }

@@ -61,7 +61,7 @@ pub use tenferro_adapter::{
 /// from tenferro so runtimes can pick a backend via
 /// [`DefaultDenseExecutor::with_kind`] without depending on tenferro directly.
 #[cfg(feature = "tenferro")]
-pub use tenferro_cpu::CpuBackendKind;
+pub use tenferro_adapter::CpuBackendKind;
 
 #[cfg(feature = "cuda")]
 pub use cuda_adapter::{

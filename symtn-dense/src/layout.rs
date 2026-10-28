@@ -69,15 +69,12 @@ mod tests {
     fn stride_conversion_uses_backend_carrier_for_arbitrary_rank() {
         let empty = strides_to_isize(&[]).unwrap();
         assert!(empty.is_empty());
-        assert!(!empty.spilled());
 
         let short = strides_to_isize(&[1, 2, 4]).unwrap();
         assert_eq!(short.as_slice(), &[1, 2, 4]);
-        assert!(!short.spilled());
 
         let long = strides_to_isize(&[1, 2, 4, 8, 16, 32, 64, 128, 256]).unwrap();
         assert_eq!(long.as_slice(), &[1, 2, 4, 8, 16, 32, 64, 128, 256]);
-        assert!(long.spilled());
     }
 
     #[test]

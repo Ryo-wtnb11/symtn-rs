@@ -21,13 +21,13 @@ tenferro = [
 ]
 cpu-faer = [
     "tenferro",
-    "tenferro-cpu/cpu-faer",
-    "tenferro-linalg/cpu-faer",
+    "tenferro-cpu/native",
+    "tenferro-linalg/native",
 ]
 cpu-blas-core = [
     "tenferro",
-    "tenferro-cpu/cpu-blas",
-    "tenferro-linalg/cpu-blas",
+    "tenferro-cpu/blas",
+    "tenferro-linalg/blas",
 ]
 cpu-blas = [
     "cpu-blas-core",
@@ -62,10 +62,10 @@ provider-inject = [
 
 [dependencies]
 num-complex = "0.4"
-tenferro-cpu = { version = "0.7.1", default-features = false, optional = true }
-tenferro-linalg = { version = "0.7.1", default-features = false, optional = true }
-tenferro-tensor = { version = "0.7.1", default-features = false, optional = true }
-tenferro-gpu = { version = "0.7.1", default-features = false, optional = true }
+tenferro-cpu = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }
+tenferro-linalg = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }
+tenferro-tensor = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }
+tenferro-gpu = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }
 # The version tenferro-gpu pins, named only to set its process-wide stream
 # count before the first client load (`single_cubecl_stream`, #1391).
 cubecl-runtime = { package = "t4a-cubecl-runtime", version = "=0.10.1", optional = true }
