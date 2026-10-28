@@ -15,6 +15,13 @@ before #2273 use `tenet-<x>` / `TENET_*`; they are now `symtn-<x>` / `SYMTN_*`.
   `cargo bench -p symtn --bench vector_ops --offline -- U1` (optional substring
   filter). Each selected row runs for at least 0.2 seconds after warmup.
 
+- `symtn-network/benches/cache_scaling.rs`: warm-hit and cold-miss
+  throughput of the structure caches and the plan cache under 1–96 scoped
+  threads (raw `StructureCache` lookups and admissions; `permute`,
+  `contract`, `Network::contract` on U(1)/SU(2)), with per-window CPU time
+  and cache-statistics deltas. Run
+  `cargo bench -p symtn-network --bench cache_scaling -- [filter ...]`;
+  thread counts and windows are set by `CACHE_SCALING_*` (see the file).
 - `operation_matrix.sh` and `operation_matrix.md`: Host operation matrix,
   environment capture, and comparison protocol.
 - `eager_overhead_ledger.sh` (`symtn/benches/eager_overhead_ledger.rs`,
@@ -31,6 +38,7 @@ exists.
 
 ## Historical results
 
+- [Structure-cache thread scaling](history/cache-scaling-2026-10-28.md)
 - [July 2026 contraction microbenchmark](history/contraction-microbench-2026-07-11.md)
 - [Eager per-call overhead ledger](history/eager-overhead-ledger-2026-09-21.md)
 - [One CPU session per compact factorization](history/factorization-session-2026-09-21.md)
