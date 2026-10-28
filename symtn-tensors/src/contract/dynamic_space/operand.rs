@@ -7,9 +7,7 @@ use symtn_core::{
     OrientedFusionTreeHomSpace,
 };
 
-use super::metadata::{
-    dispatch_prepare, LayoutBuildCapability, LayoutKeyBuilder, MetadataOutput, MetadataRequest,
-};
+use super::metadata::{dispatch_prepare, LayoutKeyBuilder, MetadataOutput, MetadataRequest};
 use super::{tree_transform_operation_axes, DynamicFusionMapSpace, TransformedLayoutProbe};
 use crate::tree_transform::OrientedBasisOrder;
 use crate::{OperationError, TreeTransformOperation};
@@ -233,11 +231,14 @@ impl<'a> FusionOperandLayout<'a> {
     where
         R: MultiplicityFreeRigidSymbols,
     {
-        let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
-        let capability = LayoutBuildCapability::KeyBuilder(primer);
-        let (homspace, prepared) =
-            capability.permute(rule, self.homspace(), codomain_axes, domain_axes)?;
-        DynamicFusionMapSpace::from_final_homspace_with_prepared(rule, homspace, prepared)
+        DynamicFusionMapSpace::permuted_memoized(
+            rule,
+            self.storage_space(),
+            self.orientation(),
+            self.homspace(),
+            operation,
+            primer,
+        )
     }
 }
 

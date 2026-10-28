@@ -59,6 +59,8 @@ mod ledger {
         UniqueBorrowedPositionQuery,
         /// A permuted-destination memo answered a lookup.
         PermutedMemoHit,
+        /// A permuted-destination memo lookup read the overflow map.
+        PermutedMemoMapRead,
         /// A permuted-destination memo publication was charged.
         PermutedMemoPublication,
         /// A complete-HomSpace structure was offered for admission.

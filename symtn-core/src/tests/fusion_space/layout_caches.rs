@@ -969,10 +969,9 @@ fn a_committed_permutation_memoizes_its_destination_in_the_source_entry() {
         recording.get(crate::probe::Event::PermutedMemoPublication),
         1
     );
-    // At least the key words, one table slot and the destination content.
-    let floor = 3 * std::mem::size_of::<usize>()
-        + std::mem::size_of::<(Box<[usize]>, HomSpaceId)>()
-        + destination.charged_retained_bytes()
+    // At least the key words and the destination content; the inline slot
+    // it fills is charged with the entry.
+    let floor = 3 * std::mem::size_of::<usize>() + destination.charged_retained_bytes()
         - std::mem::size_of::<FusionTreeHomSpace>();
     assert!(charged >= floor as u64, "{charged} < {floor}");
     second.publish(&destination, &structure);
@@ -1034,6 +1033,217 @@ fn a_committed_permutation_memoizes_its_destination_in_the_source_entry() {
         StructureCacheKind::DegeneracyStructure,
         DEGENERACY_STRUCTURE_CACHE_BYTE_BUDGET,
     );
+}
+
+/// What: the multiplicity-free memo reuses the Generic memo's storage
+/// under its own mode: a published destination is charged to the source's
+/// entry and answers the same axes with the canonical destination and no
+/// sector-structure lookup; a source structure owned by another HomSpace's
+/// entry neither answers nor stores, and a reset drops the memo.
+#[test]
+fn a_multiplicity_free_permutation_memoizes_its_destination_in_the_source_entry() {
+    if test_support::run_isolated_or_return(
+        "SYMTN_MF_PERMUTED_MEMO_ISOLATED",
+        "tests::fusion_space::layout_caches::a_multiplicity_free_permutation_memoizes_its_destination_in_the_source_entry",
+    ) {
+        return;
+    }
+    let _guard = test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    clear_structure_caches();
+    let rule = U1FusionRule;
+    let identity = rule.rule_identity();
+    let leg = |dual| SectorLeg::new([(u1(-1), 1), (u1(0), 2), (u1(1), 1)], dual);
+    let (hom, source) = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(false), leg(true)]),
+        FusionProductSpace::new([leg(false)]),
+    )
+    .canonical_coupled_subblock_structure_from_leg_degeneracies(&rule)
+    .unwrap();
+    let (codomain, domain) = (&[2][..], &[1, 0][..]);
+    let derive = |hom: &FusionTreeHomSpace| {
+        hom.permute(&rule, codomain, domain)
+            .unwrap()
+            .canonical_coupled_subblock_structure_from_leg_degeneracies(&rule)
+            .unwrap()
+    };
+
+    let Err(ticket) = hom.memoized_permuted_multiplicity_free(
+        &source,
+        &identity,
+        FusionTreePairOrientation::Direct,
+        codomain,
+        domain,
+    ) else {
+        panic!("a cold permutation derives");
+    };
+    let (destination, structure) = derive(&hom);
+    let before = degeneracy_cache_info();
+    let recording = crate::probe::record();
+    ticket.publish(&destination, &structure);
+    assert_eq!(
+        recording.get(crate::probe::Event::PermutedMemoPublication),
+        1
+    );
+    assert_eq!(degeneracy_cache_info().entries(), before.entries());
+    assert!(degeneracy_cache_info().charged_bytes() > before.charged_bytes());
+
+    let hits = crate::probe::record();
+    let Ok((memoized, memoized_structure)) = hom.memoized_permuted_multiplicity_free(
+        &source,
+        &identity,
+        FusionTreePairOrientation::Direct,
+        codomain,
+        domain,
+    ) else {
+        panic!("a published memo answers");
+    };
+    assert_eq!(hits.get(crate::probe::Event::PermutedMemoHit), 1);
+    assert_eq!(hits.get(crate::probe::Event::SectorStructureLookup), 0);
+    assert_eq!(hits.get(crate::probe::Event::CompleteHomSpaceMiss), 0);
+    assert_eq!(memoized, destination);
+    assert_eq!(memoized.existing_id(), destination.existing_id());
+    assert!(Arc::ptr_eq(&memoized_structure, &structure));
+    // The adjoint orientation of the same axes is another key.
+    assert!(hom
+        .memoized_permuted_multiplicity_free(
+            &source,
+            &identity,
+            FusionTreePairOrientation::Adjoint,
+            codomain,
+            domain
+        )
+        .is_err());
+
+    // Another HomSpace reaching `source`'s entry neither reads nor writes it.
+    let other = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(true), leg(true)]),
+        FusionProductSpace::new([leg(false)]),
+    );
+    let (other_codomain, other_domain) = (&[0][..], &[2, 1][..]);
+    let Err(foreign) = other.memoized_permuted_multiplicity_free(
+        &source,
+        &identity,
+        FusionTreePairOrientation::Direct,
+        other_codomain,
+        other_domain,
+    ) else {
+        panic!("a foreign entry answers nothing");
+    };
+    let (other_destination, other_structure) = other
+        .permute(&rule, other_codomain, other_domain)
+        .unwrap()
+        .canonical_coupled_subblock_structure_from_leg_degeneracies(&rule)
+        .unwrap();
+    foreign.publish(&other_destination, &other_structure);
+    assert_eq!(
+        recording.get(crate::probe::Event::PermutedMemoPublication),
+        1
+    );
+    assert!(hom
+        .memoized_permuted_multiplicity_free(
+            &source,
+            &identity,
+            FusionTreePairOrientation::Direct,
+            other_codomain,
+            other_domain
+        )
+        .is_err());
+
+    clear_structure_caches();
+    assert!(hom
+        .memoized_permuted_multiplicity_free(
+            &source,
+            &identity,
+            FusionTreePairOrientation::Direct,
+            codomain,
+            domain
+        )
+        .is_err());
+}
+
+/// What: the first memo keys of an entry fill its lock-free slots and later
+/// keys overflow to the map; each publication is charged either way, and a
+/// hit answers the same destination with the same probe counts from a slot
+/// or from the map.
+#[test]
+fn permuted_memo_keys_fill_the_slots_then_overflow_to_the_map() {
+    if test_support::run_isolated_or_return(
+        "SYMTN_PERMUTED_MEMO_SLOTS_ISOLATED",
+        "tests::fusion_space::layout_caches::permuted_memo_keys_fill_the_slots_then_overflow_to_the_map",
+    ) {
+        return;
+    }
+    let _guard = test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    clear_structure_caches();
+    let rule = U1FusionRule;
+    let identity = rule.rule_identity();
+    let leg = |dual| SectorLeg::new([(u1(-1), 1), (u1(0), 2), (u1(1), 1)], dual);
+    let (hom, source) = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(false), leg(true)]),
+        FusionProductSpace::new([leg(false)]),
+    )
+    .canonical_coupled_subblock_structure_from_leg_degeneracies(&rule)
+    .unwrap();
+    let keys: [(&[usize], &[usize]); PERMUTED_SLOTS + 2] = [
+        (&[2], &[1, 0]),
+        (&[1], &[0, 2]),
+        (&[0], &[2, 1]),
+        (&[2, 0], &[1]),
+        (&[1, 2], &[0]),
+        (&[0, 1, 2], &[]),
+    ];
+    let memo = |(codomain, domain): (&[usize], &[usize])| {
+        hom.memoized_permuted_multiplicity_free(
+            &source,
+            &identity,
+            FusionTreePairOrientation::Direct,
+            codomain,
+            domain,
+        )
+    };
+    let mut destinations = Vec::new();
+    for (index, &(codomain, domain)) in keys.iter().enumerate() {
+        let Err(ticket) = memo((codomain, domain)) else {
+            panic!("an unpublished key derives");
+        };
+        let (destination, structure) = hom
+            .permute(&rule, codomain, domain)
+            .unwrap()
+            .canonical_coupled_subblock_structure_from_leg_degeneracies(&rule)
+            .unwrap();
+        let before = degeneracy_cache_info().charged_bytes();
+        let recording = crate::probe::record();
+        ticket.publish(&destination, &structure);
+        assert_eq!(
+            recording.get(crate::probe::Event::PermutedMemoPublication),
+            1,
+            "key {index}"
+        );
+        assert!(
+            degeneracy_cache_info().charged_bytes() > before,
+            "key {index}"
+        );
+        destinations.push(destination);
+    }
+    for (index, &key) in keys.iter().enumerate() {
+        let hits = crate::probe::record();
+        let Ok((memoized, _)) = memo(key) else {
+            panic!("key {index} is memoized");
+        };
+        assert_eq!(memoized, destinations[index]);
+        assert_eq!(hits.get(crate::probe::Event::PermutedMemoHit), 1);
+        assert_eq!(hits.get(crate::probe::Event::SectorStructureLookup), 0);
+        assert_eq!(hits.get(crate::probe::Event::CompleteHomSpaceMiss), 0);
+        assert_eq!(
+            hits.get(crate::probe::Event::PermutedMemoMapRead),
+            usize::from(index >= PERMUTED_SLOTS),
+            "key {index}"
+        );
+    }
 }
 
 #[test]

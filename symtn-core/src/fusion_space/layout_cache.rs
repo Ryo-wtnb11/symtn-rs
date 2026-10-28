@@ -99,6 +99,31 @@ impl CompleteHomSpaceStructureCacheKey {
     }
 }
 
+/// A [`CompleteHomSpaceStructureCacheKey`] lookup that borrows its fields,
+/// so a warm lookup touches no shared reference count. Hashes as the owned
+/// key does.
+pub(crate) struct CompleteHomSpaceStructureKeyRef<'a> {
+    pub(crate) rule: &'a RuleIdentity,
+    pub(crate) mode: CompleteFusionMode,
+    pub(crate) homspace: &'a FusionTreeHomSpaceContent,
+}
+
+impl std::hash::Hash for CompleteHomSpaceStructureKeyRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.rule.hash(state);
+        self.mode.hash(state);
+        self.homspace.hash(state);
+    }
+}
+
+impl quick_cache::Equivalent<CompleteHomSpaceStructureCacheKey>
+    for CompleteHomSpaceStructureKeyRef<'_>
+{
+    fn equivalent(&self, key: &CompleteHomSpaceStructureCacheKey) -> bool {
+        self.rule == &key.rule && self.mode == key.mode && self.homspace == &*key.homspace
+    }
+}
+
 impl PartialEq for CompleteHomSpaceStructureCacheKey {
     fn eq(&self, other: &Self) -> bool {
         self.rule == other.rule && self.mode == other.mode && self.homspace == other.homspace
@@ -232,11 +257,27 @@ pub(crate) struct DegeneracyStructureEntry {
     key: CompleteHomSpaceStructureCacheKey,
     homspace: HomSpaceId,
     structure: Arc<BlockStructure>,
-    /// Canonical destinations of this Generic HomSpace, keyed by
-    /// `[nout, codomain axes.., domain axes..]`. Published only after a
+    /// Canonical destinations of this HomSpace or, for a multiplicity-free
+    /// entry, of its adjoint, keyed by `[nout, codomain axes.., domain
+    /// axes..]` with the adjoint marked in `nout`'s top bit, and read only
+    /// under this entry's own (rule, mode, HomSpace). Published only after a
     /// committed transform; charged to this entry.
+    ///
+    /// The first [`PERMUTED_SLOTS`] keys fill set-once slots in order, read
+    /// with one acquire load each. Why not only the map: every thread of a
+    /// warm loop reads the same hot entry, and a lock read writes the lock's
+    /// shared state, which stopped warm permutes from scaling past 8 threads.
+    /// Only keys beyond the slots go to the map.
+    permuted_slots: [OnceLock<(Box<[usize]>, HomSpaceId)>; PERMUTED_SLOTS],
     permuted: RwLock<FxHashMap<Box<[usize]>, HomSpaceId>>,
 }
+
+/// Lock-free memo slots per entry. Why four: across the symtn and
+/// symtn-tensors test suites, 91% of entries that memoize anything hold at
+/// most four distinct (orientation, axes) keys (1: 63%, 2: 14%); every entry
+/// of the `cache_scaling` probe holds one. Eight would cover 96% at twice
+/// the fixed inline size every entry carries; the rest overflow to the map.
+pub(crate) const PERMUTED_SLOTS: usize = 4;
 
 impl DegeneracyStructureEntry {
     fn new(key: &CompleteHomSpaceStructureCacheKey, structure: Arc<BlockStructure>) -> Self {
@@ -244,36 +285,79 @@ impl DegeneracyStructureEntry {
             key: key.clone(),
             homspace: HomSpaceId::from_content(Arc::clone(&key.homspace)),
             structure,
+            permuted_slots: std::array::from_fn(|_| OnceLock::new()),
             permuted: RwLock::default(),
         }
     }
 
-    /// The memoized destination of `source` under `rule` and `axes`, when
-    /// this entry is the Generic entry of exactly that pair.
-    pub(crate) fn permuted(
+    /// Whether this is the `mode` entry of exactly `(rule, source)`.
+    pub(crate) fn is_entry_of(
         &self,
+        mode: CompleteFusionMode,
         rule: &RuleIdentity,
         source: &FusionTreeHomSpace,
+    ) -> bool {
+        self.key.mode == mode && &self.key.rule == rule && self.key.homspace == source.content
+    }
+
+    /// `read` of the memoized destination under `axes`, borrowed from its
+    /// slot; the caller has checked [`Self::is_entry_of`] its source.
+    pub(crate) fn permuted<T>(
+        &self,
         axes: &[usize],
-    ) -> Option<HomSpaceId> {
-        if self.key.mode != CompleteFusionMode::Generic
-            || &self.key.rule != rule
-            || self.key.homspace != source.content
-        {
-            return None;
+        read: impl FnOnce(&HomSpaceId) -> T,
+    ) -> Option<T> {
+        for slot in &self.permuted_slots {
+            match slot.get() {
+                Some((key, destination)) if **key == *axes => return Some(read(destination)),
+                Some(_) => {}
+                // Slots fill in order and the map only after all of them.
+                None => return None,
+            }
         }
-        self.permuted
+        #[cfg(test)]
+        crate::probe::hit(crate::probe::Event::PermutedMemoMapRead);
+        let destination = self
+            .permuted
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(axes)
-            .cloned()
+            .cloned()?;
+        Some(read(&destination))
     }
 
     /// Inserts one derived destination unless present, and charges it while
-    /// this entry is resident; an entry no longer resident keeps nothing.
+    /// this entry is resident; an entry no longer resident keeps nothing in
+    /// its map, and its slots die with it.
     /// The charge inherits [`StructureCache::add_charge`]'s contract: the
     /// cache may sit above its budget until its next insert evicts.
     fn publish_permuted(self: &Arc<Self>, axes: &[usize], destination: HomSpaceId) {
+        if self.permuted(axes, |_| ()).is_some() {
+            return;
+        }
+        // The boxed key, and the destination content with its `Arc` header:
+        // double-counted when its own entry retains it too.
+        let item = std::mem::size_of_val(axes)
+            .saturating_add(2 * std::mem::size_of::<usize>())
+            .saturating_add(destination.content.charged_retained_bytes());
+        let mut value = (Box::from(axes), destination);
+        for slot in &self.permuted_slots {
+            match slot.set(value) {
+                // Why no removal on a refused charge: a set slot is
+                // permanent, and an entry no longer resident dies with its
+                // last holder, slot included. A concurrent publication of
+                // the same key may take a second slot; both answer equally.
+                Ok(()) => {
+                    if degeneracy_structure_cache().add_charge(&self.key, self, item as u64) {
+                        #[cfg(test)]
+                        crate::probe::hit(crate::probe::Event::PermutedMemoPublication);
+                    }
+                    return;
+                }
+                Err(refused) => value = refused,
+            }
+        }
+        let (_, destination) = value;
         let bytes = {
             let mut map = self
                 .permuted
@@ -283,11 +367,6 @@ impl DegeneracyStructureEntry {
                 return;
             }
             let table = permuted_table_bytes(map.capacity());
-            // The boxed key, and the destination content with its `Arc`
-            // header: double-counted when its own entry retains it too.
-            let item = std::mem::size_of_val(axes)
-                .saturating_add(2 * std::mem::size_of::<usize>())
-                .saturating_add(destination.content.charged_retained_bytes());
             map.insert(Box::from(axes), destination);
             permuted_table_bytes(map.capacity())
                 .saturating_sub(table)
@@ -317,6 +396,11 @@ impl DegeneracyStructureEntry {
     pub(crate) fn homspace_id(&self) -> HomSpaceId {
         self.homspace.clone()
     }
+
+    /// The canonical HomSpace of this entry.
+    pub(crate) fn canonical_homspace(&self) -> FusionTreeHomSpace {
+        FusionTreeHomSpace::from_canonical_id(self.homspace_id())
+    }
 }
 
 /// Complete block structure per HomSpace, degeneracies included (TensorKit
@@ -338,9 +422,12 @@ pub(crate) fn degeneracy_structure_cache(
 
 /// The cached complete structure of `key`: one shard read and the entry's
 /// wrapper.
-pub(crate) fn complete_hom_space_structure_cached(
-    key: &CompleteHomSpaceStructureCacheKey,
-) -> Option<Arc<DegeneracyStructureEntry>> {
+pub(crate) fn complete_hom_space_structure_cached<Q>(
+    key: &Q,
+) -> Option<Arc<DegeneracyStructureEntry>>
+where
+    Q: std::hash::Hash + quick_cache::Equivalent<CompleteHomSpaceStructureCacheKey> + ?Sized,
+{
     degeneracy_structure_cache().get(key)
 }
 

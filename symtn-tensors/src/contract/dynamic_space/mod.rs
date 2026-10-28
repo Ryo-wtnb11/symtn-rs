@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use symtn_core::{
     validate_block_storage_injective, BlockKey, BlockStructure, CoreError, FusionRule,
     FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace, FusionTreePairKey,
-    MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
+    FusionTreePairOrientation, MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
 };
 
 use crate::{OperationError, TreeTransformOperation};
@@ -443,19 +443,69 @@ impl DynamicFusionMapSpace {
         R: MultiplicityFreeRigidSymbols,
     {
         self.validate_rule(rule)?;
-        let source = self;
+        Self::permuted_memoized(
+            rule,
+            self,
+            FusionTreePairOrientation::Direct,
+            self.homspace(),
+            operation,
+            primer,
+        )
+    }
+
+    /// The multiplicity-free permutation of `logical`, the `orientation` of
+    /// `storage`'s HomSpace: from the permuted memo of `storage`'s entry, or
+    /// derived through `primer` and then memoized there.
+    ///
+    /// Why the memo may skip the primer: the destination is a pure function
+    /// of (identity, storage HomSpace, orientation, axes), and only a
+    /// derivation that succeeded under this identity published it.
+    pub(super) fn permuted_memoized<R>(
+        rule: &R,
+        storage: &Self,
+        orientation: FusionTreePairOrientation,
+        logical: &FusionTreeHomSpace,
+        operation: &TreeTransformOperation,
+        primer: LayoutKeyBuilder<R>,
+    ) -> Result<Self, OperationError>
+    where
+        R: MultiplicityFreeRigidSymbols,
+    {
         let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
         let nout = codomain_axes.len();
         let nin = domain_axes.len();
+        let identity = storage.admission.rule_identity().ok_or_else(|| {
+            OperationError::from_core_preserving_context(CoreError::MissingFusionRuleIdentity)
+        })?;
+        let ticket = match storage.homspace().memoized_permuted_multiplicity_free(
+            storage.structure(),
+            identity,
+            orientation,
+            codomain_axes,
+            domain_axes,
+        ) {
+            Ok((homspace, subblock_structure)) => {
+                return Ok(Self {
+                    nout,
+                    nin,
+                    homspace: Arc::new(homspace),
+                    subblock_structure,
+                    admission: FusionSpaceAdmission::Complete(identity.clone()),
+                    adjoint: OnceLock::new(),
+                });
+            }
+            Err(ticket) => ticket,
+        };
         let capability = LayoutBuildCapability::KeyBuilder(primer);
-        let (homspace, prepared) =
-            capability.permute(rule, source.homspace(), codomain_axes, domain_axes)?;
+        let (homspace, prepared) = capability.permute(rule, logical, codomain_axes, domain_axes)?;
         debug_assert_eq!(nout, homspace.codomain().len());
         debug_assert_eq!(nin, homspace.domain().len());
         // Why not rebuild external source legs and per-tree shape vectors:
         // #256 already carried the authoritative degeneracies into the final
         // HomSpace. The final grouped builder consumes that value directly.
-        Self::from_final_homspace_with_prepared(rule, homspace, prepared)
+        let destination = Self::from_final_homspace_with_prepared(rule, homspace, prepared)?;
+        ticket.publish(destination.homspace(), destination.structure());
+        Ok(destination)
     }
 
     pub(crate) fn transformed_layout_probe<R>(

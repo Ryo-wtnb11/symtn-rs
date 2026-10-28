@@ -964,3 +964,57 @@ fn root_constructor_builds_from_checked_keys() {
         Err(OperationError::FusionAlgebra(_))
     ));
 }
+
+#[test]
+fn direct_and_adjoint_permutes_memoize_under_distinct_keys() {
+    // What: the direct and the adjoint orientation of one resident source
+    // memoize their permuted destinations separately; each warm call takes
+    // its own memo without deriving, and equals the space derived from the
+    // explicitly permuted HomSpace.
+    let _guard = CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    symtn_core::clear_structure_caches();
+    let rule = U1FusionRule;
+    let leg = |dual| {
+        SectorLeg::new(
+            [-1, 0, 1].map(|q| (U1Irrep::new(q).sector_id(), q.unsigned_abs() as usize + 1)),
+            dual,
+        )
+    };
+    let hom = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(false), leg(true)]),
+        FusionProductSpace::new([leg(false), leg(false)]),
+    );
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, hom.clone()).unwrap();
+    let operation = TreeTransformOperation::permute([1, 2], [3, 0]);
+    let transform = |operand: FusionOperand<'_>| {
+        operand
+            .prepare(&rule, encoded_layout_primer::<U1FusionRule>)
+            .unwrap()
+            .transformed_space(&rule, &operation, encoded_layout_primer::<U1FusionRule>)
+            .unwrap()
+    };
+    let derived = |hom: &FusionTreeHomSpace| {
+        DynamicFusionMapSpace::from_final_homspace(
+            &rule,
+            hom.permute(&rule, &[1, 2], &[3, 0]).unwrap(),
+        )
+        .unwrap()
+    };
+    let direct = derived(&hom);
+    let adjoint = derived(&FusionTreeHomSpace::new(
+        hom.domain().clone(),
+        hom.codomain().clone(),
+    ));
+    assert_ne!(direct, adjoint);
+    assert_eq!(transform(FusionOperand::direct(&space)), direct);
+    assert_eq!(transform(FusionOperand::adjoint(&space)), adjoint);
+    let warm = probe::record();
+    for _ in 0..2 {
+        assert_eq!(transform(FusionOperand::direct(&space)), direct);
+        assert_eq!(transform(FusionOperand::adjoint(&space)), adjoint);
+    }
+    assert_eq!(warm.get(Event::DerivedHomspaceBuild), 0);
+    assert_eq!(warm.get(Event::FinalResultLayoutBuild), 0);
+}

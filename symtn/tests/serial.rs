@@ -80,6 +80,7 @@ mod checked_generic_facade;
 mod coefficient_group_cache;
 
 mod complete_structure_warm_hits;
+mod permuted_memo_multiplicity_free;
 
 mod complete_structure_working_set;
 
