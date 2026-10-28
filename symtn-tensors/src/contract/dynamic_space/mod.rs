@@ -25,8 +25,8 @@ use metadata::LayoutBuildCapability;
 #[cfg(test)]
 pub(crate) use metadata::{checked_layout_primer, checked_metadata_dispatcher};
 pub(crate) use metadata::{
-    dispatch_prepare, encoded_layout_primer, LayoutKeyBuilder, MetadataOutput, MetadataRequest,
-    PreparedLayoutKeys,
+    dispatch_final, dispatch_prepare, encoded_layout_primer, LayoutKeyBuilder, MetadataOutput,
+    MetadataRequest, PreparedLayoutKeys,
 };
 pub use operand::FusionOperand;
 pub(crate) use operand::FusionOperandLayout;
@@ -250,7 +250,7 @@ impl DynamicFusionMapSpace {
     where
         R: MultiplicityFreeRigidSymbols,
     {
-        let prepared = dispatch_prepare(primer, rule, &homspace)?;
+        let prepared = dispatch_final(primer, rule, &homspace)?;
         Self::from_final_homspace_with_prepared(rule, homspace, prepared)
     }
 
@@ -267,6 +267,18 @@ impl DynamicFusionMapSpace {
         let staged = match prepared {
             PreparedLayoutKeys::Checked(prepared) => Some(prepared),
             PreparedLayoutKeys::Encoded => None,
+            PreparedLayoutKeys::Final(prepared) => {
+                let (canonical, subblock_structure) = prepared.commit_with_complete_homspace();
+                let homspace = canonical.unwrap_or(homspace);
+                return Ok(Self {
+                    nout: homspace.codomain().len(),
+                    nin: homspace.domain().len(),
+                    homspace: Arc::new(homspace),
+                    subblock_structure,
+                    admission: FusionSpaceAdmission::Complete(rule.rule_identity()),
+                    adjoint: OnceLock::new(),
+                });
+            }
         };
         if let Some(prepared) = staged {
             let nout = homspace.codomain().len();

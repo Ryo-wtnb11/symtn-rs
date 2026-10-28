@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use symtn_core::{
     CheckedFusionAlgebra, CheckedFusionSpaceError, FusionRule, FusionTreeHomSpace,
-    FusionTreePairKey, MultiplicityFreeFusionRule, PreparedFusionTreeLayout,
+    FusionTreePairKey, MultiplicityFreeFusionRule, PreparedBlockStructure,
+    PreparedFusionTreeLayout,
 };
 
 use crate::OperationError;
@@ -11,12 +12,26 @@ use symtn_operations::TensorContractSpec;
 // Why not box the checked layout: the value lives on the stack for one
 // constructor call and is consumed by value, so boxing only adds an allocation.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
 pub(crate) enum PreparedLayoutKeys {
     Encoded,
     /// Checked staging: the one enumeration path, used by every
     /// multiplicity-free provider.
     Checked(PreparedFusionTreeLayout),
+    /// Checked staging of a final layout's complete structure, answered by
+    /// the resident complete structure when there is one. Only
+    /// `DynamicFusionMapSpace::from_final_homspace_with_prepared` consumes it;
+    /// key consumers stage through `MetadataRequest::Prepare`.
+    Final(PreparedBlockStructure),
+}
+
+impl std::fmt::Debug for PreparedLayoutKeys {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Encoded => formatter.write_str("Encoded"),
+            Self::Checked(prepared) => formatter.debug_tuple("Checked").field(prepared).finish(),
+            Self::Final(_) => formatter.write_str("Final(..)"),
+        }
+    }
 }
 
 impl PreparedLayoutKeys {
@@ -31,12 +46,16 @@ impl PreparedLayoutKeys {
         match self {
             Self::Checked(prepared) => prepared.keys_arc(),
             Self::Encoded => homspace.fusion_tree_keys(rule),
+            // Why not fall back to `fusion_tree_keys`: that is the unchecked
+            // enumeration, and a checked provider must not reach it silently.
+            Self::Final(_) => unreachable!("a final staging is consumed only by its final build"),
         }
     }
 
     pub(super) fn commit(self) {
         let prepared = match self {
             Self::Checked(prepared) => prepared,
+            Self::Final(_) => unreachable!("a final staging is consumed only by its final build"),
             Self::Encoded => return,
         };
         prepared.commit();
@@ -45,6 +64,12 @@ impl PreparedLayoutKeys {
 
 pub(crate) enum MetadataRequest<'a> {
     Prepare {
+        homspace: &'a FusionTreeHomSpace,
+    },
+    /// Stages the layout of a final HomSpace; the response is `Prepared`. A
+    /// checked dispatcher answers `Final`, which consults the sector
+    /// structure only when the complete structure is not resident.
+    FinalLayout {
         homspace: &'a FusionTreeHomSpace,
     },
     Permute {
@@ -206,6 +231,17 @@ pub(crate) fn dispatch_prepare<R>(
     }
 }
 
+pub(crate) fn dispatch_final<R>(
+    dispatcher: LayoutKeyBuilder<R>,
+    rule: &R,
+    homspace: &FusionTreeHomSpace,
+) -> Result<PreparedLayoutKeys, OperationError> {
+    match dispatcher(rule, MetadataRequest::FinalLayout { homspace })? {
+        MetadataOutput::Prepared(prepared) => Ok(prepared),
+        _ => unreachable!("metadata dispatcher returned a non-prepare response"),
+    }
+}
+
 pub(super) fn checked_metadata_operation_error(error: CheckedFusionSpaceError) -> OperationError {
     match error {
         CheckedFusionSpaceError::Core(error) => {
@@ -230,7 +266,7 @@ where
         prepared: PreparedLayoutKeys::Encoded,
     };
     match request {
-        MetadataRequest::Prepare { .. } => {
+        MetadataRequest::Prepare { .. } | MetadataRequest::FinalLayout { .. } => {
             Ok(MetadataOutput::Prepared(PreparedLayoutKeys::Encoded))
         }
         MetadataRequest::Permute {
@@ -282,28 +318,33 @@ where
     }
 }
 
-/// Shared checked-metadata dispatch, parameterized by the layout primer.
-///
-/// Why not collapse the lowered dispatcher onto the checked one directly:
-/// primer provenance differs (the sealed built-in lowered codec vs an
-/// external provider that certifies only `CheckedFusionAlgebra`) and so does
-/// its error mapping; everything else — checked permute/contract
-/// homspace derivation — is common and lives here.
-fn checked_metadata_dispatch_with_primer<R>(
+/// Checked metadata dispatch for a multiplicity-free provider that certifies
+/// [`CheckedFusionAlgebra`].
+pub(crate) fn checked_metadata_dispatcher<R>(
     rule: &R,
     request: MetadataRequest<'_>,
-    primer: impl Fn(&R, &FusionTreeHomSpace) -> Result<PreparedLayoutKeys, OperationError>,
 ) -> Result<MetadataOutput, OperationError>
 where
-    R: CheckedFusionAlgebra,
+    R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
 {
-    let prepare = |homspace: FusionTreeHomSpace| {
-        let prepared = primer(rule, &homspace)?;
+    // Why a permute keeps the sector-first staging: its warm derivation is
+    // answered by the source's permuted-destination memo, and a layout probe
+    // discards this staging, where a final staging would build the degeneracy
+    // part for nothing on a miss.
+    let permuted = |homspace: FusionTreeHomSpace| {
+        let prepared = checked_layout_primer(rule, &homspace)?;
+        Ok(MetadataOutput::HomSpace { homspace, prepared })
+    };
+    let contracted = |homspace: FusionTreeHomSpace| {
+        let prepared = checked_final_layout_primer(rule, &homspace)?;
         Ok(MetadataOutput::HomSpace { homspace, prepared })
     };
     match request {
         MetadataRequest::Prepare { homspace } => {
-            primer(rule, homspace).map(MetadataOutput::Prepared)
+            checked_layout_primer(rule, homspace).map(MetadataOutput::Prepared)
+        }
+        MetadataRequest::FinalLayout { homspace } => {
+            checked_final_layout_primer(rule, homspace).map(MetadataOutput::Prepared)
         }
         MetadataRequest::Permute {
             homspace,
@@ -312,7 +353,7 @@ where
         } => homspace
             .try_permute_checked(rule, codomain_axes, domain_axes)
             .map_err(checked_metadata_operation_error)
-            .and_then(prepare),
+            .and_then(permuted),
         MetadataRequest::Contract {
             lhs,
             rhs,
@@ -330,7 +371,7 @@ where
             dst_codomain_rank,
         )
         .map_err(checked_metadata_operation_error)
-        .and_then(prepare),
+        .and_then(contracted),
         MetadataRequest::ContractHomSpaceMatches {
             lhs,
             rhs,
@@ -354,9 +395,8 @@ where
     }
 }
 
-/// Checked external-provider sibling of [`checked_layout_primer`]: stages a
-/// complete layout for a rule that certifies only [`CheckedFusionAlgebra`],
-/// without requiring the sealed built-in lowered codec.
+/// Stages the checked layout of `homspace` for a multiplicity-free rule that
+/// certifies [`CheckedFusionAlgebra`].
 pub(crate) fn checked_layout_primer<R>(
     rule: &R,
     homspace: &FusionTreeHomSpace,
@@ -370,12 +410,15 @@ where
         .map_err(|error| OperationError::FusionAlgebra(Box::new(error)))
 }
 
-pub(crate) fn checked_metadata_dispatcher<R>(
+fn checked_final_layout_primer<R>(
     rule: &R,
-    request: MetadataRequest<'_>,
-) -> Result<MetadataOutput, OperationError>
+    homspace: &FusionTreeHomSpace,
+) -> Result<PreparedLayoutKeys, OperationError>
 where
     R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
 {
-    checked_metadata_dispatch_with_primer(rule, request, checked_layout_primer)
+    homspace
+        .prepare_final_coupled_subblock_structure_checked(rule)
+        .map(PreparedLayoutKeys::Final)
+        .map_err(checked_metadata_operation_error)
 }

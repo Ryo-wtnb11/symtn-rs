@@ -112,8 +112,7 @@ where
         source_homspace.domain().clone(),
         source_homspace.codomain().clone(),
     );
-    let prepared = dispatch_prepare(primer, rule, &adjoint_hom)?;
-    DynamicFusionMapSpace::from_final_homspace_with_prepared(rule, adjoint_hom, prepared)
+    DynamicFusionMapSpace::from_final_homspace_with_primer(rule, adjoint_hom, primer)
 }
 
 #[cfg(test)]

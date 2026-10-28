@@ -746,14 +746,73 @@ impl FusionTreeHomSpace {
     where
         R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
     {
+        self.validate_checked_duals(rule)?;
+        self.prepare_fusion_tree_layout_with(rule, epoch, || {
+            self.try_fusion_tree_layout_data_uncached_checked(rule)
+        })
+    }
+
+    fn validate_checked_duals<R>(&self, rule: &R) -> Result<(), FusionAlgebraError>
+    where
+        R: CheckedFusionAlgebra,
+    {
         for leg in self.codomain().legs().iter().chain(self.domain().legs()) {
             for &sector in leg.sectors() {
                 rule.try_dual_sector(sector)?;
             }
         }
-        self.prepare_fusion_tree_layout_with(rule, epoch, || {
+        Ok(())
+    }
+
+    /// Stages the checked multiplicity-free complete layout of a final
+    /// HomSpace; [`PreparedBlockStructure::commit_with_complete_homspace`]
+    /// publishes it and returns the canonical HomSpace.
+    ///
+    /// Order: provider dual validation, then the complete-structure lookup;
+    /// only a miss enumerates (or finds) the sector structure and builds the
+    /// degeneracy part, as TensorKit's `degeneracystructure`
+    /// (`spaces/structure.jl:114`). The sector layout is published only after
+    /// that build succeeds, so a failing call publishes nothing; the complete
+    /// structure is published on commit.
+    #[doc(hidden)]
+    pub fn prepare_final_coupled_subblock_structure_checked<R>(
+        &self,
+        rule: &R,
+    ) -> Result<PreparedBlockStructure, CheckedFusionSpaceError>
+    where
+        R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
+    {
+        let epoch = core_reset_epoch();
+        // Why validate duals before the lookup: no cache entry certifies a
+        // representable dual, so a hit must not answer for a provider whose
+        // cold call would fail here.
+        self.validate_checked_duals(rule)?;
+        let key = CompleteHomSpaceStructureCacheKey::new(rule, self);
+        // Why a hit may skip the sector structure: an entry is admitted only
+        // after a sector layout for the same rule identity and sector
+        // signature (both fixed by the key) was built, which is exactly the
+        // evidence a sector-structure hit supplies to the cold path.
+        if let Some(entry) = complete_hom_space_structure_cached(&key) {
+            return Ok(PreparedBlockStructure::complete_hit(
+                self.clone(),
+                entry.homspace_id(),
+                entry.structure(),
+            ));
+        }
+        let prepared = self.prepare_fusion_tree_layout_with(rule, epoch, || {
             self.try_fusion_tree_layout_data_uncached_checked(rule)
-        })
+        })?;
+        let (sector, degeneracy) =
+            coupled_subblock_parts_from_leg_degeneracies(self, prepared.layout_data())?;
+        let candidate = PreparedBlockStructure::from_shared_parts(sector, degeneracy)
+            .map(PreparedBlockStructure::with_storage_tiling)?;
+        prepared.commit();
+        Ok(PreparedBlockStructure::complete_miss(
+            self.clone(),
+            candidate,
+            key,
+            epoch,
+        ))
     }
 
     fn prepare_fusion_tree_layout_with<R, E, F>(
@@ -943,14 +1002,16 @@ impl FusionTreeHomSpace {
     {
         let epoch = core_reset_epoch();
         let rule_identity = rule.rule_identity();
-        let layout = self.generic_sector_layout(rule_identity.clone(), || {
-            self.fusion_tree_layout_data_generic(rule)
-        })?;
-        let key = CompleteHomSpaceStructureCacheKey::generic(rule_identity, &self);
+        let key = CompleteHomSpaceStructureCacheKey::generic(rule_identity.clone(), &self);
+        // Why a hit may skip the sector structure: see
+        // `prepare_final_coupled_subblock_structure_checked`.
         let (entry, structure) = if let Some(entry) = complete_hom_space_structure_cached(&key) {
             let structure = entry.structure();
             (entry, structure)
         } else {
+            let layout = self.generic_sector_layout(rule_identity, || {
+                self.fusion_tree_layout_data_generic(rule)
+            })?;
             let (sector, degeneracy) =
                 coupled_subblock_parts_from_leg_degeneracies(&self, &layout)?;
             let built = BlockStructure::from_shared_parts(sector, degeneracy)?;
@@ -962,8 +1023,8 @@ impl FusionTreeHomSpace {
 
     /// Checked Generic-fusion structural staging from this HomSpace's leg
     /// degeneracies. A failed provider walk is never cached; a successful one
-    /// may be answered by the sector-structure cache, since the layout is a
-    /// pure function of the rule identity and the sector signature.
+    /// may be answered by the complete- or sector-structure cache, since the
+    /// layout is a pure function of the rule identity and the sector signature.
     pub fn coupled_subblock_structure_from_leg_degeneracies_generic_checked<R>(
         &self,
         rule: &R,
@@ -990,26 +1051,20 @@ impl FusionTreeHomSpace {
     {
         let epoch = core_reset_epoch();
         let rule_identity = rule.rule_identity();
-        let layout = self.generic_sector_layout(rule_identity.clone(), || {
-            self.fusion_tree_layout_data_generic_checked(rule)
-        })?;
-        let (sector, degeneracy) = coupled_subblock_parts_from_leg_degeneracies(self, &layout)?;
-        let candidate = PreparedBlockStructure::from_shared_parts(sector, degeneracy)
-            .map(PreparedBlockStructure::with_storage_tiling)?;
-        Ok(PreparedBlockStructure::complete_miss(
-            self.clone(),
-            candidate,
-            CompleteHomSpaceStructureCacheKey::generic(rule_identity, self),
-            epoch,
-            true,
-        ))
+        self.clone()
+            .prepare_complete_coupled_subblock_structure_generic_checked_at(
+                rule,
+                rule_identity,
+                epoch,
+            )
     }
 
     /// Begins one complete checked Generic layout transaction. The reset epoch
     /// is captured before the provider identity is read and handed to `admit`;
-    /// checked sector admission then precedes the complete-cache probe. A hit reuses
-    /// its canonical HomSpace/structure pair without building degeneracy
-    /// metadata, while a miss carries one unpublished candidate to commit.
+    /// the complete-cache probe then precedes checked sector admission. A hit
+    /// reuses its canonical HomSpace/structure pair without consulting the
+    /// sector structure, while a miss carries one unpublished candidate to
+    /// commit.
     #[doc(hidden)]
     pub fn prepare_complete_coupled_subblock_structure_generic_checked_after<R, A>(
         self,
@@ -1060,7 +1115,7 @@ impl FusionTreeHomSpace {
     /// `source`'s resident cache entry memoizes this permutation and the
     /// destination's own entry is resident, that hit with no further
     /// provider query ([`Permuted::Memo`]); otherwise `before_derive`, the
-    /// provider derivation and the usual sector-structure / degeneracy-structure cache tail
+    /// provider derivation and the usual degeneracy-structure / sector-structure cache tail
     /// ([`Permuted::Derived`], whose ticket publishes after the caller's
     /// commit).
     ///
@@ -1194,10 +1249,9 @@ impl FusionTreeHomSpace {
     where
         R: CheckedGenericFusion,
     {
-        let layout = self.generic_sector_layout(rule_identity.clone(), || {
-            self.fusion_tree_layout_data_generic_checked(rule)
-        })?;
-        let key = CompleteHomSpaceStructureCacheKey::generic(rule_identity, &self);
+        let key = CompleteHomSpaceStructureCacheKey::generic(rule_identity.clone(), &self);
+        // Why a hit may skip the sector structure: see
+        // `prepare_final_coupled_subblock_structure_checked`.
         if let Some(entry) = complete_hom_space_structure_cached(&key) {
             return Ok(PreparedBlockStructure::complete_hit(
                 self,
@@ -1205,11 +1259,14 @@ impl FusionTreeHomSpace {
                 entry.structure(),
             ));
         }
+        let layout = self.generic_sector_layout(rule_identity, || {
+            self.fusion_tree_layout_data_generic_checked(rule)
+        })?;
         let (sector, degeneracy) = coupled_subblock_parts_from_leg_degeneracies(&self, &layout)?;
         let candidate = PreparedBlockStructure::from_shared_parts(sector, degeneracy)
             .map(PreparedBlockStructure::with_storage_tiling)?;
         Ok(PreparedBlockStructure::complete_miss(
-            self, candidate, key, epoch, false,
+            self, candidate, key, epoch,
         ))
     }
 

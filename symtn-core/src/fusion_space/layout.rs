@@ -96,7 +96,7 @@ impl PreparedFusionTreeLayout {
         }
     }
 
-    fn layout_data(&self) -> &FusionTreeHomSpaceLayoutData {
+    pub(super) fn layout_data(&self) -> &FusionTreeHomSpaceLayoutData {
         match &self.state {
             PreparedFusionTreeLayoutState::Cached { layout, .. } => layout,
             PreparedFusionTreeLayoutState::Cold { data, .. } => data,

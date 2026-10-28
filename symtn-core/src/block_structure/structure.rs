@@ -87,7 +87,6 @@ enum PreparedBlockStructureState {
         candidate: PreparedBlockStructureCandidate,
         key: CompleteHomSpaceStructureCacheKey,
         epoch: usize,
-        probe_on_commit: bool,
     },
 }
 
@@ -168,7 +167,6 @@ impl PreparedBlockStructure {
         prepared: Self,
         key: CompleteHomSpaceStructureCacheKey,
         epoch: usize,
-        probe_on_commit: bool,
     ) -> Self {
         let Self {
             state: PreparedBlockStructureState::Fresh(candidate),
@@ -184,7 +182,6 @@ impl PreparedBlockStructure {
                 candidate,
                 key,
                 epoch,
-                probe_on_commit,
             },
             required_len,
             storage_tiling,
@@ -266,14 +263,8 @@ impl PreparedBlockStructure {
                 candidate,
                 key,
                 epoch,
-                probe_on_commit,
                 ..
             } => {
-                if probe_on_commit {
-                    if let Some(entry) = complete_hom_space_structure_cached(&key) {
-                        return entry.structure().as_ref().clone();
-                    }
-                }
                 let structure =
                     Self::finish_candidate(candidate, required_len, storage_tiling).into_shared();
                 admit_complete_hom_space_structure(key, structure, epoch)
@@ -304,16 +295,7 @@ impl PreparedBlockStructure {
                 candidate,
                 key,
                 epoch,
-                probe_on_commit,
             } => {
-                if probe_on_commit {
-                    if let Some(entry) = complete_hom_space_structure_cached(&key) {
-                        return (
-                            Some(homspace.with_canonical_id(entry.homspace_id())),
-                            entry.structure(),
-                        );
-                    }
-                }
                 let structure =
                     Self::finish_candidate(candidate, required_len, storage_tiling).into_shared();
                 let (entry, structure) = admit_complete_hom_space_structure(key, structure, epoch);

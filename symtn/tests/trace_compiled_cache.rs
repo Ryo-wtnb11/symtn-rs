@@ -167,7 +167,8 @@ macro_rules! warm_lookups {
 /// What: a warm trace is one compiled-trace hit per call and no
 /// composed-coefficient lookup, at any block count, for Unique (U(1)),
 /// Simple (SU(2)) and checked Generic (SU(3)) fusion; its sector and
-/// degeneracy lookups are those of the uncached compile. The uncached
+/// degeneracy lookups are those of the uncached compile: one complete
+/// structure for the destination and no sector structure. The uncached
 /// compile of a non-Unique rule looks its fusion groups up on every call,
 /// which is what the hit removes.
 #[test]
@@ -178,7 +179,7 @@ fn a_warm_trace_is_one_compiled_lookup_per_call() {
         assert_eq!(cached.coefficient, 0, "{label} B={blocks}");
         assert_eq!(cached.sector, uncached.sector, "{label} B={blocks}");
         assert_eq!(cached.degeneracy, uncached.degeneracy, "{label} B={blocks}");
-        assert_eq!(cached.sector, (CALLS, 0), "{label} B={blocks}");
+        assert_eq!(cached.sector, (0, 0), "{label} B={blocks}");
         assert_eq!(cached.degeneracy, (CALLS, 0), "{label} B={blocks}");
         if grouped {
             assert!(uncached.coefficient >= CALLS, "{label} B={blocks}");
