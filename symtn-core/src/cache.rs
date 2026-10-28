@@ -21,8 +21,8 @@
 //! admission wins.)
 
 use std::hash::Hash;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use quick_cache::sync::{Cache, EntryAction, GuardResult};
 use quick_cache::{Equivalent, Lifecycle, OptionsBuilder, Weighter};
@@ -59,6 +59,10 @@ impl StructureCacheKind {
 }
 
 /// A snapshot of one structure cache.
+///
+/// The counters are summed over per-thread stripes without stopping the
+/// threads that count: exact once they are quiescent, eventually consistent
+/// while they run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StructureCacheInfo {
     kind: StructureCacheKind,
@@ -129,9 +133,51 @@ impl<V: ?Sized> Clone for Charged<V> {
     }
 }
 
-/// quick_cache's default hot-queue share, set explicitly because the
-/// largest admissible entry depends on it (`StructureCache::max_entry_bytes`).
-const HOT_ALLOCATION: f64 = 0.97;
+/// The hot-queue share of each cache: half, so every admissible entry also
+/// fits the cold queue.
+///
+/// quick_cache admits an entry only up to the hot target
+/// (`StructureCache::max_entry_bytes`). Once the hot queue is full, a new key
+/// enters the cold queue unreferenced, and the over-budget sweep
+/// (`shard.rs:advance_cold`) evicts unreferenced cold entries oldest first.
+/// The new entry is the youngest. It survives the sweep when its weight fits
+/// the cold share and the hot queue is within its target, because the sweep
+/// stops at the latest when cold holds only the new entry. (A re-admitted
+/// ghost key enters hot past its target; until the next promotion trims hot,
+/// a new cold entry can still be swept.)
+///
+/// Why not quick_cache's default 0.97: an entry larger than the 3% cold share
+/// was evicted by its own admission, so every repeat rebuilt it. The price is
+/// a largest admissible entry of half the budget instead of 97%, so the
+/// default budget is 128 MiB (64 MiB per entry); a larger entry is rejected
+/// and counted in [`StructureCacheInfo::rejections`].
+///
+/// The share must survive budget changes, and quick_cache 0.7.0's
+/// `set_capacity` does not keep it on its own (`shard.rs:set_capacity`): from
+/// capacity 0 it resets the hot target to its default 0.97, and otherwise it
+/// carries over the old target/capacity ratio, which truncation has moved
+/// off one half. [`quick_cache_capacity`] therefore hands quick_cache only
+/// even capacities, whose half is exact, and never 0.
+const HOT_ALLOCATION: f64 = 0.5;
+
+/// The capacity quick_cache gets for byte budget `budget`: the largest even
+/// number not above it, so the hot target is exactly half and an exact half
+/// carries over to the next capacity; `None` below 2, where nothing is
+/// admitted. Exact for budgets up to 2^53 bytes.
+///
+/// Why not rebuild the quick_cache instance on a budget change instead: the
+/// instance would then sit behind a lock or a swappable pointer that every
+/// hit reads, and std has no lock-free swap.
+fn quick_cache_capacity(budget: u64) -> Option<u64> {
+    (budget >= 2).then_some(budget & !1)
+}
+
+/// The largest entry a cache with byte budget `budget` admits: the hot
+/// target of [`quick_cache_capacity`], which quick_cache enforces
+/// (`shard.rs:replace_placeholder`).
+fn max_entry_bytes_for(budget: u64) -> u64 {
+    quick_cache_capacity(budget).map_or(0, |capacity| capacity / 2)
+}
 
 #[derive(Clone)]
 struct ChargeWeighter;
@@ -142,8 +188,46 @@ impl<K, V: ?Sized> Weighter<K, Charged<V>> for ChargeWeighter {
     }
 }
 
+/// Counter stripes per cache, as fusion-symbols stripes its hit counters
+/// (0.9.1 `src/cache.rs:HIT_STRIPES`): twice quick_cache's eight
+/// `sharded-lock` reader stripes, so up to 16 concurrent threads count on
+/// distinct cache lines while a snapshot sums only 16 lines.
+const COUNTER_STRIPES: usize = 16;
+
+/// One thread's counters, alone on its cache line pair.
+#[repr(align(128))]
+#[derive(Default)]
+struct CounterStripe {
+    hits: AtomicU64,
+    misses: AtomicU64,
+    admissions: AtomicU64,
+    evictions: AtomicU64,
+    rejections: AtomicU64,
+}
+
+type Counters = [CounterStripe; COUNTER_STRIPES];
+
+/// This thread's counter stripe, assigned round-robin on first use.
+fn counter_stripe(counters: &Counters) -> &CounterStripe {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    thread_local! {
+        static STRIPE: usize = NEXT.fetch_add(1, Ordering::Relaxed);
+    }
+    &counters[STRIPE.try_with(|stripe| *stripe).unwrap_or(0) % COUNTER_STRIPES]
+}
+
+/// The sum of one counter over every stripe. Relaxed and unsynchronized
+/// with the counting threads: exact once they are quiescent, eventually
+/// consistent while they run.
+fn counter_sum(counters: &Counters, counter: impl Fn(&CounterStripe) -> &AtomicU64) -> u64 {
+    counters
+        .iter()
+        .map(|stripe| counter(stripe).load(Ordering::Relaxed))
+        .sum()
+}
+
 #[derive(Clone)]
-struct CountEvictions(Arc<AtomicU64>);
+struct CountEvictions(Arc<Counters>);
 
 impl<K, V> Lifecycle<K, V> for CountEvictions {
     /// Evicted items, dropped when the request ends, outside the shard lock
@@ -151,7 +235,9 @@ impl<K, V> Lifecycle<K, V> for CountEvictions {
     type RequestState = Vec<(K, V)>;
 
     fn on_evict(&self, evicted: &mut Self::RequestState, key: K, value: V) {
-        self.0.fetch_add(1, Ordering::Relaxed);
+        counter_stripe(&self.0)
+            .evictions
+            .fetch_add(1, Ordering::Relaxed);
         evicted.push((key, value));
     }
 }
@@ -167,16 +253,13 @@ pub struct StructureCache<K, V: ?Sized> {
     /// write-held by [`Self::clear`]. A build that straddles a reset is
     /// therefore either wiped by the clear or refused by the epoch check.
     publication: RwLock<()>,
-    /// The last admitted entry: a repeated hit compares keys (an `Arc`
-    /// pointer first) instead of hashing one. Why weak: the front must not keep
-    /// an entry alive once the budget evicted it, so it retains no charged
-    /// bytes; an evicted entry no caller holds simply misses here.
-    last: RwLock<Option<(K, Weak<V>)>>,
-    hits: AtomicU64,
-    misses: AtomicU64,
-    admissions: AtomicU64,
-    evictions: Arc<AtomicU64>,
-    rejections: AtomicU64,
+    /// The byte budget, which bounds the charged bytes. quick_cache holds
+    /// [`quick_cache_capacity`] of it; written under the publication write
+    /// lock.
+    budget: AtomicU64,
+    /// Striped so that a warm hit writes no cache line every thread writes;
+    /// shared with the eviction lifecycle.
+    counters: Arc<Counters>,
 }
 
 impl<K, V> StructureCache<K, V>
@@ -184,16 +267,21 @@ where
     K: Eq + Hash + Clone,
     V: ?Sized,
 {
-    /// One shard: entries are heavy-tailed, and the largest must fit it
-    /// (the U(1) `V^6 <- V^6` structures charge 30-46 MB, so more shards would
-    /// force a larger budget). A hit takes only the shard's read lock, so one
+    /// One shard: entries are heavy-tailed, and the largest must fit the
+    /// hot share of the one shard (the U(1) `V^6 <- V^6` structures charge
+    /// 30-46 MB, within the 64 MiB hot share of the default budget; more
+    /// shards would force a larger budget). A hit takes only the shard's read lock, so one
     /// shard adds no contention.
     pub fn new(kind: StructureCacheKind, byte_budget: u64) -> Self {
-        let evictions = Arc::new(AtomicU64::new(0));
+        let counters: Arc<Counters> = Arc::default();
+        // A budget below 2 admits nothing; quick_cache still gets a real
+        // capacity so its ghost records keep a size for a later budget.
+        let capacity =
+            quick_cache_capacity(byte_budget).unwrap_or(DEFAULT_STRUCTURE_CACHE_BYTE_BUDGET);
         let options = OptionsBuilder::new()
             .shards(1)
             .hot_allocation(HOT_ALLOCATION)
-            .weight_capacity(byte_budget)
+            .weight_capacity(capacity)
             .estimated_items_capacity(1024)
             .build()
             .expect("structure cache options are valid");
@@ -203,43 +291,29 @@ where
                 options,
                 ChargeWeighter,
                 rustc_hash::FxBuildHasher,
-                CountEvictions(Arc::clone(&evictions)),
+                CountEvictions(Arc::clone(&counters)),
             ),
             publication: RwLock::new(()),
-            last: RwLock::new(None),
-            hits: AtomicU64::new(0),
-            misses: AtomicU64::new(0),
-            admissions: AtomicU64::new(0),
-            evictions,
-            rejections: AtomicU64::new(0),
+            budget: AtomicU64::new(byte_budget),
+            counters,
         }
     }
 
     /// A warm hit: one shard read, no allocation.
+    ///
+    /// Why no front holding the last admitted entry: a shared front's lock
+    /// is a word every hit writes, so hits stopped scaling past one thread.
     pub fn get<Q>(&self, key: &Q) -> Option<Arc<V>>
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
-        if let Some(value) = self.last_hit(key) {
-            return Some(value);
-        }
         let found = self.entries.get(key)?;
-        self.hits.fetch_add(1, Ordering::Relaxed);
+        self.stripe().hits.fetch_add(1, Ordering::Relaxed);
         Some(found.value)
     }
 
-    fn last_hit<Q>(&self, key: &Q) -> Option<Arc<V>>
-    where
-        Q: Equivalent<K> + ?Sized,
-    {
-        let last = self
-            .last
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let (_, value) = last.as_ref().filter(|(last, _)| key.equivalent(last))?;
-        let value = value.upgrade()?;
-        self.hits.fetch_add(1, Ordering::Relaxed);
-        Some(value)
+    fn stripe(&self) -> &CounterStripe {
+        counter_stripe(&self.counters)
     }
 
     /// Whether `key` is resident; counts no hit.
@@ -247,13 +321,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
-        let is_last = self
-            .last
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .is_some_and(|(last, value)| key.equivalent(last) && value.strong_count() > 0);
-        is_last || self.entries.contains_key(key)
+        self.entries.contains_key(key)
     }
 
     /// Publishes a value built since reset epoch `epoch`, or returns the
@@ -268,7 +336,7 @@ where
     pub fn publish(&self, key: &K, value: Arc<V>, bytes: u64, epoch: usize) -> (Arc<V>, bool) {
         match self.entries.get_value_or_guard(key, None) {
             GuardResult::Value(existing) => (existing.value, true),
-            GuardResult::Guard(guard) => self.admit(key, value, bytes, epoch, |charged| {
+            GuardResult::Guard(guard) => self.admit(value, bytes, epoch, |charged| {
                 let _ = guard.insert(charged);
             }),
             GuardResult::Timeout => unreachable!("a lookup without a timeout never times out"),
@@ -315,18 +383,15 @@ where
         epoch: usize,
         build: impl FnOnce() -> Result<(Arc<V>, u64), E>,
     ) -> Result<Arc<V>, E> {
-        if let Some(value) = self.last_hit(key) {
-            return Ok(value);
-        }
         match self.entries.get_value_or_guard(key, None) {
             GuardResult::Value(existing) => {
-                self.hits.fetch_add(1, Ordering::Relaxed);
+                self.stripe().hits.fetch_add(1, Ordering::Relaxed);
                 Ok(existing.value)
             }
             GuardResult::Guard(guard) => {
                 let (value, bytes) = build()?;
                 Ok(self
-                    .admit(key, value, bytes, epoch, |charged| {
+                    .admit(value, bytes, epoch, |charged| {
                         let _ = guard.insert(charged);
                     })
                     .0)
@@ -337,23 +402,25 @@ where
 
     fn admit(
         &self,
-        key: &K,
         value: Arc<V>,
         bytes: u64,
         epoch: usize,
         insert: impl FnOnce(Charged<V>),
     ) -> (Arc<V>, bool) {
-        self.misses.fetch_add(1, Ordering::Relaxed);
-        // quick_cache drops an item heavier than its shard without a trace;
-        // the rejection is counted here instead.
-        if bytes > self.max_entry_bytes() {
-            self.rejections.fetch_add(1, Ordering::Relaxed);
-            return (value, false);
-        }
+        let stripe = self.stripe();
+        stripe.misses.fetch_add(1, Ordering::Relaxed);
         let _publication = self
             .publication
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // quick_cache drops an item heavier than its hot target without a
+        // trace; the rejection is counted here instead. Checked under the
+        // lock, so a budget change cannot slip between check and insert.
+        let max_entry_bytes = self.max_entry_bytes();
+        if max_entry_bytes == 0 || bytes > max_entry_bytes {
+            stripe.rejections.fetch_add(1, Ordering::Relaxed);
+            return (value, false);
+        }
         if !may_publish_since(epoch) {
             return (value, false);
         }
@@ -361,12 +428,7 @@ where
             value: Arc::clone(&value),
             bytes,
         });
-        *self
-            .last
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((key.clone(), Arc::downgrade(&value)));
-        self.admissions.fetch_add(1, Ordering::Relaxed);
+        stripe.admissions.fetch_add(1, Ordering::Relaxed);
         (value, true)
     }
 
@@ -376,37 +438,43 @@ where
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.entries.clear();
-        self.forget_last();
-        for counter in [&self.hits, &self.misses, &self.admissions, &self.rejections] {
-            counter.store(0, Ordering::Relaxed);
+        for stripe in self.counters.iter() {
+            for counter in [
+                &stripe.hits,
+                &stripe.misses,
+                &stripe.admissions,
+                &stripe.evictions,
+                &stripe.rejections,
+            ] {
+                counter.store(0, Ordering::Relaxed);
+            }
         }
-        self.evictions.store(0, Ordering::Relaxed);
     }
 
     pub(crate) fn set_byte_budget(&self, bytes: u64) {
-        // Exclusive, as in `clear`: an admission in flight finishes before
-        // the budget changes, so it cannot republish the front afterwards.
         let _publication = self
             .publication
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.entries.set_capacity(bytes);
-        self.forget_last();
+        self.budget.store(bytes, Ordering::Relaxed);
+        match quick_cache_capacity(bytes) {
+            Some(capacity) => self.entries.set_capacity(capacity),
+            None => {
+                // Every resident entry is over this budget: evicted, and
+                // counted as quick_cache's lifecycle counts evictions.
+                // quick_cache keeps its last capacity, so its hot share is
+                // still exact when a later budget re-enables the cache.
+                let evicted = self.entries.len() as u64;
+                self.entries.clear();
+                self.stripe()
+                    .evictions
+                    .fetch_add(evicted, Ordering::Relaxed);
+            }
+        }
     }
 
-    /// quick_cache admits an entry only up to the hot-queue target of its
-    /// shard (`shard.rs` `replace_placeholder`), not the whole shard; this is
-    /// that target, computed as quick_cache computes it.
     fn max_entry_bytes(&self) -> u64 {
-        let shard = self.entries.shard_capacity();
-        ((shard as f64 * HOT_ALLOCATION) as u64).clamp(shard.min(1), shard)
-    }
-
-    fn forget_last(&self) {
-        *self
-            .last
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        max_entry_bytes_for(self.budget.load(Ordering::Relaxed))
     }
 
     pub fn info(&self) -> StructureCacheInfo {
@@ -414,13 +482,13 @@ where
             kind: self.kind,
             entries: self.entries.len(),
             charged_bytes: self.entries.weight(),
-            byte_budget: self.entries.capacity(),
+            byte_budget: self.budget.load(Ordering::Relaxed),
             max_entry_bytes: self.max_entry_bytes(),
-            hits: self.hits.load(Ordering::Relaxed),
-            misses: self.misses.load(Ordering::Relaxed),
-            admissions: self.admissions.load(Ordering::Relaxed),
-            evictions: self.evictions.load(Ordering::Relaxed),
-            rejections: self.rejections.load(Ordering::Relaxed),
+            hits: counter_sum(&self.counters, |stripe| &stripe.hits),
+            misses: counter_sum(&self.counters, |stripe| &stripe.misses),
+            admissions: counter_sum(&self.counters, |stripe| &stripe.admissions),
+            evictions: counter_sum(&self.counters, |stripe| &stripe.evictions),
+            rejections: counter_sum(&self.counters, |stripe| &stripe.rejections),
         }
     }
 }
@@ -435,7 +503,7 @@ pub trait ErasedStructureCacheControl: Sync {
 }
 
 /// Process default of every structure cache's byte budget.
-pub(crate) const DEFAULT_STRUCTURE_CACHE_BYTE_BUDGET: u64 = 64 * 1024 * 1024;
+pub(crate) const DEFAULT_STRUCTURE_CACHE_BYTE_BUDGET: u64 = 128 * 1024 * 1024;
 
 /// The slot of an externally owned kind: its owner registers on first use.
 /// A budget configured earlier is held here and handed to the owner at
@@ -527,8 +595,7 @@ pub fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         entries: 0,
         charged_bytes: 0,
         byte_budget: budget,
-        // One shard, as every structure cache.
-        max_entry_bytes: ((budget as f64 * HOT_ALLOCATION) as u64).clamp(budget.min(1), budget),
+        max_entry_bytes: max_entry_bytes_for(budget),
         hits: 0,
         misses: 0,
         admissions: 0,
@@ -641,6 +708,161 @@ mod tests {
         assert!(Arc::ptr_eq(&built, &again));
         let info = cache.info();
         assert_eq!((info.hits(), info.misses(), info.admissions()), (1, 1, 1));
+    }
+
+    #[test]
+    fn hits_counted_on_every_thread_sum_exactly_once_quiescent() {
+        let _guard = epoch_lock();
+        let cache = cache(1 << 20);
+        let epoch = core_reset_epoch();
+        cache.publish(&1, Arc::new(1), 64, epoch);
+        cache.publish(&2, Arc::new(2), 64, epoch);
+        const THREADS: u32 = 24;
+        const HITS: u32 = 1000;
+        std::thread::scope(|scope| {
+            for t in 0..THREADS {
+                let cache = &cache;
+                scope.spawn(move || {
+                    for i in 0..HITS {
+                        assert!(cache.get(&(1 + (t + i) % 2)).is_some());
+                    }
+                    assert!(cache.get(&(100 + t)).is_none());
+                });
+            }
+        });
+        // What: more threads than counter stripes, so stripes are shared, and
+        // still no hit is lost or double counted; a lookup miss counts nothing.
+        let info = cache.info();
+        assert_eq!((info.hits(), info.misses()), (u64::from(THREADS * HITS), 2));
+        cache.clear();
+        assert_eq!(cache.info().hits(), 0);
+    }
+
+    #[test]
+    fn a_cleared_entry_is_not_served_to_any_thread_that_still_holds_it() {
+        let _guard = epoch_lock();
+        let cache = cache(1 << 20);
+        let epoch = core_reset_epoch();
+        const THREADS: u32 = 8;
+        let admitted = std::sync::Barrier::new(THREADS as usize + 1);
+        let cleared = std::sync::Barrier::new(THREADS as usize + 1);
+        std::thread::scope(|scope| {
+            for t in 0..THREADS {
+                let (cache, admitted, cleared) = (&cache, &admitted, &cleared);
+                scope.spawn(move || {
+                    let held = cache.publish(&t, Arc::new(t), 64, epoch).0;
+                    assert!(Arc::ptr_eq(&cache.get(&t).unwrap(), &held));
+                    admitted.wait();
+                    cleared.wait();
+                    // What: the held Arc keeps the entry alive, yet the cleared cache
+                    // misses, and the next admission is what it serves.
+                    assert!(cache.get(&t).is_none());
+                    assert!(!cache.contains(&t));
+                    let fresh = cache.publish(&t, Arc::new(t + 100), 64, epoch).0;
+                    assert!(Arc::ptr_eq(&cache.get(&t).unwrap(), &fresh));
+                    assert_eq!(*held, t);
+                });
+            }
+            admitted.wait();
+            cache.clear();
+            cleared.wait();
+        });
+    }
+
+    /// Fills `cache` (budget 1 MiB) to 94% with entries in use, then repeats a
+    /// new entry of a fifth of the budget with no caller holding it.
+    fn assert_a_new_entry_in_a_full_cache_is_built_once(cache: &StructureCache<u32, u32>) {
+        let epoch = core_reset_epoch();
+        for key in 0..16 {
+            cache.publish(&key, Arc::new(key), 60 << 10, epoch);
+        }
+        for _ in 0..3 {
+            for key in 0..16 {
+                assert!(cache.get(&key).is_some());
+            }
+        }
+        let mut builds = 0;
+        for _ in 0..4 {
+            let value = cache
+                .get_or_try_build(&100, epoch, || {
+                    builds += 1;
+                    Ok::<_, ()>((Arc::new(100), 200 << 10))
+                })
+                .unwrap();
+            assert_eq!(*value, 100);
+        }
+        // What: built once and then hit; the budget evicted older entries
+        // to fit it, and still bounds the charged bytes.
+        assert_eq!(builds, 1);
+        assert!(cache.get(&100).is_some());
+        let info = cache.info();
+        assert!(info.charged_bytes() <= info.byte_budget());
+        assert!(info.evictions() > 0);
+    }
+
+    #[test]
+    fn an_entry_admitted_into_a_full_cache_is_served_on_its_next_repeat() {
+        let _guard = epoch_lock();
+        assert_a_new_entry_in_a_full_cache_is_built_once(&cache(1 << 20));
+    }
+
+    #[test]
+    fn a_cache_re_enabled_after_a_disabling_budget_keeps_new_entries() {
+        let _guard = epoch_lock();
+        // What: disabling a cache with a budget of 0 or 1 and enabling it
+        // again keeps the half hot share, so the full-cache admission still
+        // builds once (quick_cache's own `set_capacity` would restore a 97%
+        // or 100% hot share here).
+        for disabling in [0, 1] {
+            let cache = cache(1 << 20);
+            cache.set_byte_budget(disabling);
+            cache.set_byte_budget(1 << 20);
+            assert_a_new_entry_in_a_full_cache_is_built_once(&cache);
+            let built_disabled = cache_with_budget_then(disabling, 1 << 20);
+            assert_a_new_entry_in_a_full_cache_is_built_once(&built_disabled);
+        }
+    }
+
+    fn cache_with_budget_then(first: u64, then: u64) -> StructureCache<u32, u32> {
+        let cache = cache(first);
+        cache.set_byte_budget(then);
+        cache
+    }
+
+    #[test]
+    fn the_reported_largest_entry_is_what_the_cache_admits_after_any_budget_change() {
+        let _guard = epoch_lock();
+        let epoch = core_reset_epoch();
+        let changes: [&[u64]; 7] = [
+            &[1 << 20],
+            &[0, 1 << 20],
+            &[1, 1 << 20],
+            &[(1 << 20) + 1],
+            &[3],
+            &[1 << 20, 4097, 1 << 16],
+            &[0],
+        ];
+        for budgets in changes {
+            let cache = cache(1 << 20);
+            for &budget in budgets {
+                cache.set_byte_budget(budget);
+            }
+            let info = cache.info();
+            let max = info.max_entry_bytes();
+            assert_eq!(info.byte_budget(), *budgets.last().unwrap());
+            // What: an entry of exactly the reported size is admitted and
+            // resident; one byte more is rejected and counted.
+            if max > 0 {
+                let (_, resident) = cache.publish(&1, Arc::new(1), max, epoch);
+                assert!(resident, "{budgets:?}");
+                assert!(cache.get(&1).is_some(), "{budgets:?}");
+            }
+            let (_, resident) = cache.publish(&2, Arc::new(2), max + 1, epoch);
+            assert!(!resident, "{budgets:?}");
+            assert!(cache.get(&2).is_none(), "{budgets:?}");
+            assert_eq!(cache.info().rejections(), 1, "{budgets:?}");
+            assert!(cache.info().charged_bytes() <= cache.info().byte_budget());
+        }
     }
 
     #[test]
