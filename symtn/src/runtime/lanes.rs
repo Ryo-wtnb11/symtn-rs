@@ -50,10 +50,7 @@ pub struct Ctxs<Key: Clone + Eq + Hash + Send + Sync + 'static> {
 struct LaneConfig {
     /// `None` for a `Default` [`Ctxs`], whose lanes own private env-driven
     /// pools rather than a runtime's shared CPU context.
-    shared: Option<(
-        symtn_dense::SharedCpuContext,
-        Option<symtn_dense::CpuBackendKind>,
-    )>,
+    shared: Option<symtn_dense::SharedCpuContext>,
     recoupling_threads: Option<NonZeroUsize>,
 }
 
@@ -72,43 +69,32 @@ impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Default for Ctxs<Key> {
     }
 }
 
-/// Builds one contraction/recoupling backend. A compiled-default `gemm_kind`
-/// uses the runtime's shared CPU context; an explicit nondefault kind uses a
-/// private provider context. Both remain subject to provider synchronization.
+/// Builds one contraction/recoupling backend on the runtime's shared CPU
+/// context.
 pub(super) fn make_transform_ops(
     ctx: &symtn_dense::SharedCpuContext,
-    gemm_kind: Option<symtn_dense::CpuBackendKind>,
 ) -> Result<DenseTreeTransformOperations, Error> {
     Ok(DenseTreeTransformOperations::new(
-        symtn_dense::DefaultDenseExecutor::with_shared_context(ctx, gemm_kind)
-            .map_err(symtn_tensors::OperationError::Dense)?,
+        symtn_dense::DefaultDenseExecutor::with_shared_context(ctx),
     ))
 }
 
 impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
-    /// Builds the per-scalar contexts on the runtime's shared CPU context,
-    /// optionally with an explicit CPU GEMM provider.
-    pub(crate) fn with_config(
-        ctx: &symtn_dense::SharedCpuContext,
-        gemm_kind: Option<symtn_dense::CpuBackendKind>,
-    ) -> Result<Self, Error> {
+    /// Builds the per-scalar contexts on the runtime's shared CPU context.
+    pub(crate) fn with_config(ctx: &symtn_dense::SharedCpuContext) -> Result<Self, Error> {
         Ok(Self {
             f64:
                 Ctx::with_parts(
-                    symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(
-                        ctx, gemm_kind,
-                    )?),
-                    make_transform_ops(ctx, gemm_kind)?,
+                    symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(ctx)?),
+                    make_transform_ops(ctx)?,
                     <DenseTreeTransformOperations as symtn_tensors::TensorContractBackend<
                         f64,
                         f64,
                     >>::Workspace::default(),
                 ),
             c64: Ctx::with_parts(
-                symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(
-                    ctx, gemm_kind,
-                )?),
-                make_transform_ops(ctx, gemm_kind)?,
+                symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(ctx)?),
+                make_transform_ops(ctx)?,
                 <DenseTreeTransformOperations as symtn_tensors::TensorContractBackend<
                     Complex64,
                     f64,
@@ -117,7 +103,7 @@ impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
             f32: None,
             c32: None,
             lane_config: LaneConfig {
-                shared: Some((ctx.clone(), gemm_kind)),
+                shared: Some(ctx.clone()),
                 recoupling_threads: None,
             },
         })
@@ -128,11 +114,9 @@ impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
     fn make_lane<D: ScalarOps>(config: &LaneConfig) -> Result<Box<Ctx<D, Key>>, Error> {
         let mut lane =
             match &config.shared {
-                Some((ctx, gemm_kind)) => Ctx::with_parts(
-                    symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(
-                        ctx, *gemm_kind,
-                    )?),
-                    make_transform_ops(ctx, *gemm_kind)?,
+                Some(ctx) => Ctx::with_parts(
+                    symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(ctx)?),
+                    make_transform_ops(ctx)?,
                     <DenseTreeTransformOperations as symtn_tensors::TensorContractBackend<
                         D,
                         f64,
@@ -268,11 +252,10 @@ impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
 
 fn make_complex_multiplicity_free_ctx(
     ctx: &symtn_dense::SharedCpuContext,
-    gemm_kind: Option<symtn_dense::CpuBackendKind>,
 ) -> Result<CoefficientCtx<Complex64, RuleIdentity, Complex64>, Error> {
     Ok(CoefficientCtx::with_parts(
-        symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(ctx, gemm_kind)?),
-        make_transform_ops(ctx, gemm_kind)?,
+        symtn_tensors::TreeTransformExecutionContext::new(make_transform_ops(ctx)?),
+        make_transform_ops(ctx)?,
         <DenseTreeTransformOperations as symtn_tensors::TensorContractBackend<
             Complex64,
             Complex64,
@@ -304,11 +287,8 @@ macro_rules! define_tensor_execution_context {
             // Runtime, so the back-reference would form an Arc cycle.
             pub(crate) fn for_config(config: &RuntimeExecutionConfig) -> Result<Self, Error> {
                 let mut context = Self {
-                    $($field: Ctxs::with_config(&config.shared_ctx, config.gemm_kind)?,)+
-                    mf_c64_coeff_c64: make_complex_multiplicity_free_ctx(
-                        &config.shared_ctx,
-                        config.gemm_kind,
-                    )?,
+                    $($field: Ctxs::with_config(&config.shared_ctx)?,)+
+                    mf_c64_coeff_c64: make_complex_multiplicity_free_ctx(&config.shared_ctx)?,
                     #[cfg(all(test, feature = "cgc-gen"))]
                     generic_lane_uses: 0,
                 };
@@ -436,11 +416,10 @@ macro_rules! define_runtime_state {
             pub(super) fn with_config(
                 dense: Box<dyn symtn_dense::DenseExecutor + Send>,
                 ctx: &symtn_dense::SharedCpuContext,
-                gemm_kind: Option<symtn_dense::CpuBackendKind>,
             ) -> Result<Self, Error> {
                 Ok(Self {
-                    $($field: Ctxs::with_config(ctx, gemm_kind)?,)+
-                    mf_c64_coeff_c64: make_complex_multiplicity_free_ctx(ctx, gemm_kind)?,
+                    $($field: Ctxs::with_config(ctx)?,)+
+                    mf_c64_coeff_c64: make_complex_multiplicity_free_ctx(ctx)?,
                     dense,
                 })
             }

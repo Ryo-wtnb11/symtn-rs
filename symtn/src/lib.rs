@@ -18,8 +18,8 @@
 //! the sealed provider traits generic code names, are in [`sector`].
 //!
 //! A [`typed::Runtime`] owns the shared execution state: the per-rule
-//! contraction/tree-transform contexts, the dense backend (selectable per
-//! [`typed::LinalgBackend`]), and the
+//! contraction/tree-transform contexts, the dense backend (the CPU provider
+//! is chosen by cargo feature), and the
 //! contraction-plan cache `symtn-network` keys by network topology.
 //!
 //! **Parallelism.** A `Runtime` is cheap to clone across threads. Standalone

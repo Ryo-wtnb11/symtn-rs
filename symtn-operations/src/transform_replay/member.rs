@@ -531,7 +531,7 @@ mod tests {
     use crate::{StridedHostKernelAdapter, TreeTransformBlockSpec};
     use num_complex::Complex64;
     use symtn_dense::{
-        CpuBackendKind, DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseWrite,
+        DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseWrite,
     };
 
     fn fixture() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
@@ -569,8 +569,7 @@ mod tests {
     impl CountingDense {
         fn one_thread_faer() -> Self {
             Self {
-                inner: DefaultDenseExecutor::with_threads_and_kind(1, CpuBackendKind::Faer)
-                    .unwrap(),
+                inner: DefaultDenseExecutor::with_threads(1).unwrap(),
                 submissions: 0,
                 jobs: 0,
             }

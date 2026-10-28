@@ -125,30 +125,19 @@ type PooledContext = Box<TensorExecutionContext>;
 /// re-mint cannot fail. ponytail: CPU executors are cheap to construct; the pool
 /// exists to skip per-call construction, not because minting is expensive.
 fn mint_dense(config: &RuntimeExecutionConfig) -> Box<dyn symtn_dense::DenseExecutor + Send> {
-    Box::new(
-        symtn_dense::DefaultDenseExecutor::with_shared_context(
-            &config.shared_ctx,
-            config.linalg_kind,
-        )
-        .expect("dense executor config validated at Runtime build time"),
-    )
+    Box::new(symtn_dense::DefaultDenseExecutor::with_shared_context(
+        &config.shared_ctx,
+    ))
 }
 
 // No `dense_threads` field: the thread count is baked into `shared_ctx` at
 // build time, so executors minted later cannot drift from it.
 #[derive(Clone)]
 pub(crate) struct RuntimeExecutionConfig {
-    pub(crate) gemm_kind: Option<symtn_dense::CpuBackendKind>,
     pub(crate) recoupling_threads: Option<NonZeroUsize>,
-    /// CPU provider for dense factorizations (SVD/QR/eigh). Kept here so the
-    /// standalone-op executor pool can re-mint an executor identical to the one
-    /// `RuntimeBuilder::build` created (issue #155). `None` uses Tenferro's
-    /// resolved compiled provider default.
-    pub(crate) linalg_kind: Option<symtn_dense::CpuBackendKind>,
-    /// Runtime CPU context shared by built-in executors that use the compiled
-    /// default kind: the state, mintable executor pool, and transform backends.
-    /// An explicitly requested nondefault kind uses its own provider context;
-    /// an injected executor owns its own configuration.
+    /// Runtime CPU context shared by built-in executors: the state, mintable
+    /// executor pool, and transform backends. An injected executor owns its
+    /// own configuration.
     pub(crate) shared_ctx: symtn_dense::SharedCpuContext,
 }
 
@@ -567,34 +556,6 @@ impl std::fmt::Debug for Runtime {
     }
 }
 
-/// Names a CPU linear-algebra provider. [`RuntimeBuilder::linalg_backend`]
-/// uses it for the dense per-coupled-sector factorizations (SVD / QR / eigh /
-/// eig / inv / exp); [`RuntimeBuilder::gemm_backend`] uses it, independently,
-/// for contraction GEMM. Backend choice changes performance
-/// only — results stay TensorKit-equivalent across providers.
-///
-/// The *specific* BLAS/LAPACK behind [`LinalgBackend::Blas`] (OpenBLAS, MKL,
-/// Accelerate, or an injected provider) is a compile-time choice via the
-/// `blas-*` cargo features; at runtime you only pick faer vs the linked BLAS.
-/// Selecting `Blas` when no `cpu-blas`/`blas-*` provider was compiled in fails
-/// at [`RuntimeBuilder::build`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LinalgBackend {
-    /// Pure-Rust faer provider, available with the `cpu-faer` feature.
-    Faer,
-    /// System BLAS/LAPACK linked through a `blas-*` cargo feature.
-    Blas,
-}
-
-impl LinalgBackend {
-    fn to_kind(self) -> symtn_dense::CpuBackendKind {
-        match self {
-            LinalgBackend::Faer => symtn_dense::CpuBackendKind::Faer,
-            LinalgBackend::Blas => symtn_dense::CpuBackendKind::Blas,
-        }
-    }
-}
-
 /// Contradictory or invalid [`RuntimeBuilder`] settings, rejected by
 /// [`RuntimeBuilder::build`] instead of being silently adjusted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -603,9 +564,6 @@ pub enum RuntimeConfigError {
     ZeroDenseThreads,
     /// [`RuntimeBuilder::recoupling_threads`] was given zero.
     ZeroRecouplingThreads,
-    /// Both [`RuntimeBuilder::with_dense_executor`] and
-    /// [`RuntimeBuilder::linalg_backend`] select the factorization provider.
-    DenseExecutorWithLinalgBackend,
 }
 
 impl std::fmt::Display for RuntimeConfigError {
@@ -613,9 +571,6 @@ impl std::fmt::Display for RuntimeConfigError {
         f.write_str(match self {
             Self::ZeroDenseThreads => "dense_threads must be at least 1",
             Self::ZeroRecouplingThreads => "recoupling_threads must be at least 1",
-            Self::DenseExecutorWithLinalgBackend => {
-                "with_dense_executor and linalg_backend both select the factorization provider"
-            }
         })
     }
 }
@@ -634,18 +589,9 @@ pub struct RuntimeBuilder {
     cuda_device: Option<usize>,
     dense_threads: Option<usize>,
     recoupling_threads: Option<usize>,
-    /// User-injected CPU linear-algebra backend. When absent, the selected
-    /// built-in `linalg_backend` is used; when that is absent too, its compiled
-    /// provider default is used.
+    /// User-injected CPU linear-algebra backend. When absent, the compiled
+    /// provider is used.
     dense_executor: Option<Box<dyn symtn_dense::DenseExecutor + Send>>,
-    /// Selected built-in CPU provider for dense factorizations (SVD/QR/eigh);
-    /// `None` uses the compiled provider default. Mutually exclusive with
-    /// [`Self::dense_executor`].
-    linalg_backend: Option<LinalgBackend>,
-    /// Selected built-in CPU provider for the contraction/recoupling GEMM;
-    /// `None` uses the compiled provider default. Independent of
-    /// [`Self::linalg_backend`].
-    gemm_backend: Option<LinalgBackend>,
 }
 
 impl std::fmt::Debug for RuntimeBuilder {
@@ -656,8 +602,6 @@ impl std::fmt::Debug for RuntimeBuilder {
         s.field("dense_threads", &self.dense_threads)
             .field("recoupling_threads", &self.recoupling_threads)
             .field("dense_executor", &self.dense_executor.is_some())
-            .field("linalg_backend", &self.linalg_backend)
-            .field("gemm_backend", &self.gemm_backend)
             .finish()
     }
 }
@@ -692,13 +636,12 @@ impl RuntimeBuilder {
 
     /// Selects the CPU factorization backend (SVD / QR / eigh / eig / inv / exp
     /// on the coupled-sector matrices) by injecting a [`crate::expert::DenseExecutor`].
-    /// When no executor is injected, the selected built-in `linalg_backend` is
-    /// used; when it is unset, the provider follows Tenferro's resolved compiled
-    /// default: BLAS when its CPU build enables `cpu-blas`, otherwise faer. This
-    /// is the seam for a system BLAS/LAPACK or MKL backend: implement
-    /// `DenseExecutor` and pass it here — no operator or decomposition code changes.
-    /// Contraction GEMM is not delegated to the injected executor; it is
-    /// selected by [`Self::gemm_backend`].
+    /// When no executor is injected, the provider is the one compiled in by
+    /// cargo feature: BLAS/LAPACK with a `cpu-blas`/`blas-*` feature, otherwise
+    /// faer. Implement `DenseExecutor` and pass it here for any other backend;
+    /// no operator or decomposition code changes. Contraction GEMM is not
+    /// delegated to the injected executor; it always runs on the compiled
+    /// provider.
     ///
     /// The injected executor owns its thread configuration. [`Self::dense_threads`]
     /// sizes the runtime CPU pool, which still runs this runtime's replay,
@@ -709,82 +652,6 @@ impl RuntimeBuilder {
         executor: Box<dyn symtn_dense::DenseExecutor + Send>,
     ) -> Self {
         self.dense_executor = Some(executor);
-        self
-    }
-
-    /// Selects a built-in CPU provider ([`LinalgBackend::Faer`] or
-    /// [`LinalgBackend::Blas`]) for the dense **factorizations** — SVD / QR /
-    /// eigh / eig / inv / exp (the LAPACK-style work). Unset uses Tenferro's
-    /// resolved compiled provider default: BLAS when its CPU build enables
-    /// `cpu-blas`, otherwise faer. The contraction GEMM (BLAS-style work) is
-    /// chosen separately with [`Self::gemm_backend`].
-    ///
-    /// This is the ergonomic counterpart to [`Self::with_dense_executor`] for
-    /// the shipped providers; setting both makes [`Self::build`] fail with
-    /// [`RuntimeConfigError::DenseExecutorWithLinalgBackend`].
-    /// Choosing [`LinalgBackend::Blas`] without a compiled `cpu-blas`/`blas-*`
-    /// provider fails in [`Self::build`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::sync::Arc;
-    /// use symtn::sector::{U1FusionRule, U1Irrep};
-    /// use symtn::typed::{GradedSpace, LinalgBackend, Runtime, Svd, TensorMap};
-    ///
-    /// // Explicit faer provider. Every tensor created from this runtime
-    /// // factorizes on the chosen backend — no per-call argument.
-    /// let rt = Runtime::builder()
-    ///     .linalg_backend(LinalgBackend::Faer)
-    ///     .build()?;
-    /// let v = GradedSpace::try_new(
-    ///     Arc::new(U1FusionRule),
-    ///     [(-1, 1), (0, 2), (1, 1)].map(|(q, n)| (U1Irrep::new(q), n)),
-    /// )?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 7)?;
-    /// let Svd { u: _u, s: _s, vh: _vh } = t.svd_compact(&[0, 1], &[2, 3])?;
-    ///
-    /// // Switch to the system BLAS/LAPACK linked via a `blas-*` cargo feature
-    /// // (OpenBLAS / MKL / Accelerate). Results are identical to faer up to
-    /// // floating-point rounding; only performance differs. Without a linked
-    /// // provider this returns an error, so return to the compiled default:
-    /// let rt = Runtime::builder()
-    ///     .linalg_backend(LinalgBackend::Blas)
-    ///     .build()
-    ///     .or_else(|_| Runtime::builder().build())?;
-    /// # let _ = rt;
-    /// # Ok::<(), symtn::typed::Error>(())
-    /// ```
-    pub fn linalg_backend(mut self, backend: LinalgBackend) -> Self {
-        self.linalg_backend = Some(backend);
-        self
-    }
-
-    /// Selects a built-in CPU provider ([`LinalgBackend::Faer`] or
-    /// [`LinalgBackend::Blas`]) for the coupled-block **contraction GEMM**
-    /// (`compose` / `contract` and the recoupling replays — the BLAS-style
-    /// work). Unset uses Tenferro's resolved compiled provider default: BLAS
-    /// when its CPU build enables `cpu-blas`, otherwise faer. Independent of
-    /// [`Self::linalg_backend`]: the
-    /// factorizations and the contraction GEMM can run on different providers
-    /// (e.g. faer GEMM with BLAS/LAPACK factorizations, or the reverse).
-    /// Choosing [`LinalgBackend::Blas`] without a compiled `cpu-blas`/`blas-*`
-    /// provider fails in [`Self::build`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use symtn::typed::{LinalgBackend, Runtime};
-    ///
-    /// // This explicitly selects faer, regardless of the compiled default.
-    /// let rt = Runtime::builder()
-    ///     .gemm_backend(LinalgBackend::Faer)
-    ///     .build()?;
-    /// # let _ = rt;
-    /// # Ok::<(), symtn::typed::Error>(())
-    /// ```
-    pub fn gemm_backend(mut self, backend: LinalgBackend) -> Self {
-        self.gemm_backend = Some(backend);
         self
     }
 
@@ -813,32 +680,25 @@ impl RuntimeBuilder {
                 NonZeroUsize::new(threads).ok_or(RuntimeConfigError::ZeroRecouplingThreads)
             })
             .transpose()?;
-        if self.dense_executor.is_some() && self.linalg_backend.is_some() {
-            return Err(RuntimeConfigError::DenseExecutorWithLinalgBackend.into());
-        }
         // A custom injected executor cannot be re-minted for the pool; those
         // runtimes fall back to the state lock for factorizations (#155).
         let executor_mintable = self.dense_executor.is_none();
-        let linalg_kind = self.linalg_backend.map(LinalgBackend::to_kind);
-        // Built-in executors using the compiled default kind share this runtime
-        // CPU context. Explicit nondefault providers receive a private context
-        // in `with_shared_context`; injected executors own their configuration.
+        // Built-in executors share this runtime CPU context; injected executors
+        // own their configuration.
         let shared_ctx = match self.dense_threads {
             Some(threads) => symtn_dense::SharedCpuContext::with_threads(threads),
             None => symtn_dense::SharedCpuContext::with_available_parallelism(),
         }
         .map_err(symtn_tensors::OperationError::Dense)?;
-        // Injected backend wins; otherwise build the selected provider (faer by
-        // default) on the shared context.
+        // Injected backend wins; otherwise the compiled provider on the shared
+        // context.
         let dense: Box<dyn symtn_dense::DenseExecutor + Send> = match self.dense_executor {
             Some(executor) => executor,
-            None => Box::new(
-                symtn_dense::DefaultDenseExecutor::with_shared_context(&shared_ctx, linalg_kind)
-                    .map_err(symtn_tensors::OperationError::Dense)?,
-            ),
+            None => Box::new(symtn_dense::DefaultDenseExecutor::with_shared_context(
+                &shared_ctx,
+            )),
         };
-        let gemm_kind = self.gemm_backend.map(LinalgBackend::to_kind);
-        let mut state = RuntimeState::with_config(dense, &shared_ctx, gemm_kind)?;
+        let mut state = RuntimeState::with_config(dense, &shared_ctx)?;
         if let Some(threads) = recoupling_threads {
             state.set_recoupling_threads(threads);
         }
@@ -889,9 +749,7 @@ impl RuntimeBuilder {
             inner: Arc::new(RuntimeInner {
                 state: Mutex::new(state),
                 execution_config: RuntimeExecutionConfig {
-                    gemm_kind,
                     recoupling_threads,
-                    linalg_kind,
                     shared_ctx,
                 },
                 context_pool: Mutex::new(Vec::new()),

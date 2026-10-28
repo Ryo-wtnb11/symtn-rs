@@ -32,6 +32,15 @@ fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize) {
     (value, allocs.calls as usize, allocs.bytes as usize)
 }
 
+/// Allocation calls and bytes of `f` measured right after one call of `f`:
+/// the engine's buffer pool recycles by size, so the first call after a
+/// different operation can pay for a buffer that operation left resized.
+fn steady(f: impl Fn()) -> (usize, usize) {
+    f();
+    let ((), calls, bytes) = measure(&f);
+    (calls, bytes)
+}
+
 use crate::fixtures;
 
 use fixtures::host_runtime;
@@ -364,22 +373,29 @@ fn space_preserving_roles_cost_the_current_split_plus_one_permute() {
     let _ = p.svd_compact(&current.0, &current.1).unwrap();
 
     let before = transforms(&runtime);
-    let (_, current_allocations, current_bytes) =
-        measure(|| t.svd_compact(&current.0, &current.1).unwrap());
+    let (current_allocations, current_bytes) = steady(|| {
+        let _ = t.svd_compact(&current.0, &current.1).unwrap();
+    });
     assert_eq!(
         transforms(&runtime),
         before,
         "the current split ran a transform"
     );
-    let (_, op_allocations, op_bytes) = measure(|| p.svd_compact(&current.0, &current.1).unwrap());
+    let (op_allocations, op_bytes) = steady(|| {
+        let _ = p.svd_compact(&current.0, &current.1).unwrap();
+    });
     assert_eq!(transforms(&runtime), before);
     assert_eq!(
         (op_allocations, op_bytes),
         (current_allocations, current_bytes)
     );
-    let (_, fused_allocations, fused_bytes) = measure(|| t.svd_compact(&rows, &cols).unwrap());
+    let (fused_allocations, fused_bytes) = steady(|| {
+        let _ = t.svd_compact(&rows, &cols).unwrap();
+    });
     let after_fused = transforms(&runtime);
-    let (_, permute_allocations, permute_bytes) = measure(|| t.permute(&rows, &cols).unwrap());
+    let (permute_allocations, permute_bytes) = steady(|| {
+        let _ = t.permute(&rows, &cols).unwrap();
+    });
     assert_eq!(after_fused - before, transforms(&runtime) - after_fused);
     assert_eq!(
         (fused_allocations, fused_bytes),

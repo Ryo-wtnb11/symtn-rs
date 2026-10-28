@@ -88,8 +88,6 @@ mod complete_structure_working_set;
 
 mod composed_coefficient_cache;
 
-mod factorization_session_scope;
-
 mod solve_leg_roles;
 
 mod typed_cuda_transform_contracts;

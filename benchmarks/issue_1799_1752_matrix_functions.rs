@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering::Relaxed}
 use std::sync::Arc;
 use std::time::Instant;
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{GradedSpace, LinalgBackend, Runtime, TensorMap};
+use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 struct Allocator;
 static COUNT: AtomicBool = AtomicBool::new(false);
@@ -111,7 +111,6 @@ macro_rules! cases {
 
 fn main() {
     let runtime = Runtime::builder()
-        .linalg_backend(LinalgBackend::Faer)
         .dense_threads(1)
         .build()
         .unwrap();

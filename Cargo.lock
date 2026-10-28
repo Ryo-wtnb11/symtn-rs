@@ -2988,6 +2988,7 @@ dependencies = [
 name = "symtn-dense"
 version = "0.1.1"
 dependencies = [
+ "cpueinsum",
  "num-complex",
  "t4a-cubecl-runtime",
  "tenferro-cpu",

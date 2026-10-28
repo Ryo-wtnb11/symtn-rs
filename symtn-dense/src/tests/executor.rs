@@ -840,18 +840,6 @@ fn default_executor_rejects_integer_linalg_view() {
         } if message.contains("does not support dtype I32")
     ));
 }
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
-#[test]
-fn faer_only_build_rejects_uncompiled_blas_provider() {
-    let error = DefaultDenseExecutor::with_kind(CpuBackendKind::Blas).unwrap_err();
-    assert!(error.to_string().contains("cpu-blas"));
-}
-#[cfg(all(feature = "cpu-blas-core", not(feature = "cpu-faer")))]
-#[test]
-fn blas_only_build_rejects_uncompiled_faer_provider() {
-    let error = DefaultDenseExecutor::with_kind(CpuBackendKind::Faer).unwrap_err();
-    assert!(error.to_string().contains("cpu-faer"));
-}
 struct FullOnly(DefaultDenseExecutor);
 impl DenseExecutor for FullOnly {
     fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
@@ -1635,22 +1623,13 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
         } if message.contains("does not support dtype Bool")
     ));
 }
-#[cfg(all(feature = "cpu-faer", not(feature = "provider-inject")))]
-#[test]
-fn default_executor_values_only_runs_explicit_faer_provider() {
-    assert_values_only_for_explicit_cpu_provider(CpuBackendKind::Faer);
-}
 #[cfg(all(
     not(feature = "provider-inject"),
-    any(
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl"
-    )
+    any(feature = "cpu-faer", feature = "cpu-blas-core")
 ))]
 #[test]
-fn default_executor_values_only_runs_explicit_blas_provider() {
-    assert_values_only_for_explicit_cpu_provider(CpuBackendKind::Blas);
+fn default_executor_values_only_runs_the_compiled_provider() {
+    assert_values_only_for_compiled_cpu_provider();
 }
 #[test]
 fn strided_batch_runs_partitions_same_shape_constant_stride_runs() {
@@ -1845,7 +1824,7 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
         )
         .unwrap_err();
     assert!(
-        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlaps")),
+        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlap")),
         "{error:?}"
     );
     assert_eq!(executor.seam_dispatches(), 1);
@@ -1872,7 +1851,7 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
         )
         .unwrap_err();
     assert!(
-        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlaps")),
+        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlap")),
         "{error:?}"
     );
     assert_eq!(executor.seam_dispatches(), 1);
@@ -2587,4 +2566,55 @@ fn batched_matmul_with_ops_dtype_mismatch_and_integer_operands_are_typed() {
             ..
         }
     ));
+}
+#[cfg(feature = "tenferro")]
+#[test]
+fn identity_grouped_batch_on_a_multi_thread_engine_matches_serial_bitwise() {
+    // Large enough heterogeneous jobs that the grouped plan's Auto width can
+    // fan them out over lanes. Every destination is written by one job on a
+    // serial item context, so the result is bitwise the serial engine's.
+    let shapes = (0..12)
+        .map(|i| (24 + i % 3, 20 + i % 5, 22 + i % 4))
+        .collect::<Vec<_>>();
+    let (alpha, beta) = (c64(0.5, -1.0), c64(0.25, 0.5));
+    let run = |threads: usize| {
+        let mut executor = DefaultDenseExecutor::with_threads(threads).unwrap();
+        let mut fixture = identity_fixture::<Complex64>(&shapes, 1, (2, 1, 3), c64(3.0, -4.0));
+        let runs = strided_batch_runs(&fixture.jobs);
+        run_identity_batch(&mut executor, &mut fixture, &runs, alpha, beta).unwrap();
+        assert_eq!(executor.staged_grouped_jobs(), shapes.len());
+        fixture.output
+    };
+    let serial = run(1);
+    assert_eq!(run(4), serial);
+    assert_eq!(run(8), serial);
+}
+#[cfg(feature = "tenferro")]
+#[test]
+fn identity_grouped_first_error_is_the_lowest_job_index() {
+    // Job 0 writes after job 1 in output order; both are out of range, and the
+    // reported job is 0 (job-index order), before any write.
+    let jobs = [
+        batch_job((1, 2, 1), (4, 7, 0)),
+        batch_job((1, 1, 2), (0, 0, 7)),
+    ];
+    let values = [1.0; 8];
+    let mut output = [-1.0; 8];
+    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let error = executor
+        .matmul_batch_axpby_into(
+            DenseWrite::F64(DenseViewMut::new(&mut output, &[8], &[1], 0).unwrap()),
+            DenseRead::F64(DenseView::new(&values, &[8], &[1], 0).unwrap()),
+            DenseRead::F64(DenseView::new(&values, &[8], &[1], 0).unwrap()),
+            &jobs,
+            &[1, 1],
+            DenseScalar::F64(1.0),
+            DenseScalar::F64(0.0),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.starts_with("job 0 lhs")),
+        "{error:?}"
+    );
+    assert_eq!(output, [-1.0; 8]);
 }

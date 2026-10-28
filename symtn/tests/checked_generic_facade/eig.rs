@@ -1373,18 +1373,86 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
     );
 }
 
+/// The compiled executor, except that `eig` returns its finite eigenvalues
+/// with an all-NaN eigenvector matrix of the same order and dtype (the `Q` of
+/// a NaN matrix, so the forged factor is a real provider tensor).
+struct NonfiniteEigenvectors(symtn::expert::DefaultDenseExecutor);
+
+impl symtn::expert::DenseExecutor for NonfiniteEigenvectors {
+    fn svd(
+        &mut self,
+        input: symtn::expert::DenseRead<'_>,
+    ) -> Result<Vec<symtn::expert::DenseTensor>, symtn::expert::DenseError> {
+        self.0.svd(input)
+    }
+    fn qr(
+        &mut self,
+        input: symtn::expert::DenseRead<'_>,
+    ) -> Result<Vec<symtn::expert::DenseTensor>, symtn::expert::DenseError> {
+        self.0.qr(input)
+    }
+    fn eigh(
+        &mut self,
+        input: symtn::expert::DenseRead<'_>,
+    ) -> Result<Vec<symtn::expert::DenseTensor>, symtn::expert::DenseError> {
+        self.0.eigh(input)
+    }
+    fn dot_general_into(
+        &mut self,
+        output: symtn::expert::DenseWrite<'_>,
+        lhs: symtn::expert::DenseRead<'_>,
+        rhs: symtn::expert::DenseRead<'_>,
+        config: &symtn::expert::DenseDotConfig,
+    ) -> Result<(), symtn::expert::DenseError> {
+        self.0.dot_general_into(output, lhs, rhs, config)
+    }
+    fn eig(
+        &mut self,
+        input: symtn::expert::DenseRead<'_>,
+    ) -> Result<Vec<symtn::expert::DenseTensor>, symtn::expert::DenseError> {
+        use symtn::expert::{DenseDType, DenseRead, DenseView};
+        let mut outputs = self.0.eig(input)?;
+        let n = outputs[0].shape()[0];
+        let (shape, strides) = ([n, n], [1, n]);
+        let mut q = match outputs[0].dtype() {
+            DenseDType::C64 => {
+                let nan = vec![Complex64::new(f64::NAN, 0.0); n * n];
+                self.0
+                    .qr(DenseRead::C64(DenseView::new(&nan, &shape, &strides, 0)?))?
+            }
+            dtype => {
+                assert_eq!(dtype, DenseDType::C32);
+                let nan = vec![Complex32::new(f32::NAN, 0.0); n * n];
+                self.0
+                    .qr(DenseRead::C32(DenseView::new(&nan, &shape, &strides, 0)?))?
+            }
+        };
+        outputs[1] = q.swap_remove(0);
+        Ok(outputs)
+    }
+}
+
 #[test]
 fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{SU2FusionRule, SU2Irrep};
-
-    // A finite Jordan block `2 I + N` of size n in one sector. faer's
-    // back-substitution overflows here (f32 from n = 8, f64 from n = 26)
-    // while the eigenvalues stay finite; LAPACK `xTREVC` rescales and
-    // returns finite columns. Either outcome is allowed, but never `Ok` with
-    // a nonfinite column: the eigenvalue check runs first, then the
+    // A finite Jordan block `2 I + N` of size n in one sector. Older faer
+    // overflowed in its back-substitution here (f32 from n = 8, f64 from
+    // n = 26); faer 0.25 rescales like LAPACK `xTREVC` and returns finite
+    // columns for every input tried (Jordan blocks to n = 128, scaled
+    // couplings, graded triangular matrices), so the compiled provider may
+    // never fail here. The `forged` runtime reaches symtn's eigenvector check
+    // instead: its executor returns finite eigenvalues with NaN columns. Never
+    // `Ok` with a nonfinite column: the eigenvalue check runs first, then the
     // eigenvector check, both a `NumericalFailure`.
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let forged = Runtime::builder()
+        .dense_threads(1)
+        .with_dense_executor(Box::new(NonfiniteEigenvectors(
+            symtn::expert::DefaultDenseExecutor::with_threads(1).unwrap(),
+        )))
+        .build()
+        .unwrap();
     let jordan = |row: usize, col: usize| {
         if row == col {
             2.0
@@ -1394,12 +1462,11 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
             0.0
         }
     };
-    let faer_only = crate::backend::faer_is_default_backend();
     macro_rules! check {
-        ($leg:expr, $dtype:ty, $from:expr) => {{
+        ($runtime:expr, $must_fail:expr, $leg:expr, $dtype:ty, $from:expr) => {{
             let from: fn(f64) -> $dtype = $from;
             let source: TensorMap<_, $dtype> =
-                TensorMap::from_subblock_fn(&runtime, [&$leg], [&$leg], |_, index| {
+                TensorMap::from_subblock_fn($runtime, [&$leg], [&$leg], |_, index| {
                     from(jordan(index[0], index[1]))
                 })
                 .unwrap();
@@ -1412,7 +1479,7 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
                             .all(|value| value.re.is_finite() && value.im.is_finite()),
                         "Ok with a nonfinite eigenvector column"
                     );
-                    assert!(!faer_only, "faer is expected to overflow on this block");
+                    assert!(!$must_fail, "the forged eigenvectors were accepted");
                 }
                 Err(error) => {
                     assert!(
@@ -1431,22 +1498,31 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
             }
         }};
     }
-    for (n, single) in [(26, false), (30, false), (8, true), (10, true)] {
-        let checked_leg =
-            GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(0)), [(Label::Vacuum, n)]).unwrap();
-        let mf_leg =
-            GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), n)])
-                .unwrap();
-        if single {
-            check!(checked_leg, f32, |x| x as f32);
-            check!(checked_leg, Complex32, |x| Complex32::new(x as f32, 0.0));
-            check!(mf_leg, f32, |x| x as f32);
-            check!(mf_leg, Complex32, |x| Complex32::new(x as f32, 0.0));
-        } else {
-            check!(checked_leg, f64, |x| x);
-            check!(checked_leg, Complex64, |x| Complex64::new(x, 0.0));
-            check!(mf_leg, f64, |x| x);
-            check!(mf_leg, Complex64, |x| Complex64::new(x, 0.0));
+    for (rt, must_fail) in [(&runtime, false), (&forged, true)] {
+        for (n, single) in [(26, false), (30, false), (8, true), (10, true)] {
+            let checked_leg =
+                GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(0)), [(Label::Vacuum, n)])
+                    .unwrap();
+            let mf_leg =
+                GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), n)])
+                    .unwrap();
+            if single {
+                check!(rt, must_fail, checked_leg, f32, |x| x as f32);
+                check!(rt, must_fail, checked_leg, Complex32, |x| Complex32::new(
+                    x as f32, 0.0
+                ));
+                check!(rt, must_fail, mf_leg, f32, |x| x as f32);
+                check!(rt, must_fail, mf_leg, Complex32, |x| Complex32::new(
+                    x as f32, 0.0
+                ));
+            } else {
+                check!(rt, must_fail, checked_leg, f64, |x| x);
+                check!(rt, must_fail, checked_leg, Complex64, |x| Complex64::new(
+                    x, 0.0
+                ));
+                check!(rt, must_fail, mf_leg, f64, |x| x);
+                check!(rt, must_fail, mf_leg, Complex64, |x| Complex64::new(x, 0.0));
+            }
         }
     }
 }

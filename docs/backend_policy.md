@@ -16,16 +16,20 @@ threshold-selected numerical kernels in operator code.
 
 | `Runtime::builder()` option | Effect |
 | --- | --- |
-| `linalg_backend(Faer / Blas)` | CPU factorizations and matrix functions |
-| `gemm_backend(Faer / Blas)` | CPU contraction and recoupling GEMM, independently of factorization choice |
-| `with_dense_executor(...)` | Injected factorization executor; combining it with `linalg_backend` is a build error |
+| `with_dense_executor(...)` | Injected factorization executor |
 | `cuda(device)` (feature `cuda`) | Attach the explicit CUDA device |
 
-`Faer` / `Blas` are `LinalgBackend` variants. An unset CPU choice follows
-Tenferro's compiled default: BLAS when `cpu-blas` is enabled, otherwise faer.
-Selecting an unavailable provider fails at `build()`. The linked BLAS/LAPACK
-implementation is a compile-time `blas-*` choice (OpenBLAS, MKL or Accelerate),
-not a per-operation switch. See [`symtn/Cargo.toml`](../symtn/Cargo.toml).
+The CPU provider is a compile-time choice, following Tenferro's mutually
+exclusive `native` and `blas` providers: faer (`cpu-faer`, the default) or the
+linked BLAS/LAPACK (`cpu-blas` or a `blas-*` feature selecting OpenBLAS, MKL or
+Accelerate). There is no runtime provider switch. See
+[`symtn/Cargo.toml`](../symtn/Cargo.toml).
+
+On faer builds, the coupled-block contraction of a heterogeneous batch runs on
+symtn's own block kernel, one `cpueinsum::GroupedPlan` per batch on the
+engine's execution token; it rejects overlapping destinations and
+out-of-range jobs (the lowest job index first) before any write. BLAS builds
+run the same jobs in order through the BLAS dot.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
@@ -54,15 +58,14 @@ dense executors from pools. Each idle pool retains at most
 is not returned. Checkout, return, structural caches and plan caches have
 synchronization costs.
 
-The compiled-default CPU executors share one `SharedCpuContext` per runtime.
+The built-in CPU executors share one `SharedCpuContext` per runtime.
 `dense_threads` sizes its pool; unset uses available parallelism, 1 runs on
 the calling thread, and 0 is an error. Host dense, tree replay, plan compile
 and strided work use that pool. `recoupling_threads` defaults to 1 and caps
 recoupling/compile parallelism within it. CPU runtime construction does not
 configure Rayon's global pool or read thread-count environment variables.
-BLAS-internal threads remain separate. An explicitly selected nondefault
-provider has a private context; an injected executor owns its configuration
-and uses the runtime state lock for factorization.
+BLAS-internal threads remain separate. An injected executor owns its
+configuration and uses the runtime state lock for factorization.
 
 CUDA leases hold a process-wide lock per device ordinal plus the runtime's
 CUDA-context mutex and Tenferro's resource locks. Enqueue serializes across

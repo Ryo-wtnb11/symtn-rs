@@ -41,12 +41,7 @@ fn measure<T>(f: impl FnOnce() -> T) -> (T, Duration, usize, usize) {
 }
 
 fn public_copy_c_batch_measurement() {
-    let runtime = Runtime::builder()
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let v = u1(&[(0, 2), (1, 2)]);
     let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 3).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 4).unwrap();
@@ -186,12 +181,7 @@ fn public_host_swapped_core_release_measurement() {
 }
 
 fn public_signed_direct_release_measurement() {
-    let runtime = Runtime::builder()
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let v = fermion_u1();
     let dual = v.try_dual().unwrap();
     let lhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v], [&dual], fill(201)).unwrap();
@@ -258,12 +248,7 @@ fn public_signed_direct_release_measurement() {
 }
 
 fn public_dynamic_source_twist_release_measurement() {
-    let runtime = Runtime::builder()
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let case = fermionic_twist_roles::<_, f64>(
         &runtime,
         &fermion_u1(),

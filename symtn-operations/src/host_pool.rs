@@ -1,7 +1,7 @@
 //! The Host CPU pool that an eager operation's parallel regions run on.
 //!
-//! A `Runtime` owns one CPU context ([`SharedCpuContext`]); its Rayon pool
-//! runs the runtime's dense kernels. An eager operation enters that context on
+//! A `Runtime` owns one CPU context ([`SharedCpuContext`]): a Tenferro
+//! `CpuEngine` whose `threadteam` pool runs the runtime's dense kernels. An eager operation enters that context on
 //! the calling thread with `with_host_pool`. Every parallel region below it
 //! (tree-transform replay fan-out, plan compile, strided kernels) then runs
 //! inside the same pool through [`install_region`] or [`strided`], and every
@@ -176,6 +176,9 @@ pub struct HostPoolObservation {
     pub site: HostPoolSite,
     /// [`SharedCpuContext::identity`] of the entered pool, if any.
     pub entered: Option<usize>,
+    /// [`SharedCpuContext::num_threads`] of the entered pool: the width its
+    /// engine runs parallel work at (one when it has no team).
+    pub entered_threads: Option<usize>,
     /// `rayon::current_num_threads()` when the site ran on a Rayon worker;
     /// `None` when it ran on the calling (non-pool) thread.
     pub worker_pool_threads: Option<usize>,
@@ -203,8 +206,9 @@ pub fn take_host_pool_observations() -> Vec<HostPoolObservation> {
     std::mem::take(&mut *OBSERVATIONS.lock().unwrap_or_else(|p| p.into_inner()))
 }
 
-/// Records where a dense linear-algebra scope body runs (it is installed by
-/// Tenferro, not by [`install_region`]). A no-op outside test builds; it
+/// Records where a dense linear-algebra stage runs: on the calling thread,
+/// which holds the entered runtime's engine; the engine's own team does the
+/// parallel work. A no-op outside test builds; it
 /// stays callable there because production dense stages call it.
 #[doc(hidden)]
 #[inline]
@@ -225,6 +229,7 @@ fn observe(site: HostPoolSite, pool: Option<&SharedCpuContext>) {
     let observation = HostPoolObservation {
         site,
         entered: pool.map(SharedCpuContext::identity),
+        entered_threads: pool.map(SharedCpuContext::num_threads),
         worker_pool_threads: rayon::current_thread_index().map(|_| rayon::current_num_threads()),
     };
     OBSERVATIONS

@@ -10,7 +10,7 @@ use symtn::sector::{
     product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
     Z2Irrep,
 };
-use symtn::typed::{GradedSpace, LinalgBackend, Runtime, SectorSpectrum, TensorMap};
+use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
 struct Allocator;
 static COUNT: AtomicBool = AtomicBool::new(false);
@@ -67,7 +67,6 @@ fn measure(mut f: impl FnMut()) -> (u128, u128, usize, usize) {
 
 fn main() {
     let runtime = Runtime::builder()
-        .linalg_backend(LinalgBackend::Faer)
         .dense_threads(1)
         .build()
         .unwrap();

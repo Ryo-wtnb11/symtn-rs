@@ -1,6 +1,7 @@
 //! Separate binary: this test sizes Rayon's process-global pool with `build_global`.
-//! #1531: every Host eager operation runs its replay, plan-compile, strided
-//! and dense work on the CPU pool of the operand's own `Runtime`, whatever
+//! #1531: every Host eager operation runs its replay, plan-compile and
+//! strided regions on the CPU pool of the operand's own `Runtime`, and its
+//! dense stages on that runtime's engine at the runtime's width, whatever
 //! order runtimes with different thread counts were built in. Its own test
 //! binary: the process-global Rayon pool is sized here, to a count no runtime
 //! below uses, so a region that escaped to it would be visible.
@@ -114,6 +115,15 @@ fn assert_on_own_pool(rt: &Runtime, threads: usize, salt: usize) -> usize {
             "{site:?} was not exercised: {observations:?}"
         );
         for o in &seen {
+            if site == HostPoolSite::Dense {
+                // A dense stage runs on the calling thread, which holds this
+                // runtime's engine; the engine's team, of the runtime's width,
+                // does its parallel work.
+                assert_eq!(o.worker_pool_threads, None, "dense ran on a worker");
+                assert_eq!(o.entered, Some(id), "dense entered another engine");
+                assert_eq!(o.entered_threads, Some(threads), "dense engine width");
+                continue;
+            }
             // The pool size identifies the pool: the global one has a count
             // no runtime here uses.
             assert_eq!(
@@ -121,9 +131,9 @@ fn assert_on_own_pool(rt: &Runtime, threads: usize, salt: usize) -> usize {
                 Some(threads),
                 "{site:?} ran off the runtime pool"
             );
-            // A task stolen by another worker of the pool, or the dense body
-            // Tenferro installs there, carries no symtn entry of its own and
-            // runs on the ambient pool: the one it is a worker of.
+            // A task stolen by another worker of the pool carries no symtn
+            // entry of its own and runs on the ambient pool: the one it is a
+            // worker of.
             assert!(
                 o.entered.is_none_or(|e| e == id),
                 "{site:?} entered another pool"

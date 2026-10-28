@@ -75,7 +75,7 @@ factorizations, provider resources and backend scheduling.
 | `symtn-operations` | Tree-transform structures, replay and dense-job descriptions |
 | `symtn-tensors` | Contraction, trace, transforms and tree-transform caches |
 | `symtn-matrixalgebra` | Per-sector factorization and factor-space authority |
-| `symtn-dense` | Tenferro adapter, dense executors, sessions and placement |
+| `symtn-dense` | Tenferro adapter, dense executors, block-GEMM kernel and placement |
 | `symtn` | Typed facade, eager/prepared operations and `Runtime` |
 | `symtn-network` | Labeled networks, planning, execution and plan cache |
 | `symtn-macros` | `contract!` syntax and compile-time label validation |
@@ -145,13 +145,12 @@ persistent tree-transform plans; network-order persistence is explicit.
 | symtn → Strided | `symtn-operations`, `symtn-tensors` | Structural permutation, pack and scatter |
 
 Only `symtn-sectors` imports fusion-symbols as a normal dependency, and only
-`symtn-dense` imports Tenferro. Test-only dependencies may exercise symbol
-cache controls. Application code owns cache budgets and thread policy;
+`symtn-dense` imports Tenferro and its `cpueinsum` block-GEMM provider.
+Test-only dependencies may exercise symbol cache controls. Application code owns cache budgets and thread policy;
 dependency changes require explicit approval under [AGENTS.md](../AGENTS.md).
 
 ## Current deviations
 
-- `symtn-dense` re-exports Tenferro's `CpuBackendKind` through the expert API.
 - Opening a CUDA context fixes CubeCL's process-global stream count to one.
   See [backend policy](backend_policy.md#parallel-execution) for the required
   ordering and process-wide effects.

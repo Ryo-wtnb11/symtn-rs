@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [features]
 default = ["cpu-faer"]
 tenferro = [
+    "dep:cpueinsum",
     "dep:tenferro-cpu",
     "dep:tenferro-linalg",
     "dep:tenferro-tensor",
@@ -62,6 +63,9 @@ provider-inject = [
 
 [dependencies]
 num-complex = "0.4"
+# symtn's block-contraction kernel (#2337); the version tenferro-cpu resolves,
+# so `Exec` from `CpuEngine::exec` is this crate's type.
+cpueinsum = { version = "0.7.0", optional = true }
 tenferro-cpu = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }
 tenferro-linalg = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }
 tenferro-tensor = { git = "https://github.com/tensor4all/tenferro-rs", rev = "d346af902ace87cd18754e8e165e72725aeff01c", default-features = false, optional = true }

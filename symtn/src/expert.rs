@@ -15,27 +15,23 @@ pub use symtn_core::{
     BlockLayout, BlockRef, BlockView, HostReadableStorage, Placement, SectorLeg,
     SectorLegConstructionError, TensorStorage,
 };
-/// Process-wide CPU session counters.
-pub use symtn_dense::{cpu_session_stats, reset_cpu_session_stats, CpuSessionStats};
 /// Per-thread CUDA boundary counters and the plan-cache snapshot returned by
 /// `Runtime::cuda_plan_cache_stats`.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{
     cuda_transfer_stats, reset_cuda_transfer_stats, CudaPlanCacheStats, CudaTransferStats,
 };
-/// The dense executor seam of `RuntimeBuilder::with_dense_executor` and the
-/// types its methods exchange; `CpuBackendKind` selects the provider of
-/// `DefaultDenseExecutor::with_kind`.
-pub use symtn_dense::{
-    CpuBackendKind, DefaultDenseExecutor, DenseBackend, DenseDType, DenseDotConfig, DenseError,
-    DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
-    DenseRead, DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, MatrixOp,
-    SharedCpuContext,
-};
 /// The device context a CUDA runtime dereferences to, and the device buffer
 /// inside a `CudaStorage`.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{CudaDenseContext, CudaDenseStorage};
+/// The dense executor seam of `RuntimeBuilder::with_dense_executor` and the
+/// types its methods exchange.
+pub use symtn_dense::{
+    DefaultDenseExecutor, DenseBackend, DenseDType, DenseDotConfig, DenseError, DenseExecutor,
+    DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned, DenseRead,
+    DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, MatrixOp, SharedCpuContext,
+};
 /// The tree-transform descriptor carried by `OperationError` variants.
 pub use symtn_tensors::{TreeTransformOperation, TreeTransformOperationKind};
 

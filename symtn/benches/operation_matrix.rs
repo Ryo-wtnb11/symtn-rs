@@ -9,12 +9,10 @@ use std::{
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    Complex64, ContractSpec, Eig, Error, GradedSpace, LinalgBackend, Qr, Runtime, TensorMap,
-    TensorScalar,
+    Complex64, ContractSpec, Eig, Error, GradedSpace, Qr, Runtime, TensorMap, TensorScalar,
 };
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::expert::CpuBackendKind;
 use symtn::expert::DefaultDenseExecutor;
 use symtn::expert::{BlockRef, SectorLeg};
 use symtn::expert::{DenseExecutor, DenseGemmBatchJob, MatrixOp};
@@ -220,16 +218,7 @@ fn bench<T, E>(
 }
 
 fn benchmark_runtime() -> Result<Runtime, Error> {
-    let backend = match std::env::var("OP_MATRIX_GEMM_BACKEND").as_deref() {
-        Ok("blas") => LinalgBackend::Blas,
-        Ok("faer") | Err(_) => LinalgBackend::Faer,
-        Ok(other) => {
-            return Err(Error::InvalidArgument(format!(
-                "OP_MATRIX_GEMM_BACKEND must be `faer` or `blas`, got `{other}`"
-            )))
-        }
-    };
-    let builder = Runtime::builder().dense_threads(1).gemm_backend(backend);
+    let builder = Runtime::builder().dense_threads(1);
     if std::env::var("OP_MATRIX_CACHE").as_deref() == Ok("disabled") {
         // Process-global: every build is offered and rejected.
         symtn::cache::configure_budgets([
@@ -241,17 +230,7 @@ fn benchmark_runtime() -> Result<Runtime, Error> {
 }
 
 fn benchmark_dense_executor() -> Result<DefaultDenseExecutor, symtn::expert::DenseError> {
-    let kind = match std::env::var("OP_MATRIX_GEMM_BACKEND").as_deref() {
-        Ok("blas") => CpuBackendKind::Blas,
-        Ok("faer") | Err(_) => CpuBackendKind::Faer,
-        Ok(other) => {
-            return Err(symtn::expert::DenseError::Unsupported {
-                op: "oriented_uniform_run",
-                message: format!("OP_MATRIX_GEMM_BACKEND must be `faer` or `blas`, got `{other}`"),
-            })
-        }
-    };
-    DefaultDenseExecutor::with_threads_and_kind(1, kind)
+    DefaultDenseExecutor::with_threads(1)
 }
 
 fn operation_enabled(operation: &str) -> bool {
@@ -2619,7 +2598,7 @@ fn run_full_qr_lowering(min_time: Duration) -> Result<(), Box<dyn std::error::Er
         return Ok(());
     }
     let min_time = min_time.max(Duration::from_millis(100));
-    println!("# FullQr: fixed_global_D=32 geometries=few-large:G2:d32,many-small:G16:d2 shapes=square,wide,tall layouts=canonical,padded dtypes=f64,c64 fixture_and_literal_preflight_outside_factor_timers dense_executor=DefaultDenseExecutor factorization_provider=compiled_cpu_features OP_MATRIX_GEMM_BACKEND_does_not_select_factorization_provider threads=wrapper_RAYON_BLAS_1");
+    println!("# FullQr: fixed_global_D=32 geometries=few-large:G2:d32,many-small:G16:d2 shapes=square,wide,tall layouts=canonical,padded dtypes=f64,c64 fixture_and_literal_preflight_outside_factor_timers dense_executor=DefaultDenseExecutor factorization_provider=compiled_cpu_features threads=wrapper_RAYON_BLAS_1");
     for (workload, degeneracy, sectors) in [("few-large", 32, 2), ("many-small", 2, 16)] {
         for (shape_name, aspect) in [
             ("square", CheckedMatrixAspect::Square),
@@ -3623,7 +3602,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("TENFERRO_AUTHORITY").unwrap_or_else(|_| "unknown".into())
     );
     println!(
-        "# features=cpu-faer:{} blas-provider:{} cuda:{} gemm_backend={}",
+        "# features=cpu-faer:{} blas-provider:{} cuda:{}",
         cfg!(feature = "cpu-faer"),
         cfg!(any(
             feature = "cpu-blas",
@@ -3632,7 +3611,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             feature = "blas-mkl"
         )),
         cfg!(feature = "cuda"),
-        std::env::var("OP_MATRIX_GEMM_BACKEND").unwrap_or_else(|_| "faer".into())
     );
     println!("# degeneracy={degeneracy}");
     println!("# threads=RAYON_NUM_THREADS:{} OPENBLAS_NUM_THREADS:{} OMP_NUM_THREADS:{} MKL_NUM_THREADS:{}", env_or_unset("RAYON_NUM_THREADS"), env_or_unset("OPENBLAS_NUM_THREADS"), env_or_unset("OMP_NUM_THREADS"), env_or_unset("MKL_NUM_THREADS"));

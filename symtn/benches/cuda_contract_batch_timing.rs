@@ -139,13 +139,7 @@ fn dynamic_tree_release_measurement() {
             );
         }
     }
-    let runtime = Runtime::builder()
-        .cuda(0)
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
     run(&u1_inactive_cases::<f64>(&runtime)[1]);
     run(&u1_reordered::<f64>(&runtime));
     for case in fermionic_twist_roles::<FermionU1, f64>(
@@ -164,13 +158,7 @@ fn dynamic_tree_release_measurement() {
 }
 
 fn direct_core_release_measurement() {
-    let runtime = Runtime::builder()
-        .cuda(0)
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
     for (case, _) in candidate_core_probes::<_, f64>(&runtime, &su2()) {
         if !matches!(case.name, "C1" | "C2") {
             continue;
@@ -265,13 +253,7 @@ fn direct_core_release_measurement() {
 }
 
 fn signed_core_release_measurement() {
-    let runtime = Runtime::builder()
-        .cuda(0)
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
     let space = fermion_u1();
     let dual = space.try_dual().unwrap();
     let a = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&space], [&dual], fill(201)).unwrap();

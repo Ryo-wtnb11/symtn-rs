@@ -378,25 +378,13 @@ fn cuda_device_lock_is_one_per_ordinal() {
     assert!(!std::ptr::eq(cuda_device_lock(7), cuda_device_lock(8)));
 }
 
-// The default-feature graph includes faer. This control verifies that its
-// explicit provider path constructs; the adapter's private route test pins
-// the unset compiled-default selection separately.
-#[cfg(feature = "cpu-faer")]
 #[test]
-fn transform_ops_builds_for_every_faer_config() {
-    let faer = symtn_dense::CpuBackendKind::Faer;
+fn transform_ops_share_their_cpu_context() {
     let serial = symtn_dense::SharedCpuContext::with_threads(1).expect("serial context");
     let env = symtn_dense::SharedCpuContext::from_env();
     for ctx in [&serial, &env] {
-        let ops = make_transform_ops(ctx, None).expect("default transform ops");
+        let ops = make_transform_ops(ctx).expect("transform ops");
         assert!(ops.dense().shares_cpu_context(ctx));
-        // Explicit-kind arm: build must succeed; context sharing holds
-        // whenever the kind IS the compiled default (all-faer builds), but
-        // an explicit non-default kind keeps a private context (see
-        // `DefaultDenseExecutor::with_shared_context`), so no sharing
-        // assert here — it would flip on blas-featured builds.
-        let ops = make_transform_ops(ctx, Some(faer)).expect("faer transform ops");
-        drop(ops);
     }
 }
 

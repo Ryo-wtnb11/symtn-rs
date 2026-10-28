@@ -29,13 +29,9 @@ fn pooled() -> Runtime {
 fn locked() -> Runtime {
     Runtime::builder()
         .dense_threads(1)
-        .with_dense_executor(Box::new(
-            DefaultDenseExecutor::with_shared_context(
-                &SharedCpuContext::with_threads(1).unwrap(),
-                None,
-            )
-            .unwrap(),
-        ))
+        .with_dense_executor(Box::new(DefaultDenseExecutor::with_shared_context(
+            &SharedCpuContext::with_threads(1).unwrap(),
+        )))
         .build()
         .unwrap()
 }

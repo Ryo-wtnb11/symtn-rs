@@ -132,8 +132,6 @@ fn firewall_ignores_comments_strings_and_restricted_visibility() {
 #[test]
 fn symtn_dense_exports_exactly_the_pinned_names() {
     let expected = [
-        "CpuBackendKind",
-        "CpuSessionStats",
         "CudaDenseContext",
         "CudaDenseStorage",
         "CudaPlanCacheStats",
@@ -167,7 +165,6 @@ fn symtn_dense_exports_exactly_the_pinned_names() {
         "SharedCpuContext",
         "arity_mismatch",
         "check_contiguous_output",
-        "cpu_session_stats",
         "cuda_all_finite",
         "cuda_conj",
         "cuda_copy_region_into",
@@ -198,7 +195,6 @@ fn symtn_dense_exports_exactly_the_pinned_names() {
         "cuda_transfer_stats",
         "cuda_widen",
         "plan_cache_entries_for",
-        "reset_cpu_session_stats",
         "reset_cuda_transfer_stats",
         "strided_batch_runs",
         "strided_batch_runs_into",

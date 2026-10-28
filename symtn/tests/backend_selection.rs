@@ -12,9 +12,7 @@ use symtn::expert::{
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::OperationError;
 use symtn::typed::{Error, Svd};
-use symtn::typed::{
-    GradedSpace, LinalgBackend, Runtime, RuntimeConfigError, SectorSpectrum, TensorMap,
-};
+use symtn::typed::{GradedSpace, Runtime, RuntimeConfigError, SectorSpectrum, TensorMap};
 
 #[test]
 fn compact_diagonal_svd_submits_no_dense_svd() {
@@ -204,27 +202,6 @@ fn injected_executor_without_eig_reports_unsupported() {
         ),
         "a missing executor capability must be Unsupported, got {operation:?}"
     );
-}
-
-#[test]
-fn injected_executor_with_linalg_backend_is_a_typed_build_error() {
-    let error = Runtime::builder()
-        .with_dense_executor(Box::new(DefaultDenseExecutor::default()))
-        .linalg_backend(LinalgBackend::Faer)
-        .build()
-        .unwrap_err();
-    assert_eq!(
-        error,
-        Error::RuntimeConfig(RuntimeConfigError::DenseExecutorWithLinalgBackend)
-    );
-    // The provider-independent GEMM selection is not a factorization provider,
-    // so it stays compatible with an injected executor.
-    #[cfg(feature = "cpu-faer")]
-    Runtime::builder()
-        .with_dense_executor(Box::new(DefaultDenseExecutor::default()))
-        .gemm_backend(LinalgBackend::Faer)
-        .build()
-        .unwrap();
 }
 
 #[test]

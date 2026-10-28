@@ -18,8 +18,7 @@ use prepared::u1_legs;
 use crate::counting_alloc;
 
 fn executor() -> DefaultDenseExecutor {
-    DefaultDenseExecutor::with_shared_context(&SharedCpuContext::with_threads(1).unwrap(), None)
-        .unwrap()
+    DefaultDenseExecutor::with_shared_context(&SharedCpuContext::with_threads(1).unwrap())
 }
 
 /// Allocation calls of one warm `execute` over `count` members.
@@ -56,7 +55,15 @@ fn solver_calls(orders: &[usize]) -> u64 {
         for (matrix, &n) in matrices.iter().zip(orders) {
             let (shape, strides) = ([n, n], [1, n]);
             let view = DenseView::new(matrix.as_slice(), &shape, &strides, 0).unwrap();
-            black_box(dense.eigh(DenseRead::F64(view)).unwrap());
+            // The plan keeps each eigenvector buffer it receives, so the
+            // baseline keeps it too: a dropped output goes back to the
+            // engine's buffer pool and the next call would reuse it for free.
+            let [_values, vectors]: [_; 2] = dense
+                .eigh(DenseRead::F64(view))
+                .unwrap()
+                .try_into()
+                .unwrap();
+            black_box(vectors.into_f64_vec().unwrap());
         }
     };
     solve(&mut dense);

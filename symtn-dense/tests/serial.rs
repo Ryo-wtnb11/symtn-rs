@@ -12,5 +12,3 @@ mod numerics;
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 mod cuda_transfer_allocations;
-
-mod cpu_session_scope;

@@ -324,7 +324,6 @@ const TYPED: &[&str] = &[
     "GradedSpace",
     "LeftPolar",
     "LegSelection",
-    "LinalgBackend",
     "Lq",
     "MaterializeExec",
     "MemberFault",
@@ -489,8 +488,6 @@ const EXPERT: &[&str] = &[
     "BlockLayout",
     "BlockRef",
     "BlockView",
-    "CpuBackendKind",
-    "CpuSessionStats",
     "CudaDenseContext",
     "CudaDenseStorage",
     "CudaPlanCacheStats",
@@ -520,11 +517,9 @@ const EXPERT: &[&str] = &[
     "TensorStorage",
     "TreeTransformOperation",
     "TreeTransformOperationKind",
-    "cpu_session_stats",
     "cuda_transfer_stats",
     "diagonal_spectrum",
     "is_diagonal",
-    "reset_cpu_session_stats",
     "reset_cuda_transfer_stats",
 ];
 /// The one public control of the process-global structure caches.

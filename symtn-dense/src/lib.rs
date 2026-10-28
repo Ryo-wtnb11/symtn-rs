@@ -52,16 +52,7 @@ pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};
 
 #[cfg(feature = "tenferro")]
-pub use tenferro_adapter::{
-    cpu_session_stats, reset_cpu_session_stats, CpuSessionStats, DefaultDenseExecutor,
-    SharedCpuContext,
-};
-
-/// CPU linear-algebra provider selector (faer vs system BLAS/LAPACK), re-exported
-/// from tenferro so runtimes can pick a backend via
-/// [`DefaultDenseExecutor::with_kind`] without depending on tenferro directly.
-#[cfg(feature = "tenferro")]
-pub use tenferro_adapter::CpuBackendKind;
+pub use tenferro_adapter::{DefaultDenseExecutor, SharedCpuContext};
 
 #[cfg(feature = "cuda")]
 pub use cuda_adapter::{

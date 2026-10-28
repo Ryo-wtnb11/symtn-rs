@@ -73,7 +73,6 @@ mod lazy_adjoint_non_self_dual_contract;
 mod lazy_adjoint_shared_owner;
 mod lazy_axpby_both_modes;
 mod lie_group_tensors;
-mod linalg_backend;
 mod mf_linalg_conformance;
 mod mf_structural_conformance;
 mod named_factorization_reconstruction;

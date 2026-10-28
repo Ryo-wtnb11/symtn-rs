@@ -1245,7 +1245,7 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
     >>::adjoint_space(checked_input.space())
     .unwrap();
     let context = symtn_dense::SharedCpuContext::with_threads(1).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::with_shared_context(&context, None).unwrap();
+    let mut dense = symtn_dense::DefaultDenseExecutor::with_shared_context(&context);
     let mut warm = |call: &mut dyn FnMut(&mut symtn_dense::DefaultDenseExecutor)| {
         call(&mut dense);
         call(&mut dense);
