@@ -381,7 +381,7 @@ fn su3_is_refused_as_multiplicity_free_and_admitted_as_checked_generic() {
     // Octet (1,1) is enumeration index 4 (grade 2: (0,2), (1,1), (2,0) after
     // grade 1's (0,1), (1,0)); 8 x 8 contains the octet twice.
     let octet = rule
-        .try_encode_label(&rule.category().irrep(&[1, 1], &[]).unwrap())
+        .try_encode_label(&rule.category().irrep(&[1, 1]).unwrap())
         .unwrap();
     assert_eq!(octet, s(4));
     assert_eq!(rule.try_nsymbol(octet, octet, octet), Ok(2));
@@ -434,9 +434,9 @@ fn a_and_b_blocks_are_the_category_authority() {
     let su3 = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
     let rule = cg(su3.clone());
     let sun = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let octet = su3.irrep(&[1, 1], &[]).unwrap();
+    let octet = su3.irrep(&[1, 1]).unwrap();
     let rule_octet = rule.try_encode_label(&octet).unwrap();
-    let lie_group_octet = sun.encode_irrep(&[1, 1], &[]).unwrap();
+    let lie_group_octet = sun.encode_irrep(&[1, 1]).unwrap();
     let authority_a = su3.a_symbol(&octet, &octet, &octet).unwrap();
     let authority_b = su3.b_symbol(&octet, &octet, &octet).unwrap();
     for block in [
@@ -2078,7 +2078,7 @@ impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
     ) -> Result<LieIrrep, FusionAlgebraError> {
         let twice_spin = Self::checked(id)?;
         category()
-            .irrep(&[twice_spin], &[])
+            .irrep(&[twice_spin])
             .map_err(|_| FusionAlgebraError::InvalidSector { sector: id })
     }
     fn sector_id<'a>(
@@ -2114,7 +2114,7 @@ impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
             }
         }
         let group = category();
-        Ok(twice_spins.map(|twice_spin| group.irrep(&[twice_spin.unwrap()], &[]).unwrap()))
+        Ok(twice_spins.map(|twice_spin| group.irrep(&[twice_spin.unwrap()]).unwrap()))
     }
     fn admit_r<'a>(
         &self,

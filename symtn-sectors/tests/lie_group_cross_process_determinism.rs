@@ -30,7 +30,7 @@ fn fnv(hash: &mut u64, bits: u64) {
 /// `(f_blocks, r_blocks, hash)`.
 fn su3_symbol_hash() -> (usize, usize, u64) {
     let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let labels = [[1, 1], [1, 0], [0, 1]].map(|l| rule.encode_irrep(&l, &[]).unwrap());
+    let labels = [[1, 1], [1, 0], [0, 1]].map(|l| rule.encode_irrep(&l).unwrap());
     let channels = |x, y| rule.try_fusion_channels(x, y).unwrap();
     let (mut f_blocks, mut r_blocks, mut hash) = (0, 0, 0xcbf2_9ce4_8422_2325u64);
     for &a in &labels {

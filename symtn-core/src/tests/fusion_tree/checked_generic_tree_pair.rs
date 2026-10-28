@@ -20,7 +20,7 @@ fn sun3() -> LieGroupFusionRule {
 }
 
 fn irrep(rule: &LieGroupFusionRule, dynkin: [i64; 2]) -> SectorId {
-    rule.encode_irrep(&dynkin, &[]).unwrap()
+    rule.encode_irrep(&dynkin).unwrap()
 }
 
 fn vertex(label: usize) -> MultiplicityIndex {

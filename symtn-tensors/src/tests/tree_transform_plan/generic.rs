@@ -1254,7 +1254,7 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
         );
-        let adjoint = provider.encode_irrep(adjoint_labels, &[]).unwrap();
+        let adjoint = provider.encode_irrep(adjoint_labels).unwrap();
         assert_eq!(provider.try_nsymbol(adjoint, adjoint, adjoint).unwrap(), 2);
         let homspace = FusionTreeHomSpace::new(
             FusionProductSpace::new(
@@ -1322,8 +1322,8 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
     use symtn_sectors::LieGroupFusionRule;
 
     let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let adjoint = inner.encode_irrep(&[1, 1], &[]).unwrap();
-    let fundamental = inner.encode_irrep(&[1, 0], &[]).unwrap();
+    let adjoint = inner.encode_irrep(&[1, 1]).unwrap();
+    let fundamental = inner.encode_irrep(&[1, 0]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let leg = || SectorLeg::new([(fundamental, 1), (adjoint, 2)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -1370,7 +1370,7 @@ fn retained_su3_vertex_move_replay_queries_no_symbols() {
     let inner =
         symtn_sectors::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
             .unwrap();
-    let octet = inner.encode_irrep(&[1, 1], &[]).unwrap();
+    let octet = inner.encode_irrep(&[1, 1]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let leg = |n| SectorLeg::new([(octet, n)], false);
     let source = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
@@ -1460,7 +1460,7 @@ fn measure_checked_generic_transform_case(
 
     fusion_symbols::cache::reset();
     let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
-    let adjoint = inner.encode_irrep(adjoint_labels, &[]).unwrap();
+    let adjoint = inner.encode_irrep(adjoint_labels).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new(

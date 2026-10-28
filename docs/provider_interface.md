@@ -130,9 +130,16 @@ PSO(4)), semisimple products, tori, U(n) and semisimple×torus quotients are
 admitted wherever fusion-symbols executes them; a group it rejects returns its
 `LieError` as `LieGroupFusionRuleError::Provider` at construction.
 
-`encode_irrep(dynkin, charges)` and `decode_irrep(id)` take the label as
-`LieGroup::irrep` does; the typed label is the single vector of Dynkin labels
-followed by charges. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
+The encoders mirror fusion-symbols' constructors: `encode_irrep(dynkin)` takes
+Dynkin labels as `LieGroup::irrep` does and serves groups without a torus;
+`encode_irrep_with_charges(dynkin, charges)` takes the label as
+`LieGroup::irrep_with_charges` does and serves every group; and
+`encode_spin(j)` takes a `fusion_symbols::lie::HalfInt` spin as
+`LieGroup::irrep_spin` does, for SU(2) and SO(3) in any rank-one presentation.
+`encode_irrep` on a group with a torus, and `encode_spin` on any other group,
+return `LieGroupFusionRuleError::Provider(LieError::InvalidLabel)`.
+`decode_irrep(id)` returns the Dynkin labels and the charges; the typed label is
+the single vector of Dynkin labels followed by charges. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
 to `0, 1, 2, 3, 4, …`) and ranks the whole coordinate vector by total grade
 then lexicographically, so a single simple factor keeps its Dynkin-only ids.
 `sector_order_key` does not use that rank: it lists one TensorKit position per

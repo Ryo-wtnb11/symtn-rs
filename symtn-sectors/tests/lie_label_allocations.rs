@@ -43,7 +43,7 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
     ] {
         let rule = LieGroupFusionRule::new(group.clone()).unwrap();
         let category = LieGroup::new(group).unwrap();
-        let adjoint = category.irrep(dynkin, charges).unwrap();
+        let adjoint = category.irrep_with_charges(dynkin, charges).unwrap();
         let channel_labels: Vec<_> = category
             .fusion(&adjoint, &adjoint)
             .unwrap()
@@ -53,7 +53,10 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
             channel_labels
                 .iter()
                 .fold(0usize, |sum, (dynkin, charges)| {
-                    sum + rule.encode_irrep(dynkin, charges).unwrap().id()
+                    sum + rule
+                        .encode_irrep_with_charges(dynkin, charges)
+                        .unwrap()
+                        .id()
                 })
         };
         // The first pass interns each sector's irrep (fusion-symbols checks
@@ -63,7 +66,7 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
         assert_eq!(encoded, expected);
         assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
         // A warm decode allocates only the returned label vectors.
-        let sector = rule.encode_irrep(dynkin, charges).unwrap();
+        let sector = rule.encode_irrep_with_charges(dynkin, charges).unwrap();
         let (decoded, allocs) = counting_alloc::measure(|| rule.decode_irrep(sector).unwrap());
         assert_eq!(decoded, (dynkin.to_vec(), charges.to_vec()));
         let returned = [dynkin.len(), charges.len()];
@@ -88,11 +91,11 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
     for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
         let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
-        let object = category.irrep(labels, &[]).unwrap();
+        let object = category.irrep(labels).unwrap();
         // A separate rule: encoding interns, and this rule's table must stay cold.
         let expected = LieGroupFusionRule::new(GroupId::su(n).unwrap())
             .unwrap()
-            .encode_irrep(labels, &[])
+            .encode_irrep(labels)
             .unwrap();
         let _ = CategoryProvider::category(&rule);
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
@@ -122,7 +125,7 @@ fn warm_lie_group_order_key_does_not_allocate() {
         (su2_su3_u1, &[1, 1, 1][..], &[2][..], 3),
     ] {
         let rule = LieGroupFusionRule::new(group).unwrap();
-        let sector = rule.encode_irrep(dynkin, charges).unwrap();
+        let sector = rule.encode_irrep_with_charges(dynkin, charges).unwrap();
         let (key, allocs) =
             counting_alloc::measure(|| CheckedGenericFusion::sector_order_key(&rule, sector));
         assert_eq!(key.positions().len(), len);

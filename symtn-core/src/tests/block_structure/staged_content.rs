@@ -84,8 +84,8 @@ fn uncached_generic_preview_keeps_its_coupled_region_geometry() {
     ) { return; }
     clear_structure_caches();
     let rule = symtn_sectors::testing::su_lie_rule(3);
-    let adjoint = rule.encode_irrep(&[1, 1], &[]).unwrap();
-    let trivial = rule.encode_irrep(&[0, 0], &[]).unwrap();
+    let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
+    let trivial = rule.encode_irrep(&[0, 0]).unwrap();
     let leg = |dual| SectorLeg::new([(adjoint, 2), (trivial, 3)], dual);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(false), leg(true)]),

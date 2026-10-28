@@ -152,9 +152,9 @@ fn checked_generic_coupled_storage_is_admitted_by_witness() {
     // the same coupled-sector builder, so both the staged preview and the
     // committed structure carry the witness.
     let rule = symtn_sectors::testing::su_lie_rule(3);
-    let fundamental = rule.encode_irrep(&[1, 0], &[]).unwrap();
-    let adjoint = rule.encode_irrep(&[1, 1], &[]).unwrap();
-    let trivial = rule.encode_irrep(&[0, 0], &[]).unwrap();
+    let fundamental = rule.encode_irrep(&[1, 0]).unwrap();
+    let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
+    let trivial = rule.encode_irrep(&[0, 0]).unwrap();
     let leg = |dual| SectorLeg::new([(fundamental, 3), (adjoint, 2), (trivial, 2)], dual);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(false), leg(true)]),

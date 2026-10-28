@@ -161,7 +161,7 @@ impl CategoryCodec<LieGroup> for CompactSu2Codec {
     ) -> Result<LieIrrep, FusionAlgebraError> {
         let label = checked_irrep(id)?;
         Ok(category()
-            .irrep(&[label.twice_spin() as i64], &[])
+            .irrep(&[label.twice_spin() as i64])
             .expect("symtn SU(2) labels fit fusion-symbols' rank-one labels"))
     }
 

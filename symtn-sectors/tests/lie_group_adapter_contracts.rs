@@ -22,7 +22,7 @@ fn absent_lie_group_moves_do_not_require_an_encoded_dual_or_finite_dimension() {
     let su78 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(78).unwrap()).unwrap();
     let mut labels = vec![0; 77];
     labels[36] = 19;
-    let overflowing_dimension = su78.encode_irrep(&labels, &[]).unwrap();
+    let overflowing_dimension = su78.encode_irrep(&labels).unwrap();
     for (rule, sector) in [(&su3, unencodable_dual), (&su78, overflowing_dimension)] {
         let unit = rule.vacuum();
         // For nontrivial a, N(a,1;1) = N(1,a;1) = 0 without dimensions or duals.

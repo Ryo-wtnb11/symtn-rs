@@ -262,7 +262,7 @@ fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
         );
-        let adjoint_id = provider.encode_irrep(&adjoint, &[]).unwrap();
+        let adjoint_id = provider.encode_irrep(&adjoint).unwrap();
         assert_eq!(
             provider
                 .try_nsymbol(adjoint_id, adjoint_id, adjoint_id)
