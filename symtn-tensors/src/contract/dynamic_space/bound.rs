@@ -825,11 +825,10 @@ where
         R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra,
     {
         let layout_build = LayoutBuildCapability::checked();
-        let prepared = layout_build.prepare(provider.as_ref(), &homspace)?;
-        let space = DynamicFusionMapSpace::from_final_homspace_with_prepared(
+        let space = DynamicFusionMapSpace::from_final_homspace_with_primer(
             provider.as_ref(),
             homspace,
-            prepared,
+            layout_build.key_builder(),
         )?;
         Self::from_derived_with_capability(provider, space, layout_build)
     }
@@ -1058,13 +1057,10 @@ where
     where
         R: MultiplicityFreeRigidSymbols,
     {
-        let prepared = self
-            .layout_build
-            .prepare(self.provider.as_ref(), &homspace)?;
-        let space = DynamicFusionMapSpace::from_final_homspace_with_prepared(
+        let space = DynamicFusionMapSpace::from_final_homspace_with_primer(
             self.provider.as_ref(),
             homspace,
-            prepared,
+            self.layout_build.key_builder(),
         )?;
         Self::from_derived_like(self, space)
     }
