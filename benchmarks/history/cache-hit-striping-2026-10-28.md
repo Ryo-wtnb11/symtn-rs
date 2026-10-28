@@ -162,12 +162,33 @@ weighs entries by bytes.
 
 ## Follow-up
 
-**Intern the sector signature.** Give each distinct HomSpace sector
-signature one canonical `Arc`, looked up when a HomSpace is constructed.
-`FusionTreeHomSpaceCacheKey` equality then becomes `Arc::ptr_eq`, and its
-hash becomes the pointer or a hash stored with the canonical entry.
+**Sector-signature interning is not needed.** A Mac profile of the U(1)
+`s3` own-Runtime warm permute at 1 thread (3054 worker samples) shows
+where the signature walks come from:
 
-- This removes the `product_space_signature_eq` walk that dominates a warm
-  hit at one thread (finding 3).
-- It needs its own bounded, clearable intern table, and that table needs its
-  own leaf. It is not implemented here.
+- Each warm multiplicity-free permute derives a fresh destination
+  HomSpace. That HomSpace's first sector-structure lookup must walk its
+  signature once, interned or not: that lookup is the canonicalization.
+  This one walk is TensorKit's floor (`Hashed` rehashes per lookup).
+- The walks above the floor were repeats on the same fresh HomSpace:
+  - `PreparedFusionTreeLayout::commit_layout` re-checked residency with a
+    second sector lookup (107 samples, 3.5%);
+  - `validate_homspace_signature` compared the prepared key with the very
+    HomSpace it was built from.
+- Both are removed instead.
+  - A warm commit returns the prepared layout without re-admitting an
+    entry evicted or reset since prepare.
+  - Validation short-cuts on pointer equality.
+  - A sector-keyed intern table (its own bound, reset and
+    `StructureCacheKind`) or a stored hash would only speed up those
+    repeats, so neither is added.
+
+**Next leaf: a permuted-destination memo for multiplicity-free permutes.**
+In that profile, deriving the destination HomSpace and its lookups
+(`MultiplicityFreeAdmissionMode::stage_transform`) is 42% of a warm call.
+Checked Generic permutes already skip this through
+`DegeneracyStructureEntry::permuted` (#2154). That memo lives in the
+DegeneracyStructure entry, so it is already charged, bounded, cleared and
+epoch-ticketed. Extending it beyond `CompleteFusionMode::Generic` would
+remove the derivation and the remaining sector and degeneracy lookups from a
+warm multiplicity-free permute. The gain is not yet measured.

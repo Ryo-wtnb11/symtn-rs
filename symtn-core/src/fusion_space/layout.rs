@@ -105,6 +105,9 @@ impl PreparedFusionTreeLayout {
 
     fn validate_homspace_signature(&self, homspace: &FusionTreeHomSpace) -> Result<(), CoreError> {
         let key = self.cache_key();
+        if Arc::ptr_eq(&homspace.content, &key.homspace) {
+            return Ok(());
+        }
         if !product_space_signature_eq(homspace.codomain(), &key.homspace.codomain)
             || !product_space_signature_eq(homspace.domain(), &key.homspace.domain)
         {
@@ -203,24 +206,24 @@ impl PreparedFusionTreeLayout {
     /// Publishes the prepared layout and returns its shared key storage.
     ///
     /// Why no fallible return: checked enumeration and layout-data formation
-    /// completed in `prepare`; the remaining cache race check, monotonic ID,
-    /// and bounded admission are process-local publication only.
+    /// completed in `prepare`; what remains is the bounded admission of a
+    /// cold layout, which is process-local publication only. A layout found
+    /// warm in `prepare` is returned as is.
     pub fn commit(self) -> Arc<[FusionTreePairKey]> {
         Arc::clone(&self.commit_layout().keys)
     }
 
     pub(crate) fn commit_layout(self) -> Arc<FusionTreeHomSpaceLayout> {
         let cache = sector_structure_cache();
-        let (key, layout, cold) = match self.state {
-            PreparedFusionTreeLayoutState::Cached { key, layout } => {
-                // The warm path: still resident, nothing to publish.
-                if cache.contains(&key) {
-                    return layout;
-                }
-                (key, layout, false)
-            }
+        let (key, layout) = match self.state {
+            // Why no residency re-check: the layout is a pure function of its
+            // key, so an entry evicted or reset since prepare is left out
+            // rather than re-admitted, exactly as if it were evicted just
+            // after this commit. Re-checking walked the sector signature a
+            // second time on every warm call.
+            PreparedFusionTreeLayoutState::Cached { layout, .. } => return layout,
             PreparedFusionTreeLayoutState::Cold { key, data } => {
-                (key, Arc::new(FusionTreeHomSpaceLayout { data }), true)
+                (key, Arc::new(FusionTreeHomSpaceLayout { data }))
             }
         };
         let charged_bytes = charged_fusion_tree_layout_bytes(&key, &layout);
@@ -230,13 +233,9 @@ impl PreparedFusionTreeLayout {
             cache.publish(&key, Arc::clone(&layout), charged_bytes, core_reset_epoch());
         #[cfg(test)]
         if Arc::ptr_eq(&published, &layout) {
-            if cold {
-                crate::probe::hit(crate::probe::Event::LayoutBuild);
-            }
+            crate::probe::hit(crate::probe::Event::LayoutBuild);
             crate::probe::hit(crate::probe::Event::LayoutAdmission);
         }
-        #[cfg(not(test))]
-        let _ = cold;
         published
     }
 }

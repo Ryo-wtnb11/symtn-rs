@@ -321,6 +321,7 @@ where
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
+        self.probe_lookup();
         let found = self.entries.get(key)?;
         self.stripe().hits.fetch_add(1, Ordering::Relaxed);
         Some(found.value)
@@ -330,12 +331,12 @@ where
         counter_stripe(&self.counters)
     }
 
-    /// Whether `key` is resident; counts no hit.
-    pub(crate) fn contains<Q>(&self, key: &Q) -> bool
-    where
-        Q: Hash + Equivalent<K> + ?Sized,
-    {
-        self.entries.contains_key(key)
+    #[inline]
+    fn probe_lookup(&self) {
+        #[cfg(test)]
+        if self.kind == StructureCacheKind::SectorStructure {
+            crate::probe::hit(crate::probe::Event::SectorStructureLookup);
+        }
     }
 
     /// Publishes a value built since reset epoch `epoch`, or returns the
@@ -348,6 +349,7 @@ where
     /// insert: no caller code runs under it, so a concurrent caller of the
     /// same key never waits on a build.
     pub fn publish(&self, key: &K, value: Arc<V>, bytes: u64, epoch: usize) -> (Arc<V>, bool) {
+        self.probe_lookup();
         match self.entries.get_value_or_guard(key, None) {
             GuardResult::Value(existing) => {
                 self.stripe()
@@ -402,6 +404,7 @@ where
         epoch: usize,
         build: impl FnOnce() -> Result<(Arc<V>, u64), E>,
     ) -> Result<Arc<V>, E> {
+        self.probe_lookup();
         match self.entries.get_value_or_guard(key, None) {
             GuardResult::Value(existing) => {
                 self.stripe().hits.fetch_add(1, Ordering::Relaxed);
@@ -787,7 +790,6 @@ mod tests {
                     // What: the held Arc keeps the entry alive, yet the cleared cache
                     // misses, and the next admission is what it serves.
                     assert!(cache.get(&t).is_none());
-                    assert!(!cache.contains(&t));
                     let fresh = cache.publish(&t, Arc::new(t + 100), 64, epoch).0;
                     assert!(Arc::ptr_eq(&cache.get(&t).unwrap(), &fresh));
                     assert_eq!(*held, t);

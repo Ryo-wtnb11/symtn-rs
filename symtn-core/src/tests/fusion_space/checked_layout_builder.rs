@@ -185,6 +185,107 @@ fn warm_layout_commit_publishes_nothing() {
     assert!(Arc::ptr_eq(&cold, &warm));
 }
 
+/// Commits a layout prepared warm after `drop_entry` removed its entry, and
+/// checks that the commit returns the prepared keys without re-admitting
+/// them and that the next call rebuilds once.
+fn assert_warm_commit_after_removal_is_not_readmitted(drop_entry: impl FnOnce()) {
+    let hom = singleton_rank_hom(su2(1), 5);
+    let resident = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let prepared = hom
+        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .unwrap();
+    let prepared_keys = prepared.keys_arc();
+    assert!(Arc::ptr_eq(&prepared_keys, &resident.keys));
+    drop_entry();
+
+    let recording = crate::probe::record();
+    let committed = prepared.commit();
+    assert!(Arc::ptr_eq(&committed, &prepared_keys));
+    assert_eq!(recording.get(crate::probe::Event::LayoutAdmission), 0);
+    assert_eq!(
+        structure_cache_info(StructureCacheKind::SectorStructure).entries(),
+        0
+    );
+
+    let rebuilt = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    assert_eq!(rebuilt.keys, committed);
+    assert_eq!(
+        (
+            recording.get(crate::probe::Event::LayoutBuild),
+            recording.get(crate::probe::Event::LayoutAdmission)
+        ),
+        (1, 1)
+    );
+}
+
+#[test]
+fn warm_commit_after_reset_returns_the_prepared_keys_without_readmission() {
+    // What: a layout found warm and then reset before its commit is not
+    // re-published by that commit; the next call rebuilds it once.
+    let _guard = test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    clear_structure_caches();
+    assert_warm_commit_after_removal_is_not_readmitted(clear_structure_caches);
+}
+
+#[test]
+fn warm_commit_after_eviction_returns_the_prepared_keys_without_readmission() {
+    // What: as after a reset, for an entry evicted by a budget change
+    // between prepare and commit.
+    let _guard = test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    clear_structure_caches();
+    let budget = structure_cache_info(StructureCacheKind::SectorStructure).byte_budget();
+    assert_warm_commit_after_removal_is_not_readmitted(|| {
+        set_structure_cache_byte_budget(StructureCacheKind::SectorStructure, 0);
+        set_structure_cache_byte_budget(StructureCacheKind::SectorStructure, budget);
+    });
+    clear_structure_caches();
+}
+
+#[test]
+fn warm_multiplicity_free_permute_looks_up_its_sector_structure_once() {
+    // What: the core steps of a warm multiplicity-free permute (derive the
+    // destination, prepare its layout, complete it, commit) walk the
+    // destination's sector signature in one sector-structure lookup.
+    let _guard = test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    clear_structure_caches();
+    let source = FusionTreeHomSpace::new(
+        FusionProductSpace::new([
+            SectorLeg::new([(u1(-1), 2), (u1(0), 3), (u1(1), 2)], false),
+            SectorLeg::new([(u1(-1), 3), (u1(0), 2), (u1(1), 4)], true),
+        ]),
+        FusionProductSpace::new([
+            SectorLeg::new([(u1(-1), 2), (u1(0), 4), (u1(1), 3)], false),
+            SectorLeg::new([(u1(-1), 4), (u1(0), 3), (u1(1), 2)], true),
+        ]),
+    );
+    let permute = || {
+        let destination = source
+            .try_permute_checked(&U1FusionRule, &[1, 2], &[3, 0])
+            .unwrap();
+        let prepared = destination
+            .prepare_fusion_tree_layout_checked(&U1FusionRule)
+            .unwrap();
+        let (_, structure) = prepared
+            .build_complete_homspace_from_leg_degeneracies(destination)
+            .unwrap();
+        prepared.commit();
+        structure
+    };
+    let cold = permute();
+    assert!(cold.block_count() > 1);
+
+    let recording = crate::probe::record();
+    let warm = permute();
+    assert!(Arc::ptr_eq(&cold, &warm));
+    assert_eq!(recording.get(crate::probe::Event::SectorStructureLookup), 1);
+}
+
 #[test]
 fn prepared_layout_publishes_only_at_commit() {
     // What: cold preparation enumerates exactly once but does not consume
@@ -589,37 +690,6 @@ fn prepared_lowered_final_structure_checks_signature_but_reads_target_degeneraci
             recording.get(crate::probe::Event::LayoutAdmission)
         ),
         (0, 0)
-    );
-}
-
-#[test]
-fn cached_commit_readmits_after_core_reset() {
-    // What: a cached preparation that survives reset republishes its exact
-    // retained keys without consuming a fresh layout identity.
-    let _guard = test_support::CACHE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    clear_structure_caches();
-    let hom = singleton_rank_hom(su2(1), 5);
-    hom.prepare_fusion_tree_layout_checked(&SU2FusionRule)
-        .unwrap()
-        .commit();
-    let prepared = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
-        .unwrap();
-    let retained = prepared.keys_arc();
-    clear_structure_caches();
-    let recording = crate::probe::record();
-
-    let committed = prepared.commit();
-
-    assert!(Arc::ptr_eq(&retained, &committed));
-    assert_eq!(
-        (
-            recording.get(crate::probe::Event::LayoutBuild),
-            recording.get(crate::probe::Event::LayoutAdmission)
-        ),
-        (0, 1)
     );
 }
 
