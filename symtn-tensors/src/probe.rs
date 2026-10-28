@@ -35,6 +35,8 @@ pub(crate) enum Event {
     CandidateScore,
     /// The fusion contraction preflight ran for candidate selection.
     ContractPreflight,
+    /// The fusion-aware trace preflight ran.
+    TracePreflight,
     /// A candidate's transformed layout was probed (one per operand side).
     CandidateLayoutProbe,
     /// A fusion operand projection was prepared.

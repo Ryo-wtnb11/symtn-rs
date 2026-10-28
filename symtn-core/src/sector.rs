@@ -60,10 +60,15 @@ struct SectorLegData {
     /// `dual(V)` shares `V.dims`).
     ///
     /// Why lazy and not at construction: `SectorLeg::new` has no rule, and a
-    /// `SectorId`'s dual is rule-relative. Why validated on every query and
-    /// not trusted: two rules of one Rust type (Generic providers) can dualize
-    /// one id differently, so a query whose rule disagrees with `images`
-    /// builds its own storage and leaves this map untouched.
+    /// `SectorId`'s dual is rule-relative. Why trusted only under the filling
+    /// rule's identity: equal [`RuleIdentity`] values promise equal
+    /// operations, the same contract every structure cache keys on, so a
+    /// query under that identity reuses the map without asking the provider
+    /// (TensorKit's `dual(V)` is a flag flip, `gradedspace.jl:112`). Two
+    /// rules of one Rust type can still dualize one id differently, so any
+    /// other identity re-queries every sector, and a query whose rule
+    /// disagrees with `images` builds its own storage and leaves this map
+    /// untouched.
     ///
     /// Why boxed exact-size slices and not inline vectors: every leg storage
     /// carries this field, most are never dualized, and the few allocations
@@ -76,6 +81,8 @@ pub(crate) struct DualSectorMap {
     pub(crate) images: Box<[SectorId]>,
     /// The sorted dual map, `None` when it equals the source map.
     pub(crate) moved: Option<MovedSectorMap>,
+    /// The identity of the rule that filled this map.
+    pub(crate) filled_by: RuleIdentity,
 }
 
 pub(crate) struct MovedSectorMap {
@@ -217,6 +224,17 @@ impl SectorLeg {
     /// size_of::<usize>())` for `n` sectors (images, sorted sectors,
     /// back-images, degeneracies). A dual query that fills it later therefore
     /// never grows a charge a cache has already admitted.
+    ///
+    /// `size_of::<DualSectorMap>()` includes the inline [`RuleIdentity`] of
+    /// the filling rule. The map holds a strong clone of that identity: one
+    /// identity per leg storage, which can outlive the rule while a leg (for
+    /// example one inside a cached HomSpace) is alive. Any heap behind it
+    /// (content bytes, a product or value node) is shared with the rule's own
+    /// identity and is not charged here, because the charge is fixed before
+    /// the first dual query, and a dual query must never grow a charge a
+    /// cache has already admitted. In-tree identities retain a few tens of
+    /// bytes; a provider's content bytes are unbounded by design, as they are
+    /// for cache keys.
     #[doc(hidden)]
     pub fn charged_retained_bytes(&self) -> usize {
         let dual_map = self
@@ -371,26 +389,51 @@ impl SectorLeg {
     /// carried along) and the dual flag is flipped.
     ///
     /// After the first query on a leg's storage, the dual shares that
-    /// storage and allocates nothing.
+    /// storage and allocates nothing; a later query by a rule with the same
+    /// [`FusionRule::rule_identity`] also asks the rule for no sector's dual.
     pub fn dual<R>(&self, rule: &R) -> Self
     where
         R: FusionRule,
     {
+        self.dual_under(rule, &rule.rule_identity())
+    }
+
+    /// [`Self::dual`] under `identity`, which must be `rule`'s identity;
+    /// callers that derive several legs read it once.
+    ///
+    /// Why not assert that here: reading the identity is a provider query,
+    /// and debug builds would then ask it on every call.
+    pub(crate) fn dual_under<R>(&self, rule: &R, identity: &RuleIdentity) -> Self
+    where
+        R: FusionRule,
+    {
         self.dual_by(
+            identity,
             |sector| Ok(rule.dual(sector)),
             |sector| SectorLegConstructionError::DuplicateSector { sector },
         )
         .unwrap_or_else(|error| panic!("{error}"))
     }
 
-    /// Shared body of the dual constructors. `dual_of` is queried once per
-    /// sector in sector order, so the first rule error is the one returned;
-    /// `not_injective` reports the smallest sector two sectors dualize onto.
+    /// Shared body of the dual constructors. Under the identity that filled
+    /// this storage's dual map, the map answers without any `dual_of` query.
+    /// Otherwise `dual_of` is queried once per sector in sector order, so the
+    /// first rule error is the one returned; `not_injective` reports the
+    /// smallest sector two sectors dualize onto.
     fn dual_by<E>(
         &self,
+        identity: &RuleIdentity,
         mut dual_of: impl FnMut(SectorId) -> Result<SectorId, E>,
         not_injective: impl FnOnce(SectorId) -> E,
     ) -> Result<Self, E> {
+        if self
+            .data
+            .dual
+            .get()
+            .is_some_and(|map| map.filled_by == *identity)
+        {
+            return Ok(self.flipped());
+        }
         let (sectors, degeneracies) = self.map();
         if let Some(images) = self.stored_images() {
             for (index, (&sector, &image)) in sectors.iter().zip(images).enumerate() {
@@ -448,7 +491,11 @@ impl SectorLeg {
                 .collect(),
             images: triples.iter().map(|&(_, _, source)| source).collect(),
         });
-        Ok(self.install_dual_map(DualSectorMap { images, moved }))
+        Ok(self.install_dual_map(DualSectorMap {
+            images,
+            moved,
+            filled_by: identity.clone(),
+        }))
     }
 
     /// The dual leg once `map`, computed from this leg's own sectors, is
@@ -498,6 +545,18 @@ impl SectorLeg {
     where
         R: CheckedFusionAlgebra,
     {
+        self.try_dual_under(rule, &rule.rule_identity())
+    }
+
+    /// [`Self::try_dual`] under `identity`, which must be `rule`'s identity.
+    pub(crate) fn try_dual_under<R>(
+        &self,
+        rule: &R,
+        identity: &RuleIdentity,
+    ) -> Result<Self, FusionAlgebraError>
+    where
+        R: CheckedFusionAlgebra,
+    {
         // Why not mutate a cloned leg as sectors succeed: a later failure must
         // leave no partially dualized value available to callers.
         //
@@ -505,6 +564,7 @@ impl SectorLeg {
         // dual collapses two sectors onto one id breaks the rule's rigidity
         // structure; it is not a caller mistake.
         self.dual_by(
+            identity,
             |sector| rule.try_dual_sector(sector),
             |dual| FusionAlgebraError::DualNotInjective { dual },
         )
@@ -520,7 +580,21 @@ impl SectorLeg {
     where
         R: CheckedGenericFusion,
     {
+        self.try_dual_generic_under(rule, &rule.rule_identity())
+    }
+
+    /// [`Self::try_dual_generic`] under `identity`, which must be `rule`'s
+    /// identity.
+    pub(crate) fn try_dual_generic_under<R>(
+        &self,
+        rule: &R,
+        identity: &RuleIdentity,
+    ) -> Result<Self, CheckedGenericStructureError<R::Error>>
+    where
+        R: CheckedGenericFusion,
+    {
         self.dual_by(
+            identity,
             |sector| {
                 rule.try_dual(sector)
                     .map_err(CheckedGenericStructureError::Provider)

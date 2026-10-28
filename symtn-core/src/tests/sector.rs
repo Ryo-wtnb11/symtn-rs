@@ -624,10 +624,12 @@ fn sector_leg_dual_race_loser_shares_only_an_agreeing_map() {
             degeneracies: Box::new([4, 2]),
             images: Box::new([u1(1), u1(-1)]),
         }),
+        filled_by: U1FusionRule.rule_identity(),
     };
     let identity_map = || DualSectorMap {
         images: Box::new([u1(-1), u1(1)]),
         moved: None,
+        filled_by: SU2FusionRule.rule_identity(),
     };
     let u1_dual = SectorLeg::new([(u1(-1), 4), (u1(1), 2)], true);
     let identity_dual = SectorLeg::new(pairs, true);

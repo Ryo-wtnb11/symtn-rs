@@ -69,3 +69,4 @@ mod fusion_tree;
 mod generic_symbol_shape_mismatch;
 mod sector;
 mod storage;
+mod trusted_dual_map;
