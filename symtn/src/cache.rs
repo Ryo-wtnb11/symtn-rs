@@ -2,7 +2,7 @@
 //! retained structural data.
 //!
 //! Four caches, each a pure function of its key and each byte-bounded on its
-//! own budget (64 MiB by default), shared by every
+//! own budget (128 MiB by default), shared by every
 //! [`Runtime`](crate::typed::Runtime) of the process:
 //!
 //! - fusion-tree keys and sector structure per HomSpace sector signature,
@@ -27,8 +27,8 @@
 //!
 //! The composed coefficients are one process-global cache, so several
 //! Runtimes working on disjoint transforms share its one budget. Its largest
-//! admissible entry is [`StructureCacheInfo::max_entry_bytes`]: 65,095,598 B
-//! at the default budget. Raise its budget
+//! admissible entry is [`StructureCacheInfo::max_entry_bytes`], half its
+//! budget: 67,108,864 B at the default budget. Raise its budget
 //! with [`configure_budgets`] when a workload needs more.
 //!
 //! A cache hit is interchangeable with a rebuild, so clearing or sizing these
@@ -56,13 +56,15 @@ pub fn clear() {
 
 /// Sets the byte budget of each listed cache; entries beyond a lowered
 /// budget are evicted. Owned by the application: library code never calls it.
+/// A budget below 2 bytes disables the cache; otherwise its largest
+/// admissible entry is half its budget, rounded down.
 ///
 /// A completed transformer is published only while every block structure it
 /// is keyed on is resident in, or was admitted to, the
 /// [`StructureCacheKind::DegeneracyStructure`] cache: content that cache
-/// rejected (oversize, a zero budget, or a build that straddled a
+/// rejected (oversize, a budget below 2, or a build that straddled a
 /// [`clear`]) gets a fresh identity on every call, so its transformers are
-/// rebuilt per call rather than cached. A `DegeneracyStructure` budget of 0
+/// rebuilt per call rather than cached. A `DegeneracyStructure` budget below 2
 /// therefore also disables completed-transformer caching. It does not
 /// disable the [`StructureCacheKind::TreeTransformCoefficients`] cache,
 /// whose keys hold sectors and fusion trees only, never block contents.

@@ -29,7 +29,7 @@ rustc-hash = "2"
 # The one bounded concurrent cache behind symtn's four structure caches
 # (#2014): byte-weighted, sharded, single-flight misses. Default features off:
 # the caches pass their own hasher, and std locks suffice.
-quick_cache = { version = "0.7", default-features = false }
+quick_cache = { version = "0.7", default-features = false, features = ["sharded-lock"] }
 
 [dev-dependencies]
 # Enables `testing` for this crate's own integration tests

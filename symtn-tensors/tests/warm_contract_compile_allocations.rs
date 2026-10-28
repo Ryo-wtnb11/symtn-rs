@@ -333,8 +333,8 @@ fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
 fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
     let _serial = crate::counting_alloc::serial();
     // Rank 6 is the largest case (#1998): its complete HomSpace, transform
-    // and fusion-tree layouts must fit the 64 MiB budgets and the 8 MiB entry
-    // limits, or each warm call would rebuild them (#1993).
+    // and fusion-tree layouts must fit the default budgets and their
+    // largest-entry limits, or each warm call would rebuild them (#1993).
     for rank in [2, 3, 4, 5, 6] {
         let complete_bypasses =
             symtn_core::structure_cache_info(symtn_core::StructureCacheKind::DegeneracyStructure)
@@ -394,7 +394,7 @@ fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
     let _serial = crate::counting_alloc::serial();
     // What (#2011): the rank-6 C1p working set — the
     // CopyC output transform and the DynamicTree route's transforms — fits
-    // the default 64 MiB process-global completed-transformer cache, so
+    // the default process-global completed-transformer cache, so
     // alternating the two routes evicts nothing and every warm call reuses
     // its retained transformers instead of recompiling the DynamicTree route
     // (8.26 M allocations) after each 65 MB transform evicts the other.
