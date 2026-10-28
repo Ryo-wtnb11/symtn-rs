@@ -63,6 +63,8 @@ mod ledger {
         PermutedMemoPublication,
         /// A complete-HomSpace structure was offered for admission.
         CompleteHomSpaceMiss,
+        /// A key was looked up in the sector-structure cache.
+        SectorStructureLookup,
         /// A fusion-tree layout was built cold and published.
         LayoutBuild,
         /// A fusion-tree layout was published.
