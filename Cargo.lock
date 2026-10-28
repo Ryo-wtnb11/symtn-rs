@@ -1174,9 +1174,9 @@ dependencies = [
 
 [[package]]
 name = "fusion-symbols"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81876d859d86b45daacc1d9892ff79daa6982f465f0f851b40bf7f558dcfea9e"
+checksum = "fde5078a82667d0b541d6037b527eb0365d500f69ca3db170f8ebb6f5c8d4ea9"
 dependencies = [
  "num-bigint",
  "num-complex",

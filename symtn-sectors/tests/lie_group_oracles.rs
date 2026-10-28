@@ -152,30 +152,35 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
     }
     assert_eq!(GroupId::so(5).unwrap(), GroupId::pso(5).unwrap());
     for root_system in [
+        RootSystem::G2,
         RootSystem::F4,
         RootSystem::E6,
         RootSystem::E7,
         RootSystem::E8,
     ] {
-        assert!(matches!(
-            LieGroupFusionRule::new(GroupId::cover(&[root_system], 0).unwrap()),
-            Err(LieGroupFusionRuleError::Provider(
-                LieError::Unsupported { .. }
-            ))
-        ));
+        let group = GroupId::cover(&[root_system], 0).unwrap();
+        assert_eq!(rule(group.clone()).group_id(), &group);
     }
 }
 
 #[test]
-fn g2_is_constructible_and_admits_a_sector_while_f4_stays_unsupported() {
-    let g2 = rule(GroupId::g2());
-    let id = g2.encode_irrep(&[1, 0], &[]).unwrap();
-    assert_eq!(g2.decode_irrep(id).unwrap(), (vec![1, 0], vec![]));
+fn exceptional_groups_admit_sectors_and_e6_label_overflow_is_unrepresentable() {
+    for (group, label) in [
+        (GroupId::g2(), vec![1, 0]),
+        (GroupId::f4(), vec![1, 0, 0, 0]),
+        (GroupId::e6(), vec![1, 0, 0, 0, 0, 0]),
+        (GroupId::e7(), vec![1, 0, 0, 0, 0, 0, 0]),
+        (GroupId::e8(), vec![1, 0, 0, 0, 0, 0, 0, 0]),
+    ] {
+        let r = rule(group);
+        let id = r.encode_irrep(&label, &[]).unwrap();
+        assert_eq!(r.decode_irrep(id).unwrap(), (label, vec![]));
+    }
+    // fusion-symbols' LabelOverflow on a label is the codec's unrepresentable label.
+    let label = [0, 0, 0, 0, 0, 15];
     assert!(matches!(
-        LieGroupFusionRule::new(GroupId::f4()),
-        Err(LieGroupFusionRuleError::Provider(
-            LieError::Unsupported { .. }
-        ))
+        rule(GroupId::e6()).encode_irrep(&label, &[]),
+        Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == label
     ));
 }
 
