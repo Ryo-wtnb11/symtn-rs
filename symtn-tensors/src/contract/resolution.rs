@@ -1095,6 +1095,15 @@ mod tests {
 
         #[test]
         fn warm_contract_compile_runs_one_preflight_and_rebuilds_no_homspace() {
+            // Isolated: the warm counts rely on each transformed source's
+            // destination memo staying resident across the three calls, and a
+            // concurrent test's cache clear would drop it mid-measurement.
+            if crate::test_support::run_isolated_or_return(
+                "SYMTN_WARM_COMPILE_COUNTS_ISOLATED",
+                "contract::resolution::tests::warm_compile_counts::warm_contract_compile_runs_one_preflight_and_rebuilds_no_homspace",
+            ) {
+                return;
+            }
             let provider = Arc::new(U1FusionRule);
             let lhs = space(&provider, 2, 1);
             let matrix = space(&provider, 1, 1);
