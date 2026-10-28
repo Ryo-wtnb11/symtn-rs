@@ -12,15 +12,17 @@
 //!   `degeneracystructure`);
 //! - completed permute/braid/transpose transformers,
 //!   [`StructureCacheKind::CompletedTreeTransformer`] (TensorKit
-//!   `treetransposer` / `treebraider`);
+//!   `treetransposer` / `treebraider`), and compiled fusion-aware traces,
+//!   so a warm trace is one lookup in every fusion style. TensorKit has no
+//!   trace counterpart: its `_trace_permute!` looks every fusion block up in
+//!   `fsbraid` on each call, and recomposes Unique traces per tree;
 //! - composed fusion-tree transformation coefficients per source fusion-tree
 //!   group, [`StructureCacheKind::TreeTransformCoefficients`] (TensorKit
 //!   `fsbraid` / `fstranspose`). As TensorKit's `NoCache`, Unique fusion
 //!   (U(1), Z2, ...) never enters it: a degeneracy-only change recomputes
 //!   its one phase per block without allocating per block. A trace keeps its
 //!   multiplicity-free Simple or checked Generic group permutations here as
-//!   well (present entries only); Unique trace stays uncached, as in
-//!   TensorKit.
+//!   well (present entries only), read when its compiled trace misses.
 //!
 //! This mirrors TensorKit's `GLOBAL_CACHES` with `empty_globalcaches!` and
 //! `global_cache_info` (`caches.jl:1-11` @cfaa073).

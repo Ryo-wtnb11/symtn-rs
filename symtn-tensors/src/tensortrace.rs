@@ -17,7 +17,12 @@ use crate::contract::{
 };
 use crate::lowering::lower_tensortrace_source_adjoint_axes_dyn;
 use crate::strided::offset_to_isize;
-use crate::tree_transform::{CheckedGenericPlanError, CheckedPendingCoefficients};
+use crate::tree_transform::{
+    lookup_trace, publish_staged_trace, CheckedGenericPlanError, CheckedPendingCoefficients,
+    TraceKeyRef, TraceSplit, TransformerMode,
+};
+use std::any::TypeId;
+use symtn_core::RuleIdentity;
 use symtn_operations::structure_identity::validate_structure_identity;
 use symtn_operations::tensortrace_raw_strided_kernel_add_with_coefficient_trusted;
 use symtn_operations::transform_structure::validate_destination_layouts_injective;
@@ -132,11 +137,24 @@ impl<'a> OrientedTraceSource<'a> {
 /// ordering. Why not recover per-source error precedence within a group: doing
 /// so would replay the same F/R traversal for every source tree.
 ///
-/// A fusion group whose lowered terms are resident in the process-global
+/// A compile over canonical source and destination contents is resident in
+/// the process-global completed-transformer cache: a warm compile is one
+/// lookup that rebinds the cached terms to the caller's structures, with no
+/// per-group lookup, symbol query, split or descriptor assembly. Otherwise a
+/// fusion group whose lowered terms are resident in the process-global
 /// transformation-coefficient cache makes no symbol queries and no split;
-/// only a whole successful compile publishes the groups it built.
+/// only a whole successful compile publishes what it built.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TensorTraceFusionStructure<C> {
+    core: Arc<TraceCore<C>>,
+    dst_structure: Arc<BlockStructure>,
+    src_structure: Arc<BlockStructure>,
+}
+
+/// The structure-free part of a compiled trace, as the completed-transformer
+/// cache keeps it: everything but the two structures it is bound to.
+#[derive(Debug, PartialEq)]
+pub(crate) struct TraceCore<C> {
     dst_rank: usize,
     src_rank: usize,
     output_axes: Vec<usize>,
@@ -144,8 +162,27 @@ pub struct TensorTraceFusionStructure<C> {
     trace_rhs_axes: Vec<usize>,
     terms: Vec<TensorTraceFusionStructureTerm<C>>,
     descriptor: TensorTraceDescriptor,
-    dst_structure: Arc<BlockStructure>,
-    src_structure: Arc<BlockStructure>,
+}
+
+impl<C> TraceCore<C> {
+    /// Bytes this core retains. The term keys hold the tree arenas of the
+    /// structures it was compiled over, so their contents are charged too:
+    /// a resident core keeps them alive after their own entries leave.
+    pub(crate) fn charged_bytes(&self, dst: &BlockStructure, src: &BlockStructure) -> usize {
+        let words = self.output_axes.capacity()
+            + self.trace_lhs_axes.capacity()
+            + self.trace_rhs_axes.capacity();
+        core::mem::size_of::<Self>()
+            .saturating_add(words.saturating_mul(core::mem::size_of::<usize>()))
+            .saturating_add(
+                self.terms
+                    .capacity()
+                    .saturating_mul(core::mem::size_of::<TensorTraceFusionStructureTerm<C>>()),
+            )
+            .saturating_add(self.descriptor.heap_bytes())
+            .saturating_add(dst.charged_retained_bytes())
+            .saturating_add(src.charged_retained_bytes())
+    }
 }
 
 impl<C> TensorTraceFusionStructure<C> {
@@ -158,7 +195,14 @@ impl<C> TensorTraceFusionStructure<C> {
     ) -> Result<Self, OperationError>
     where
         R: MultiplicityFreeRigidSymbols<Scalar = C>,
-        C: Clone + Add<Output = C> + Mul<Output = C> + Zero + RealStructuralCoefficient,
+        C: Clone
+            + Add<Output = C>
+            + Mul<Output = C>
+            + Zero
+            + RealStructuralCoefficient
+            + Send
+            + Sync
+            + 'static,
     {
         Self::compile_fusion_dyn_raw_with_preflight(rule, dst, src, axes, |_, _| {
             Ok(TraceAdmission::Unchecked)
@@ -176,7 +220,14 @@ impl<C> TensorTraceFusionStructure<C> {
     ) -> Result<Self, OperationError>
     where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + CheckedFusionAlgebra,
-        C: Clone + Add<Output = C> + Mul<Output = C> + Zero + RealStructuralCoefficient,
+        C: Clone
+            + Add<Output = C>
+            + Mul<Output = C>
+            + Zero
+            + RealStructuralCoefficient
+            + Send
+            + Sync
+            + 'static,
     {
         Self::compile_fusion_dyn_checked_raw(src.provider(), dst.space(), src.space(), axes)
     }
@@ -189,7 +240,14 @@ impl<C> TensorTraceFusionStructure<C> {
     ) -> Result<Self, OperationError>
     where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + CheckedFusionAlgebra,
-        C: Clone + Add<Output = C> + Mul<Output = C> + Zero + RealStructuralCoefficient,
+        C: Clone
+            + Add<Output = C>
+            + Mul<Output = C>
+            + Zero
+            + RealStructuralCoefficient
+            + Send
+            + Sync
+            + 'static,
     {
         Self::compile_fusion_dyn_raw_with_preflight(
             rule,
@@ -217,7 +275,14 @@ impl<C> TensorTraceFusionStructure<C> {
     ) -> Result<Self, OperationError>
     where
         R: MultiplicityFreeRigidSymbols<Scalar = C>,
-        C: Clone + Add<Output = C> + Mul<Output = C> + Zero + RealStructuralCoefficient,
+        C: Clone
+            + Add<Output = C>
+            + Mul<Output = C>
+            + Zero
+            + RealStructuralCoefficient
+            + Send
+            + Sync
+            + 'static,
         F: FnOnce(
             OrientedFusionTreeHomSpace<'_>,
             &TensorTraceAxisPlan,
@@ -261,7 +326,14 @@ impl<C> TensorTraceFusionStructure<C> {
     ) -> Result<Self, OperationError>
     where
         R: MultiplicityFreeRigidSymbols<Scalar = C>,
-        C: Clone + Add<Output = C> + Mul<Output = C> + Zero + RealStructuralCoefficient,
+        C: Clone
+            + Add<Output = C>
+            + Mul<Output = C>
+            + Zero
+            + RealStructuralCoefficient
+            + Send
+            + Sync
+            + 'static,
         F: FnOnce(
             OrientedFusionTreeHomSpace<'_>,
             &TensorTraceAxisPlan,
@@ -287,6 +359,19 @@ impl<C> TensorTraceFusionStructure<C> {
             dst_codomain_rank,
             admission,
         )?;
+        // After every admission check: a hit skips only the lowering, so
+        // errors keep their order and checked admission still runs.
+        let identity = rule.rule_identity();
+        let completed = CompletedTrace::new(&axis_plan, src, dst_codomain_rank);
+        let key = completed.key::<C>(
+            &identity,
+            TransformerMode::MultiplicityFree,
+            &dst_structure,
+            src,
+        );
+        if let Some(core) = lookup_trace::<TraceCore<C>>(&key) {
+            return Ok(Self::bind(core, dst_structure, src));
+        }
         let (terms, pending) = build_trace_terms::<MultiplicityFreeAdmissionMode, R>(
             rule,
             &dst_structure,
@@ -296,12 +381,35 @@ impl<C> TensorTraceFusionStructure<C> {
         )?;
         let structure = Self::assemble(axis_plan, terms, dst_structure, src)?;
         pending.publish(epoch);
+        if let Some(staged) = completed.staged::<C>(
+            &identity,
+            TransformerMode::MultiplicityFree,
+            &structure,
+            src,
+        ) {
+            publish_staged_trace(staged, epoch);
+        }
         Ok(structure)
     }
 
-    /// The only constructor. The descriptor is compiled here from `terms`
-    /// (one descriptor term per fusion term, in order, or an error), so
-    /// `descriptor.terms()[i]` addresses `terms[i]`'s block pair for every
+    /// A resident core bound to the caller's structures. The key's content
+    /// ids make them the structures the core was assembled over, value for
+    /// value, so its pairing and layout checks still hold.
+    fn bind(
+        core: Arc<TraceCore<C>>,
+        dst_structure: Arc<BlockStructure>,
+        src: OrientedTraceSource<'_>,
+    ) -> Self {
+        Self {
+            core,
+            dst_structure,
+            src_structure: Arc::clone(src.structure),
+        }
+    }
+
+    /// The only builder of a core. The descriptor is compiled here from
+    /// `terms` (one descriptor term per fusion term, in order, or an error),
+    /// so `descriptor.terms()[i]` addresses `terms[i]`'s block pair for every
     /// `i`; the fields are private, so replay can pair them without checking.
     fn assemble(
         axis_plan: TensorTraceAxisPlan,
@@ -321,13 +429,15 @@ impl<C> TensorTraceFusionStructure<C> {
         )?;
 
         Ok(Self {
-            dst_rank: dst_structure.rank(),
-            src_rank: src.structure.rank(),
-            output_axes: axis_plan.output_axes,
-            trace_lhs_axes: axis_plan.trace_lhs_axes,
-            trace_rhs_axes: axis_plan.trace_rhs_axes,
-            terms,
-            descriptor,
+            core: Arc::new(TraceCore {
+                dst_rank: dst_structure.rank(),
+                src_rank: src.structure.rank(),
+                output_axes: axis_plan.output_axes,
+                trace_lhs_axes: axis_plan.trace_lhs_axes,
+                trace_rhs_axes: axis_plan.trace_rhs_axes,
+                terms,
+                descriptor,
+            }),
             dst_structure,
             src_structure: Arc::clone(src.structure),
         })
@@ -342,7 +452,7 @@ impl<C> TensorTraceFusionStructure<C> {
             &TensorTraceFusionStructureTerm<C>,
         ),
     > {
-        self.descriptor.terms().iter().zip(&self.terms)
+        self.core.descriptor.terms().iter().zip(&self.core.terms)
     }
 
     /// The `index`-th pair of [`Self::paired_terms`].
@@ -353,42 +463,45 @@ impl<C> TensorTraceFusionStructure<C> {
         &TensorTraceDescriptorTerm,
         &TensorTraceFusionStructureTerm<C>,
     ) {
-        (&self.descriptor.terms()[index], &self.terms[index])
+        (
+            &self.core.descriptor.terms()[index],
+            &self.core.terms[index],
+        )
     }
 
     #[inline]
     pub fn dst_rank(&self) -> usize {
-        self.dst_rank
+        self.core.dst_rank
     }
 
     #[inline]
     pub fn src_rank(&self) -> usize {
-        self.src_rank
+        self.core.src_rank
     }
 
     #[inline]
     pub fn output_axes(&self) -> &[usize] {
-        &self.output_axes
+        &self.core.output_axes
     }
 
     #[inline]
     pub fn trace_lhs_axes(&self) -> &[usize] {
-        &self.trace_lhs_axes
+        &self.core.trace_lhs_axes
     }
 
     #[inline]
     pub fn trace_rhs_axes(&self) -> &[usize] {
-        &self.trace_rhs_axes
+        &self.core.trace_rhs_axes
     }
 
     #[inline]
     pub fn terms(&self) -> &[TensorTraceFusionStructureTerm<C>] {
-        &self.terms
+        &self.core.terms
     }
 
     #[inline]
     pub(crate) fn descriptor(&self) -> &TensorTraceDescriptor {
-        &self.descriptor
+        &self.core.descriptor
     }
 
     /// The destination block structure the terms were compiled for.
@@ -461,6 +574,31 @@ pub(crate) struct TensorTraceDescriptor {
 }
 
 impl TensorTraceDescriptor {
+    /// Heap bytes of every buffer this descriptor owns.
+    fn heap_bytes(&self) -> usize {
+        let words = self.destination_shape.capacity()
+            + self.destination_strides.capacity()
+            + self.destination_zero_strides.capacity()
+            + self.output_shape.capacity()
+            + self.trace_shape.capacity()
+            + self.dst_strides.capacity()
+            + self.src_output_strides.capacity()
+            + self.src_trace_strides.capacity()
+            + self.destination_producers.capacity();
+        words
+            .saturating_mul(core::mem::size_of::<usize>())
+            .saturating_add(
+                self.terms
+                    .capacity()
+                    .saturating_mul(core::mem::size_of::<TensorTraceDescriptorTerm>()),
+            )
+            .saturating_add(
+                self.destination_layouts
+                    .capacity()
+                    .saturating_mul(core::mem::size_of::<TensorTraceDestinationLayout>()),
+            )
+    }
+
     #[inline]
     pub(crate) fn terms(&self) -> &[TensorTraceDescriptorTerm] {
         &self.terms
@@ -731,6 +869,109 @@ pub(crate) struct TensorTraceDescriptorTerm {
     pub(crate) src_offset: isize,
 }
 
+/// The completed-transformer key of one compile, held across the lowering
+/// that consumes its axis plan: the `(p…, q…)` permutation halves (inline
+/// up to rank 12) and the split that recovers the plan from them.
+struct CompletedTrace {
+    codomain_permutation: smallvec::SmallVec<[usize; 12]>,
+    domain_permutation: smallvec::SmallVec<[usize; 12]>,
+    split: TraceSplit,
+}
+
+impl CompletedTrace {
+    fn new(
+        axis_plan: &TensorTraceAxisPlan,
+        src: OrientedTraceSource<'_>,
+        dst_codomain_rank: usize,
+    ) -> Self {
+        let (front, back) = axis_plan.output_axes.split_at(dst_codomain_rank);
+        Self {
+            codomain_permutation: front
+                .iter()
+                .chain(&axis_plan.trace_lhs_axes)
+                .copied()
+                .collect(),
+            domain_permutation: back
+                .iter()
+                .chain(&axis_plan.trace_rhs_axes)
+                .copied()
+                .collect(),
+            split: TraceSplit {
+                open_codomain_rank: dst_codomain_rank,
+                pairs: axis_plan.trace_lhs_axes.len(),
+                storage_nout: src.storage_nout,
+                storage_nin: src.storage_nin,
+            },
+        }
+    }
+
+    fn key<'a, C: 'static>(
+        &'a self,
+        identity: &'a RuleIdentity,
+        mode: TransformerMode,
+        dst: &'a BlockStructure,
+        src: OrientedTraceSource<'a>,
+    ) -> TraceKeyRef<'a> {
+        TraceKeyRef {
+            rule: identity,
+            mode,
+            coefficient: TypeId::of::<C>(),
+            codomain_permutation: &self.codomain_permutation,
+            domain_permutation: &self.domain_permutation,
+            orientation: src.orientation,
+            split: self.split,
+            dst,
+            src: src.structure,
+        }
+    }
+
+    /// The entry to publish for `structure`, or `None` when a keyed content
+    /// is not canonical (an expert or staged structure gets a fresh id per
+    /// call, so its entry could only evict live ones).
+    fn staged<C>(
+        &self,
+        identity: &RuleIdentity,
+        mode: TransformerMode,
+        structure: &TensorTraceFusionStructure<C>,
+        src: OrientedTraceSource<'_>,
+    ) -> Option<(
+        crate::tree_transform::CompletedTransformerKey,
+        Arc<dyn std::any::Any + Send + Sync>,
+        u64,
+    )>
+    where
+        C: 'static + Send + Sync,
+    {
+        let key = self.key::<C>(identity, mode, &structure.dst_structure, src);
+        key.publishable()
+            .then(|| self.entry(identity, mode, structure, src))
+    }
+
+    /// The entry of `structure` under this key, publishable or not.
+    fn entry<C>(
+        &self,
+        identity: &RuleIdentity,
+        mode: TransformerMode,
+        structure: &TensorTraceFusionStructure<C>,
+        src: OrientedTraceSource<'_>,
+    ) -> (
+        crate::tree_transform::CompletedTransformerKey,
+        Arc<dyn std::any::Any + Send + Sync>,
+        u64,
+    )
+    where
+        C: 'static + Send + Sync,
+    {
+        self.key::<C>(identity, mode, &structure.dst_structure, src)
+            .staged_entry(
+                Arc::clone(&structure.core),
+                structure
+                    .core
+                    .charged_bytes(&structure.dst_structure, src.structure),
+            )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TensorTraceAxisPlan {
     output_axes: Vec<usize>,
@@ -923,6 +1164,22 @@ where
         src_space.space().nin(),
         orientation,
     );
+    // After every admission check, as the multiplicity-free compile.
+    let identity = src_space.provider().rule_identity();
+    let completed = CompletedTrace::new(&axis_plan, source, dst_nout);
+    let key = completed.key::<R::Scalar>(
+        &identity,
+        TransformerMode::CheckedGeneric,
+        &dst_structure,
+        source,
+    );
+    if let Some(core) = lookup_trace::<TraceCore<R::Scalar>>(&key) {
+        return Ok(TensorTraceFusionStructure::bind(
+            core,
+            dst_structure,
+            source,
+        ));
+    }
     let (terms, built) = build_trace_terms::<CheckedGenericAdmissionMode, R>(
         src_space.provider(),
         &dst_structure,
@@ -933,6 +1190,18 @@ where
     let structure = TensorTraceFusionStructure::assemble(axis_plan, terms, dst_structure, source)
         .map_err(CheckedGenericPlanError::Operation)?;
     pending.stage(built);
+    // Published with the groups, only after the destination commit, keyed
+    // then on the committed destination (a cold call compiles on a preview).
+    pending.stage_trace(
+        completed.entry::<R::Scalar>(
+            &identity,
+            TransformerMode::CheckedGeneric,
+            &structure,
+            source,
+        ),
+        Arc::clone(&structure.dst_structure),
+        Arc::clone(source.structure),
+    );
     Ok(structure)
 }
 
@@ -1165,10 +1434,11 @@ where
         stage: TensorTraceStage<'_, R, PreparedCheckedGenericDynamicSpace>,
         pending: CheckedPendingCoefficients,
     ) -> Result<BoundDynamicFusionMapSpace<R>, CheckedGenericPlanError<R::Error>> {
+        let preview = stage.destination.shared_structure();
         let space = src
             .commit_final_homspace_generic_bound_checked(stage.destination)
             .map_err(CheckedGenericPlanError::Operation)?;
-        pending.flush();
+        pending.flush_committed(&[(preview, Arc::clone(space.space().structure()))]);
         Ok(space)
     }
 }
@@ -1248,7 +1518,7 @@ where
 {
     let mut pending = M::open_trace();
     let structure = M::compile_trace(&stage, src, axes, &mut pending)?;
-    let scalar = structure.dst_rank == 0
+    let scalar = structure.dst_rank() == 0
         && structure.dst_structure.block_count() == 1
         && !structure.descriptor().source_conjugate();
     let value = scalar.then(|| read(&structure)).flatten();

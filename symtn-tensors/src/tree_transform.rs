@@ -6,9 +6,10 @@ pub use cache::{
     admit_exact_tree_pair_layout, exact_layout_tree_pair_hit, TreeTransformOperationView,
 };
 pub(crate) use cache::{
-    lookup_bound, publishable, CheckedPendingCoefficients, CoefficientGroupReuse,
-    CompletedTransformerKey, OrientedBasisOrder, PendingCoefficientGroups, TraceTermReuse,
-    TransformerMode, TreeTransformPlanning, TreeTransformScope,
+    lookup_bound, lookup_trace, publish_staged_trace, publishable, CheckedPendingCoefficients,
+    CoefficientGroupReuse, CompletedTransformerKey, OrientedBasisOrder, PendingCoefficientGroups,
+    TraceKeyRef, TraceSplit, TraceTermReuse, TransformerMode, TreeTransformPlanning,
+    TreeTransformScope,
 };
 pub use operation::{
     TreeTransformOperation, TreeTransformOperationKind, TreeTransformRuleCacheKey,

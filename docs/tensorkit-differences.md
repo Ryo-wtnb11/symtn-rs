@@ -43,6 +43,15 @@ this page records intentional differences.
   operation error before factorization on supported storage.
 - **Distinct `flip` legs.** Repeated legs are `InvalidArgument` before provider
   queries. `twist` applies one factor per occurrence.
+- **Compiled traces are cached.** A fusion-aware trace over canonical
+  structures keeps its compiled terms in the completed-transformer cache, so
+  a warm trace is one lookup in every fusion style. TensorKit's
+  `_trace_permute!` looks up `fsbraid` per fusion block on every call and
+  recomposes Unique traces per tree (`NoCache`). Without the entry, a warm
+  SU(2) trace with 979 blocks read 552 fusion groups per call (81 µs against
+  10 µs), and a U(1) one with 146 blocks recomposed every block (68 µs
+  against 4 µs); see
+  [the benchmark record](../benchmarks/history/compiled-trace-cache-2026-10-28.md).
 
 ## Conventions
 

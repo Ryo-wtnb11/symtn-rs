@@ -539,11 +539,11 @@ fn trace_activity() -> (usize, usize, usize) {
     (activity.hits, activity.misses, activity.publications)
 }
 
-/// What (#2072, #2149): a warm checked compile hits every fusion group and
-/// asks the provider exactly the preflight's queries, in order: no group
-/// admission or recoupling (#2072) and no lowering split or channel factor
-/// (#2149). The cold compile asks the same preflight first, and the term
-/// bits are equal.
+/// What (#2072, #2149): a warm checked compile is one compiled-trace hit,
+/// with no fusion-group lookup, and asks the provider exactly the
+/// preflight's queries, in order: no group admission or recoupling (#2072)
+/// and no lowering split or channel factor (#2149). The cold compile asks
+/// the same preflight first, and the term bits are equal.
 #[test]
 fn warm_compile_asks_only_the_preflight() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -560,12 +560,15 @@ fn warm_compile_asks_only_the_preflight() {
     assert!(!preflight.is_empty());
     provider.reset(Vec::new());
     trace_activity();
+    crate::probe::take_compiled_trace_activity();
     let cold = publishing_compile(&fixture).unwrap();
     let cold_calls = provider.calls.take();
     assert_eq!(trace_activity(), (0, groups, groups));
+    assert_eq!(crate::probe::take_compiled_trace_activity(), (0, 1));
     let warm = publishing_compile(&fixture).unwrap();
     let warm_calls = provider.calls.take();
-    assert_eq!(trace_activity(), (groups, 0, 0));
+    assert_eq!(trace_activity(), (0, 0, 0));
+    assert_eq!(crate::probe::take_compiled_trace_activity(), (1, 0));
 
     let bits = |structure: &TensorTraceFusionStructure<f64>| {
         structure
@@ -615,9 +618,9 @@ fn failing_compile_publishes_nothing_and_repeats_its_ledger() {
     }
 }
 
-/// What (#2072): the owned checked trace publishes its groups only once
-/// execution returned `Ok`; a lowering failure publishes none, and the
-/// following successful call is cold, then warm.
+/// What (#2072): the owned checked trace publishes its groups and its
+/// compiled trace only once execution returned `Ok`; a lowering failure
+/// publishes none, and the following successful call is cold, then warm.
 #[test]
 fn owned_checked_trace_publishes_after_success_only() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -643,13 +646,17 @@ fn owned_checked_trace_publishes_after_success_only() {
     };
     fixture.provider.reset(vec![twist]);
     trace_activity();
+    crate::probe::take_compiled_trace_activity();
     assert!(run().is_err());
     assert_eq!(trace_activity().2, 0);
+    assert_eq!(crate::probe::take_compiled_trace_activity(), (0, 0));
     fixture.provider.reset(Vec::new());
     let cold = run().unwrap();
     assert_eq!(trace_activity(), (0, groups, groups));
+    assert_eq!(crate::probe::take_compiled_trace_activity(), (0, 1));
     let warm = run().unwrap();
-    assert_eq!(trace_activity(), (groups, 0, 0));
+    assert_eq!(trace_activity(), (0, 0, 0));
+    assert_eq!(crate::probe::take_compiled_trace_activity(), (1, 0));
     assert_eq!(
         cold.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
         warm.iter().map(|value| value.to_bits()).collect::<Vec<_>>()

@@ -3,7 +3,9 @@
 //! hits and misses, key splits and presence.
 
 use super::*;
-use crate::probe::{take_trace_column_activity, CoefficientGroupActivity};
+use crate::probe::{
+    take_compiled_trace_activity, take_trace_column_activity, CoefficientGroupActivity,
+};
 use symtn_core::{
     clear_structure_caches, structure_cache_info, FermionParityFusionRule, StructureCacheKind,
 };
@@ -428,13 +430,14 @@ fn present_zero_axes() -> TensorTraceAxisSpec<'static> {
     TensorTraceAxisSpec::new(&PRESENT_ZERO_OUTPUT, &PRESENT_ZERO_LHS, &PRESENT_ZERO_RHS)
 }
 
-/// What: a Simple trace resolves each fusion group once per call from
-/// cache 4: cold misses and publishes every group, warm hits every group
-/// with identical term bits. Another trace pair, the lazy adjoint of the
-/// same parent and a transform-scope entry of the same permutation are
-/// distinct entries; a degeneracy-only change and another instance of the
-/// same rule hit; Unique fusion makes no cache-4 activity (TensorKit
-/// `NoCache`).
+/// What: a Simple trace resolves each fusion group once per compile from
+/// cache 4: cold misses and publishes every group and the compiled trace; a
+/// warm repeat is one compiled-trace hit with no group lookup and identical
+/// term bits. Another trace pair, the lazy adjoint of the same parent and a
+/// transform-scope entry of the same permutation are distinct entries; a
+/// degeneracy-only change (another content, so a compiled-trace miss) hits
+/// every group, and another instance of the same rule hits the compiled
+/// trace; Unique fusion makes no cache-4 activity (TensorKit `NoCache`).
 #[test]
 fn trace_groups_resolve_through_cache4_per_group() {
     // Exact hit/miss counts: alone in a child process, so no sibling test
@@ -452,10 +455,13 @@ fn trace_groups_resolve_through_cache4_per_group() {
     let groups = su2.groups();
     assert!(groups > 1);
 
+    take_compiled_trace_activity();
     let cold = su2.compile(open);
     assert_eq!(take_trace_column_activity(), activity(0, groups, groups));
+    assert_eq!(take_compiled_trace_activity(), (0, 1));
     let warm = su2.compile(open);
-    assert_eq!(take_trace_column_activity(), activity(groups, 0, 0));
+    assert_eq!(take_trace_column_activity(), activity(0, 0, 0));
+    assert_eq!(take_compiled_trace_activity(), (1, 0));
     assert_eq!(term_bits(&cold), term_bits(&warm));
 
     // Key splits: another `(p…, q…)` and the lazy adjoint of one parent.
@@ -513,7 +519,8 @@ fn trace_groups_resolve_through_cache4_per_group() {
         1,
     )
     .compile(open);
-    assert_eq!(take_trace_column_activity(), activity(fp_groups, 0, 0));
+    assert_eq!(take_trace_column_activity(), activity(0, 0, 0));
+    assert_eq!(take_compiled_trace_activity().0, 1);
 
     let u1 = MfTrace::new(Arc::new(U1FusionRule), u1_hom(), open, 1);
     u1.compile(open);
@@ -574,8 +581,10 @@ fn trace_and_transform_of_one_permutation_do_not_share_entries() {
         crate::probe::take_coefficient_group_activity(),
         activity(groups, 0, 0)
     );
+    take_compiled_trace_activity();
     let warm = su2.compile(open);
-    assert_eq!(take_trace_column_activity(), activity(groups, 0, 0));
+    assert_eq!(take_trace_column_activity(), activity(0, 0, 0));
+    assert_eq!(take_compiled_trace_activity(), (1, 0));
     assert_eq!(term_bits(&cold), term_bits(&warm));
     let bits = |structure: &crate::TreeTransformStructure<f64>| {
         let mut coefficients = Vec::new();
@@ -791,4 +800,73 @@ fn present_zero_entry_propagates_nan_warm_as_cold() {
             .iter()
             .any(|value| value.is_nan())
     );
+}
+
+/// What: the compiled-trace key separates splits. Over the same canonical
+/// source and destination contents and the same `(p…, q…)` permutation, a
+/// key whose open codomain rank, pair count or stored ranks differ misses
+/// the entry published under another split. (A real compile cannot reach
+/// such a collision: the permutation lengths and the destination rank fix
+/// the split. The field pins that the key never relies on it.)
+#[test]
+fn compiled_trace_keys_separate_splits_over_equal_structures() {
+    if crate::test_support::run_isolated_or_return(
+        "SYMTN_2072_ISOLATED",
+        "tests::tensortrace::trace_cache4::compiled_trace_keys_separate_splits_over_equal_structures",
+    ) {
+        return;
+    }
+    use crate::tree_transform::{
+        lookup_trace, publish_staged_trace, TraceKeyRef, TraceSplit, TransformerMode,
+    };
+    let space = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::new(SU2FusionRule),
+        su2_hom(),
+    )
+    .unwrap();
+    let structure = space.space().structure();
+    assert!(structure.is_canonical());
+    let identity = symtn_core::FusionRule::rule_identity(&SU2FusionRule);
+    let key = |split| TraceKeyRef {
+        rule: &identity,
+        mode: TransformerMode::MultiplicityFree,
+        coefficient: std::any::TypeId::of::<u64>(),
+        codomain_permutation: &[1, 0],
+        domain_permutation: &[3, 2],
+        orientation: symtn_core::FusionTreePairOrientation::Direct,
+        split,
+        dst: structure,
+        src: structure,
+    };
+    let published = TraceSplit {
+        open_codomain_rank: 1,
+        pairs: 1,
+        storage_nout: 2,
+        storage_nin: 2,
+    };
+    clear_structure_caches();
+    publish_staged_trace(
+        key(published).staged_entry(Arc::new(2416_u64), 64),
+        symtn_core::core_reset_epoch(),
+    );
+    assert_eq!(lookup_trace::<u64>(&key(published)).as_deref(), Some(&2416));
+    for split in [
+        TraceSplit {
+            open_codomain_rank: 0,
+            pairs: 2,
+            ..published
+        },
+        TraceSplit {
+            open_codomain_rank: 2,
+            pairs: 0,
+            ..published
+        },
+        TraceSplit {
+            storage_nout: 1,
+            storage_nin: 3,
+            ..published
+        },
+    ] {
+        assert!(lookup_trace::<u64>(&key(split)).is_none(), "{split:?}");
+    }
 }

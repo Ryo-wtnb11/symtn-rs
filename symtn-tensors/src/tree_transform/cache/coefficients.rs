@@ -24,13 +24,22 @@
 //! the same cached `fsbraid`, then splits every row on every call; symtn
 //! stores the rows already lowered (split, `g₁ == g₂`, channel factor,
 //! #2149), since its arena-backed, provider-admitted split costs allocations
-//! and queries per row where TensorKit's isbits split costs none. Unique
-//! trace stays uncached, as TensorKit's `NoCache`, since a trace hit saves
-//! no work over one phase per source.
+//! and queries per row where TensorKit's isbits split costs none.
 //!
-//! Unique fusion never enters this cache, as TensorKit's `NoCache`: its
-//! cache-3 miss recomputes one phase per block on a reused scratch and
-//! allocates nothing per block, so a hit would save no allocation.
+//! Unique fusion never enters this cache, transform or trace, as TensorKit's
+//! `NoCache`: a cache-3 miss recomputes one phase per block on a reused
+//! scratch and allocates nothing per block, so a group hit would save
+//! nothing.
+//!
+//! Trace groups are read only when the whole compiled trace misses the
+//! completed-transformer cache (a new content, e.g. a degeneracy-only
+//! change): a warm trace in any fusion style, Unique included, is one
+//! completed-transformer lookup. TensorKit caches no compiled trace. symtn
+//! deviates because, without it, every warm call paid one shared-cache
+//! read per fusion group, or a phase, split and term per source block for
+//! Unique: SU(2) `s = 6` (979 blocks) read 552 groups per call, 81 µs
+//! against 10 µs from the compiled entry, and U(1) `s = 6` (146 blocks)
+//! took 68 µs against 4 µs (`benchmarks/history/compiled-trace-cache-2026-10-28.md`).
 //!
 //! Rust deviations, each deliberate:
 //! - entries are byte-weighted under the per-kind budget of `symtn::cache`,
@@ -230,7 +239,18 @@ impl PendingCoefficientGroups {
 pub(crate) struct CheckedPendingCoefficients {
     pending: PendingCoefficientGroups,
     transformers: Vec<(CompletedTransformerKey, TreeTransformStructure<f64>)>,
+    traces: Vec<StagedTrace>,
     epoch: usize,
+}
+
+/// A compiled trace staged until the contraction's commit, with the
+/// structures its key was formed over.
+struct StagedTrace {
+    key: CompletedTransformerKey,
+    entry: Arc<ErasedEntry>,
+    bytes: u64,
+    dst: Arc<BlockStructure>,
+    src: Arc<BlockStructure>,
 }
 
 impl CheckedPendingCoefficients {
@@ -239,12 +259,31 @@ impl CheckedPendingCoefficients {
         Self {
             pending: PendingCoefficientGroups::default(),
             transformers: Vec::new(),
+            traces: Vec::new(),
             epoch: symtn_core::core_reset_epoch(),
         }
     }
 
     pub(crate) fn stage(&mut self, built: PendingCoefficientGroups) {
         self.pending.groups.extend(built.groups);
+    }
+
+    /// Stages a compiled trace ([`super::TraceKeyRef::staged_entry`]) over
+    /// `dst` (possibly a preview) and `src`; [`Self::flush_committed`]
+    /// re-keys it to the committed destination, as the transformers.
+    pub(crate) fn stage_trace(
+        &mut self,
+        (key, entry, bytes): (CompletedTransformerKey, Arc<ErasedEntry>, u64),
+        dst: Arc<BlockStructure>,
+        src: Arc<BlockStructure>,
+    ) {
+        self.traces.push(StagedTrace {
+            key,
+            entry,
+            bytes,
+            dst,
+            src,
+        });
     }
 
     /// Stages a completed transformer built on a cache-3 miss under its
@@ -277,6 +316,18 @@ impl CheckedPendingCoefficients {
                 .find(|(preview, _)| preview.content_id() == built.content_id())
                 .map_or_else(|| Arc::clone(built), |(_, committed)| Arc::clone(committed))
         };
+        for staged in self.traces {
+            let dst = committed_of(&staged.dst);
+            if dst.as_ref() == staged.dst.as_ref()
+                && publishable([dst.as_ref(), staged.src.as_ref()])
+            {
+                let key = CompletedTransformerKey {
+                    dst: dst.content_id(),
+                    ..staged.key
+                };
+                super::publish_staged_trace((key, staged.entry, staged.bytes), self.epoch);
+            }
+        }
         for (key, built) in self.transformers {
             let (dst, src) = (
                 committed_of(built.dst_structure()),

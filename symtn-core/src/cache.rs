@@ -41,7 +41,8 @@ pub enum StructureCacheKind {
     /// (TensorKit `degeneracystructure`).
     DegeneracyStructure,
     /// Completed tree transformers (TensorKit `treetransposer` /
-    /// `treebraider`), shared by every Runtime of the process.
+    /// `treebraider`) and compiled fusion-aware traces, shared by every
+    /// Runtime of the process.
     CompletedTreeTransformer,
     /// Composed fusion-tree transformation coefficients per source
     /// fusion-tree group, degeneracies excluded (TensorKit `fsbraid` /
