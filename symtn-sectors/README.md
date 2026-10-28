@@ -11,11 +11,11 @@ provider and sector type. Multiplicity-free factors select multiplicity-free
 admission; a checked-Generic factor selects checked-Generic admission.
 
 The `cgc-gen` feature enables `LieGroupFusionRule::new(GroupId)` over
-every group fusion-symbols' `LieGroup` executes: A/B/C/D and G2 factors, semisimple
+every group fusion-symbols' `LieGroup` executes: factors of every simple type, A–G, semisimple
 products, tori, U(n) and their central quotients. It validates full
 global-form admission, ranks Dynkin labels then zigzag-mapped torus charges
 by graded lexicographic order, uses checked Generic Host execution, and
-forwards all symbols to fusion-symbols. Groups it does not execute, such as
-F4, E6, E7 and E8 factors, fail at construction with `LieGroupFusionRuleError::Provider`. The compact
+forwards all symbols to fusion-symbols. A group fusion-symbols rejects fails at
+construction with `LieGroupFusionRuleError::Provider`. The compact
 `SU2FusionRule` keeps its multiplicity-free and physical-basis capabilities.
 Raw `SectorId` values remain rule-local rather than stable wire data.
