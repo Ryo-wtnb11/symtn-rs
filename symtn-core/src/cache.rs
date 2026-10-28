@@ -17,8 +17,9 @@
 //! charged bytes, and [`StructureCache::get_or_try_build`] makes concurrent
 //! misses of one key build once. ([`StructureCache::publish`] admits a value
 //! built outside the cache, for transactions that stage a build before
-//! publishing it; racing builders of one key there all build, and the first
-//! admission wins.)
+//! publishing it; racing builders of one key there all build, the first
+//! admission wins, and the others count in
+//! [`StructureCacheInfo::duplicate_builds`].)
 
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -75,6 +76,7 @@ pub struct StructureCacheInfo {
     admissions: u64,
     evictions: u64,
     rejections: u64,
+    duplicate_builds: u64,
 }
 
 impl StructureCacheInfo {
@@ -102,7 +104,8 @@ impl StructureCacheInfo {
     }
     /// Completed builds offered for admission: admitted, rejected as
     /// oversize, or refused because a reset ran during the build. A build
-    /// that loses a publication race to an equal key is not counted.
+    /// that loses a publication race to an equal key is not counted here but
+    /// in [`Self::duplicate_builds`].
     pub fn misses(self) -> u64 {
         self.misses
     }
@@ -115,6 +118,16 @@ impl StructureCacheInfo {
     /// Builds larger than [`Self::max_entry_bytes`], returned uncached.
     pub fn rejections(self) -> u64 {
         self.rejections
+    }
+    /// Completed builds not retained because a value for the same key was
+    /// already resident when they were published; the resident value was
+    /// returned instead. The waste of concurrent misses of one key on a
+    /// cache without single-flight. Rejections and builds that straddled a
+    /// reset are not counted here. Concurrent misses that the cache resolves
+    /// with single-flight (one builds, the others wait for its entry) never
+    /// add to it, so a cache admitted only that way reports 0.
+    pub fn duplicate_builds(self) -> u64 {
+        self.duplicate_builds
     }
 }
 
@@ -203,6 +216,7 @@ struct CounterStripe {
     admissions: AtomicU64,
     evictions: AtomicU64,
     rejections: AtomicU64,
+    duplicate_builds: AtomicU64,
 }
 
 type Counters = [CounterStripe; COUNTER_STRIPES];
@@ -335,7 +349,12 @@ where
     /// same key never waits on a build.
     pub fn publish(&self, key: &K, value: Arc<V>, bytes: u64, epoch: usize) -> (Arc<V>, bool) {
         match self.entries.get_value_or_guard(key, None) {
-            GuardResult::Value(existing) => (existing.value, true),
+            GuardResult::Value(existing) => {
+                self.stripe()
+                    .duplicate_builds
+                    .fetch_add(1, Ordering::Relaxed);
+                (existing.value, true)
+            }
             GuardResult::Guard(guard) => self.admit(value, bytes, epoch, |charged| {
                 let _ = guard.insert(charged);
             }),
@@ -445,6 +464,7 @@ where
                 &stripe.admissions,
                 &stripe.evictions,
                 &stripe.rejections,
+                &stripe.duplicate_builds,
             ] {
                 counter.store(0, Ordering::Relaxed);
             }
@@ -489,6 +509,7 @@ where
             admissions: counter_sum(&self.counters, |stripe| &stripe.admissions),
             evictions: counter_sum(&self.counters, |stripe| &stripe.evictions),
             rejections: counter_sum(&self.counters, |stripe| &stripe.rejections),
+            duplicate_builds: counter_sum(&self.counters, |stripe| &stripe.duplicate_builds),
         }
     }
 }
@@ -601,6 +622,7 @@ pub fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         admissions: 0,
         evictions: 0,
         rejections: 0,
+        duplicate_builds: 0,
     }
 }
 
@@ -727,15 +749,23 @@ mod tests {
                         assert!(cache.get(&(1 + (t + i) % 2)).is_some());
                     }
                     assert!(cache.get(&(100 + t)).is_none());
+                    cache.publish(&50, Arc::new(t), 64, epoch);
                 });
             }
         });
         // What: more threads than counter stripes, so stripes are shared, and
-        // still no hit is lost or double counted; a lookup miss counts nothing.
+        // still no hit is lost or double counted; a lookup miss counts nothing;
+        // of the racing publishers of one key, one is admitted and every other
+        // is a duplicate.
         let info = cache.info();
-        assert_eq!((info.hits(), info.misses()), (u64::from(THREADS * HITS), 2));
+        assert_eq!((info.hits(), info.misses()), (u64::from(THREADS * HITS), 3));
+        assert_eq!(
+            (info.admissions(), info.duplicate_builds()),
+            (3, u64::from(THREADS) - 1)
+        );
         cache.clear();
-        assert_eq!(cache.info().hits(), 0);
+        let info = cache.info();
+        assert_eq!((info.hits(), info.duplicate_builds()), (0, 0));
     }
 
     #[test]
@@ -876,6 +906,14 @@ mod tests {
         // What: both report residency; the second caller got the winner.
         assert!(admitted && resident);
         assert_eq!(*cache.get(&3).unwrap(), 1);
+        // The second build was wasted: counted as a duplicate, not a miss.
+        let info = cache.info();
+        assert_eq!(
+            (info.misses(), info.admissions(), info.duplicate_builds()),
+            (1, 1, 1)
+        );
+        cache.clear();
+        assert_eq!(cache.info().duplicate_builds(), 0);
     }
 
     #[test]
@@ -891,8 +929,18 @@ mod tests {
         assert_eq!(*value, 9);
         assert!(!resident);
         assert!(cache.get(&5).is_none());
+        // A rejected build is not a duplicate, nor is the next one of the
+        // same key: nothing was resident.
+        cache.publish(&5, Arc::new(9), max_entry + 1, core_reset_epoch());
         let info = cache.info();
-        assert_eq!((info.rejections(), info.admissions()), (1, 0));
+        assert_eq!(
+            (
+                info.rejections(),
+                info.admissions(),
+                info.duplicate_builds()
+            ),
+            (2, 0, 0)
+        );
     }
 
     #[test]
@@ -904,6 +952,8 @@ mod tests {
         assert_eq!(*value, 4);
         assert!(!resident);
         assert!(cache.get(&6).is_none());
+        cache.publish(&6, Arc::new(4), 64, stale);
+        assert_eq!(cache.info().duplicate_builds(), 0);
     }
 
     #[test]

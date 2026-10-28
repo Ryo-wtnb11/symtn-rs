@@ -38,6 +38,15 @@ pub use symtn_core::{StructureCacheInfo, StructureCacheKind};
 
 /// Snapshots of every structure cache, in [`StructureCacheKind::ALL`] order.
 /// Each is sampled separately, not as one atomic snapshot.
+///
+/// [`StructureCacheInfo::duplicate_builds`] counts the builds wasted when
+/// several threads miss one key at once and the first to publish wins. The
+/// [`StructureCacheKind::DegeneracyStructure`],
+/// [`StructureCacheKind::CompletedTreeTransformer`] and
+/// [`StructureCacheKind::TreeTransformCoefficients`] caches have no
+/// single-flight, because their builds run Rayon regions and a thread waiting
+/// on another's build could steal work that waits on its own. A concurrent
+/// miss resolved by single-flight builds once and reports no duplicate.
 pub fn stats() -> Vec<StructureCacheInfo> {
     symtn_core::structure_cache_infos()
 }
