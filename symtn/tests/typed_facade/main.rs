@@ -471,7 +471,7 @@ impl CategoryCodec<ExternalSu2> for Su2Codec {
     ) -> Result<LieIrrep, FusionAlgebraError> {
         i64::try_from(sector.id())
             .ok()
-            .and_then(|twice_spin| category().0.irrep(&[twice_spin], &[]).ok())
+            .and_then(|twice_spin| category().0.irrep(&[twice_spin]).ok())
             .ok_or(FusionAlgebraError::InvalidSector { sector })
     }
 

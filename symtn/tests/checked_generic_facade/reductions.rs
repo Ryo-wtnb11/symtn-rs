@@ -408,8 +408,8 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
     }
 
     let provider = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-    let three = provider.encode_irrep(&[1, 0], &[]).unwrap();
-    let eight = provider.encode_irrep(&[1, 1], &[]).unwrap();
+    let three = provider.encode_irrep(&[1, 0]).unwrap();
+    let eight = provider.encode_irrep(&[1, 1]).unwrap();
     let r = provider.try_r_symbol_generic(three, three, eight).unwrap();
     assert_eq!(
         r.shape(),

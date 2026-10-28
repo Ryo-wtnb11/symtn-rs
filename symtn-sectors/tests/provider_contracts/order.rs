@@ -69,7 +69,7 @@ mod lie {
     fn key(rule: &LieGroupFusionRule, dynkin: &[i64], charges: &[i64]) -> Vec<u64> {
         positions(CheckedGenericFusion::sector_order_key(
             rule,
-            rule.encode_irrep(dynkin, charges).unwrap(),
+            rule.encode_irrep_with_charges(dynkin, charges).unwrap(),
         ))
     }
 
@@ -89,7 +89,10 @@ mod lie {
         }
         let mut labels: Vec<_> = cases.iter().rev().map(|&(d, q, _)| (d, q)).collect();
         labels.sort_by_key(|&(d, q)| {
-            CheckedGenericFusion::sector_order_key(rule, rule.encode_irrep(d, q).unwrap())
+            CheckedGenericFusion::sector_order_key(
+                rule,
+                rule.encode_irrep_with_charges(d, q).unwrap(),
+            )
         });
         assert_eq!(labels, sorted);
     }
@@ -157,8 +160,8 @@ mod lie {
         for p in 0..4 {
             for b in [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [0, 3]] {
                 let id = product.encode_component_ids(
-                    su2.encode_irrep(&[p], &[]).unwrap(),
-                    su3.encode_irrep(&b, &[]).unwrap(),
+                    su2.encode_irrep(&[p]).unwrap(),
+                    su3.encode_irrep(&b).unwrap(),
                 );
                 assert_eq!(
                     positions(CheckedGenericFusion::sector_order_key(&product, id)),
@@ -234,10 +237,8 @@ mod lie {
         let su2 = self::rule(GroupId::su(2).unwrap());
         let product = ProductFusionRule::<_, _>::try_new(su2.clone(), U1FusionRule).unwrap();
         for (p, q) in [(0, 0), (1, -1), (2, 1), (3, -2)] {
-            let id = product.encode_component_ids(
-                su2.encode_irrep(&[p], &[]).unwrap(),
-                U1Irrep::new(q).sector_id(),
-            );
+            let id = product
+                .encode_component_ids(su2.encode_irrep(&[p]).unwrap(), U1Irrep::new(q).sector_id());
             assert_eq!(
                 positions(CheckedGenericFusion::sector_order_key(&product, id)),
                 key(&rule, &[p], &[q.into()])

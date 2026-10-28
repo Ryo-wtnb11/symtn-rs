@@ -293,7 +293,7 @@ mod generated {
     fn category_authority_a_b_match_octet_and_asymmetric_product_literals() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let [octet, fifteen, fifteen_bar, twenty_seven] =
-            [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_irrep(&labels, &[]).unwrap());
+            [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_irrep(&labels).unwrap());
         for block in [
             su3.try_a_symbol_generic(octet, octet, octet).unwrap(),
             su3.try_b_symbol_generic(octet, octet, octet).unwrap(),
@@ -484,7 +484,7 @@ mod generated {
     #[test]
     fn rotated_gauge_a_detects_transposition_and_complex_conjugation() {
         let group = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
-        let objects = [[2, 1], [1, 2], [2, 2]].map(|labels| group.irrep(&labels, &[]).unwrap());
+        let objects = [[2, 1], [1, 2], [2, 2]].map(|labels| group.irrep(&labels).unwrap());
         for complex in [false, true] {
             let rule = CategoryRule::try_new(
                 Rotated {
@@ -520,9 +520,9 @@ mod generated {
     #[test]
     fn checked_generic_product_surface_preserves_hand_derived_factor_data() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let three = su3.encode_irrep(&[1, 0], &[]).unwrap();
-        let anti_three = su3.encode_irrep(&[0, 1], &[]).unwrap();
-        let six = su3.encode_irrep(&[2, 0], &[]).unwrap();
+        let three = su3.encode_irrep(&[1, 0]).unwrap();
+        let anti_three = su3.encode_irrep(&[0, 1]).unwrap();
+        let six = su3.encode_irrep(&[2, 0]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, su3.clone()).unwrap();
         let swapped = ProductFusionRule::<_, _>::try_new(su3, SU2FusionRule).unwrap();
         assert_eq!(rule.rule_identity(), rule.clone().rule_identity());
@@ -694,8 +694,8 @@ mod generated {
     #[test]
     fn su3_u1_keeps_the_full_octet_blocks_and_nonselfdual_phase() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
-        let three = su3.encode_irrep(&[1, 0], &[]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1]).unwrap();
+        let three = su3.encode_irrep(&[1, 0]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, U1FusionRule).unwrap();
         let oq = |q| rule.encode_component_ids(octet, U1Irrep::new(q).sector_id());
         let f = rule
@@ -753,7 +753,7 @@ mod generated {
     #[test]
     fn su3_fermion_product_negates_every_octet_r_entry() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule).unwrap();
         let odd = rule.encode_component_ids(octet, s(1));
         let even = rule.encode_component_ids(octet, s(0));
@@ -774,7 +774,7 @@ mod generated {
     #[test]
     fn su3_su3_octet_checks_every_entry_of_the_fourfold_multiplicity_blocks() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let x = rule.encode_component_ids(octet, octet);
         assert_eq!(rule.try_nsymbol(x, x, x).unwrap(), 4);
@@ -816,11 +816,11 @@ mod generated {
     #[test]
     fn asymmetric_su3_product_pins_unequal_f_and_r_digit_orders() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
-        let octet = su3.encode_irrep(&[1, 1], &[]).unwrap();
-        let twenty_seven = su3.encode_irrep(&[2, 2], &[]).unwrap();
-        let anti_three = su3.encode_irrep(&[0, 1], &[]).unwrap();
-        let twenty_four = su3.encode_irrep(&[3, 1], &[]).unwrap();
-        let forty_two = su3.encode_irrep(&[2, 3], &[]).unwrap();
+        let octet = su3.encode_irrep(&[1, 1]).unwrap();
+        let twenty_seven = su3.encode_irrep(&[2, 2]).unwrap();
+        let anti_three = su3.encode_irrep(&[0, 1]).unwrap();
+        let twenty_four = su3.encode_irrep(&[3, 1]).unwrap();
+        let forty_two = su3.encode_irrep(&[2, 3]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let pair = |right| rule.encode_component_ids(octet, right);
         // TensorKitSectors Fsymbol(p,p,b,b,o,c), with p=(2,2), b=(0,1),
@@ -1059,12 +1059,12 @@ mod generated {
         let to_product = |id| {
             let (dynkin, _) = lie.decode_irrep(id).unwrap();
             product.encode_component_ids(
-                su2.encode_irrep(&dynkin[..1], &[]).unwrap(),
-                su3.encode_irrep(&dynkin[1..], &[]).unwrap(),
+                su2.encode_irrep(&dynkin[..1]).unwrap(),
+                su3.encode_irrep(&dynkin[1..]).unwrap(),
             )
         };
         let su3_box = [[0, 0], [1, 0], [0, 1], [2, 0], [1, 1], [0, 2]];
-        let label = |j: i64, [p, q]: [i64; 2]| lie.encode_irrep(&[j, p, q], &[]).unwrap();
+        let label = |j: i64, [p, q]: [i64; 2]| lie.encode_irrep(&[j, p, q]).unwrap();
         let sectors: Vec<_> = (0..4)
             .flat_map(|j| su3_box.map(|pq| label(j, pq)))
             .collect();
@@ -1082,11 +1082,11 @@ mod generated {
         let to_product = |id| {
             let (dynkin, charges) = lie.decode_irrep(id).unwrap();
             product.encode_component_ids(
-                su2.encode_irrep(&dynkin, &[]).unwrap(),
+                su2.encode_irrep(&dynkin).unwrap(),
                 U1Irrep::new(i32::try_from(charges[0]).unwrap()).sector_id(),
             )
         };
-        let label = |j: i64, q: i64| lie.encode_irrep(&[j], &[q]).unwrap();
+        let label = |j: i64, q: i64| lie.encode_irrep_with_charges(&[j], &[q]).unwrap();
         let sectors: Vec<_> = (0..4)
             .flat_map(|j| (-2..=2).map(move |q| (j, q)))
             .map(|(j, q)| label(j, q))

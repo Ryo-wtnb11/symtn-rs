@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use fusion_symbols::category::FusionCategory;
-use fusion_symbols::lie::{GroupId, LieError, LieGroup, RootSystem};
+use fusion_symbols::lie::{GroupId, HalfInt, LieError, LieGroup, RootSystem};
 use symtn_sectors::{
     BraidingStyleKind, CategoryProvider, CheckedGenericFusion, CheckedGenericPivotal,
     CheckedGenericRigidSymbols, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
@@ -105,17 +105,17 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         assert_eq!(r.group_id(), &group);
         assert_eq!(r.fusion_style(), FusionStyleKind::Generic);
         assert_eq!(r.braiding_style(), BraidingStyleKind::Bosonic);
-        let id = r.encode_irrep(&accepted, &[]).unwrap();
+        let id = r.encode_irrep(&accepted).unwrap();
         assert_eq!(r.decode_irrep(id).unwrap().0, accepted);
         assert_eq!(r.sector_id(&r.object(id).unwrap()).unwrap(), id);
         assert!(matches!(
-            r.encode_irrep(&[], &[]),
+            r.encode_irrep(&[]),
             Err(LieGroupFusionRuleError::LabelLength { .. })
         ));
         let mut negative = accepted.clone();
         negative[0] = -1;
         assert!(matches!(
-            r.encode_irrep(&negative, &[]),
+            r.encode_irrep(&negative),
             Err(LieGroupFusionRuleError::NegativeLabel {
                 index: 0,
                 value: -1
@@ -123,10 +123,10 @@ fn constructor_global_form_matrix_and_all_codec_routes() {
         ));
         let cover = rule(GroupId::cover(group.root_systems(), 0).unwrap());
         for label in rejected {
-            let raw_id = cover.encode_irrep(&label, &[]).unwrap();
+            let raw_id = cover.encode_irrep(&label).unwrap();
             assert!(
                 matches!(
-                    r.encode_irrep(&label, &[]),
+                    r.encode_irrep(&label),
                     Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
                 ),
                 "{group:?}: {label:?}"
@@ -173,22 +173,19 @@ fn exceptional_groups_admit_sectors_and_e6_label_overflow_is_unrepresentable() {
         (GroupId::e8(), vec![1, 0, 0, 0, 0, 0, 0, 0]),
     ] {
         let r = rule(group);
-        let id = r.encode_irrep(&label, &[]).unwrap();
+        let id = r.encode_irrep(&label).unwrap();
         assert_eq!(r.decode_irrep(id).unwrap(), (label, vec![]));
     }
     // fusion-symbols' LabelOverflow on a label is the codec's unrepresentable label.
     let label = [0, 0, 0, 0, 0, 15];
     assert!(matches!(
-        rule(GroupId::e6()).encode_irrep(&label, &[]),
+        rule(GroupId::e6()).encode_irrep(&label),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == label
     ));
 }
 
 fn fusion(r: &LieGroupFusionRule, a: &[i64], b: &[i64]) -> BTreeMap<Vec<i64>, usize> {
-    let (a, b) = (
-        r.encode_irrep(a, &[]).unwrap(),
-        r.encode_irrep(b, &[]).unwrap(),
-    );
+    let (a, b) = (r.encode_irrep(a).unwrap(), r.encode_irrep(b).unwrap());
     r.try_fusion_channels(a, b)
         .unwrap()
         .into_iter()
@@ -202,7 +199,7 @@ fn fusion(r: &LieGroupFusionRule, a: &[i64], b: &[i64]) -> BTreeMap<Vec<i64>, us
 }
 
 fn exact_dimension(r: &LieGroupFusionRule, label: &[i64], dimension: u64) {
-    let id = r.encode_irrep(label, &[]).unwrap();
+    let id = r.encode_irrep(label).unwrap();
     assert_eq!(
         r.object(id).unwrap().dim_exact().to_string(),
         dimension.to_string()
@@ -221,7 +218,7 @@ fn rank_one_isomorphisms_match_su2_triangle_oracle() {
         let r = rule(group.clone());
         for a in 0..=3 {
             exact_dimension(&r, &[a], a as u64 + 1);
-            let id = r.encode_irrep(&[a], &[]).unwrap();
+            let id = r.encode_irrep(&[a]).unwrap();
             assert_eq!(r.try_dual(id).unwrap(), id);
             for b in 0..=3 {
                 let expected = ((a - b).abs()..=a + b)
@@ -249,7 +246,7 @@ fn b2_c2_isomorphism_has_fixed_swapped_labels_and_complete_products() {
         exact_dimension(&b, &label, dim);
         exact_dimension(&c, &[label[1], label[0]], dim);
         for (r, l) in [(&b, label), (&c, [label[1], label[0]])] {
-            let id = r.encode_irrep(&l, &[]).unwrap();
+            let id = r.encode_irrep(&l).unwrap();
             assert_eq!(r.try_dual(id).unwrap(), id);
         }
     }
@@ -284,18 +281,15 @@ fn d3_a3_isomorphism_has_fixed_cyclic_labels_products_and_duals() {
         exact_dimension(&a, &map(label), dim);
         let dual = [label[0], label[2], label[1]];
         assert_eq!(
-            d.decode_irrep(d.try_dual(d.encode_irrep(&label, &[]).unwrap()).unwrap())
+            d.decode_irrep(d.try_dual(d.encode_irrep(&label).unwrap()).unwrap())
                 .unwrap()
                 .0,
             dual
         );
         assert_eq!(
-            a.decode_irrep(
-                a.try_dual(a.encode_irrep(&map(label), &[]).unwrap())
-                    .unwrap()
-            )
-            .unwrap()
-            .0,
+            a.decode_irrep(a.try_dual(a.encode_irrep(&map(label)).unwrap()).unwrap())
+                .unwrap()
+                .0,
             map(dual)
         );
     }
@@ -320,11 +314,11 @@ fn d3_a3_isomorphism_has_fixed_cyclic_labels_products_and_duals() {
 fn codec_holes_width_foreign_objects_and_full_group_identity() {
     let su2 = rule(GroupId::su(2).unwrap());
     assert_eq!(
-        su2.encode_irrep(&[u32::MAX as i64], &[]).unwrap().id(),
+        su2.encode_irrep(&[u32::MAX as i64]).unwrap().id(),
         u32::MAX as usize
     );
     assert!(matches!(
-        su2.encode_irrep(&[u32::MAX as i64 + 1], &[]),
+        su2.encode_irrep(&[u32::MAX as i64 + 1]),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
     ));
     if usize::BITS > 32 {
@@ -341,23 +335,20 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
         let r = rule(group);
         for raw in 0..100 {
             let id = SectorId::new(raw);
-            assert_eq!(
-                r.encode_irrep(&r.decode_irrep(id).unwrap().0, &[]).unwrap(),
-                id
-            );
+            assert_eq!(r.encode_irrep(&r.decode_irrep(id).unwrap().0).unwrap(), id);
         }
         assert!(matches!(
-            r.encode_irrep(&vec![i64::MAX; r.group_id().semisimple_rank()], &[]),
+            r.encode_irrep(&vec![i64::MAX; r.group_id().semisimple_rank()]),
             Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
         ));
     }
     let quotient = rule(GroupId::psu(2).unwrap());
-    assert_eq!(quotient.encode_irrep(&[2], &[]).unwrap(), SectorId::new(2));
+    assert_eq!(quotient.encode_irrep(&[2]).unwrap(), SectorId::new(2));
     assert!(matches!(
         quotient.decode_irrep(SectorId::new(1)),
         Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
     ));
-    let warm = quotient.encode_irrep(&[2], &[]).unwrap();
+    let warm = quotient.encode_irrep(&[2]).unwrap();
     let member = quotient.object(warm).unwrap();
     assert_eq!(quotient.sector_id(&member).unwrap(), warm);
     assert!(matches!(
@@ -382,7 +373,7 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
             );
             assert_ne!(rules[i], rules[j]);
             assert_ne!(rules[i].rule_identity(), rules[j].rule_identity());
-            let id = rules[i].encode_irrep(&[1], &[]).unwrap();
+            let id = rules[i].encode_irrep(&[1]).unwrap();
             assert!(matches!(
                 rules[i].sector_id(&rules[j].object(id).unwrap()),
                 Err(LieGroupFusionRuleError::Provider(LieError::InvalidLabel))
@@ -421,7 +412,7 @@ fn gauge_invariant_closed_braid_traces_fs_and_twists() {
     ];
     for (group, label, n, trace, cycle, fs) in cases {
         let r = rule(group);
-        let a = r.encode_irrep(&label, &[]).unwrap();
+        let a = r.encode_irrep(&label).unwrap();
         assert_eq!(
             r.category()
                 .frobenius_schur_indicator(&r.object(a).unwrap()),
@@ -470,7 +461,7 @@ fn gauge_invariant_closed_braid_traces_fs_and_twists() {
         );
     }
     let d = rule(GroupId::spin(6).unwrap());
-    let spinor = d.encode_irrep(&[0, 0, 1], &[]).unwrap();
+    let spinor = d.encode_irrep(&[0, 0, 1]).unwrap();
     assert_ne!(d.try_dual(spinor).unwrap(), spinor);
     assert_eq!(
         d.category()
@@ -526,7 +517,7 @@ fn multiplicity_two_sp4_and_so6_have_nonscalar_f_r_a_b() {
         ),
     ] {
         let r = rule(group);
-        let a = r.encode_irrep(&label, &[]).unwrap();
+        let a = r.encode_irrep(&label).unwrap();
         exact_dimension(&r, &label, dimension);
         assert_eq!(
             fusion(&r, &label, &label),
@@ -543,7 +534,7 @@ fn multiplicity_two_sp4_and_so6_have_nonscalar_f_r_a_b() {
             dimension * dimension
         );
         for channel in channels {
-            let c = r.encode_irrep(&channel, &[]).unwrap();
+            let c = r.encode_irrep(&channel).unwrap();
             assert_eq!(r.try_nsymbol(a, a, c).unwrap(), 2);
             // A unit leg makes the F entries independently fixed delta_mu,lambda,
             // while retaining both outer-multiplicity axes (no scalar shortcut).
@@ -596,7 +587,7 @@ fn ids(r: &LieGroupFusionRule, labels: &[(&[i64], &[i64], usize)]) {
     for &(dynkin, charges, id) in labels {
         let group = r.group_id();
         assert_eq!(
-            r.encode_irrep(dynkin, charges).unwrap(),
+            r.encode_irrep_with_charges(dynkin, charges).unwrap(),
             SectorId::new(id),
             "{group:?}: {dynkin:?}; {charges:?}"
         );
@@ -654,7 +645,7 @@ fn multi_coordinate_ids_rank_dynkin_then_zigzag_charges() {
     ids(&u2, &[(&[0], &[0], 0), (&[1], &[1], 4), (&[2], &[0], 5)]);
     holes(&u2, 1..=3);
     assert!(matches!(
-        u2.encode_irrep(&[0], &[1]),
+        u2.encode_irrep_with_charges(&[0], &[1]),
         Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
     ));
     // SO(4) admits even a1 + a2: grades 1 (ids 1, 2) and 3 (ids 6..=9) are holes.
@@ -710,7 +701,7 @@ fn every_group_shape_round_trips_admitted_labels_and_rejects_the_rest() {
             match r.decode_irrep(id) {
                 Ok((dynkin, charges)) => {
                     assert!(group.admits(&dynkin, &charges), "{group:?}: {raw}");
-                    assert_eq!(r.encode_irrep(&dynkin, &charges).unwrap(), id);
+                    assert_eq!(r.encode_irrep_with_charges(&dynkin, &charges).unwrap(), id);
                     let typed = [dynkin, charges].concat();
                     assert_eq!(r.try_decode_label(id).unwrap(), typed);
                     assert_eq!(r.try_encode_label(&typed).unwrap(), id);
@@ -725,13 +716,13 @@ fn every_group_shape_round_trips_admitted_labels_and_rejects_the_rest() {
         if let Some((dynkin, charges)) = rejected {
             assert!(!group.admits(&dynkin, &charges));
             assert!(matches!(
-                r.encode_irrep(&dynkin, &charges),
+                r.encode_irrep_with_charges(&dynkin, &charges),
                 Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
             ));
         }
         let (r_rank, t_rank) = (group.semisimple_rank(), group.torus_rank());
         assert!(matches!(
-            r.encode_irrep(&vec![0; r_rank], &vec![0; t_rank + 1]),
+            r.encode_irrep_with_charges(&vec![0; r_rank], &vec![0; t_rank + 1]),
             Err(LieGroupFusionRuleError::LabelLength { .. })
         ));
         assert!(matches!(
@@ -760,7 +751,7 @@ fn multi_factor_and_torus_queries_forward_to_fusion_symbols() {
             .collect();
         let object = |id: SectorId| {
             let (dynkin, charges) = r.decode_irrep(id).unwrap();
-            fs.irrep(&dynkin, &charges).unwrap()
+            fs.irrep_with_charges(&dynkin, &charges).unwrap()
         };
         let labels =
             |x: &fusion_symbols::lie::LieIrrep| (x.dynkin(), x.charges().collect::<Vec<_>>());
@@ -833,6 +824,34 @@ fn multi_factor_and_torus_queries_forward_to_fusion_symbols() {
     }
 }
 
+/// The encoders mirror fusion-symbols' `irrep`, `irrep_with_charges` and
+/// `irrep_spin` admission boundaries.
+#[test]
+fn encoders_mirror_provider_constructor_boundaries() {
+    let invalid = |result| {
+        matches!(
+            result,
+            Err(LieGroupFusionRuleError::Provider(LieError::InvalidLabel))
+        )
+    };
+    let u2 = rule(GroupId::u(2).unwrap());
+    assert!(invalid(u2.encode_irrep(&[1])));
+    let fundamental = u2.encode_irrep_with_charges(&[1], &[1]).unwrap();
+    assert_eq!(u2.decode_irrep(fundamental).unwrap(), (vec![1], vec![1]));
+
+    let su2 = rule(GroupId::su(2).unwrap());
+    let half = su2.encode_spin(HalfInt::half(1)).unwrap();
+    assert_eq!(su2.decode_irrep(half).unwrap(), (vec![1], vec![]));
+    assert!(matches!(
+        rule(GroupId::so(3).unwrap()).encode_spin(HalfInt::half(1)),
+        Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
+    ));
+    assert!(invalid(
+        rule(GroupId::su(3).unwrap()).encode_spin(HalfInt::half(1))
+    ));
+    assert!(invalid(u2.encode_spin(HalfInt::half(1))));
+}
+
 /// Id overflow is detected before lattice admission; an in-budget hole is
 /// `NotAdmissible`.
 #[test]
@@ -842,11 +861,11 @@ fn id_overflow_precedes_admission() {
     let (dynkin, charges) = ([1_i64 << 40], [1]);
     assert!(!group.admits(&dynkin, &charges));
     assert!(matches!(
-        u2.encode_irrep(&dynkin, &charges),
+        u2.encode_irrep_with_charges(&dynkin, &charges),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [1 << 40, 1]
     ));
     assert!(matches!(
-        u2.encode_irrep(&[0], &[1]),
+        u2.encode_irrep_with_charges(&[0], &[1]),
         Err(LieGroupFusionRuleError::Provider(LieError::NotAdmissible))
     ));
     assert!(matches!(
@@ -859,7 +878,7 @@ fn id_overflow_precedes_admission() {
 fn label_length_mismatch_names_the_mismatched_slice() {
     let u2 = rule(GroupId::u(2).unwrap());
     // The Dynkin slice is right; the charge slice has one entry too many.
-    let error = u2.encode_irrep(&[0], &[0, 0]).unwrap_err();
+    let error = u2.encode_irrep_with_charges(&[0], &[0, 0]).unwrap_err();
     assert!(matches!(
         error,
         LieGroupFusionRuleError::LabelLength {
@@ -872,7 +891,7 @@ fn label_length_mismatch_names_the_mismatched_slice() {
         "expected 1 entries in the first mismatched label slice (Dynkin labels, then charges), got 2"
     );
     assert!(matches!(
-        u2.encode_irrep(&[0, 0], &[0]),
+        u2.encode_irrep_with_charges(&[0, 0], &[0]),
         Err(LieGroupFusionRuleError::LabelLength {
             expected: 1,
             found: 2
@@ -885,14 +904,14 @@ fn unrepresentable_charges_ids_and_fusions_are_typed() {
     let max = i64::from(i32::MAX);
     let u1 = rule(GroupId::u(1).unwrap());
     for q in [max, -max] {
-        let id = u1.encode_irrep(&[], &[q]).unwrap();
+        let id = u1.encode_irrep_with_charges(&[], &[q]).unwrap();
         assert_eq!(u1.decode_irrep(id).unwrap(), (vec![], vec![q]));
     }
     // Beyond fusion-symbols' charge range, and beyond i64 zigzag.
     for q in [max + 1, -max - 1, i64::MAX, i64::MIN] {
         assert!(
             matches!(
-                u1.encode_irrep(&[], &[q]),
+                u1.encode_irrep_with_charges(&[], &[q]),
                 Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [q]
             ),
             "{q}"
@@ -902,9 +921,9 @@ fn unrepresentable_charges_ids_and_fusions_are_typed() {
     // doubled spin, not by the id budget.
     let spin4 = rule(GroupId::spin(4).unwrap());
     let past = i64::from(u32::MAX) + 1;
-    assert!(spin4.encode_irrep(&[past - 1, 0], &[]).is_ok());
+    assert!(spin4.encode_irrep(&[past - 1, 0]).is_ok());
     assert!(matches!(
-        spin4.encode_irrep(&[past, 0], &[]),
+        spin4.encode_irrep(&[past, 0]),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [past, 0]
     ));
     // In-range charges whose id count overflows usize.
@@ -912,22 +931,22 @@ fn unrepresentable_charges_ids_and_fusions_are_typed() {
     let charges = [max; 3];
     assert!(LieGroup::new(GroupId::torus(3).unwrap())
         .unwrap()
-        .irrep(&[], &charges)
+        .irrep_with_charges(&[], &charges)
         .is_ok());
     assert!(matches!(
-        torus.encode_irrep(&[], &charges),
+        torus.encode_irrep_with_charges(&[], &charges),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == charges
     ));
     // A fusion that overflows a coordinate names the product's highest weight.
-    let top = u1.encode_irrep(&[], &[max]).unwrap();
-    let one = u1.encode_irrep(&[], &[1]).unwrap();
+    let top = u1.encode_irrep_with_charges(&[], &[max]).unwrap();
+    let one = u1.encode_irrep_with_charges(&[], &[1]).unwrap();
     assert!(matches!(
         u1.try_fusion_channels(top, one),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [max + 1]
     ));
     let su2_u1 = rule(GroupId::cover(&[RootSystem::A(1)], 1).unwrap());
-    let top = su2_u1.encode_irrep(&[1], &[max]).unwrap();
-    let one = su2_u1.encode_irrep(&[1], &[1]).unwrap();
+    let top = su2_u1.encode_irrep_with_charges(&[1], &[max]).unwrap();
+    let one = su2_u1.encode_irrep_with_charges(&[1], &[1]).unwrap();
     assert!(matches!(
         su2_u1.try_fusion_channels(top, one),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [2, max + 1]
