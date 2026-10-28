@@ -61,6 +61,8 @@ pub(super) fn trace_preflight<M, R>(
 where
     M: TracePreflightMode<R>,
 {
+    #[cfg(test)]
+    crate::probe::hit(crate::probe::Event::TracePreflight);
     M::validate_source(src)?;
     // TensorKit `trace_permute!` gates the braiding first: a trace is defined
     // only for symmetric braiding.

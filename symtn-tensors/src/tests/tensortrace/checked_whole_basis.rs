@@ -553,12 +553,13 @@ fn warm_compile_asks_only_the_preflight() {
     let provider = &*fixture.provider;
     let structure = fixture.src.space().structure();
     let groups = structure.fusion_tree_group_slice().len();
-    // Not `reset`: a renewed identity would reject the bound source.
-    provider.calls.take();
+    // The identity the compiles below run under: the source's dual maps
+    // were filled under an earlier one, so every dualization re-queries
+    // its sectors (#2422).
+    provider.reset(Vec::new());
     crate::tensortrace_fusion_dyn_preflight_generic_checked(&fixture.src, axes(), 1).unwrap();
     let preflight = provider.calls.take();
     assert!(!preflight.is_empty());
-    provider.reset(Vec::new());
     trace_activity();
     crate::probe::take_compiled_trace_activity();
     let cold = publishing_compile(&fixture).unwrap();
@@ -663,10 +664,11 @@ fn owned_checked_trace_publishes_after_success_only() {
     );
 }
 
-/// What (#2146): the owned checked trace preflights once per call. Its
-/// stage asks exactly the preflight's queries, and its execution asks the
-/// committed-destination compile's queries without that compile's own
-/// preflight, in the same order, cold and warm.
+/// What (#2146): the owned checked trace preflights once per call: in its
+/// stage, never in its execution. Its stage asks exactly the preflight's
+/// queries, and its execution asks the committed-destination compile's
+/// queries without that compile's own preflight, in the same order, cold
+/// and warm.
 #[test]
 fn owned_checked_trace_preflights_once() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -679,11 +681,17 @@ fn owned_checked_trace_preflights_once() {
     provider.calls.take();
     crate::tensortrace_fusion_dyn_preflight_generic_checked(&fixture.src, axes(), 1).unwrap();
     let preflight = provider.calls.take();
-    assert!(!preflight.is_empty());
+    // The preflight only dualizes the source's legs, whose dual maps were
+    // filled under the bound identity, so it asks nothing (#2422);
+    // `warm_compile_asks_only_the_preflight` pins a non-empty preflight.
+    assert_eq!(preflight, []);
     let owned = |compile_calls: Vec<Call>| {
         assert_eq!(compile_calls[..preflight.len()], preflight[..]);
+        let preflights = crate::probe::record();
         let stage = crate::tensortrace_stage_checked_generic(&fixture.src, axes(), 1).unwrap();
+        assert_eq!(preflights.get(crate::probe::Event::TracePreflight), 1);
         assert_eq!(provider.calls.take(), preflight);
+        let preflights = crate::probe::record();
         crate::tensortrace_checked_generic_in(
             stage,
             &fixture.src,
@@ -693,6 +701,7 @@ fn owned_checked_trace_preflights_once() {
             1.0,
         )
         .unwrap();
+        assert_eq!(preflights.get(crate::probe::Event::TracePreflight), 0);
         assert_eq!(provider.calls.take(), compile_calls[preflight.len()..]);
     };
     compile(&fixture).unwrap();

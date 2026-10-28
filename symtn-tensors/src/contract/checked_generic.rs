@@ -2443,7 +2443,7 @@ mod tests {
     /// What (#2154): a memo hit whose operation has no completed transformer
     /// yet (a permute after a braid on the same axes) runs the source
     /// preflight inside the structure build. Its ledger is the derived
-    /// path's without the destination's `Dual` queries, its payload is
+    /// path's without the destination's derivation, its payload is
     /// equal, and a non-symmetric braiding fails at the same event with the
     /// same error. Oracle: a space admitted before a reset retains no entry,
     /// so it neither publishes nor reads a memo.
@@ -2475,8 +2475,10 @@ mod tests {
                 let events = provider.events.borrow().clone();
                 (result, events)
             });
-            // The derived ledger is the memo's with one run of `Dual`
-            // queries (the destination's derivation) where they diverge.
+            // The derived ledger is the memo's with the destination's
+            // derivation where they diverge: one `Identity` read and no
+            // `Dual` query, because the braid filled the dual maps of the
+            // crossing legs under this identity (#2422).
             let split = derived
                 .1
                 .iter()
@@ -2485,7 +2487,7 @@ mod tests {
                 .count();
             let dropped = derived.1[split..]
                 .iter()
-                .take_while(|&&event| event == Event::Query(Query::Dual))
+                .take_while(|&&event| event == Event::Identity)
                 .count();
             assert_eq!(derived.1[..split], memo.1[..split], "{braiding:?}");
             assert_eq!(
@@ -2537,8 +2539,7 @@ mod tests {
         if !isolated("a_warm_checked_contraction_derives_no_staged_operand") {
             return;
         }
-        use Event::Query as Q;
-        let (i, s, b, d) = (Identity, Style, Braiding, Q(Query::Dual));
+        let (i, s, b) = (Identity, Style, Braiding);
         // Per fixture: whether it stages an operand, then the warm
         // lhs-provider events, direct and adjoint.
         type Pin = (&'static str, bool, [Vec<Event>; 2]);
@@ -2568,11 +2569,14 @@ mod tests {
             (
                 "three_stages",
                 // Both operands share one canonical source structure, whose
-                // trees are admitted once per call (#2233).
+                // trees are admitted once per call (#2233). Each of its two
+                // derivations reads the identity once and asks no `Dual`:
+                // its legs' dual maps were filled under that identity
+                // (#2422).
                 true,
                 [
-                    vec![i, s, b, i, d, d, s, i, s, i, i, s, i, i, s, i, s],
-                    vec![i, s, b, i, d, d, s, i, s, i, i, s, i, i, s, i, s],
+                    vec![i, s, b, i, i, i, s, i, s, i, i, s, i, i, s, i, s],
+                    vec![i, s, b, i, i, i, s, i, s, i, i, s, i, i, s, i, s],
                 ],
             ),
         ];

@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::OnceCell;
 
 #[derive(Clone, Copy)]
 pub(crate) struct OrientedLegView<'a> {
@@ -55,8 +56,19 @@ impl<'a> OrientedLegView<'a> {
     where
         R: FusionRule,
     {
+        self.materialize_with(rule, &OnceCell::new())
+    }
+
+    /// [`Self::materialize`] that reads `rule`'s identity into `identity`
+    /// only when this leg is dualized, so one derivation reads it at most
+    /// once and a derivation that dualizes nothing never asks for it.
+    fn materialize_with<R>(self, rule: &R, identity: &OnceCell<RuleIdentity>) -> SectorLeg
+    where
+        R: FusionRule,
+    {
         if self.dualize {
-            self.source.dual(rule)
+            self.source
+                .dual_under(rule, identity.get_or_init(|| rule.rule_identity()))
         } else {
             self.source.clone()
         }
@@ -66,8 +78,20 @@ impl<'a> OrientedLegView<'a> {
     where
         R: CheckedFusionAlgebra,
     {
+        self.try_materialize_with(rule, &OnceCell::new())
+    }
+
+    fn try_materialize_with<R>(
+        self,
+        rule: &R,
+        identity: &OnceCell<RuleIdentity>,
+    ) -> Result<SectorLeg, FusionAlgebraError>
+    where
+        R: CheckedFusionAlgebra,
+    {
         if self.dualize {
-            self.source.try_dual(rule)
+            self.source
+                .try_dual_under(rule, identity.get_or_init(|| rule.rule_identity()))
         } else {
             Ok(self.source.clone())
         }
@@ -80,10 +104,22 @@ impl<'a> OrientedLegView<'a> {
     where
         R: CheckedGenericFusion,
     {
+        self.try_materialize_generic_with(rule, &OnceCell::new())
+    }
+
+    fn try_materialize_generic_with<R>(
+        self,
+        rule: &R,
+        identity: &OnceCell<RuleIdentity>,
+    ) -> Result<SectorLeg, CheckedGenericStructureError<R::Error>>
+    where
+        R: CheckedGenericFusion,
+    {
         if !self.dualize {
             return Ok(self.source.clone());
         }
-        self.source.try_dual_generic(rule)
+        self.source
+            .try_dual_generic_under(rule, identity.get_or_init(|| rule.rule_identity()))
     }
 }
 
@@ -184,18 +220,19 @@ impl<'a> HomSpaceDescriptor<'a> {
     {
         #[cfg(test)]
         crate::probe::hit(crate::probe::Event::DescriptorMaterialization);
+        let identity = OnceCell::new();
         FusionTreeHomSpace::new(
             FusionProductSpace::new(
                 self.codomain()
                     .iter()
                     .copied()
-                    .map(|view| view.materialize(rule)),
+                    .map(|view| view.materialize_with(rule, &identity)),
             ),
             FusionProductSpace::new(
                 self.domain()
                     .iter()
                     .copied()
-                    .map(|view| view.materialize(rule)),
+                    .map(|view| view.materialize_with(rule, &identity)),
             ),
         )
     }
@@ -209,17 +246,18 @@ impl<'a> HomSpaceDescriptor<'a> {
     {
         #[cfg(test)]
         crate::probe::hit(crate::probe::Event::DescriptorMaterialization);
+        let identity = OnceCell::new();
         let codomain = self
             .codomain()
             .iter()
             .copied()
-            .map(|view| view.try_materialize(rule))
+            .map(|view| view.try_materialize_with(rule, &identity))
             .collect::<Result<SmallVec<[SectorLeg; 8]>, _>>()?;
         let domain = self
             .domain()
             .iter()
             .copied()
-            .map(|view| view.try_materialize(rule))
+            .map(|view| view.try_materialize_with(rule, &identity))
             .collect::<Result<SmallVec<[SectorLeg; 8]>, _>>()?;
         Ok(FusionTreeHomSpace::new(
             FusionProductSpace::new(codomain),
@@ -234,17 +272,18 @@ impl<'a> HomSpaceDescriptor<'a> {
     where
         R: CheckedGenericFusion,
     {
+        let identity = OnceCell::new();
         let codomain = self
             .codomain()
             .iter()
             .copied()
-            .map(|view| view.try_materialize_generic(rule))
+            .map(|view| view.try_materialize_generic_with(rule, &identity))
             .collect::<Result<SmallVec<[SectorLeg; 8]>, _>>()?;
         let domain = self
             .domain()
             .iter()
             .copied()
-            .map(|view| view.try_materialize_generic(rule))
+            .map(|view| view.try_materialize_generic_with(rule, &identity))
             .collect::<Result<SmallVec<[SectorLeg; 8]>, _>>()?;
         Ok(FusionTreeHomSpace::new(
             FusionProductSpace::new(codomain),
