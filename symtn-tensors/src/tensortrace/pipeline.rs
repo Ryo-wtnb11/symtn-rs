@@ -648,7 +648,8 @@ where
                     },
                 )?;
             }
-            // TensorKit `NoCache` for Unique: one uncached phase per tree.
+            // TensorKit `NoCache` for Unique: one uncached phase per tree on
+            // a compiled-trace miss; a warm compile never reaches here.
             return Ok(PendingCoefficientGroups::default());
         }
 

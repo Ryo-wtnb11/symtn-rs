@@ -949,6 +949,15 @@ fn tensortrace_fusion_rejects_invalid_axis_sets_at_compile_time() {
 
 #[test]
 fn tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace() {
+    // The probe below watches the compile itself: alone in a child process
+    // on emptied caches, so no sibling's resident compiled trace answers it.
+    if crate::test_support::run_isolated_or_return(
+        "SYMTN_SUPERTRACE_ISOLATED",
+        "tests::tensortrace::tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace",
+    ) {
+        return;
+    }
+    symtn_core::clear_structure_caches();
     let rule = FermionParityFusionRule;
     let even = SectorId::new(0);
     let odd = SectorId::new(1);

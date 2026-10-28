@@ -63,6 +63,7 @@ mod repartition_allocations;
 mod restrict_leg_allocations;
 mod single_precision_allocations;
 mod structure_signature;
+mod trace_compiled_cache;
 mod trace_warm_allocations;
 mod transform_owned_parallel;
 mod typed_add_assign;

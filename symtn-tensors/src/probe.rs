@@ -73,9 +73,13 @@ pub(crate) enum Event {
     TraceMiss,
     /// A built trace column was offered for publication.
     TracePublication,
+    /// A compiled-trace lookup was answered by a resident entry.
+    CompiledTraceHit,
+    /// A compiled trace was offered for publication.
+    CompiledTracePublication,
 }
 
-const EVENTS: usize = Event::TracePublication as usize + 1;
+const EVENTS: usize = Event::CompiledTracePublication as usize + 1;
 
 /// Runs once, inside the next raw trace execution on this thread.
 pub(crate) type TraceRawExecutionHook = Box<dyn FnOnce() -> Result<(), OperationError>>;
@@ -153,6 +157,14 @@ pub(crate) fn take_completed_transformer_activity() -> CompletedActivity {
         builds: take(Event::CompletedBuild),
         publications: take(Event::CompletedPublication),
     }
+}
+
+/// This thread's compiled-trace `(hits, publications)` since the last take.
+pub(crate) fn take_compiled_trace_activity() -> (usize, usize) {
+    (
+        take(Event::CompiledTraceHit),
+        take(Event::CompiledTracePublication),
+    )
 }
 
 /// This thread's composed-coefficient or trace-column activity since the

@@ -1,6 +1,8 @@
 //! The process-global completed-transformer cache, the composed-coefficient
 //! cache ([`coefficients`]) a completed-transformer miss consults per source
-//! group, and the multiplicity-free resolution paths.
+//! group, and the multiplicity-free resolution paths. The same cache keeps
+//! compiled fusion-aware traces ([`TraceKeyRef`], [`TraceSplit`]), whose
+//! lowering is a pure function of the same kind of key.
 //!
 //! Reference: TensorKit `cfaa073e` `treetransformers.jl:treetransposer` /
 //! `treebraider` (`@cached`, `:156-180`) memoize one completed transformer
@@ -250,6 +252,9 @@ impl<'a> TreeTransformOperationView<'a> {
 /// (replay-time only); sector identity beyond the structures (the content ids
 /// fix it); oriented logical keys, projection and axis map (derived from the
 /// parent and `basis_order`).
+///
+/// A compiled trace is keyed here too (`trace` set, see [`TraceSplit`]); its
+/// value is a trace core, never a replay core, so the two never collide.
 #[derive(Clone, Debug)]
 pub(crate) struct CompletedTransformerKey {
     rule: RuleIdentity,
@@ -260,8 +265,30 @@ pub(crate) struct CompletedTransformerKey {
     basis_order: OrientedBasisOrder,
     storage_conjugate: bool,
     logical_source: Option<usize>,
+    trace: Option<TraceSplit>,
     dst: usize,
     src: usize,
+}
+
+/// What a compiled trace keys beyond its `(p…, q…)` permutation: with the
+/// open codomain rank `r` and the pair count `k`, the permutation is
+/// `output[..r] ++ lhs ← output[r..] ++ rhs`, so `(operation, r, k)` fixes
+/// the whole axis plan; the stored ranks fix how oriented axes map onto the
+/// stored source. The orientation (source conjugation) is the key's own
+/// `orientation`.
+///
+/// Every other input of the lowering is keyed already: the rule identity
+/// fixes every F/R/dimension/twist value it reads (fermionic twists
+/// included), the mode fixes the admission family, the coefficient type the
+/// scalar lane, and the two content ids every tree, shape, stride and
+/// offset. Checked admission only rejects; a resident entry proves an equal
+/// compile succeeded.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct TraceSplit {
+    pub(crate) open_codomain_rank: usize,
+    pub(crate) pairs: usize,
+    pub(crate) storage_nout: usize,
+    pub(crate) storage_nin: usize,
 }
 
 /// What equality and hashing read, borrowed. The owned key and the borrowed
@@ -277,6 +304,7 @@ struct KeyParts<'a> {
     basis_order: OrientedBasisOrder,
     storage_conjugate: bool,
     logical_source: Option<usize>,
+    trace: Option<TraceSplit>,
     dst: usize,
     src: usize,
 }
@@ -303,6 +331,7 @@ impl CompletedTransformerKey {
             basis_order,
             storage_conjugate,
             logical_source: logical_source.map(BlockStructure::content_id),
+            trace: None,
             dst: dst.content_id(),
             src: src.content_id(),
         }
@@ -339,6 +368,7 @@ impl CompletedTransformerKey {
             basis_order: self.basis_order,
             storage_conjugate: self.storage_conjugate,
             logical_source: self.logical_source,
+            trace: self.trace,
             dst: self.dst,
             src: self.src,
         }
@@ -385,6 +415,7 @@ impl TreePairKeyRef<'_> {
             basis_order: OrientedBasisOrder::Canonical,
             storage_conjugate: false,
             logical_source: None,
+            trace: None,
             dst: self.dst,
             src: self.src,
         }
@@ -401,6 +432,125 @@ impl symtn_core::StructureCacheEquivalent<CompletedTransformerKey> for TreePairK
     fn equivalent(&self, key: &CompletedTransformerKey) -> bool {
         self.parts() == key.parts()
     }
+}
+
+/// Borrowed probe of a compiled-trace key: the `(p…, q…)` permutation as
+/// two borrowed halves, so a warm lookup allocates nothing.
+pub(crate) struct TraceKeyRef<'a> {
+    pub(crate) rule: &'a RuleIdentity,
+    pub(crate) mode: TransformerMode,
+    pub(crate) coefficient: TypeId,
+    pub(crate) codomain_permutation: &'a [usize],
+    pub(crate) domain_permutation: &'a [usize],
+    pub(crate) orientation: FusionTreePairOrientation,
+    pub(crate) split: TraceSplit,
+    pub(crate) dst: &'a BlockStructure,
+    pub(crate) src: &'a BlockStructure,
+}
+
+impl TraceKeyRef<'_> {
+    fn parts(&self) -> KeyParts<'_> {
+        KeyParts {
+            rule: self.rule,
+            mode: self.mode,
+            coefficient: self.coefficient,
+            operation: TreeTransformOperationView::new(
+                TreeTransformOperationKind::Permute,
+                self.codomain_permutation,
+                self.domain_permutation,
+                &[],
+                &[],
+            ),
+            orientation: self.orientation,
+            basis_order: OrientedBasisOrder::Canonical,
+            storage_conjugate: false,
+            logical_source: None,
+            trace: Some(self.split),
+            dst: self.dst.content_id(),
+            src: self.src.content_id(),
+        }
+    }
+
+    fn to_owned_key(&self) -> CompletedTransformerKey {
+        CompletedTransformerKey {
+            rule: self.rule.clone(),
+            mode: self.mode,
+            coefficient: self.coefficient,
+            operation: TreeTransformOperation::permute(
+                self.codomain_permutation.iter().copied(),
+                self.domain_permutation.iter().copied(),
+            ),
+            orientation: self.orientation,
+            basis_order: OrientedBasisOrder::Canonical,
+            storage_conjugate: false,
+            logical_source: None,
+            trace: Some(self.split),
+            dst: self.dst.content_id(),
+            src: self.src.content_id(),
+        }
+    }
+
+    /// Whether this compile may be published: both contents canonical.
+    pub(crate) fn publishable(&self) -> bool {
+        publishable([self.dst, self.src])
+    }
+
+    /// The owned key and its entry with its charge, for a publication
+    /// staged until a commit.
+    pub(crate) fn staged_entry<V>(
+        &self,
+        value: Arc<V>,
+        value_bytes: usize,
+    ) -> (CompletedTransformerKey, Arc<ErasedEntry>, u64)
+    where
+        V: 'static + Send + Sync,
+    {
+        let key = self.to_owned_key();
+        let bytes = key
+            .charged_retained_bytes()
+            .saturating_add(ENTRY_OVERHEAD_BYTES)
+            .saturating_add(value_bytes) as u64;
+        let value: Arc<ErasedEntry> = value;
+        (key, value, bytes)
+    }
+}
+
+impl Hash for TraceKeyRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.parts().hash(state);
+    }
+}
+
+impl symtn_core::StructureCacheEquivalent<CompletedTransformerKey> for TraceKeyRef<'_> {
+    fn equivalent(&self, key: &CompletedTransformerKey) -> bool {
+        self.parts() == key.parts()
+    }
+}
+
+/// The resident compiled trace of `key`. Its value type is fixed by the
+/// key's coefficient `TypeId` together with its trace scope.
+pub(crate) fn lookup_trace<V>(key: &TraceKeyRef<'_>) -> Option<Arc<V>>
+where
+    V: 'static + Send + Sync,
+{
+    let entry = completed_transformers().get(key)?;
+    #[cfg(test)]
+    crate::probe::hit(crate::probe::Event::CompiledTraceHit);
+    Some(
+        entry
+            .downcast::<V>()
+            .unwrap_or_else(|_| unreachable!("the trace key's TypeId fixes the entry type")),
+    )
+}
+
+/// Publishes a staged compiled trace built since reset epoch `epoch`.
+pub(crate) fn publish_staged_trace(
+    (key, entry, bytes): (CompletedTransformerKey, Arc<ErasedEntry>, u64),
+    epoch: usize,
+) {
+    #[cfg(test)]
+    crate::probe::hit(crate::probe::Event::CompiledTracePublication);
+    let _ = completed_transformers().publish(&key, entry, bytes, epoch);
 }
 
 /// One identity of a typed source or destination: its canonical HomSpace,

@@ -230,6 +230,7 @@ fn staged_groups_publish_only_when_flushed_in_their_epoch() {
     let mut stale = CheckedPendingCoefficients {
         pending: PendingCoefficientGroups::default(),
         transformers: Vec::new(),
+        traces: Vec::new(),
         epoch: symtn_core::core_reset_epoch().wrapping_add(2),
     };
     let built = handle();
