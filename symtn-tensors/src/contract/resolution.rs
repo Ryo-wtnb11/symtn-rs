@@ -1143,16 +1143,17 @@ mod tests {
                 // What: no core preflight (Host and device share the planner,
                 // which rejects every candidate on axes alone), no core
                 // destination check
-                // for a non-core request, and only the HomSpaces TensorKit
-                // also forms: one permuted HomSpace per transformed source
-                // plus the core destination when the output transform is not
+                // for a non-core request, and fewer HomSpaces than TensorKit
+                // forms: each transformed source's permuted HomSpace comes
+                // from its source's destination memo, so only the core
+                // destination is built, when the output transform is not
                 // the identity. The fixture covers both output forms.
                 assert_eq!(core_dst, output != [0, 1, 2]);
                 let core_dst = usize::from(core_dst);
                 let expected = ContractCompileCounts {
                     preflights: 0,
                     core_destination_checks: 0,
-                    derived_homspace_builds: 2 + core_dst,
+                    derived_homspace_builds: core_dst,
                 };
                 assert_eq!(host, expected, "host output order {output:?}");
                 assert_eq!(storage, expected, "storage output order {output:?}");

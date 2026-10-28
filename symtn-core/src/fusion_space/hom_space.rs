@@ -389,6 +389,14 @@ impl FusionTreeHomSpace {
             .clone()
     }
 
+    /// The HomSpace whose canonical identity is `id`.
+    pub(crate) fn from_canonical_id(id: HomSpaceId) -> Self {
+        Self {
+            content: Arc::clone(&id.content),
+            id: OnceLock::from(id),
+        }
+    }
+
     pub(crate) fn with_canonical_id(self, id: HomSpaceId) -> Self {
         debug_assert_eq!(self.content, id.content);
         Self {
@@ -1075,24 +1083,19 @@ impl FusionTreeHomSpace {
         let epoch = core_reset_epoch();
         let rule_identity = rule.rule_identity();
         admit(&rule_identity)?;
-        let mut axes = SmallVec::<[usize; 9]>::new();
-        axes.push(codomain_axes.len());
-        axes.extend_from_slice(codomain_axes);
-        axes.extend_from_slice(domain_axes);
-        let entry = source.complete_entry();
-        if let Some(id) = entry
-            .as_ref()
-            .and_then(|entry| entry.permuted(&rule_identity, self, &axes))
-        {
-            let destination = Self {
-                content: Arc::clone(&id.content),
-                id: OnceLock::from(id),
-            };
-            let key =
-                CompleteHomSpaceStructureCacheKey::generic(rule_identity.clone(), &destination);
-            if let Some(resident) = complete_hom_space_structure_cached(&key) {
-                #[cfg(test)]
-                crate::probe::hit(crate::probe::Event::PermutedMemoHit);
+        let ticket = match self.memoized_permuted(
+            source,
+            CompleteFusionMode::Generic,
+            &rule_identity,
+            permuted_memo_key(
+                FusionTreePairOrientation::Direct,
+                codomain_axes,
+                domain_axes,
+            ),
+            epoch,
+        ) {
+            Ok(resident) => {
+                let destination = resident.canonical_homspace();
                 let prepared = PreparedBlockStructure::complete_hit(
                     destination.clone(),
                     resident.homspace_id(),
@@ -1100,7 +1103,8 @@ impl FusionTreeHomSpace {
                 );
                 return Ok((prepared, destination, Permuted::Memo));
             }
-        }
+            Err(ticket) => ticket,
+        };
         before_derive()?;
         let destination = self.try_permute_generic_checked(rule, codomain_axes, domain_axes)?;
         let prepared = destination
@@ -1110,8 +1114,75 @@ impl FusionTreeHomSpace {
                 rule_identity,
                 epoch,
             )?;
-        let ticket = PermutedMemoTicket { entry, axes, epoch };
         Ok((prepared, destination, Permuted::Derived(ticket)))
+    }
+
+    /// The multiplicity-free destination of the `orientation` of `self`
+    /// (`self` or its adjoint) permuted by `(codomain_axes, domain_axes)`
+    /// under `rule`, from the memo of `source`'s resident entry when the
+    /// destination's own entry is also resident: its canonical HomSpace and
+    /// structure, exactly what a derivation hitting the complete cache
+    /// returns. Otherwise the ticket that publishes the caller's derived
+    /// destination; the reset epoch it carries is read here, before that
+    /// derivation.
+    ///
+    /// Why no admission before the memo: a multiplicity-free permutation is
+    /// a pure function of (rule identity, source HomSpace, orientation,
+    /// axes), and the memo holds only destinations whose derivation and
+    /// complete layout succeeded under that identity.
+    #[doc(hidden)]
+    pub fn memoized_permuted_multiplicity_free(
+        &self,
+        source: &BlockStructure,
+        rule: &RuleIdentity,
+        orientation: FusionTreePairOrientation,
+        codomain_axes: &[usize],
+        domain_axes: &[usize],
+    ) -> Result<(Self, Arc<BlockStructure>), PermutedMemoTicket> {
+        let epoch = core_reset_epoch();
+        self.memoized_permuted(
+            source,
+            CompleteFusionMode::MultiplicityFree,
+            rule,
+            permuted_memo_key(orientation, codomain_axes, domain_axes),
+            epoch,
+        )
+        .map(|resident| (resident.canonical_homspace(), resident.structure()))
+    }
+
+    /// The memo lookup shared by every mode: the destination with its
+    /// resident entry, or the publication ticket. A ticket keeps `source`'s
+    /// entry only when it is the `mode` entry of `self`: a structure shared
+    /// by another HomSpace must not memoize this one's destinations.
+    fn memoized_permuted(
+        &self,
+        source: &BlockStructure,
+        mode: CompleteFusionMode,
+        rule: &RuleIdentity,
+        axes: SmallVec<[usize; 9]>,
+        epoch: usize,
+    ) -> Result<Arc<DegeneracyStructureEntry>, PermutedMemoTicket> {
+        let entry = source
+            .complete_entry()
+            .filter(|entry| entry.is_entry_of(mode, rule, self));
+        // Why a borrowed key and the resident entry rather than the memoized
+        // id: every reference count touched here is shared by all threads
+        // permuting this source, so the hit takes none beyond the lookup's.
+        let resident = entry.as_ref().and_then(|entry| {
+            entry.permuted(&axes, |destination| {
+                complete_hom_space_structure_cached(&CompleteHomSpaceStructureKeyRef {
+                    rule,
+                    mode,
+                    homspace: &destination.content,
+                })
+            })
+        });
+        if let Some(resident) = resident.flatten() {
+            #[cfg(test)]
+            crate::probe::hit(crate::probe::Event::PermutedMemoHit);
+            return Ok(resident);
+        }
+        Err(PermutedMemoTicket { entry, axes, epoch })
     }
 
     fn prepare_complete_coupled_subblock_structure_generic_checked_at<R>(
@@ -1644,4 +1715,23 @@ impl FusionTreeHomSpace {
             None
         }
     }
+}
+
+/// The permuted-memo key `[nout, codomain axes.., domain axes..]`, with the
+/// top bit of `nout` set for the adjoint orientation. Why not a separate
+/// word: a rank-8 key then still fits the inline capacity.
+fn permuted_memo_key(
+    orientation: FusionTreePairOrientation,
+    codomain_axes: &[usize],
+    domain_axes: &[usize],
+) -> SmallVec<[usize; 9]> {
+    const ADJOINT: usize = 1 << (usize::BITS - 1);
+    let mut axes = SmallVec::new();
+    axes.push(match orientation {
+        FusionTreePairOrientation::Direct => codomain_axes.len(),
+        FusionTreePairOrientation::Adjoint => codomain_axes.len() | ADJOINT,
+    });
+    axes.extend_from_slice(codomain_axes);
+    axes.extend_from_slice(domain_axes);
+    axes
 }
