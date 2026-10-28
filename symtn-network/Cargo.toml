@@ -55,6 +55,10 @@ required-features = ["cuda"]
 name = "microbench_cpu_shape_reuse"
 harness = false
 
+[[bench]]
+name = "cache_scaling"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
