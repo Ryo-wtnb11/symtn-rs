@@ -1636,7 +1636,7 @@ fn grouped_gemm_into<T: GroupedScalar>(
     let rhs = &rhs.data()[rhs.offset()..rhs.offset() + rhs_len];
     let offset = output.offset();
     let out = &mut output.data_mut()[offset..offset + out_len];
-    let mut stage = |grouped_jobs: &mut Vec<cpueinsum::GroupedGemmJob>| {
+    let stage = |grouped_jobs: &mut Vec<cpueinsum::GroupedGemmJob>| {
         grouped_jobs.clear();
         grouped_jobs.extend(jobs.iter().map(|job| {
             cpueinsum::GroupedGemmJob::new(

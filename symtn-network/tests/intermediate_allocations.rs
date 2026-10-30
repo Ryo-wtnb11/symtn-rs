@@ -74,8 +74,11 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
     }
 
     // Depending on the greedy tie break, the sole receiver is either 5x11
-    // (A*B) or 7x11 (A*C). Both are distinct from the 11x11 escaped output;
-    // neither receiver-sized Vec may be allocated after the pool is warm.
+    // (A*B) or 7x11 (A*C). Both are distinct from the 11x11 escaped output.
+    // After the pool is warm the receiver itself is reused; the one
+    // receiver-sized allocation left is its step's `copyC` temporary, which
+    // is per-call scratch (the Runtime keeps no execution pool).
+    let mut receiver_sized = 0;
     for receiver_elements in [5 * 11, 7 * 11] {
         reset_event_counters();
         PAYLOAD_SIZE.store(
@@ -98,9 +101,10 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
         assert_eq!(output.dense_data().unwrap().len(), 11 * 11);
         drop(output);
         ENABLED.store(false, Ordering::SeqCst);
-        assert_eq!(PAYLOAD_ALLOC_CALLS.load(Ordering::Relaxed), 0);
+        receiver_sized += PAYLOAD_ALLOC_CALLS.load(Ordering::Relaxed);
         assert_eq!(REGISTRY_OVERFLOWS.load(Ordering::Relaxed), 0);
     }
+    assert_eq!(receiver_sized, 1);
 }
 
 struct CountingAllocator;
@@ -1110,7 +1114,7 @@ fn run_typed_overwrite_worker(
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm",
+            "typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm",
             "--nocapture",
         ])
         .env("SYMTN_TYPED_ALLOC_RULE", rule)
@@ -1293,7 +1297,7 @@ fn warm_lazy_conj_replay_does_not_materialize_the_input() {
 }
 
 #[test]
-fn typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm() {
+fn typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     if let Ok(dtype) = std::env::var("SYMTN_TYPED_ALLOC_DTYPE") {
@@ -1349,10 +1353,11 @@ fn typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm() {
                     sample.payload_retained_live_bytes == sample.payload_size_bytes
                         && sample.payload_output_live_bytes == sample.payload_size_bytes
                         // The first step's reordered output is the default order plus
-                        // a permute (#1461, TensorKit `copyC`). Its temporary lives in
-                        // the warm Runtime's pooled context scratch (#1626), so only
-                        // that step's result and the network output allocate.
-                        && sample.payload_alloc_calls == 2
+                        // a permute (#1461, TensorKit `copyC`): its per-call temporary
+                        // (the Runtime keeps no execution pool, as TensorKit allocates
+                        // the `copyC` temporary per call), that step's result and the
+                        // network output allocate.
+                        && sample.payload_alloc_calls == 3
                         && sample.registry_overflows == 0
                 }),
                 "{diagnostics}; fresh samples={fresh:?}"
@@ -1361,7 +1366,8 @@ fn typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm() {
                 warm.iter().all(|sample| {
                     sample.payload_retained_live_bytes == 0
                         && sample.payload_output_live_bytes == sample.payload_size_bytes
-                        && sample.payload_alloc_calls == 1
+                        // The `copyC` temporary and the network output.
+                        && sample.payload_alloc_calls == 2
                         && sample.registry_overflows == 0
                 }),
                 "{diagnostics}; warm samples={warm:?}"

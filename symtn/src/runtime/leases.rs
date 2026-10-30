@@ -3,9 +3,8 @@ use super::*;
 /// The execution scratch of one standalone operation (tree-transform and
 /// contraction lanes), built for the call and dropped when it returns, or kept
 /// by a prepared workspace for its replays. It holds only the lanes the
-/// operation used (each boxed on first use, so moving the context moves a few
-/// pointers, #228), structural state and scratch; the operation runs on the
-/// caller's engine.
+/// operation used (the first inline, any later one boxed; see [`Ctxs`]),
+/// structural state and scratch; the operation runs on the caller's engine.
 pub(crate) struct ContextLease(TensorExecutionContext);
 
 impl ContextLease {

@@ -52,7 +52,7 @@ fn build_runtime() -> Runtime {
 }
 
 /// A permute at one payload dtype, which is the cheapest public operation
-/// that leases the runtime's execution lane for that dtype.
+/// that builds an execution lane for that dtype.
 macro_rules! permuted {
     ($engine:ident, $runtime:expr, $dtype:ty, $space:expr, $seed:expr) => {{
         let tensor: TensorMap<U1FusionRule, $dtype> =
@@ -86,13 +86,11 @@ fn runtime_construction_does_not_build_unused_dtype_lanes() {
          had been used in this process, against {baseline} before"
     );
 
-    // Isolating the lane: on a fresh runtime, run the *double-precision*
-    // operation first. That warms everything this runtime caches by structure
-    // rather than by dtype — the layout admission and the tree-transform plan
-    // store, which is shared and keyed on the f64 coefficients. What the first
-    // single-precision operation then pays for, and the second does not, is
-    // its own lane. Two rounds, each on a new runtime, so the lane is shown to
-    // be per-runtime rather than process-global.
+    // The lanes are per call, not per runtime: on a fresh runtime, after the
+    // double-precision operation warmed everything cached by structure (the
+    // layout admission and the shared tree-transform plan store), the first
+    // single-precision operation costs what the second does. A Complex32
+    // lane built into the runtime on first use would make the first dearer.
     for round in 0..2 {
         let runtime = build_runtime();
         permuted!(engine, &runtime, f64, &space, 10 + round);
@@ -101,10 +99,9 @@ fn runtime_construction_does_not_build_unused_dtype_lanes() {
         let (_, cold, _) = measured(|| permuted!(engine, &runtime, Complex32, &space, 30 + round));
         let (_, warm, _) = measured(|| permuted!(engine, &runtime, Complex32, &space, 40 + round));
         eprintln!("round {round}: first Complex32 permute {cold} calls, second {warm}");
-        assert!(
-            cold > warm,
-            "round {round}: the Complex32 lane should be constructed on first use, not at \
-             Runtime::build ({cold} cold against {warm} warm)"
+        assert_eq!(
+            cold, warm,
+            "round {round}: the first Complex32 call on a runtime built per-runtime state"
         );
     }
 }

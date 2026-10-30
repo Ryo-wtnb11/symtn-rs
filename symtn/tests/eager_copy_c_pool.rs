@@ -1,9 +1,11 @@
-//! #1626: an eager `contract(spec)` that takes TensorKit `blas_contract!`'s
-//! `copyC` route (a zero-copy contraction into a temporary, then one permute
-//! into the result) keeps that temporary in the Runtime's pooled execution
-//! scratch, as `contract_into` keeps its own. A warm call therefore
-//! allocates exactly one output-sized buffer: the returned tensor, and a warm
-//! `contract_into` (#1631), which takes the same route, allocates none.
+//! An eager `contract(spec)` that takes TensorKit `blas_contract!`'s `copyC`
+//! route (a zero-copy contraction into a temporary, then one permute into the
+//! result) allocates exactly two output-sized buffers, warm or cold: the
+//! temporary and the returned tensor. `contract_into` (#1631) takes the same
+//! route and allocates only the temporary. Like TensorKit, whose `copyC`
+//! temporary is allocated per call, the temporary is per-call scratch: the
+//! Runtime keeps no execution pool (#1626's pooled temporary was retired with
+//! the caller-owned engine model).
 
 use std::sync::Arc;
 
@@ -49,20 +51,17 @@ fn warm_split_moving_eager_contract_allocates_only_its_result() {
         codomain: &[0, 2],
         domain: &[1],
     };
-    // Cold: the result and the pooled temporary.
-    assert_eq!(
-        sized_allocs(output_bytes, || a.contract(engine, &b, &spec).unwrap()),
-        2
-    );
-    for _ in 0..3 {
+    // What: the result and the temporary, never an operand-sized copy or a
+    // second temporary.
+    for _ in 0..4 {
         assert_eq!(
             sized_allocs(output_bytes, || a.contract(engine, &b, &spec).unwrap()),
-            1
+            2
         );
     }
 
-    // What: `contract_into` takes the same route (#1631) with the same pooled
-    // temporary, so a warm call allocates nothing output-sized at all.
+    // What: `contract_into` takes the same route (#1631), so it allocates
+    // the temporary and nothing else output-sized.
     let mut destination = a.contract(engine, &b, &spec).unwrap();
     for _ in 0..2 {
         a.contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
@@ -73,7 +72,7 @@ fn warm_split_moving_eager_contract_allocates_only_its_result() {
             sized_allocs(output_bytes, || a
                 .contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
                 .unwrap()),
-            0
+            1
         );
     }
 

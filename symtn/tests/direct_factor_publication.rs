@@ -203,7 +203,7 @@ fn compact_lq_requests_no_zeroed_output_storage() {
 mod checked_generic {
     use super::*;
     use symtn::sector::LieGroupFusionRule;
-    use symtn::typed::{LeftPolar, RightPolar, Svd};
+    use symtn::typed::{LeftPolar, RightPolar};
 
     fn su3_leg(
         provider: &Arc<LieGroupFusionRule>,
@@ -238,18 +238,6 @@ mod checked_generic {
     fn payload_bytes(tensor: &TensorMap<LieGroupFusionRule, f64>) -> usize {
         std::mem::size_of_val(tensor.dense_data().unwrap())
     }
-
-    // Why both tests take `counting_alloc::serial()`:
-    // `checked_generic_polar_allocates_no_per_sector_temporaries` compares
-    // two `measured` calls' byte growth against each other and shares its
-    // `tall_legs(&provider, 1)` fixture with
-    // `checked_generic_polar_and_lq_match_reconstruction_oracles`'s `cases!`
-    // invocation (same rows/cols sectors and degeneracies, hence the same
-    // key into symtn-core's process-global fusion-tree-layout and
-    // complete-HomSpace-structure caches). Either test running unlocked
-    // beside the other can warm or (weakly held, #1610) evict that shared
-    // entry mid-measurement, moving the scratch-byte delta the assertion
-    // compares.
 
     /// Left: `A = W P`, right: `A = P W`, with `W` an isometry (`Wᴴ W = 1`
     /// left, `W Wᴴ = 1` right: every eigenvalue of the Gram matrix is one)
@@ -347,54 +335,10 @@ mod checked_generic {
         cases!(engine, Complex64, &runtime);
     }
 
-    // Allocation contract: polar writes W and P into their output regions,
-    // with no per-sector temporaries (W, P or a clone of the scaled factor)
-    // copied out afterwards (#1478). Both polar and
-    // `svd_compact` run the same staged per-sector SVD, so absolute counts
-    // include backend workspace whose size depends on the dense kernel's SIMD
-    // width (macOS and Linux differ by tens of bytes). Scaling every
-    // degeneracy keeps the tree structure (and all metadata) fixed, so the
-    // growth of the bytes a call allocates beyond its outputs is its
-    // payload-proportional scratch. Polar's must not exceed the SVD stage's,
-    // which per-sector temporaries would.
-    #[test]
-    fn checked_generic_polar_allocates_no_per_sector_temporaries() {
-        let engine = &mut symtn::typed::CpuEngine::serial();
-        let _serial = crate::counting_alloc::serial();
-        let runtime = Runtime::builder().build().unwrap();
-        let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
-        );
-        let mut scratch = |scale| {
-            let (rows, cols) = tall_legs(&provider, scale);
-            let a: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(engine, &runtime, [&rows], [&cols], 1485).unwrap();
-            let warm = (
-                a.left_polar(engine, &[0], &[1]).unwrap(),
-                a.svd_compact(engine, &[0], &[1]).unwrap(),
-            );
-            let (LeftPolar { w, p }, polar) =
-                measured(|| a.left_polar(engine, &[0], &[1]).unwrap());
-            let (Svd { u, s, vh }, svd) = measured(|| a.svd_compact(engine, &[0], &[1]).unwrap());
-            black_box(&warm);
-            let polar_outputs = payload_bytes(&w) + payload_bytes(&p);
-            let s_bytes = s
-                .diagview(engine)
-                .unwrap()
-                .iter()
-                .map(|entry| entry.values.len())
-                .sum::<usize>()
-                * std::mem::size_of::<f64>();
-            let svd_outputs = payload_bytes(&u) + s_bytes + payload_bytes(&vh);
-            (polar.bytes - polar_outputs, svd.bytes - svd_outputs)
-        };
-        let (polar_small, svd_small) = scratch(1);
-        let (polar_large, svd_large) = scratch(3);
-        assert!(
-            polar_large - polar_small <= svd_large - svd_small,
-            "polar scratch {polar_small} -> {polar_large}, SVD stage {svd_small} -> {svd_large}"
-        );
-    }
+    // The polar publication contract (#1478, no per-sector W, P or scaled
+    // factor temporary) is observed on the GEMM views in the lib test
+    // `checked_generic_polar_writes_its_factors_in_place`, which can inject a
+    // recording dense executor.
 
     // Byte contract (#1494): the leg-degeneracy (facade) layout of a rank-3
     // and a rank-4 multiplicity map is a coupled-sector tiling, so QR, SVD,

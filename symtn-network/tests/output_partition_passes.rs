@@ -1,9 +1,11 @@
 //! What: a warm contraction whose output codomain takes legs from both
-//! operands costs one output-sized allocation, by the eager `contract(spec)`
-//! and by `Network::contract` alike: the network step passes the output split as its
-//! `ContractSpec` (TensorOperations `pAB`), so no separate permute pass and no
-//! second output-sized buffer follow the contraction. Spelling the same result
-//! as contract-then-permute still costs two.
+//! operands costs the same output-sized allocations by the eager
+//! `contract(spec)` and by `Network::contract`: the network step passes the
+//! output split as its `ContractSpec` (TensorOperations `pAB`), so no separate
+//! permute pass and no third output-sized buffer follow the contraction. Both
+//! take TensorKit's `copyC` route: its per-call temporary (the Runtime keeps
+//! no execution pool, as TensorKit allocates it per call) and the result,
+//! the two buffers contract-then-permute also costs.
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Engine;
@@ -42,7 +44,7 @@ fn operands(engine: &mut dyn Engine) -> (Map, Map) {
 }
 
 #[test]
-fn mixed_output_partition_costs_one_output_sized_allocation() {
+fn mixed_output_partition_costs_no_permute_pass() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let (a, b) = operands(engine);
@@ -95,9 +97,9 @@ fn mixed_output_partition_costs_one_output_sized_allocation() {
         )
         .unwrap()
     };
-    // Cold: the result and the Runtime-pooled copyC temporary (#1626).
+    // The result and the per-call copyC temporary, cold and warm.
     assert_eq!(output_sized_allocs(&mut moved), 2);
-    assert_eq!(output_sized_allocs(&mut moved), 1);
+    assert_eq!(output_sized_allocs(&mut moved), 2);
 
     let (a, b) = operands(engine);
     assert_eq!(
@@ -120,9 +122,9 @@ fn mixed_output_partition_costs_one_output_sized_allocation() {
         .contract(engine, &[&a, &b])
         .unwrap()
     };
-    // The step's spec is that same contract: cold it pools its temporary,
-    // warm only the result is output-sized — no permute pass follows.
+    // The step's spec is that same contract: its temporary and the result,
+    // cold and warm; no permute pass follows.
     assert_eq!(output_sized_allocs(&mut mixed), 2);
-    assert_eq!(output_sized_allocs(&mut mixed), 1);
-    assert_eq!(output_sized_allocs(&mut mixed), 1);
+    assert_eq!(output_sized_allocs(&mut mixed), 2);
+    assert_eq!(output_sized_allocs(&mut mixed), 2);
 }

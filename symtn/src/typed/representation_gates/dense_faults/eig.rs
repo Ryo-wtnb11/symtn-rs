@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::{DenseDType, DenseView};
 
 /// Owned EIGH entries; the destination form is refused, so a checked
 /// Generic EIGH must use owned output.
@@ -363,4 +364,125 @@ fn eig_full_accepts_finite_defective_sectors_in_both_modes_without_a_rank_svd() 
     let spin_half = SU2Irrep::from_twice_spin(1);
     check!(mf_leg, spin_half, f64, |z| z.re, real);
     check!(mf_leg, spin_half, Complex64, |z| z, complex);
+}
+
+/// The default executor, except that `eig` returns the provider's finite
+/// eigenvalues with an all-NaN eigenvector matrix of the same order and
+/// dtype: a provider that reports success with nonfinite eigenvectors. The
+/// matrix is the `Q` of an all-NaN QR, so it is a real provider tensor.
+struct NonfiniteEigenvectors(DefaultDenseExecutor);
+
+impl DenseExecutor for NonfiniteEigenvectors {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
+    }
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
+    }
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
+    }
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
+    }
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut outputs = self.0.eig(engine, input)?;
+        let n = outputs[0].shape()[0];
+        let (shape, strides) = ([n, n], [1, n]);
+        let mut q = match outputs[1].dtype() {
+            DenseDType::C64 => {
+                let nan = vec![Complex64::new(f64::NAN, 0.0); n * n];
+                let view = DenseView::new(&nan, &shape, &strides, 0)?;
+                self.0.qr(engine, DenseRead::C64(view))?
+            }
+            dtype => {
+                assert_eq!(dtype, DenseDType::C32);
+                let nan = vec![Complex32::new(f32::NAN, 0.0); n * n];
+                let view = DenseView::new(&nan, &shape, &strides, 0)?;
+                self.0.qr(engine, DenseRead::C32(view))?
+            }
+        };
+        assert!(q[0].shape() == [n, n], "the forged eigenvectors are n x n");
+        outputs[1] = q.swap_remove(0);
+        Ok(outputs)
+    }
+}
+
+/// symtn's own eigenvector check: a provider that reports success with a
+/// nonfinite eigenvector of a finite input is a `NumericalFailure`, in both
+/// fusion modes and every dtype. The default provider cannot reach it (faer
+/// 0.27 rescales its back substitution like LAPACK `xTREVC` and reports
+/// `NoConvergence` for a nonfinite column), so the provider is forged.
+#[test]
+fn eig_full_rejects_provider_nonfinite_eigenvectors_in_both_modes() {
+    let engine = &mut crate::typed::CpuEngine::serial();
+    use symtn::sector::{SU2FusionRule, SU2Irrep};
+
+    let runtime = Runtime::builder().build().unwrap();
+    let checked_leg =
+        GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(0)), [(Label::Vacuum, 3)]).unwrap();
+    let mf_leg =
+        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 3)]).unwrap();
+    // `2 I + N`: finite, with finite eigenvalues.
+    let jordan = |row: usize, col: usize| match col.checked_sub(row) {
+        Some(0) => 2.0,
+        Some(1) => 1.0,
+        _ => 0.0,
+    };
+    macro_rules! check {
+        ($leg:expr, $dtype:ty, $from:expr) => {{
+            let from: fn(f64) -> $dtype = $from;
+            let source: TensorMap<_, $dtype> =
+                TensorMap::from_subblock_fn(engine, &runtime, [&$leg], [&$leg], |_, index| {
+                    from(jordan(index[0], index[1]))
+                })
+                .unwrap();
+            let _dense =
+                probe::inject_dense(Box::new(NonfiniteEigenvectors(DefaultDenseExecutor::new())));
+            let error = source.eig_full(engine, &[0], &[1]).unwrap_err();
+            assert!(
+                matches!(
+                    cause::<symtn_tensors::OperationError>(&error),
+                    Some(symtn_tensors::OperationError::Dense(
+                        DenseError::NumericalFailure {
+                            op: "eig eigenvector check",
+                            ..
+                        }
+                    ))
+                ),
+                "{error:?}"
+            );
+        }};
+    }
+    check!(checked_leg, f32, |x| x as f32);
+    check!(checked_leg, f64, |x| x);
+    check!(checked_leg, Complex32, |x| Complex32::new(x as f32, 0.0));
+    check!(checked_leg, Complex64, |x| Complex64::new(x, 0.0));
+    check!(mf_leg, f32, |x| x as f32);
+    check!(mf_leg, f64, |x| x);
+    check!(mf_leg, Complex32, |x| Complex32::new(x as f32, 0.0));
+    check!(mf_leg, Complex64, |x| Complex64::new(x, 0.0));
 }

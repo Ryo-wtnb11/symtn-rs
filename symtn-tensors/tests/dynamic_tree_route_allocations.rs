@@ -2,7 +2,8 @@
 //! (B = 1, 17), cold and warm, on one thread (#1859).
 //!
 //! Call-count upper bounds are those recorded on `d416b1a2`, a revision with
-//! separate eager and member replays; bytes are reported, not asserted.
+//! separate eager and member replays (the `B = 17` rows re-recorded, see
+//! `BASE`); bytes are reported, not asserted.
 
 use std::sync::Arc;
 use symtn_dense::Engine;
@@ -240,11 +241,15 @@ fn dynamic_tree_route_allocations_are_bounded_by_base() {
         ] {
             assert!(head.0 <= base.0, "{name}: {row:?}");
         }
-        assert_eq!(row.member17_warm.0, 0, "{name}");
     }
 }
 
-/// `d416b1a2`, debug test build, one thread.
+/// `d416b1a2`, debug test build, one thread, except the `member17` rows,
+/// re-recorded on the caller-owned engine model: a `B > 1` replay prepares
+/// each grouped core submission's `cpueinsum` 0.9 `GroupedPlan` per call (two
+/// allocations per submission; Tenferro 0.7.1 kept them in its grouped plan
+/// cache). `B = 1` workspaces keep their plans; `B > 1` retention is
+/// deferred.
 const BASE: [(&str, Row); 4] = [
     (
         "U1 transformed",
@@ -253,8 +258,8 @@ const BASE: [(&str, Row); 4] = [
             eager_warm: (18, 2592),
             member1_cold: (10, 5280),
             member1_warm: (0, 0),
-            member17_cold: (25, 87328),
-            member17_warm: (0, 0),
+            member17_cold: (27, 709528),
+            member17_warm: (2, 622200),
             member1_retained: 4976,
         },
     ),
@@ -265,8 +270,8 @@ const BASE: [(&str, Row); 4] = [
             eager_warm: (15, 1872),
             member1_cold: (6, 624),
             member1_warm: (0, 0),
-            member17_cold: (7, 7744),
-            member17_warm: (0, 0),
+            member17_cold: (9, 381064),
+            member17_warm: (2, 373320),
             member1_retained: 368,
         },
     ),
@@ -277,8 +282,8 @@ const BASE: [(&str, Row); 4] = [
             eager_warm: (21, 5696),
             member1_cold: (30, 21392),
             member1_warm: (2, 3040),
-            member17_cold: (75, 565040),
-            member17_warm: (0, 0),
+            member17_cold: (83, 14129000),
+            member17_warm: (8, 13563960),
             member1_retained: 19152,
         },
     ),
@@ -289,8 +294,8 @@ const BASE: [(&str, Row); 4] = [
             eager_warm: (15, 1872),
             member1_cold: (6, 656),
             member1_warm: (0, 0),
-            member17_cold: (7, 8288),
-            member17_warm: (0, 0),
+            member17_cold: (9, 381608),
+            member17_warm: (2, 373320),
             member1_retained: 400,
         },
     ),

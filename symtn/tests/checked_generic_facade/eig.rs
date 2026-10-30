@@ -1083,17 +1083,21 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
 }
 
 #[test]
-fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
+fn eig_full_never_returns_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{SU2FusionRule, SU2Irrep};
 
-    // A finite Jordan block `2 I + N` of size n in one sector. faer's
-    // back-substitution overflows here (f32 from n = 8, f64 from n = 26)
-    // while the eigenvalues stay finite; LAPACK `xTREVC` rescales and
-    // returns finite columns. Either outcome is allowed, but never `Ok` with
-    // a nonfinite column: the eigenvalue check runs first, then the
-    // eigenvector check, both a `NumericalFailure`.
+    // A finite Jordan block `2 I + N` of size n in one sector. Older faer
+    // overflowed in its back-substitution here (f32 from n = 8, f64 from
+    // n = 26); faer 0.27 rescales like LAPACK `xTREVC` and reports
+    // `NoConvergence` rather than a nonfinite column, so no default provider
+    // reaches symtn's eigenvector check on it (that check is driven by a
+    // forged provider in the lib test
+    // `eig_full_rejects_provider_nonfinite_eigenvectors_in_both_modes`).
+    // Either outcome is allowed, but never `Ok` with a nonfinite column: a
+    // failure is a `NumericalFailure` (the provider's, or symtn's eigenvalue
+    // or eigenvector check).
     let runtime = Runtime::builder().build().unwrap();
     let jordan = |row: usize, col: usize| {
         if row == col {
@@ -1104,7 +1108,6 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
             0.0
         }
     };
-    let faer_only = crate::backend::faer_is_default_backend();
     macro_rules! check {
         ($engine:ident, $leg:expr, $dtype:ty, $from:expr) => {{
             let from: fn(f64) -> $dtype = $from;
@@ -1122,17 +1125,13 @@ fn eig_full_rejects_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
                             .all(|value| value.re.is_finite() && value.im.is_finite()),
                         "Ok with a nonfinite eigenvector column"
                     );
-                    assert!(!faer_only, "faer is expected to overflow on this block");
                 }
                 Err(error) => {
                     assert!(
                         matches!(
                             crate::report::cause::<symtn::typed::OperationError>(&error),
                             Some(symtn::typed::OperationError::Dense(
-                                symtn::expert::DenseError::NumericalFailure {
-                                    op: "eig eigenvector check",
-                                    ..
-                                }
+                                symtn::expert::DenseError::NumericalFailure { .. }
                             ))
                         ),
                         "{error:?}"

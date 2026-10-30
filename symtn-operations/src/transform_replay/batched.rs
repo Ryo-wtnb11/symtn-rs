@@ -173,6 +173,32 @@ where
         Ok(())
     })?;
 
+    // Size the pack scratch for the largest Multi block once, so a fresh
+    // per-call workspace allocates each buffer once instead of growing it
+    // block by block.
+    let mut largest = (0usize, 0usize);
+    for (block_index, _) in recoupling_plan.entries() {
+        if let TreeTransformBlock::Multi {
+            dst_count,
+            src_count,
+            element_count,
+            ..
+        } = *recoupling_multi_block(task, block_index)?
+        {
+            largest.0 = largest.0.max(
+                element_count
+                    .checked_mul(src_count)
+                    .ok_or_else(|| OperationError::ElementCountOverflow)?,
+            );
+            largest.1 = largest.1.max(
+                element_count
+                    .checked_mul(dst_count)
+                    .ok_or_else(|| OperationError::ElementCountOverflow)?,
+            );
+        }
+    }
+    workspace.prepare_packed_buffers(largest.0, largest.1, D::zero());
+
     for (block_index, job) in recoupling_plan.entries() {
         let TreeTransformBlock::Multi {
             dst_layout_start,

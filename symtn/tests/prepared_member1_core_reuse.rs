@@ -50,7 +50,14 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     (0..stack.len())
-        .flat_map(|i| stack.member(engine, i).unwrap().dense_data().unwrap().to_vec())
+        .flat_map(|i| {
+            stack
+                .member(engine, i)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .to_vec()
+        })
         .collect()
 }
 
@@ -233,7 +240,8 @@ macro_rules! prepared_impl {
                 workspace: &'w mut ContractWorkspace<R, D>,
             ) -> &'w StackedTensorMap<R, D> {
                 self.plan
-                    .execute(&mut *self.engine.borrow_mut(), lhs, rhs, workspace).unwrap()
+                    .execute(&mut *self.engine.borrow_mut(), lhs, rhs, workspace)
+                    .unwrap()
             }
             fn execute_into(
                 &self,
@@ -243,7 +251,8 @@ macro_rules! prepared_impl {
                 workspace: &mut ContractWorkspace<R, D>,
             ) {
                 self.plan
-                    .execute_into(&mut *self.engine.borrow_mut(), lhs, rhs, dst, workspace).unwrap()
+                    .execute_into(&mut *self.engine.borrow_mut(), lhs, rhs, dst, workspace)
+                    .unwrap()
             }
         }
     };

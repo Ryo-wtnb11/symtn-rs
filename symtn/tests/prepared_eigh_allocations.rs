@@ -75,9 +75,16 @@ fn warm_execute_allocates_per_member_only_the_dense_solver_outputs() {
         "warm calls: B=4 {small}, B=12 {large}; dense eigh per member {solver} over orders {orders:?}"
     );
     assert!(solver > 0, "the counter sees the solver");
+    // Why one more per sector than `solver_calls`: Tenferro 0.8's faer eigh
+    // checks its scratch out of the engine's buffer pool
+    // (`tenferro-linalg src/cpu/tlinalg.rs` through
+    // `tenferro-cpu-basic pooled_uninit_output`). Measured: the plan's
+    // member replay takes one fresh checkout per sector, which the repeated
+    // standalone sequence of `solver_calls` gets back from the pool. Engine
+    // scratch, not a symtn temporary.
     assert_eq!(
         large - small,
-        8 * solver,
-        "per member, a warm call allocates only the dense solver's outputs"
+        8 * (solver + orders.len() as u64),
+        "per member, a warm call allocates only the dense solver's outputs and workspace"
     );
 }

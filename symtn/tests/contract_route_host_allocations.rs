@@ -2,8 +2,7 @@
 //! (`contract_into`) and `ContractPlan` members (B = 1, 17), cold and warm,
 //! on one thread.
 //!
-//! Call-count upper bounds recorded on `e6e9cac8` (before Core and CopyC
-//! joined the one Host executor); bytes are reported, not asserted.
+//! Call-count upper bounds (see `BASE`); bytes are reported, not asserted.
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
@@ -90,26 +89,34 @@ fn row(codomain: &[usize]) -> Row {
     }
 }
 
-/// `e6e9cac8`, debug test build, one thread.
+/// Recorded on the caller-owned engine model, debug test build, one thread.
+/// Against the `e6e9cac8` base (core `eager_warm` 11, `member17_warm` 1 for
+/// both routes): an eager call now allocates its executor and transform
+/// scratch per call (the Runtime keeps no execution pool; TensorKit's
+/// TensorOperations also allocates temporaries per call), and an unbound
+/// grouped core submission prepares its `cpueinsum` 0.9 `GroupedPlan` per
+/// call (two allocations, where Tenferro 0.7.1's grouped validator made
+/// one). `B = 1` workspaces keep their grouped plans, so `member1_warm` is
+/// zero; `B > 1` retention is deferred.
 const BASE: [(&str, Row); 2] = [
     (
         "core",
         Row {
-            eager_warm: (11, 1248),
-            member1_cold: (9, 328),
-            member1_warm: (1, 48),
-            member17_cold: (9, 2632),
-            member17_warm: (1, 816),
+            eager_warm: (14, 16064),
+            member1_cold: (6, 15472),
+            member1_warm: (0, 0),
+            member17_cold: (11, 252328),
+            member17_warm: (2, 248880),
         },
     ),
     (
         "copyC",
         Row {
-            eager_warm: (14, 1648),
-            member1_cold: (11, 2880),
-            member1_warm: (1, 48),
-            member17_cold: (13, 45568),
-            member17_warm: (1, 816),
+            eager_warm: (18, 18984),
+            member1_cold: (7, 17992),
+            member1_warm: (0, 0),
+            member17_cold: (15, 295264),
+            member17_warm: (2, 248880),
         },
     ),
 ];

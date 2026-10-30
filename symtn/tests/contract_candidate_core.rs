@@ -1007,10 +1007,20 @@ fn large_output_from_small_operands_copies_the_operands_not_c() {
             case.terms(),
         );
         let (calls, bytes, lookups) = warm(&runtime, &case);
+        let (result, large) =
+            counting_alloc::measure_matching(output_bytes as usize..=usize::MAX, || {
+                black_box(&case.lhs)
+                    .contract(engine, &case.rhs, &case.spec())
+                    .unwrap()
+            });
+        drop(result);
         eprintln!("U(1) {name}: {calls} calls, {bytes} B, {lookups} transform lookups, dim(C) {output_bytes} B");
-        // What: only the output is allocated, not a `dim(C)` temporary as well.
-        assert!(
-            bytes < output_bytes + output_bytes / 2,
+        // What: the output is the only `dim(C)`-sized allocation, no `dim(C)`
+        // temporary as well. The copied operands are smaller per-call scratch
+        // (the Runtime keeps no execution pool), so total bytes are not the
+        // measure.
+        assert_eq!(
+            large.matched_calls, 1,
             "{name}: {bytes} B allocated for a {output_bytes} B output"
         );
     }

@@ -1263,8 +1263,9 @@ where
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
             return self.matmul_rank2_batch(engine, dst, lhs, rhs, jobs, runs, alpha, beta);
         }
-        self.backend
-            .matmul_rank2_batch_with_ops(engine, dst, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta)
+        self.backend.matmul_rank2_batch_with_ops(
+            engine, dst, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
+        )
     }
 }
 

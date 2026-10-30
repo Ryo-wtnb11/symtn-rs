@@ -33,16 +33,30 @@ pub(crate) trait MultiplicityFreeCoefficientLane<C: symtn_tensors::DenseBlockSca
 /// one payload dtype, so building every lane would charge each call for lanes
 /// it never names. A lane holds descriptors and scratch only; every operation
 /// runs on the caller's engine.
+///
+/// The first lane a context names is stored inline, so a standalone
+/// operation, which names one, allocates no lane. Later lanes of other dtypes
+/// are boxed, so moving the context copies at most one lane per namespace
+/// (#228).
 pub struct Ctxs<Key: Clone + Eq + Hash + Send + Sync + 'static> {
+    first: Option<FirstLane<Key>>,
     f64: Option<Box<Ctx<f64, Key>>>,
     c64: Option<Box<Ctx<Complex64, Key>>>,
     f32: Option<Box<Ctx<f32, Key>>>,
     c32: Option<Box<Ctx<Complex32, Key>>>,
 }
 
+enum FirstLane<Key: Clone + Eq + Hash + Send + Sync + 'static> {
+    F64(Ctx<f64, Key>),
+    C64(Ctx<Complex64, Key>),
+    F32(Ctx<f32, Key>),
+    C32(Ctx<Complex32, Key>),
+}
+
 impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Default for Ctxs<Key> {
     fn default() -> Self {
         Self {
+            first: None,
             f64: None,
             c64: None,
             f32: None,
@@ -55,22 +69,25 @@ fn built<T: Default>(lane: &mut Option<Box<T>>) -> &mut T {
     lane.get_or_insert_with(Box::default)
 }
 
+macro_rules! lane_accessor {
+    ($name:ident, $field:ident, $variant:ident, $ty:ty) => {
+        pub(crate) fn $name(&mut self) -> &mut Ctx<$ty, Key> {
+            let first = self
+                .first
+                .get_or_insert_with(|| FirstLane::$variant(Ctx::default()));
+            match first {
+                FirstLane::$variant(lane) => lane,
+                _ => built(&mut self.$field),
+            }
+        }
+    };
+}
+
 impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
-    pub(crate) fn f64_lane(&mut self) -> &mut Ctx<f64, Key> {
-        built(&mut self.f64)
-    }
-
-    pub(crate) fn c64_lane(&mut self) -> &mut Ctx<Complex64, Key> {
-        built(&mut self.c64)
-    }
-
-    pub(crate) fn f32_lane(&mut self) -> &mut Ctx<f32, Key> {
-        built(&mut self.f32)
-    }
-
-    pub(crate) fn c32_lane(&mut self) -> &mut Ctx<Complex32, Key> {
-        built(&mut self.c32)
-    }
+    lane_accessor!(f64_lane, f64, F64, f64);
+    lane_accessor!(c64_lane, c64, C64, Complex64);
+    lane_accessor!(f32_lane, f32, F32, f32);
+    lane_accessor!(c32_lane, c32, C32, Complex32);
 }
 
 macro_rules! rule_lanes {

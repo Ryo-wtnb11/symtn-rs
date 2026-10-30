@@ -608,7 +608,10 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
             values: entry.values.iter().map(|value| value.norm()).collect(),
         })
         .collect();
-    for (compact, values) in spectrum.iter().zip(t.svd_vals(engine, &[0, 1], &[2, 3]).unwrap()) {
+    for (compact, values) in spectrum
+        .iter()
+        .zip(t.svd_vals(engine, &[0, 1], &[2, 3]).unwrap())
+    {
         assert_eq!(compact.sector, values.sector);
         for (&got, want) in compact.values.iter().zip(values.values) {
             assert!(

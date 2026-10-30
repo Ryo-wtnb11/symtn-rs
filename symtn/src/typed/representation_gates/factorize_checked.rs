@@ -969,3 +969,78 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
         }
     }
 }
+
+// Publication contract (#1478): polar runs each sector's GEMMs straight into
+// the published W and P storage, and P's GEMM reads the `sqrt(S)` scaled
+// factor in place, the same buffer W's GEMM read. A per-sector W or P
+// temporary would put a GEMM destination outside the published buffers; a
+// clone of the scaled factor would give P's operands another address.
+// Observed on the kernels' own views, so engine scratch can neither hide nor
+// trigger it.
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn checked_generic_polar_writes_its_factors_in_place() {
+    let engine = &mut crate::typed::CpuEngine::serial();
+    use symtn_core::LieGroupFusionRule;
+
+    let within = |inner: &std::ops::Range<usize>, outer: &std::ops::Range<usize>| {
+        outer.start <= inner.start && inner.end <= outer.end
+    };
+    let gemms = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let counts = Arc::new(SpyCounts::default());
+    let runtime = Runtime::builder().build().unwrap();
+    let provider =
+        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    // Four coupled sectors, rows >= columns in each.
+    let irreps = [vec![0i64, 0], vec![1, 0], vec![0, 1], vec![1, 1]];
+    let leg = |dims: [usize; 4]| {
+        GradedSpace::try_new(
+            Arc::clone(&provider),
+            irreps.iter().cloned().zip(dims).collect::<Vec<_>>(),
+        )
+        .unwrap()
+    };
+    let (rows, cols) = (leg([2, 4, 6, 4]), leg([2, 2, 4, 4]));
+    let tall: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&rows], [&cols], 1485).unwrap();
+    let wide: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&cols], [&rows], 1486).unwrap();
+    let _dense = probe::inject_dense(Box::new(
+        SpyExecutor::counting(&counts).recording_gemms(&gemms),
+    ));
+    for left in [true, false] {
+        gemms.lock().unwrap().clear();
+        counts.reset();
+        let (w, p) = if left {
+            let LeftPolar { w, p } = tall.left_polar(engine, &[0], &[1]).unwrap();
+            (w, p)
+        } else {
+            let RightPolar { p, wh } = wide.right_polar(engine, &[0], &[1]).unwrap();
+            (wh, p)
+        };
+        let log = gemms.lock().unwrap().clone();
+        // One SVD and two GEMMs per coupled sector.
+        assert_eq!(counts.of(Kernel::SVD), 4, "left {left}");
+        assert_eq!(log.len(), 2 * 4, "left {left}: {log:?}");
+        assert_eq!(counts.others(&[Kernel::Svd, Kernel::DotGeneral]), 0);
+        let (w_data, p_data) = (
+            spy_span(w.dense_data().unwrap()),
+            spy_span(p.dense_data().unwrap()),
+        );
+        for sector in log.chunks(2) {
+            let [w_gemm, p_gemm] = sector else {
+                unreachable!()
+            };
+            assert!(within(&w_gemm.output, &w_data), "left {left}: W temporary");
+            assert!(within(&p_gemm.output, &p_data), "left {left}: P temporary");
+            // Left: `P = (sqrt(S) Vh)ᴴ (sqrt(S) Vh)`, `Vh` W's right operand;
+            // right: `P = (U sqrt(S)) (U sqrt(S))ᴴ`, `U` W's left operand.
+            let factor = if left { &w_gemm.rhs } else { &w_gemm.lhs };
+            assert_eq!(
+                (&p_gemm.lhs, &p_gemm.rhs),
+                (factor, factor),
+                "left {left}: P does not read the scaled factor in place"
+            );
+        }
+    }
+}

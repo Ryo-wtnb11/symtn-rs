@@ -27,6 +27,8 @@ use crate::report;
 use crate::counting_alloc;
 
 /// `(allocations, bytes)` requested on this thread while `f` runs.
+use symtn_dense::Engine;
+
 fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize) {
     let (value, allocs) = counting_alloc::measure(f);
     (value, allocs.calls as usize, allocs.bytes as usize)
@@ -382,6 +384,14 @@ fn lazy_adjoint_leg_roles_equal_the_permute_composition() {
 /// both sides swapped) makes the operation on the permuted tensor
 /// structurally identical to the current-split operation, so their requested
 /// allocations and bytes must agree: the leg roles add exactly one permute.
+///
+/// Each call is measured on its own engine after the same warm-up call.
+/// Why not one shared engine: Tenferro's faer SVD checks scratch and factor
+/// buffers out of the engine's best-fit buffer pool, so whether a buffer is
+/// fresh, and whether symtn's factor publication must grow the first
+/// sector's factor to the published length (`append_owned_factor`, 688 B on
+/// this fixture), depends on which buffers earlier calls returned to that
+/// pool, not on the operation.
 #[test]
 fn space_preserving_roles_cost_the_current_split_plus_one_permute() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -397,27 +407,32 @@ fn space_preserving_roles_cost_the_current_split_plus_one_permute() {
     let _ = t.svd_compact(engine, &rows, &cols).unwrap();
     let _ = t.svd_compact(engine, &current.0, &current.1).unwrap();
     let _ = p.svd_compact(engine, &current.0, &current.1).unwrap();
+    let on_own_engine = |f: &dyn Fn(&mut dyn Engine)| {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        f(engine);
+        let ((), calls, bytes) = measure(|| f(engine));
+        (calls, bytes)
+    };
 
     let before = transforms(&runtime);
-    let (_, current_allocations, current_bytes) =
-        measure(|| t.svd_compact(engine, &current.0, &current.1).unwrap());
+    let (current_allocations, current_bytes) =
+        on_own_engine(&|engine| drop(t.svd_compact(engine, &current.0, &current.1).unwrap()));
+    let (op_allocations, op_bytes) =
+        on_own_engine(&|engine| drop(p.svd_compact(engine, &current.0, &current.1).unwrap()));
     assert_eq!(
         transforms(&runtime),
         before,
         "the current split ran a transform"
     );
-    let (_, op_allocations, op_bytes) =
-        measure(|| p.svd_compact(engine, &current.0, &current.1).unwrap());
-    assert_eq!(transforms(&runtime), before);
     assert_eq!(
         (op_allocations, op_bytes),
         (current_allocations, current_bytes)
     );
-    let (_, fused_allocations, fused_bytes) =
-        measure(|| t.svd_compact(engine, &rows, &cols).unwrap());
+    let (fused_allocations, fused_bytes) =
+        on_own_engine(&|engine| drop(t.svd_compact(engine, &rows, &cols).unwrap()));
     let after_fused = transforms(&runtime);
-    let (_, permute_allocations, permute_bytes) =
-        measure(|| t.permute(engine, &rows, &cols).unwrap());
+    let (permute_allocations, permute_bytes) =
+        on_own_engine(&|engine| drop(t.permute(engine, &rows, &cols).unwrap()));
     assert_eq!(after_fused - before, transforms(&runtime) - after_fused);
     assert_eq!(
         (fused_allocations, fused_bytes),

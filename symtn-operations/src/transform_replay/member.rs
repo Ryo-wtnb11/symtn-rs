@@ -1044,7 +1044,7 @@ mod tests {
                     + core::mem::size_of::<usize>()
                         * (w.chunk_runs.capacity()
                             + w.chunk_scatter_groups.capacity()
-                            + w.fused_indices.capacity()
+                            + w.fused_indices_heap_capacity()
                             + w.member_shape.capacity())
                     + core::mem::size_of::<isize>()
                         * (w.zero_strides.capacity()

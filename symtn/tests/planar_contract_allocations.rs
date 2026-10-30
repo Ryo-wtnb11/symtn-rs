@@ -4,9 +4,11 @@
 //! per-call plan metadata is not counted. The reference is the core alone:
 //! `compose` of the operands already transposed by hand, whose payload
 //! allocations are its output plus whatever the dense provider's GEMM owns.
-//! `planar_contract` must match it — the operand and output transposes
-//! write Runtime-pooled scratch — and `planar_contract_into` must match it
-//! less the output. The hand-written sequence owns every transposed payload.
+//! The hand-written sequence owns every transposed payload. `planar_contract`
+//! takes the same work: its operand and output transposes write per-call
+//! scratch, as TensorOperations allocates its temporaries per call, so it
+//! must match the hand sequence and `planar_contract_into` must match it less
+//! the output.
 
 use crate::counting_alloc;
 use symtn::typed::Engine;
@@ -137,11 +139,14 @@ fn planar_contract_owns_only_its_output() {
             drop(hand(engine, &lhs, &rhs));
         });
         assert!(core >= 1, "{spec:?}: the core owns its output");
-        assert_eq!(eager, core, "{spec:?}: eager = the core's output and GEMM");
+        assert_eq!(
+            eager, hand_written,
+            "{spec:?}: eager = the hand sequence's transposes and core"
+        );
         assert_eq!(
             into,
-            core - 1,
-            "{spec:?}: the destination form owns no payload"
+            hand_written - 1,
+            "{spec:?}: the destination form owns no output payload"
         );
         // An identity `transpose` returns its input, so the golden-chain
         // step's hand sequence copies θ and the output only.

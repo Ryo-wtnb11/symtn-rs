@@ -316,7 +316,9 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
-    fused_indices: Vec<usize>,
+    // One fused index per lane and fused axis; inline up to eight, the rank
+    // metadata width, so a fresh per-call workspace allocates none.
+    fused_indices: smallvec::SmallVec<[usize; 8]>,
     member_shape: Vec<usize>,
     member_dst_strides: Vec<isize>,
     member_src_strides: Vec<isize>,
@@ -336,7 +338,7 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
-            fused_indices: Vec::new(),
+            fused_indices: smallvec::SmallVec::new(),
             member_shape: Vec::new(),
             member_dst_strides: Vec::new(),
             member_src_strides: Vec::new(),
@@ -362,7 +364,7 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.chunk_runs.capacity()
                 + self.chunk_scatter_groups.capacity()
-                + self.fused_indices.capacity()
+                + self.fused_indices_heap_capacity()
                 + self.member_shape.capacity(),
             std::mem::size_of::<usize>(),
         ) + bytes(
@@ -419,6 +421,15 @@ impl<T> HostTreeTransformWorkspace<T> {
         self.packed
             .destination_mut()
             .resize_filled(destination_len, zero);
+    }
+
+    /// Heap elements `fused_indices` owns (none while inline).
+    fn fused_indices_heap_capacity(&self) -> usize {
+        if self.fused_indices.spilled() {
+            self.fused_indices.capacity()
+        } else {
+            0
+        }
     }
 
     fn prepare_fused_indices(

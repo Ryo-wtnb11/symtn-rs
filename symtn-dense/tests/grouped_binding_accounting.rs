@@ -73,8 +73,16 @@ fn check<T: Copy>(
                 zero,
                 binding,
             ),
-            None => executor
-                .matmul_batch_axpby_into(&mut engine, output, lhs, rhs, jobs, &runs, one, zero),
+            None => executor.matmul_batch_axpby_into(
+                &mut engine,
+                output,
+                lhs,
+                rhs,
+                jobs,
+                &runs,
+                one,
+                zero,
+            ),
         }
         .unwrap()
     };

@@ -2,8 +2,8 @@
 //! across the codomain/domain split is one contraction into one retained
 //! buffer, not a contraction followed by a separate permute call into a
 //! second one. On the copyC route the data moved is the same (GEMM into the
-//! pooled temporary, then one transform); the saving is the separate call and
-//! its second buffer.
+//! per-call temporary, then one transform); the saving is the separate call
+//! and its second retained buffer.
 //!
 //! This test, with the step loop's structure (no permute path per step), is
 //! the evidence for #1614's gate: symtn-network has no transform-seam
@@ -112,8 +112,10 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
     let warm_lookups = transform_lookups(&runtime) - lookups_before;
     let retained = plan_cache_stats(&runtime).retained_workspace_bytes;
 
-    // What: the intermediate's buffer is reused, not reallocated.
-    assert_eq!(warm_allocs, 0, "warm intermediate-sized allocations");
+    // What: the intermediate's buffer is reused, not reallocated; the one
+    // intermediate-sized allocation is the step's per-call copyC temporary
+    // (the Runtime keeps no execution pool).
+    assert_eq!(warm_allocs, 1, "warm intermediate-sized allocations");
     // What: one transform for the one split-moving intermediate — the
     // step's own output permute (copyC). An operand-rebuilding route would
     // look up three.
