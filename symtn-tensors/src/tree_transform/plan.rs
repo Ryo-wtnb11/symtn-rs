@@ -1457,24 +1457,42 @@ where
         return inputs.into_iter().map(build).collect();
     }
 
-    use rayon::prelude::*;
+    use std::sync::Mutex;
+    use symtn_operations::host_pool::{fork, region, HostPoolSite};
 
-    let batches = symtn_operations::host_pool::install_region(
-        symtn_operations::host_pool::HostPoolSite::PlanCompile,
-        || {
-            partition_staged_groups(inputs, threads)
-                .into_par_iter()
-                .map(|batch| batch.into_iter().map(&build).collect::<Result<Vec<_>, _>>())
-                .collect::<Vec<_>>()
-        },
-    );
+    // One input and one result slot per batch: each job takes its input and
+    // stores its result, so the fold below sees the batches in source order
+    // whatever ran first.
+    let inputs: Vec<Mutex<Option<Vec<I>>>> = partition_staged_groups(inputs, threads)
+        .into_iter()
+        .map(|batch| Mutex::new(Some(batch)))
+        .collect();
+    type Slot<O> = Mutex<Option<Result<Vec<O>, OperationError>>>;
+    let results: Vec<Slot<O>> = inputs.iter().map(|_| Mutex::new(None)).collect();
+    region(HostPoolSite::PlanCompile, |exec| {
+        fork(exec, inputs.len(), |job, _child| {
+            let batch = inputs[job].lock().unwrap_or_else(|p| p.into_inner()).take();
+            if let Some(batch) = batch {
+                let result = batch.into_iter().map(&build).collect();
+                *results[job].lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
+            }
+        });
+    });
+    let batches = results.into_iter().map(|slot| {
+        // INVARIANT: `fork` runs every job before returning.
+        slot.into_inner()
+            .unwrap_or_else(|p| p.into_inner())
+            .expect("every staged batch ran")
+    });
     flatten_ordered_batch_results(batches)
 }
 
-fn flatten_ordered_batch_results<O, E>(batches: Vec<Result<Vec<O>, E>>) -> Result<Vec<O>, E> {
+fn flatten_ordered_batch_results<O, E>(
+    batches: impl IntoIterator<Item = Result<Vec<O>, E>>,
+) -> Result<Vec<O>, E> {
     let mut outputs = Vec::new();
-    // Why not collect the parallel iterator directly into `Result<Vec<_>, _>`:
-    // Rayon deliberately leaves the winning error nondeterministic when
+    // Why not stop at the first failing job as it finishes: jobs finish in
+    // scheduling order, so the winning error would be nondeterministic when
     // several batches fail. Folding ordered batch results here preserves the
     // serial source-group error precedence without publishing partial state.
     for batch in batches {

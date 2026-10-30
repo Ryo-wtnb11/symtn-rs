@@ -556,10 +556,7 @@ mod allocation_replay_tests {
         let mut kernels = StridedHostKernelAdapter::default();
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(3)
-            .build()
-            .unwrap();
+        let pool = crate::host_pool::test_pool(3);
 
         let mut replay = || {
             tree_transform_structure_with_structural_recoupling_raw(
@@ -621,10 +618,7 @@ mod allocation_replay_tests {
         let mut kernels = StridedHostKernelAdapter::default();
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(3)
-            .build()
-            .unwrap();
+        let pool = crate::host_pool::test_pool(3);
 
         let mut replay = || {
             dst.fill(f64::NAN);
@@ -717,10 +711,7 @@ mod allocation_replay_tests {
         let mut kernels = StridedHostKernelAdapter::default();
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(3)
-            .build()
-            .unwrap();
+        let pool = crate::host_pool::test_pool(3);
         pool.install(|| {
             tree_transform_structure_with_structural_recoupling_raw(
                 &mut kernels,

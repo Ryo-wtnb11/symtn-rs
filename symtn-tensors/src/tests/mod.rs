@@ -538,7 +538,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let (dst_space, src_space) = dynamic_trace_spaces(dst, src)?;
     crate::tensortrace::tensortrace_fusion_dyn_into_raw(
@@ -591,7 +592,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     tensortrace_fusion_structure_into_host(
         structure,
@@ -1367,7 +1369,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
@@ -1403,7 +1406,8 @@ fn assert_tree_single_dtype<T>(
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let space = vec![2, 2];
@@ -1433,7 +1437,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let space = vec![4, 2];
@@ -1556,7 +1561,8 @@ fn assert_tree_multi_tensorkit_orientation_dtype<T>(
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let src_space = vec![6, 1];
@@ -1649,7 +1655,8 @@ fn assert_tree_multi_keyed_dtype<T>(
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let key10 = BlockKey::opaque([10]);

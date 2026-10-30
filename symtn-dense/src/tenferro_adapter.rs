@@ -8,8 +8,10 @@ use crate::{
 };
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use std::sync::{Mutex, MutexGuard};
+use tenferro_cpu::threadteam::{pays_at, DispatchKind, Exec};
 use tenferro_cpu::{CpuEngine, Pool};
 #[cfg(not(feature = "provider-inject"))]
 use tenferro_linalg::{LinalgBackend, TensorLinalgExt, TensorReadLinalgExt};
@@ -66,15 +68,19 @@ pub struct SharedCpuContext {
 struct SharedEngine {
     engine: Mutex<CpuEngine>,
     threads: usize,
+    /// The cheapest parallel section the engine's team can open; `None` for a
+    /// serial engine.
+    min_section_cost: Option<Duration>,
 }
 
 impl SharedCpuContext {
-    fn from_engine(engine: CpuEngine) -> Self {
+    fn from_engine(engine: CpuEngine, min_section_cost: Option<Duration>) -> Self {
         let threads = engine.num_threads();
         Self {
             inner: Arc::new(SharedEngine {
                 engine: Mutex::new(engine),
                 threads,
+                min_section_cost: min_section_cost.filter(|_| threads > 1),
             }),
         }
     }
@@ -86,18 +92,21 @@ impl SharedCpuContext {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|&threads| threads > 0)
             .unwrap_or_else(available_parallelism);
-        Self::with_threads(threads).unwrap_or_else(|_| Self::from_engine(CpuEngine::serial()))
+        Self::with_threads(threads).unwrap_or_else(|_| Self::from_engine(CpuEngine::serial(), None))
     }
 
     /// Fixed thread count; `1` builds no pool at all (fully serial).
     pub fn with_threads(threads: usize) -> Result<Self, DenseError> {
         if threads <= 1 {
-            return Ok(Self::from_engine(CpuEngine::serial()));
+            return Ok(Self::from_engine(CpuEngine::serial(), None));
         }
         Pool::builder()
             .threads(threads)
             .build()
-            .map(|pool| Self::from_engine(CpuEngine::new(pool)))
+            .map(|pool| {
+                let cost = pool.dispatch_costs().min_cost(DispatchKind::Team);
+                Self::from_engine(CpuEngine::new(pool), Some(cost))
+            })
             .map_err(|err| DenseError::Backend {
                 backend: DenseBackend::Tenferro,
                 op: "SharedCpuContext::with_threads",
@@ -122,23 +131,33 @@ impl SharedCpuContext {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Runs `op` on this context's pool (the engine's `threadteam` pool, which
-    /// Rayon work inside `op` then uses). A serial context runs `op` inline.
+    /// Whether a region of serial time `estimate` that opens one parallel
+    /// section can pay on this engine's team at any width (threadteam's own
+    /// rule, [`pays_at`]). A region that cannot pay runs serially anyway, so
+    /// callers skip minting a token for it. Always false for a serial engine.
+    pub fn section_pays(&self, estimate: Duration) -> bool {
+        self.inner
+            .min_section_cost
+            .is_some_and(|cost| pays_at(estimate, 1, cost))
+    }
+
+    /// Runs `op` with the engine's placement token: every worker of its team,
+    /// which `op` splits with `fork` or hands to strided kernels. A serial or
+    /// broken engine hands `op` a serial token.
     ///
-    /// Holds the engine lock for the region, so `op` must not call a dense
-    /// executor on this context, and a caller already on a pool worker must
-    /// run inline instead of calling this (it would deadlock).
+    /// Holds the engine lock while `op` runs, so `op` must not call a dense
+    /// executor on this context or ask for the token again.
     #[doc(hidden)]
-    pub fn install<R: Send>(&self, op: impl FnOnce() -> R + Send) -> R {
+    pub fn with_exec<R>(&self, op: impl FnOnce(Exec<'_>) -> R) -> R {
         if self.inner.threads <= 1 {
-            return op();
+            return op(Exec::serial());
         }
         let mut engine = self.lock();
         let result = match engine.exec() {
-            Ok(exec) => exec.into_token().external(|_width| op()),
+            Ok(exec) => op(exec.into_token()),
             // A broken engine refuses tokens; the region itself is still
             // correct on the calling thread.
-            Err(_) => op(),
+            Err(_) => op(Exec::serial()),
         };
         result
     }

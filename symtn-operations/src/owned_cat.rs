@@ -4,7 +4,7 @@ use core::ops::Range;
 
 use num_complex::Complex64;
 use num_traits::Zero;
-use strided_kernel::{CopyPlan, MaybeSendSync, RawStridedMut, RawStridedRef, StridedError};
+use strided_kernel::{CopyPlan, RawStridedMut, RawStridedRef, StridedError};
 
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::ConjugateValue;
@@ -116,7 +116,7 @@ pub enum OwnedCatC64Source<'a> {
 
 /// Returns `None` unless the compiled copies prove a complete physical overwrite.
 #[doc(hidden)]
-pub fn try_cat_owned_raw<D: ConjugateValue + MaybeSendSync>(
+pub fn try_cat_owned_raw<D: ConjugateValue + Send + Sync>(
     required_len: usize,
     side: OwnedCatSide,
     copies: &[OwnedCatCopy],
@@ -147,7 +147,7 @@ pub fn try_cat_owned_mixed_raw<D>(
     compact_diagonals: &[Option<&[D]>],
 ) -> Option<Vec<D>>
 where
-    D: ConjugateValue + MaybeSendSync + Zero,
+    D: ConjugateValue + Send + Sync + Zero,
 {
     if sources
         .iter()
@@ -319,7 +319,7 @@ fn source_bounds_hold(copy: &OwnedCatCopy, source_len: usize) -> bool {
         .is_some_and(|last| last < source_len)
 }
 
-fn write_same<D: ConjugateValue + MaybeSendSync>(
+fn write_same<D: ConjugateValue + Send + Sync>(
     destination: &mut [MaybeUninit<D>],
     source: &[D],
     copy: &OwnedCatCopy,
@@ -377,7 +377,7 @@ fn write_same<D: ConjugateValue + MaybeSendSync>(
 
 /// One compiled rank-2 strided copy into the uninitialized destination; the
 /// replay allocates nothing at rank 2 (`RAW_FUSED_RANK_LIMIT` is 8).
-fn copy_strided_rows<D: Copy + MaybeSendSync>(
+fn copy_strided_rows<D: Copy + Send + Sync>(
     destination: &mut [MaybeUninit<D>],
     source: &[D],
     copy: &OwnedCatCopy,
@@ -400,8 +400,8 @@ fn copy_strided_rows<D: Copy + MaybeSendSync>(
         signed(copy.destination_offset)?,
     )?;
     let plan = CopyPlan::compile(&dims, &destination_strides, &source_strides)?;
-    crate::host_pool::strided(copy.rows * copy.cols, || {
-        plan.execute_uninit(&mut destination, &source)
+    crate::host_pool::strided(copy.rows * copy.cols, |exec| {
+        plan.execute_uninit(&mut destination, &source, exec)
     })
 }
 

@@ -12,9 +12,8 @@ pub(super) fn effective_tree_transform_threads(
     let runnable = singles.max(schedule.pack_columns.len()).max(1);
     let requested = requested.max(1);
 
-    // Why not query the pool for serial replay: without an entered Host pool,
-    // current_num_threads initializes Rayon's global pool even though this
-    // call cannot use parallel execution.
+    // Why answer before reading the engine width: a serial replay needs no
+    // engine lookup at all.
     if requested == 1 || runnable == 1 {
         return 1;
     }
@@ -27,18 +26,26 @@ pub(super) fn effective_tree_transform_threads(
         .min(runnable)
 }
 
-/// Every replay fork runs in the operation's Host pool. Only the outermost
-/// fork installs; nested forks already run on a worker of that pool.
-pub(super) fn replay_join<A, B, RA, RB>(left: A, right: B) -> (RA, RB)
+/// Runs a replay phase split over `threads` workers with the operation's
+/// engine token; a serial phase takes no token.
+pub(super) fn replay_region<R>(threads: usize, op: impl FnOnce(Exec<'_>) -> R) -> R {
+    if threads <= 1 {
+        return op(Exec::serial());
+    }
+    crate::host_pool::region(crate::host_pool::HostPoolSite::Replay, op)
+}
+
+/// One replay fork: both halves run as jobs of `exec`. The split itself (and
+/// so every per-worker scratch slice and the left-before-right error order)
+/// is fixed by the replay's `threads`, not by where the token places a job.
+pub(super) fn replay_join<A, B, RA, RB>(exec: Exec<'_>, left: A, right: B) -> (RA, RB)
 where
-    A: FnOnce() -> RA + Send,
-    B: FnOnce() -> RB + Send,
-    RA: Send,
-    RB: Send,
+    A: FnOnce(Exec<'_>) -> RA + Send + Sync,
+    B: FnOnce(Exec<'_>) -> RB + Send + Sync,
+    RA: Send + Sync,
+    RB: Send + Sync,
 {
-    crate::host_pool::install_region(crate::host_pool::HostPoolSite::Replay, || {
-        pool_join(left, right)
-    })
+    pool_join(exec, left, right)
 }
 
 /// Executes a validated tree-transform block list against a dense executor.
@@ -264,6 +271,7 @@ fn replay_pack_columns<A, D>(
     src_data: &[D],
     storage_conjugate: bool,
     threads: usize,
+    exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -298,7 +306,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_pack_columns(
                 kernels,
                 left_indices,
@@ -310,9 +319,10 @@ where
                 src_data,
                 storage_conjugate,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_pack_columns(
                 right_kernels,
                 right_indices,
@@ -324,6 +334,7 @@ where
                 src_data,
                 storage_conjugate,
                 right_threads,
+                exec,
             )
         },
     );
@@ -347,6 +358,7 @@ pub(super) fn replay_single_blocks<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
+    exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -399,7 +411,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_single_blocks(
                 kernels,
                 left_indices,
@@ -415,9 +428,10 @@ where
                 alpha,
                 mode,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_single_blocks(
                 right_kernels,
                 right_indices,
@@ -433,6 +447,7 @@ where
                 alpha,
                 mode,
                 right_threads,
+                exec,
             )
         },
     );
@@ -473,6 +488,7 @@ fn replay_scatter_columns<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
+    exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -530,7 +546,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_scatter_columns(
                 kernels,
                 left_indices,
@@ -544,9 +561,10 @@ where
                 alpha,
                 mode,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_scatter_columns(
                 right_kernels,
                 right_indices,
@@ -560,6 +578,7 @@ where
                 alpha,
                 mode,
                 right_threads,
+                exec,
             )
         },
     );
@@ -583,6 +602,7 @@ pub(super) fn replay_scatter_groups<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
+    exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -608,6 +628,7 @@ where
                 alpha,
                 mode,
                 1,
+                Exec::serial(),
             )?;
         }
         return Ok(());
@@ -624,7 +645,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_scatter_groups(
                 kernels,
                 left_indices,
@@ -640,9 +662,10 @@ where
                 alpha,
                 mode,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_scatter_groups(
                 right_kernels,
                 right_indices,
@@ -658,6 +681,7 @@ where
                 alpha,
                 mode,
                 right_threads,
+                exec,
             )
         },
     );
@@ -745,18 +769,21 @@ where
         *pack_cursor += 1;
     }
     let start = profile.as_ref().map(|_| std::time::Instant::now());
-    replay_pack_columns(
-        kernels.clone(),
-        &mut workspace.fused_indices[..fused_index_len],
-        max_fused_rank,
-        layouts,
-        &schedule.pack_columns[pack_start..*pack_cursor],
-        workspace.packed.source_mut().as_mut_slice(),
-        source_start,
-        src_data,
-        storage_conjugate,
-        threads,
-    )?;
+    replay_region(threads, |exec| {
+        replay_pack_columns(
+            kernels.clone(),
+            &mut workspace.fused_indices[..fused_index_len],
+            max_fused_rank,
+            layouts,
+            &schedule.pack_columns[pack_start..*pack_cursor],
+            workspace.packed.source_mut().as_mut_slice(),
+            source_start,
+            src_data,
+            storage_conjugate,
+            threads,
+            exec,
+        )
+    })?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
         profile.packed_columns += chunk.iter().map(|job| job.contracted).sum::<usize>();
         profile.multi_pack += start.elapsed();
@@ -784,7 +811,7 @@ where
             .filter(|&group| !schedule.scatter_groups[group].columns.is_empty()),
     );
     // Why not sort/copy every scatter descriptor: only the at-most-T group
-    // indices need destination order for one safe Rayon split tree.
+    // indices need destination order for one safe replay split tree.
     workspace
         .chunk_scatter_groups
         .sort_unstable_by_key(|&group| {
@@ -809,7 +836,7 @@ where
 ///
 /// - Singles apply in parallel when their compiled slices are disjoint. Multi
 ///   blocks replay in concurrency-bounded chunks whose pack and scatter phases
-///   each enter Rayon once. Work items are independent because the compile step
+///   each take the engine token once. Work items are independent because the compile step
 ///   rejects duplicate destination blocks
 ///   (`OperationError::DuplicateTransformDestination`) and pack columns are
 ///   disjoint scratch ranges by construction; the workspace forbids `unsafe`,
@@ -821,8 +848,8 @@ where
 /// - Each chunk is one serial grouped GEMM call between its pack and scatter
 ///   phases. The dense executor owns its own parallelism, so no nesting arises.
 ///
-/// Parallel copy scheduling uses recursive `rayon::join` in the operation's
-/// Host pool, capped by the configured worker count. Replay descriptors and safe split
+/// Parallel copy scheduling forks the operation's engine token recursively
+/// (`replay_join`), capped by the configured worker count. Replay descriptors and safe split
 /// boundaries are compiled into the structure.
 ///
 /// Per-task traversal indices are disjoint slices of one workspace arena, split
@@ -879,22 +906,25 @@ where
     {
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         if schedule.singles_slice_disjoint {
-            replay_single_blocks(
-                kernels.clone(),
-                &mut workspace.fused_indices[..fused_index_len],
-                max_fused_rank,
-                task.blocks(),
-                layouts,
-                task.single_coefficients(),
-                storage_conjugate,
-                &schedule.singles,
-                dst_data,
-                0,
-                src_data,
-                alpha,
-                mode,
-                threads,
-            )?;
+            replay_region(threads, |exec| {
+                replay_single_blocks(
+                    kernels.clone(),
+                    &mut workspace.fused_indices[..fused_index_len],
+                    max_fused_rank,
+                    task.blocks(),
+                    layouts,
+                    task.single_coefficients(),
+                    storage_conjugate,
+                    &schedule.singles,
+                    dst_data,
+                    0,
+                    src_data,
+                    alpha,
+                    mode,
+                    threads,
+                    exec,
+                )
+            })?;
         } else {
             let mut zero_strides = Vec::new();
             for &item in &schedule.singles {
@@ -947,22 +977,25 @@ where
 
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         if scatter_slice_disjoint {
-            replay_scatter_groups(
-                kernels.clone(),
-                &mut workspace.fused_indices[..fused_index_len],
-                max_fused_rank,
-                layouts,
-                &schedule.scatter_columns,
-                &schedule.scatter_groups,
-                &workspace.chunk_scatter_groups,
-                dst_data,
-                0,
-                packed_destination,
-                destination_start,
-                alpha,
-                mode,
-                threads,
-            )?;
+            replay_region(threads, |exec| {
+                replay_scatter_groups(
+                    kernels.clone(),
+                    &mut workspace.fused_indices[..fused_index_len],
+                    max_fused_rank,
+                    layouts,
+                    &schedule.scatter_columns,
+                    &schedule.scatter_groups,
+                    &workspace.chunk_scatter_groups,
+                    dst_data,
+                    0,
+                    packed_destination,
+                    destination_start,
+                    alpha,
+                    mode,
+                    threads,
+                    exec,
+                )
+            })?;
         } else {
             let mut zero_strides = Vec::new();
             for &group in &workspace.chunk_scatter_groups {

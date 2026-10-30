@@ -224,10 +224,7 @@ fn overwrite_multi_c64_does_not_read_nan_destinations() {
         let nan = num_complex::Complex64::new(f64::NAN, f64::NAN);
         let mut dst = vec![nan; 3];
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
+        let pool = crate::host_pool::test_pool(threads);
         pool.install(|| {
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
                 &mut StridedHostKernelAdapter::default(),
@@ -287,10 +284,7 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
     for threads in [1, 2] {
         let mut dst = [f64::NAN; 5];
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
+        let pool = crate::host_pool::test_pool(threads);
         pool.install(|| {
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
                 &mut StridedHostKernelAdapter::default(),

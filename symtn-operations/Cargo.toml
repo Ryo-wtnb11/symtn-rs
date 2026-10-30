@@ -15,11 +15,6 @@ num-complex = "0.4"
 num-traits = "0.2"
 smallvec = { version = "1", features = ["const_generics", "union"] }
 strided-kernel.workspace = true
-# Tree-transform replay parallelism uses rayon directly: strided-kernel's
-# unconditional "parallel" feature above already pulls rayon into every
-# build, so this adds no dependency weight. Replay, compile and strided
-# regions run inside the runtime's one CPU pool (`host_pool`).
-rayon = "1.10"
 rustc-hash = "2"
 
 [features]

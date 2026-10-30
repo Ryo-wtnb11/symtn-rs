@@ -649,7 +649,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         let mut layout = CheckedBlockLayout::default();
         for (shape, strides, [dst_offset, lhs_offset, rhs_offset]) in cases() {

@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Ryo-wtnb11/symtn-rs"
 
 [workspace.dependencies]
-strided-kernel = { version = "0.4.4", features = ["parallel"] }
+strided-kernel = { version = "0.9.0", features = ["parallel"] }
 
 [profile.dev]
 debug = "line-tables-only"

@@ -647,7 +647,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         let mut adapter = StridedHostKernelAdapter::default();
         for (shape, dst_strides, dst_offset, src_strides, src_offset) in checked_cases() {

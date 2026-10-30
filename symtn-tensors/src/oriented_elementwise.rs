@@ -169,7 +169,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if source_data.len() != source.storage_space().required_len()?
         || logical_runs.len() != destination.rank()
@@ -206,7 +207,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let member_len = source.storage_space().required_len()?;
     if Some(source_data.len()) != member_len.checked_mul(members)
@@ -360,7 +362,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if destination_data.len() != destination.required_len()?
         || source_data.len() != source.storage_space().required_len()?
@@ -514,7 +517,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if lhs_data.len() != lhs.storage_space().required_len()?
         || rhs_data.len() != rhs.storage_space().required_len()?
@@ -580,7 +584,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if destination_data.len() != destination.required_len()?
         || source_data.len() != source.storage_space().required_len()?

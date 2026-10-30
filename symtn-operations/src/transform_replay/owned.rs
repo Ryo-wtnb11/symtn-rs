@@ -64,36 +64,40 @@ where
         let blocks = structure.blocks();
         // Singles split on the schedule's slice-disjoint boundaries exactly as
         // `replay_single_blocks` does; a non-disjoint schedule stays serial.
-        split_join_uninit(
-            &schedule.singles,
-            dst_data,
-            0,
-            &mut workspace.fused_indices[..fused_index_len],
-            max_fused_rank,
-            if schedule.singles_slice_disjoint {
-                threads
-            } else {
-                1
-            },
-            &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
-            &|items, dst, dst_start, fused_index| {
-                for &item in items {
-                    let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
-                    write_uninit_layout_from_source(
-                        layouts,
-                        dst_layout,
-                        src_layout,
-                        dst,
-                        dst_start,
-                        src_data,
-                        storage_conjugate,
-                        TransformScale::new(alpha, coefficients[coefficient]),
-                        fused_index,
-                    )?;
-                }
-                Ok(())
-            },
-        )?;
+        let singles_threads = if schedule.singles_slice_disjoint {
+            threads
+        } else {
+            1
+        };
+        replay_region(singles_threads, |exec| {
+            split_join_uninit(
+                &schedule.singles,
+                dst_data,
+                0,
+                &mut workspace.fused_indices[..fused_index_len],
+                max_fused_rank,
+                singles_threads,
+                exec,
+                &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
+                &|items, dst, dst_start, fused_index| {
+                    for &item in items {
+                        let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
+                        write_uninit_layout_from_source(
+                            layouts,
+                            dst_layout,
+                            src_layout,
+                            dst,
+                            dst_start,
+                            src_data,
+                            storage_conjugate,
+                            TransformScale::new(alpha, coefficients[coefficient]),
+                            fused_index,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )
+        })?;
 
         if recoupling_plan.is_empty() {
             return Ok(());
@@ -120,32 +124,36 @@ where
             let scatter_groups = &schedule.scatter_groups;
             // Groups split on their ordered destination ranges exactly as
             // `replay_scatter_groups` does; columns inside a group stay serial.
-            split_join_uninit(
-                &workspace.chunk_scatter_groups,
-                dst_data,
-                0,
-                &mut workspace.fused_indices[..fused_index_len],
-                max_fused_rank,
-                if scatter_slice_disjoint { threads } else { 1 },
-                &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
-                &|groups, dst, dst_start, fused_index| {
-                    for &group in groups {
-                        for item in &scatter_columns[scatter_groups[group].columns.clone()] {
-                            write_uninit_layout_from_packed(
-                                layouts,
-                                item.dst_layout,
-                                dst,
-                                dst_start,
-                                packed,
-                                item.packed_offset - destination_start,
-                                alpha,
-                                fused_index,
-                            )?;
+            let scatter_threads = if scatter_slice_disjoint { threads } else { 1 };
+            replay_region(scatter_threads, |exec| {
+                split_join_uninit(
+                    &workspace.chunk_scatter_groups,
+                    dst_data,
+                    0,
+                    &mut workspace.fused_indices[..fused_index_len],
+                    max_fused_rank,
+                    scatter_threads,
+                    exec,
+                    &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
+                    &|groups, dst, dst_start, fused_index| {
+                        for &group in groups {
+                            for item in &scatter_columns[scatter_groups[group].columns.clone()] {
+                                write_uninit_layout_from_packed(
+                                    layouts,
+                                    item.dst_layout,
+                                    dst,
+                                    dst_start,
+                                    packed,
+                                    item.packed_offset - destination_start,
+                                    alpha,
+                                    fused_index,
+                                )?;
+                            }
                         }
-                    }
-                    Ok(())
-                },
-            )?;
+                        Ok(())
+                    },
+                )
+            })?;
         }
         debug_assert_eq!(pack_cursor, schedule.pack_columns.len());
         Ok(())
@@ -153,7 +161,7 @@ where
     .map(Some)
 }
 
-/// Recursive `rayon::join` over an uninitialised destination, mirroring the
+/// Recursive `replay_join` over an uninitialised destination, mirroring the
 /// split tree of `replay_single_blocks` / `replay_scatter_groups`: `items`
 /// are sorted by destination offset and `dst_lo(item)` is the absolute start
 /// of each item's destination range; `leaf` writes `items` into `dst`, whose
@@ -178,13 +186,14 @@ fn split_join_uninit<I, D>(
     fused_indices: &mut [usize],
     max_fused_rank: usize,
     threads: usize,
+    exec: Exec<'_>,
     dst_lo: &(impl Fn(&I) -> Result<isize, OperationError> + Sync),
     leaf: &(impl Fn(&[I], &mut [MaybeUninit<D>], isize, &mut [usize]) -> Result<(), OperationError>
           + Sync),
 ) -> Result<(), OperationError>
 where
     I: Sync,
-    D: Send,
+    D: Send + Sync,
 {
     if items.is_empty() {
         return Ok(());
@@ -203,7 +212,8 @@ where
     let right_threads = threads - left_threads;
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             split_join_uninit(
                 left_items,
                 left_data,
@@ -211,11 +221,12 @@ where
                 left_indices,
                 max_fused_rank,
                 left_threads,
+                exec,
                 dst_lo,
                 leaf,
             )
         },
-        || {
+        |exec| {
             split_join_uninit(
                 right_items,
                 right_data,
@@ -223,6 +234,7 @@ where
                 right_indices,
                 max_fused_rank,
                 right_threads,
+                exec,
                 dst_lo,
                 leaf,
             )
@@ -699,11 +711,8 @@ mod owned_overwrite_tests {
         assert_eq!(actual, [0.0, 0.0]);
     }
 
-    fn pool(threads: usize) -> rayon::ThreadPool {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap()
+    fn pool(threads: usize) -> crate::host_pool::TestPool {
+        crate::host_pool::test_pool(threads)
     }
 
     fn z2_leg(even: usize, odd: usize) -> SectorLeg {

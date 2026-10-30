@@ -131,30 +131,6 @@ fn runtime() -> Runtime {
 }
 
 #[test]
-fn cache_concurrency_user_par_iter_on_the_runtime_pool() {
-    if crate::test_cache::run_isolated_or_return(
-        "SYMTN_CACHE_CONCURRENCY_RUNTIME_POOL",
-        "cache_concurrency_tests::cache_concurrency_user_par_iter_on_the_runtime_pool",
-    ) {
-        return;
-    }
-    watchdog(|| {
-        let runtime = runtime();
-        let source = fixture(&runtime);
-        crate::cache::clear();
-        let before = admissions();
-        let shared = runtime.execution_config().shared_ctx.clone();
-        let built = shared.install(|| {
-            (0..TASKS)
-                .into_par_iter()
-                .map(|_| resolve(&runtime, &source))
-                .collect::<Vec<_>>()
-        });
-        assert_converged(&built, before, Some((1, source_groups(&source))));
-    });
-}
-
-#[test]
 fn cache_concurrency_user_par_iter_on_a_foreign_pool() {
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_CACHE_CONCURRENCY_FOREIGN_POOL",
@@ -182,6 +158,9 @@ fn cache_concurrency_user_par_iter_on_a_foreign_pool() {
 }
 
 #[test]
+// Why exempt from the audit: this case deliberately runs Host sites with no
+// Runtime, which the audit rejects by construction.
+#[cfg_attr(symtn_scope_audit, ignore = "runs Host sites without a Runtime")]
 fn cache_concurrency_ambient_pool_without_a_runtime() {
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_CACHE_CONCURRENCY_AMBIENT_POOL",
@@ -197,8 +176,8 @@ fn cache_concurrency_ambient_pool_without_a_runtime() {
         let src_len = source.space().required_len().unwrap();
         crate::cache::clear();
         let before = admissions();
-        // Standalone contexts on Rayon's global pool: no Runtime pool,
-        // recoupling regions on the ambient pool.
+        // Standalone contexts on Rayon's global pool: no Runtime engine, so
+        // recoupling regions run serially on each caller.
         let built = (0..TASKS)
             .into_par_iter()
             .map(|_| {
@@ -243,8 +222,11 @@ fn cache_concurrency_with_a_racing_clear() {
                 }
             })
         };
-        let shared = runtime.execution_config().shared_ctx.clone();
-        let built = shared.install(|| {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        let built = pool.install(|| {
             (0..TASKS)
                 .into_par_iter()
                 .map(|_| resolve(&runtime, &source))

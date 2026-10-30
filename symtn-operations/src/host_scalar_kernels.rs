@@ -3,8 +3,8 @@ use core::ops::{Add, Mul};
 use num_traits::{One, Zero};
 
 use strided_kernel::{
-    axpy_conj_raw, axpy_raw, copy_scale_conj_raw, copy_scale_raw, CopyPlan, MaybeSendSync,
-    RawStridedMut, RawStridedRef, RAW_FUSED_RANK_LIMIT,
+    axpy_conj_raw, axpy_raw, copy_scale_conj_raw, copy_scale_raw, CopyPlan, RawStridedMut,
+    RawStridedRef, RAW_FUSED_RANK_LIMIT,
 };
 
 use smallvec::SmallVec;
@@ -43,7 +43,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if source_conjugate {
         return tensoradd_raw_strided_conjugating_kernel(
@@ -95,7 +96,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if source_conjugate {
         return tensoradd_raw_strided_conjugating_kernel_trusted(
@@ -294,7 +296,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + MaybeSendSync,
+        + Send
+        + Sync,
 {
     validate_raw_strided_views(
         dst_data,
@@ -341,7 +344,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + MaybeSendSync,
+        + Send
+        + Sync,
 {
     #[cfg(debug_assertions)]
     validate_raw_strided_views(
@@ -424,7 +428,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     validate_raw_strided_views(
         dst_data,
@@ -476,7 +481,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     #[cfg(debug_assertions)]
     validate_raw_strided_views(
@@ -924,7 +930,7 @@ fn raw_strided_combine_loop<T>(
     action: RawStridedAction<T>,
 ) -> Result<(), OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     if crate::strided::element_count(shape)? == 0 {
         return Ok(());
@@ -992,7 +998,7 @@ pub(crate) fn raw_rank_within_strided_limit_routed<T>(
     action: RawStridedAction<T>,
 ) -> Result<bool, OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     if shape.len() > RAW_FUSED_RANK_LIMIT {
         return Ok(false);
@@ -1036,7 +1042,7 @@ pub(crate) fn combine_fused_layout<T>(
     index: &mut SmallVec<[usize; FUSED_LAYOUT_INLINE_RANK]>,
 ) -> Result<(), OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     normalize_fused_layout(shape, raw_dst_strides, raw_src_strides, layout)?;
     let (dims, dst_strides, src_strides) =
@@ -1172,7 +1178,7 @@ pub(crate) fn strided_raw_action<T>(
     action: RawStridedAction<T>,
 ) -> Result<bool, OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     match action {
         RawStridedAction::Copy => {}
@@ -1188,14 +1194,14 @@ where
     let mut dst =
         RawStridedMut::new(dst_data, shape, dst_strides, dst_offset).map_err(strided_error)?;
     let (dst, src) = (&mut dst, &src);
-    crate::host_pool::strided(shape.iter().product(), || {
+    crate::host_pool::strided(shape.iter().product(), |exec| {
         match (action, source_conjugate) {
             (RawStridedAction::Copy, conjugate) => {
                 let plan = CopyPlan::compile(shape, dst_strides, src_strides)?;
                 if conjugate {
-                    plan.execute_conj(dst, src)
+                    plan.execute_conj(dst, src, exec)
                 } else {
-                    plan.execute(dst, src)
+                    plan.execute(dst, src, exec)
                 }
             }
             (RawStridedAction::CopyScale { alpha }, false) => copy_scale_raw(dst, src, alpha),
@@ -2169,7 +2175,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + MaybeSendSync
+            + Send
+            + Sync
             + core::fmt::Debug,
     {
         let shapes: Vec<Vec<usize>> = (0..=RAW_FUSED_RANK_LIMIT)
@@ -2566,7 +2573,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + MaybeSendSync
+            + Send
+            + Sync
             + core::fmt::Debug,
     {
         let mut rng = Rng(0x2230_9e37_79b9_7f4a);

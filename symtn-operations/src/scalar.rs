@@ -58,7 +58,8 @@ pub trait TreeTransformScalar:
     + Zero
     + One
     + ConjugateValue
-    + strided_kernel::MaybeSendSync
+    + Send
+    + Sync
 {
 }
 
@@ -70,7 +71,8 @@ impl<T> TreeTransformScalar for T where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
 {
 }
 
@@ -298,7 +300,8 @@ pub trait DenseBlockScalar:
     + Zero
     + One
     + ConjugateValue
-    + strided_kernel::MaybeSendSync
+    + Send
+    + Sync
     + 'static
 {
     fn dense_read(view: DenseView<'_, Self>) -> DenseRead<'_>;

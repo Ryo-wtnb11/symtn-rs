@@ -61,7 +61,9 @@ synchronization costs.
 The built-in CPU executors share one `SharedCpuContext` per runtime.
 `dense_threads` sizes its pool; unset uses available parallelism, 1 runs on
 the calling thread, and 0 is an error. Host dense, tree replay, plan compile
-and strided work use that pool. `recoupling_threads` defaults to 1 and caps
+and strided work use that pool: dense calls through the engine, and the other
+regions by forking the engine's placement token (symtn runs no scheduler of
+its own). `recoupling_threads` defaults to 1 and caps
 recoupling/compile parallelism within it. CPU runtime construction does not
 configure Rayon's global pool or read thread-count environment variables.
 BLAS-internal threads remain separate. An injected executor owns its

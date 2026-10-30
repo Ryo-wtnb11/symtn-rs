@@ -1483,7 +1483,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<M::Coeff>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
     P: AsRef<[D]>,
 {
     trace_staged_in::<M, R, D, _, M::Error>(stage, src, axes, read, |structure, value, nout| {
@@ -1654,7 +1655,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<f64>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
     P: AsRef<[D]>,
 {
     tensortrace_owned_in::<MultiplicityFreeAdmissionMode, R, D, P>(
@@ -1686,7 +1688,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<f64>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
     P: AsRef<[D]>,
 {
     tensortrace_owned_in::<CheckedGenericAdmissionMode, R, D, P>(
@@ -1802,7 +1805,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let mut coefficients = CheckedPendingCoefficients::new();
     let structure =
@@ -2027,7 +2031,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     structure.validate_replay_structures(dst_structure, src_structure)?;
     validate_trace_data_extents(dst_structure, dst_data.len(), src_structure, src_data.len())?;
@@ -2081,7 +2086,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     tensortrace_fusion_dyn_into_raw(
         src_space.provider(),
@@ -2121,7 +2127,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     tensortrace_fusion_dyn_into_checked_raw(
         src_space.provider(),
@@ -2161,7 +2168,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure = TensorTraceFusionStructure::compile_fusion_dyn_raw(
         src_space.provider(),
@@ -2200,7 +2208,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure = TensorTraceFusionStructure::compile_fusion_dyn_checked_raw(
         src_space.provider(),
@@ -2241,7 +2250,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure =
         TensorTraceFusionStructure::compile_fusion_dyn_raw(rule, dst_space, src_space, axes)?;
@@ -2271,7 +2281,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     trace_structure_owned_parts(
         structure,
@@ -2301,7 +2312,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     // Why: a public executor must not replay terms compiled for other spaces;
     // the pointer-equality fast path keeps compiled-in-place callers free.
@@ -2378,7 +2390,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     // Why: a public executor must not replay terms compiled for other spaces;
     // the pointer-equality fast path keeps compiled-in-place callers free.
@@ -2413,7 +2426,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     trace_structure_owned_parts(
         structure,
@@ -2446,7 +2460,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     replay_fusion_trace_host(
         structure,
@@ -2505,7 +2520,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure = TensorTraceFusionStructure::compile_fusion_dyn_checked_raw(
         rule, dst_space, src_space, axes,
@@ -2555,7 +2571,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if beta.is_one() {
         return Ok(());

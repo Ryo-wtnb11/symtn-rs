@@ -58,6 +58,11 @@ symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-fe
 # The CUDA member workspace's failure seam (#1859).
 symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features = false, features = ["testing"] }
 
+[lints.rust]
+# `symtn_scope_audit`: CI-only coverage audit of Host pool entry
+# (symtn-operations host_pool.rs); exempts the one test that runs without a Runtime.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(symtn_scope_audit)"] }
+
 [lints.clippy]
 # Edition 2024 (merged doctests) makes clippy suggest let-chains for nested
 # `if let`. Why-not apply them: the workspace's 2021 rustfmt style cannot

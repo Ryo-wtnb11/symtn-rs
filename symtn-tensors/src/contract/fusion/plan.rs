@@ -1955,10 +1955,7 @@ mod tests {
     fn equal_cost_keeps_lhs_first_across_repeats_and_thread_counts() {
         // What: an equal allocation cost always selects the stable LHS-sorted candidate.
         for threads in [1, 2, 4] {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(threads)
-                .build()
-                .unwrap();
+            let pool = symtn_operations::host_pool::test_pool(threads);
             for _ in 0..4 {
                 assert_eq!(
                     pool.install(|| selected_contract_axes([1, 1, 2, 3], [3, 2, 1, 1])),

@@ -271,7 +271,8 @@ impl StridedHostKernelAdapter {
             + Zero
             + One
             + ConjugateValue
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         validate_raw_strided_bounds(dst_data.len(), shape, dst_strides, dst_offset)?;
         validate_raw_strided_bounds(src_data.len(), shape, src_strides, src_offset)?;
@@ -392,7 +393,8 @@ impl StridedHostKernelAdapter {
             + One
             + ConjugateValue
             + RecouplingCoefficientAction<C>
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         macro_rules! run {
@@ -485,7 +487,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     fn add_strided_baked(
         &mut self,

@@ -252,10 +252,7 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
     )
     .unwrap();
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(3)
-        .build()
-        .unwrap();
+    let pool = crate::host_pool::test_pool(3);
     let mut destination = initial.clone();
     let mut workspace = TreeTransformWorkspace::default();
     pool.install(|| {
@@ -379,10 +376,7 @@ where
     let (dst_structure, src_structure, replay) = recoupling_fixture();
     let fused_rank = replay.layouts().max_fused_rank();
     assert!(fused_rank > 0);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .build()
-        .unwrap();
+    let pool = crate::host_pool::test_pool(threads);
     pool.install(|| {
         let mut axpby = dst.to_vec();
         let mut workspace = TreeTransformWorkspace::default();

@@ -1,10 +1,7 @@
-//! Separate binary: this test sizes Rayon's process-global pool with `build_global`.
 //! #1531: every Host eager operation runs its replay, plan-compile and
-//! strided regions on the CPU pool of the operand's own `Runtime`, and its
-//! dense stages on that runtime's engine at the runtime's width, whatever
-//! order runtimes with different thread counts were built in. Its own test
-//! binary: the process-global Rayon pool is sized here, to a count no runtime
-//! below uses, so a region that escaped to it would be visible.
+//! strided regions on the placement token of the operand's own `Runtime`
+//! engine, and its dense stages on that engine at the runtime's width,
+//! whatever order runtimes with different thread counts were built in.
 
 use std::sync::Arc;
 
@@ -14,8 +11,6 @@ use symtn::typed::{LegSelection, Runtime};
 use symtn_tensors::host_pool::{
     observe_host_pools, take_host_pool_observations, HostPoolObservation, HostPoolSite,
 };
-
-const GLOBAL_THREADS: usize = 5;
 
 type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
 
@@ -85,9 +80,8 @@ fn assert_on_own_pool(rt: &Runtime, threads: usize, salt: usize) -> usize {
     let observations = observe(rt, salt);
     let id = observations
         .iter()
-        .filter(|o| o.site != HostPoolSite::Dense)
         .find_map(|o| o.entered)
-        .expect("no host region entered a pool");
+        .unwrap_or_else(|| panic!("no host site entered an engine: {observations:?}"));
     for site in [
         HostPoolSite::Replay,
         HostPoolSite::PlanCompile,
@@ -96,16 +90,13 @@ fn assert_on_own_pool(rt: &Runtime, threads: usize, salt: usize) -> usize {
     ] {
         let seen: Vec<_> = observations.iter().filter(|o| o.site == site).collect();
         if threads == 1 {
-            // One thread: no pool. Nothing may run on any Rayon worker, and
-            // every region that is entered at all is entered in this runtime.
-            assert!(
-                seen.iter().all(|o| o.worker_pool_threads.is_none()),
-                "{site:?}: {seen:?}"
-            );
+            // One thread: a serial engine has no token to share, so its
+            // regions run serially and are mostly never entered; any that
+            // is entered is entered in this runtime on a serial token.
             assert!(
                 seen.iter()
                     .filter(|o| o.site != HostPoolSite::Dense)
-                    .all(|o| o.entered == Some(id)),
+                    .all(|o| o.entered == Some(id) && o.token_budget == Some(1)),
                 "{site:?}: {seen:?}"
             );
             continue;
@@ -115,35 +106,12 @@ fn assert_on_own_pool(rt: &Runtime, threads: usize, salt: usize) -> usize {
             "{site:?} was not exercised: {observations:?}"
         );
         for o in &seen {
-            if site == HostPoolSite::Dense {
-                // A dense stage runs on the calling thread, which holds this
-                // runtime's engine; the engine's team, of the runtime's width,
-                // does its parallel work.
-                assert_eq!(o.worker_pool_threads, None, "dense ran on a worker");
-                assert_eq!(o.entered, Some(id), "dense entered another engine");
-                assert_eq!(o.entered_threads, Some(threads), "dense engine width");
-                continue;
-            }
-            // The pool size identifies the pool: the global one has a count
-            // no runtime here uses.
-            assert_eq!(
-                o.worker_pool_threads,
-                Some(threads),
-                "{site:?} ran off the runtime pool"
-            );
-            // A task stolen by another worker of the pool carries no symtn
-            // entry of its own and runs on the ambient pool: the one it is a
-            // worker of.
-            assert!(
-                o.entered.is_none_or(|e| e == id),
-                "{site:?} entered another pool"
-            );
-        }
-        if site != HostPoolSite::Dense {
-            assert!(
-                seen.iter().any(|o| o.entered == Some(id)),
-                "{site:?}: {seen:?}"
-            );
+            // A dense stage takes its token inside the dense backend; a region
+            // takes this runtime's engine token at the runtime's width.
+            assert_eq!(o.entered, Some(id), "{site:?} entered another engine");
+            assert_eq!(o.entered_threads, Some(threads), "{site:?} engine width");
+            let budget = (site != HostPoolSite::Dense).then_some(threads);
+            assert_eq!(o.token_budget, budget, "{site:?} token budget");
         }
     }
     id
@@ -151,11 +119,6 @@ fn assert_on_own_pool(rt: &Runtime, threads: usize, salt: usize) -> usize {
 
 #[test]
 fn each_runtime_runs_host_work_on_its_own_pool_in_either_build_order() {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(GLOBAL_THREADS)
-        .build_global()
-        .unwrap();
-
     // A serial runtime built first does not cap a later one.
     let (serial, wide) = (runtime(1), runtime(4));
     let wide_pool = assert_on_own_pool(&wide, 4, 0);

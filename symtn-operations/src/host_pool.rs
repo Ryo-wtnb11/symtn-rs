@@ -1,22 +1,24 @@
-//! The Host CPU pool that an eager operation's parallel regions run on.
+//! The Host CPU engine that an eager operation's parallel regions run on.
 //!
 //! A `Runtime` owns one CPU context ([`SharedCpuContext`]): a Tenferro
-//! `CpuEngine` whose `threadteam` pool runs the runtime's dense kernels. An eager operation enters that context on
-//! the calling thread with `with_host_pool`. Every parallel region below it
-//! (tree-transform replay fan-out, plan compile, strided kernels) then runs
-//! inside the same pool through [`install_region`] or [`strided`], and every
-//! degree cap reads [`current_threads`].
+//! `CpuEngine` whose `threadteam` team runs the runtime's dense kernels. An
+//! eager operation enters that context on the calling thread with
+//! [`enter_host_pool`]. Every parallel region below it (tree-transform replay
+//! fan-out, plan compile, strided kernels) takes the engine's placement token
+//! through [`region`] or [`strided`] and splits it with [`fork`] / [`join`];
+//! every degree cap reads [`current_threads`]. symtn schedules no work of its
+//! own: the token decides where each task runs.
 //!
-//! Why the regions are installed, not the whole operation: a Rayon worker that
-//! waits in `join` or in a nested `install` runs other queued jobs of its
-//! pool. A whole operation picked up that way could enter Tenferro's backend
-//! while another operation's dense call owns the same pool (Tenferro panics on
-//! that re-entry), or block on a runtime lock held lower on the same stack.
-//! Regions hold no lock and never call the dense backend, so running one of
-//! them on a waiting worker is harmless.
+//! A region holds the engine for its duration, so it must not call the dense
+//! backend. Inside a region (on the calling thread and on every forked task)
+//! the context is marked busy: a nested region or strided call runs serially
+//! within the task that reached it instead of asking the held engine again.
 //!
-//! With no entered pool (direct callers of this crate without a `Runtime`),
-//! regions use the ambient Rayon pool as before.
+//! With no entered context (direct callers of this crate without a `Runtime`),
+//! regions run serially on the calling thread.
+// ponytail: the entered context is thread-local until engine option A passes
+// `&mut` engine through every operation; the token then comes from that
+// argument and this lookup goes away.
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
@@ -24,12 +26,21 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(test, feature = "testing"))]
 use std::sync::Mutex;
+use std::sync::RwLock;
 
-use strided_kernel::{with_execution_policy, ExecutionPolicy};
+use strided_kernel::execution::KernelClass;
+pub use strided_kernel::Exec;
 use symtn_dense::SharedCpuContext;
 
+#[derive(Clone)]
+enum Entry {
+    Pool(SharedCpuContext),
+    /// Inside a region that holds the entered engine's token.
+    Busy,
+}
+
 thread_local! {
-    static CURRENT: RefCell<Option<SharedCpuContext>> = const { RefCell::new(None) };
+    static CURRENT: RefCell<Option<Entry>> = const { RefCell::new(None) };
 }
 
 /// Keeps a pool entered on the calling thread until dropped (see
@@ -37,7 +48,7 @@ thread_local! {
 #[must_use = "the pool is entered only while the guard lives"]
 pub struct HostPoolGuard {
     entered: usize,
-    previous: Option<SharedCpuContext>,
+    previous: Option<Entry>,
     _thread_bound: PhantomData<*const ()>,
 }
 
@@ -48,7 +59,7 @@ impl Drop for HostPoolGuard {
             let mut current = current.borrow_mut();
             // Why the identity check: a guard dropped out of nesting order must
             // not re-enter a pool that an inner guard has already left.
-            if current.as_ref().map(SharedCpuContext::identity) == Some(self.entered) {
+            if matches!(&*current, Some(Entry::Pool(pool)) if pool.identity() == self.entered) {
                 *current = previous;
             }
         });
@@ -61,99 +72,147 @@ impl Drop for HostPoolGuard {
 pub fn enter_host_pool(pool: &SharedCpuContext) -> HostPoolGuard {
     HostPoolGuard {
         entered: pool.identity(),
-        previous: CURRENT.with(|current| current.replace(Some(pool.clone()))),
+        previous: CURRENT.with(|current| current.replace(Some(Entry::Pool(pool.clone())))),
         _thread_bound: PhantomData,
     }
 }
 
-/// Runs `op` with `pool` as the calling thread's Host pool.
-pub(crate) fn with_host_pool<R>(pool: &SharedCpuContext, op: impl FnOnce() -> R) -> R {
-    let _entered = enter_host_pool(pool);
-    op()
-}
-
-fn current_pool() -> Option<SharedCpuContext> {
+fn current_entry() -> Option<Entry> {
     CURRENT.with(|current| current.borrow().clone())
 }
 
-/// Worker count a parallel region may use: the entered pool's size, or the
-/// ambient Rayon pool's when no pool is entered.
+/// Marks the calling thread busy until dropped, restoring its entry.
+struct BusyGuard(Option<Entry>);
+
+impl BusyGuard {
+    fn enter() -> Self {
+        Self(CURRENT.with(|current| current.replace(Some(Entry::Busy))))
+    }
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        CURRENT.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// Worker count a parallel region may use: the entered engine's width; one
+/// inside a region or with no entered engine.
 pub fn current_threads() -> usize {
-    CURRENT
-        .with(|current| current.borrow().as_ref().map(SharedCpuContext::num_threads))
-        .unwrap_or_else(|| {
+    match current_entry() {
+        Some(Entry::Pool(pool)) => pool.num_threads().max(1),
+        Some(Entry::Busy) => 1,
+        None => {
             audit_unentered(HostPoolSite::Threads);
-            rayon::current_num_threads()
-        })
-        .max(1)
+            1
+        }
+    }
 }
 
 /// Coverage audit (`--cfg symtn_scope_audit`, a CI row): a Host site reached
-/// on a caller thread with no entered pool means an eager operation that
-/// neither leases nor enters its runtime's pool, so its work would run on the
-/// ambient (global) pool. On a Rayon worker the ambient pool is the one being
-/// worked in, which is correct.
+/// with no entered engine means an eager operation that neither leases nor
+/// enters its runtime's engine, so its work would run serially.
 #[inline(always)]
 fn audit_unentered(site: HostPoolSite) {
     #[cfg(symtn_scope_audit)]
-    if rayon::current_thread_index().is_none() {
-        panic!("Host {site:?} site reached with no entered runtime pool");
-    }
+    panic!("Host {site:?} site reached with no entered runtime pool");
+    #[cfg(not(symtn_scope_audit))]
     let _ = site;
 }
 
-/// Runs a parallel region inside the entered pool. A one-thread pool runs it
-/// on the calling thread with strided fan-out disabled. `op` must not take a
-/// runtime lock or call the dense backend (see the module docs).
-pub fn install_region<R: Send>(site: HostPoolSite, op: impl FnOnce() -> R + Send) -> R {
-    match current_pool() {
+/// Runs a parallel region with the entered engine's token. A one-thread
+/// engine, a nested region, or no entered engine hands `op` a serial token.
+/// `op` must not take a runtime lock or call the dense backend (see the
+/// module docs).
+pub fn region<R>(site: HostPoolSite, op: impl FnOnce(Exec<'_>) -> R) -> R {
+    match current_entry() {
+        Some(Entry::Pool(pool)) => pool.with_exec(|exec| {
+            observe(site, Some(&pool), exec.budget().get());
+            let _busy = BusyGuard::enter();
+            op(exec)
+        }),
+        Some(Entry::Busy) => op(Exec::serial()),
         None => {
             audit_unentered(site);
-            observe(site, None);
-            op()
+            observe(site, None, 1);
+            op(Exec::serial())
         }
-        Some(pool) if pool.num_threads() == 1 => {
-            with_execution_policy(ExecutionPolicy::Sequential, || {
-                observe(site, Some(&pool));
-                op()
-            })
-        }
-        // Already on a pool worker (a nested region): `install` holds the
-        // engine lock for the outer region, so re-entering it would deadlock;
-        // the nested Rayon work stays on the current pool anyway.
-        // ponytail: any Rayon worker counts, so a caller inside a foreign Rayon
-        // pool runs the region there; check the engine pool identity once
-        // threadteam exposes it.
-        Some(pool) if rayon::current_thread_index().is_some() => {
-            observe(site, Some(&pool));
-            op()
-        }
-        Some(pool) => pool.install(|| {
-            with_host_pool(&pool, || {
-                observe(site, Some(&pool));
-                op()
-            })
-        }),
     }
 }
 
-/// Runs one strided-kernel call of `len` elements. At or below strided's own
-/// threading gate the kernel is serial whichever pool is current, so it runs
-/// in place without an install; above it the call is a parallel region.
-pub fn strided<R: Send>(len: usize, op: impl FnOnce() -> R + Send) -> R {
-    if len <= strided_kernel::execution::MINTHREADLENGTH {
-        return match CURRENT.with(|current| current.borrow().is_some()) {
-            // Why Sequential rather than ambient: a strided entry may query the
-            // ambient pool before its own size gate, which would initialize
-            // Rayon's global pool from inside a runtime operation.
-            true => with_execution_policy(ExecutionPolicy::Sequential, op),
-            false => {
-                audit_unentered(HostPoolSite::Strided);
-                op()
-            }
-        };
+/// Runs one strided-kernel call of `len` copied elements. When no parallel
+/// section over `len` copies can pay on the entered engine, strided would run
+/// serially whatever token it got, so it gets a serial one without taking the
+/// engine; above that the call is a parallel region.
+pub fn strided<R>(len: usize, op: impl FnOnce(Exec<'_>) -> R) -> R {
+    match current_entry() {
+        Some(Entry::Pool(pool)) if pool.section_pays(KernelClass::Copy.estimate(len)) => {
+            region(HostPoolSite::Strided, op)
+        }
+        Some(_) => op(Exec::serial()),
+        None => {
+            audit_unentered(HostPoolSite::Strided);
+            op(Exec::serial())
+        }
     }
-    install_region(HostPoolSite::Strided, op)
+}
+
+/// Runs `jobs` jobs over `exec` (see `Exec::fork`); job `i` gets a child
+/// token. Each job runs marked busy, so strided calls inside it use their own
+/// child token, never the held engine.
+pub fn fork(exec: Exec<'_>, jobs: usize, f: impl Fn(usize, Exec<'_>) + Sync) {
+    exec.fork(jobs, |job, child| {
+        let _busy = BusyGuard::enter();
+        f(job, child);
+    });
+}
+
+/// Runs `left` and `right` as two jobs of `exec`, each with its half of the
+/// budget, and returns both results.
+pub fn join<A, B, RA, RB>(exec: Exec<'_>, left: A, right: B) -> (RA, RB)
+where
+    A: FnOnce(Exec<'_>) -> RA + Send + Sync,
+    B: FnOnce(Exec<'_>) -> RB + Send + Sync,
+    RA: Send + Sync,
+    RB: Send + Sync,
+{
+    // Why the slots: `fork` takes one `Fn` for every job, and each side is a
+    // `FnOnce` that owns its half of the split buffers. Why `RwLock`, not
+    // `Mutex`: each slot is touched by one job only, and std's `Mutex` boxes
+    // an OS lock on first use on some targets (macOS), which would put an
+    // allocation on every replay fork; `RwLock` does not allocate.
+    let left = RwLock::new(Some(left));
+    let right = RwLock::new(Some(right));
+    let left_out = RwLock::new(None);
+    let right_out = RwLock::new(None);
+    fork(exec, 2, |job, child| {
+        if job == 0 {
+            let run = take(&left);
+            *write(&left_out) = Some(run(child));
+        } else {
+            let run = take(&right);
+            *write(&right_out) = Some(run(child));
+        }
+    });
+    (take(&left_out), take(&right_out))
+}
+
+fn write<T>(slot: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    slot.write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn take<T>(slot: &RwLock<Option<T>>) -> T {
+    // INVARIANT: `fork` runs each of the two jobs exactly once before
+    // returning (a panicking job unwinds through `fork`), so every slot is
+    // filled once and taken once.
+    write(slot).take().expect("join slot filled exactly once")
+}
+
+#[cfg(any(test, feature = "testing"))]
+fn lock<T>(slot: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Where a Host pool observation was taken.
@@ -168,20 +227,21 @@ pub enum HostPoolSite {
     Dense,
 }
 
-/// One observation of the pool a Host parallel site ran in.
+/// One observation of the engine a Host parallel site ran with.
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostPoolObservation {
     pub site: HostPoolSite,
-    /// [`SharedCpuContext::identity`] of the entered pool, if any.
+    /// [`SharedCpuContext::identity`] of the entered engine, if any.
     pub entered: Option<usize>,
-    /// [`SharedCpuContext::num_threads`] of the entered pool: the width its
-    /// engine runs parallel work at (one when it has no team).
+    /// [`SharedCpuContext::num_threads`] of the entered engine: the width its
+    /// team runs parallel work at (one when it has no team).
     pub entered_threads: Option<usize>,
-    /// `rayon::current_num_threads()` when the site ran on a Rayon worker;
-    /// `None` when it ran on the calling (non-pool) thread.
-    pub worker_pool_threads: Option<usize>,
+    /// Budget of the placement token the region ran with: the entered
+    /// engine's token for a region, one for a serial region; `None` for a
+    /// dense stage, which takes its token inside the dense backend.
+    pub token_budget: Option<usize>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -203,37 +263,74 @@ pub fn observe_host_pools(enabled: bool) {
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub fn take_host_pool_observations() -> Vec<HostPoolObservation> {
-    std::mem::take(&mut *OBSERVATIONS.lock().unwrap_or_else(|p| p.into_inner()))
+    std::mem::take(&mut *lock(&OBSERVATIONS))
 }
 
 /// Records where a dense linear-algebra stage runs: on the calling thread,
 /// which holds the entered runtime's engine; the engine's own team does the
-/// parallel work. A no-op outside test builds; it
-/// stays callable there because production dense stages call it.
+/// parallel work. A no-op outside test builds; it stays callable there
+/// because production dense stages call it.
 #[doc(hidden)]
 #[inline]
 pub fn observe_dense_site() {
     #[cfg(any(test, feature = "testing"))]
-    observe(HostPoolSite::Dense, current_pool().as_ref());
+    if OBSERVING.load(Ordering::Relaxed) {
+        let pool = match current_entry() {
+            Some(Entry::Pool(pool)) => Some(pool),
+            _ => None,
+        };
+        record(HostPoolObservation {
+            site: HostPoolSite::Dense,
+            entered: pool.as_ref().map(SharedCpuContext::identity),
+            entered_threads: pool.as_ref().map(SharedCpuContext::num_threads),
+            token_budget: None,
+        });
+    }
 }
 
 #[cfg(not(any(test, feature = "testing")))]
 #[inline(always)]
-fn observe(_site: HostPoolSite, _pool: Option<&SharedCpuContext>) {}
+fn observe(_site: HostPoolSite, _pool: Option<&SharedCpuContext>, _budget: usize) {}
 
 #[cfg(any(test, feature = "testing"))]
-fn observe(site: HostPoolSite, pool: Option<&SharedCpuContext>) {
+fn observe(site: HostPoolSite, pool: Option<&SharedCpuContext>, budget: usize) {
     if !OBSERVING.load(Ordering::Relaxed) {
         return;
     }
-    let observation = HostPoolObservation {
+    record(HostPoolObservation {
         site,
         entered: pool.map(SharedCpuContext::identity),
         entered_threads: pool.map(SharedCpuContext::num_threads),
-        worker_pool_threads: rayon::current_thread_index().map(|_| rayon::current_num_threads()),
-    };
-    OBSERVATIONS
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .push(observation);
+        token_budget: Some(budget),
+    });
+}
+
+#[cfg(any(test, feature = "testing"))]
+fn record(observation: HostPoolObservation) {
+    lock(&OBSERVATIONS).push(observation);
+}
+
+/// Test support: an engine of `threads` workers that [`TestPool::install`]
+/// enters on the calling thread, in place of a runtime.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub struct TestPool(SharedCpuContext);
+
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn test_pool(threads: usize) -> TestPool {
+    TestPool(SharedCpuContext::with_threads(threads).expect("test engine"))
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl TestPool {
+    /// Runs `op` with this engine entered as the calling thread's Host pool.
+    pub fn install<R>(&self, op: impl FnOnce() -> R) -> R {
+        let _entered = enter_host_pool(&self.0);
+        op()
+    }
+
+    pub fn context(&self) -> &SharedCpuContext {
+        &self.0
+    }
 }

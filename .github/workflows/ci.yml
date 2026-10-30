@@ -372,7 +372,7 @@ jobs:
   # execution lease or an explicit guard). `symtn_scope_audit` turns a Host
   # replay/compile/strided site reached with no entered pool on a caller
   # thread into a panic, so an operation that forgets the entry fails here
-  # instead of silently running on Rayon's global pool. Own job: the cfg
+  # instead of silently running serially. Own job: the cfg
   # changes RUSTFLAGS and would otherwise invalidate the test job's build
   # cache.
   host-pool-audit:

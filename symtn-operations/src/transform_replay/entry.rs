@@ -27,7 +27,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
@@ -68,7 +69,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
@@ -110,7 +112,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
