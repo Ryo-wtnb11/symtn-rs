@@ -93,6 +93,7 @@ macro_rules! for_dtypes {
 #[test]
 fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
@@ -104,14 +105,15 @@ fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
         let v = space(&[(0, 1), (1, 2)]);
         // V ⊗ V: q=0: 1·1; q=1: 1·2 + 2·1 = 4 (two trees); q=2: 2·2 = 4.
         let fused = space(&[(0, 1), (1, 4), (2, 4)]);
-        let iso: TensorMap<_, D> = TensorMap::isomorphism(&rt, [&v, &v], [&fused]).unwrap();
+        let iso: TensorMap<_, D> = TensorMap::isomorphism(engine, &rt, [&v, &v], [&fused]).unwrap();
         let u = U1Irrep::new;
         assert_identity_blocks(
             &format!("{what} isomorphism V⊗V ← W"),
             &iso,
             &[(u(0), 1, 1), (u(1), 4, 4), (u(2), 4, 4)],
         );
-        let inverse: TensorMap<_, D> = TensorMap::isomorphism(&rt, [&fused], [&v, &v]).unwrap();
+        let inverse: TensorMap<_, D> =
+            TensorMap::isomorphism(engine, &rt, [&fused], [&v, &v]).unwrap();
         assert_identity_blocks(
             &format!("{what} isomorphism W ← V⊗V"),
             &inverse,
@@ -119,7 +121,7 @@ fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
         );
         // q=0 lives only in the codomain, so it has no stored block.
         let small = space(&[(1, 3), (2, 1)]);
-        let w: TensorMap<_, D> = TensorMap::isometry(&rt, [&v, &v], [&small]).unwrap();
+        let w: TensorMap<_, D> = TensorMap::isometry(engine, &rt, [&v, &v], [&small]).unwrap();
         assert_identity_blocks(
             &format!("{what} isometry V⊗V ← W'"),
             &w,
@@ -132,6 +134,7 @@ fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
 #[test]
 fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
@@ -147,7 +150,7 @@ fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() 
         // V ⊗ V, twice-spin labels: 0: 0⊗0 (1) + ½⊗½ (4) = 5 (two trees);
         // ½: 0⊗½ (2) + ½⊗0 (2) = 4 (two trees); 1: ½⊗½ (4).
         let fused = space(&[(0, 5), (1, 4), (2, 4)]);
-        let iso: TensorMap<_, D> = TensorMap::isomorphism(&rt, [&v, &v], [&fused]).unwrap();
+        let iso: TensorMap<_, D> = TensorMap::isomorphism(engine, &rt, [&v, &v], [&fused]).unwrap();
         assert_identity_blocks(
             &format!("{what} isomorphism V⊗V ← W"),
             &iso,
@@ -155,7 +158,7 @@ fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() 
         );
         // ½ lives only in the codomain, so it has no stored block.
         let small = space(&[(0, 2), (2, 3)]);
-        let w: TensorMap<_, D> = TensorMap::isometry(&rt, [&v, &v], [&small]).unwrap();
+        let w: TensorMap<_, D> = TensorMap::isometry(engine, &rt, [&v, &v], [&small]).unwrap();
         assert_identity_blocks(
             &format!("{what} isometry V⊗V ← W'"),
             &w,
@@ -172,6 +175,7 @@ fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() 
 #[test]
 fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
     fn run<D: TensorScalar + Into<Complex64>>(what: &str) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
@@ -184,30 +188,30 @@ fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
         let w = space(&[(0, 2)]);
 
         // TensorKit trees of V ⊗ V at charge 0: (0,0), (-1,1), (1,-1).
-        let t: TensorMap<_, D> = TensorMap::isometry(&rt, [&v, &v], [&w]).unwrap();
+        let t: TensorMap<_, D> = TensorMap::isometry(engine, &rt, [&v, &v], [&w]).unwrap();
         assert_dense(
             &format!("{what} isometry V⊗V ← U1(0=>2)"),
-            &t.to_physical_dense().unwrap(),
+            &t.to_physical_dense(engine).unwrap(),
             &[3, 3, 2],
             &[(&[1, 1, 1], 1.0), (&[3, 2, 2], 1.0)],
         );
 
         // TensorKit trees of V ⊗ V' at charge 0: (0,0), (1,-1), (-1,1).
         let t: TensorMap<_, D> =
-            TensorMap::isometry(&rt, [&v, &v.try_dual().unwrap()], [&w]).unwrap();
+            TensorMap::isometry(engine, &rt, [&v, &v.try_dual().unwrap()], [&w]).unwrap();
         assert_dense(
             &format!("{what} isometry V⊗V' ← U1(0=>2)"),
-            &t.to_physical_dense().unwrap(),
+            &t.to_physical_dense(engine).unwrap(),
             &[3, 3, 2],
             &[(&[1, 1, 1], 1.0), (&[2, 2, 2], 1.0)],
         );
 
         // W's physical order is 0 (×3), 1 (×2), -1 (×2), 2, -2.
         let fused = space(&[(0, 3), (1, 2), (-1, 2), (2, 1), (-2, 1)]);
-        let t: TensorMap<_, D> = TensorMap::isomorphism(&rt, [&v, &v], [&fused]).unwrap();
+        let t: TensorMap<_, D> = TensorMap::isomorphism(engine, &rt, [&v, &v], [&fused]).unwrap();
         assert_dense(
             &format!("{what} isomorphism V⊗V ← W"),
-            &t.to_physical_dense().unwrap(),
+            &t.to_physical_dense(engine).unwrap(),
             &[3, 3, 9],
             &[
                 (&[1, 1, 1], 1.0),
@@ -235,6 +239,7 @@ fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
 fn su2_three_leg_isometry_matches_tensorkit_dense() {
     use std::f64::consts::FRAC_1_SQRT_2;
     fn run<D: TensorScalar + Into<Complex64>>(what: &str) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
@@ -247,10 +252,10 @@ fn su2_three_leg_isometry_matches_tensorkit_dense() {
         };
         let s = space(&[(0, 1), (1, 1)]);
         let w = space(&[(1, 4)]);
-        let t: TensorMap<_, D> = TensorMap::isometry(&rt, [&s, &s, &s], [&w]).unwrap();
+        let t: TensorMap<_, D> = TensorMap::isometry(engine, &rt, [&s, &s, &s], [&w]).unwrap();
         assert_dense(
             &format!("{what} isometry S⊗S⊗S ← SU2(½=>4)"),
-            &t.to_physical_dense().unwrap(),
+            &t.to_physical_dense(engine).unwrap(),
             &[3, 3, 3, 8],
             &[
                 (&[2, 1, 1, 1], 1.0),
@@ -281,6 +286,7 @@ fn su2_three_leg_isometry_matches_tensorkit_dense() {
 #[test]
 fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
     fn run<D: TensorScalar + Into<Complex64>>(what: &str) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
@@ -295,10 +301,10 @@ fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
         let w = space(&[(1, 6)]);
         let (a, b) = ((1.0f64 / 3.0).sqrt(), (2.0f64 / 3.0).sqrt());
         let h = std::f64::consts::FRAC_1_SQRT_2;
-        let t: TensorMap<_, D> = TensorMap::isometry(&rt, [&s, &s, &s], [&w]).unwrap();
+        let t: TensorMap<_, D> = TensorMap::isometry(engine, &rt, [&s, &s, &s], [&w]).unwrap();
         assert_dense(
             &format!("{what} isometry S⊗S⊗S ← SU2(½=>6)"),
-            &t.to_physical_dense().unwrap(),
+            &t.to_physical_dense(engine).unwrap(),
             &[6, 6, 6, 12],
             &[
                 (&[2, 1, 1, 1], 1.0),
@@ -335,6 +341,7 @@ fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
 /// `t[f₁, f₂]`.
 #[test]
 fn su2_product_isometry_follows_tensorkit_inner_line_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     type Su2Su2 = ProductFusionRule<SU2FusionRule, SU2FusionRule>;
     let rt = Runtime::builder().build().unwrap();
     let p = |a: usize, b: usize| {
@@ -349,7 +356,7 @@ fn su2_product_isometry_follows_tensorkit_inner_line_order() {
     };
     let y = space(&[((1, 1), 1)]);
     let w = space(&[((1, 1), 2), ((1, 3), 2), ((3, 1), 2), ((3, 3), 1)]);
-    let t: TensorMap<_, f64> = TensorMap::isometry(&rt, [&y, &y, &y], [&w]).unwrap();
+    let t: TensorMap<_, f64> = TensorMap::isometry(engine, &rt, [&y, &y, &y], [&w]).unwrap();
     let mut got = Vec::new();
     for (trees, block) in t.subblocks().unwrap() {
         let columns = *block.shape().last().unwrap();
@@ -381,6 +388,7 @@ fn su2_product_isometry_follows_tensorkit_inner_line_order() {
 fn su3_isometry_is_the_block_identity_across_multiplicity_vertices() {
     use symtn::sector::LieGroupFusionRule;
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
+        let engine = &mut symtn::typed::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
@@ -395,7 +403,7 @@ fn su3_isometry_is_the_block_identity_across_multiplicity_vertices() {
         // + 8⊗1 (2) + 1⊗8 (2) = 12.
         let small =
             GradedSpace::try_new(provider, [(octet.clone(), 3), (singlet.clone(), 5)]).unwrap();
-        let w: TensorMap<_, D> = TensorMap::isometry(&rt, [&v, &v], [&small]).unwrap();
+        let w: TensorMap<_, D> = TensorMap::isometry(engine, &rt, [&v, &v], [&small]).unwrap();
         assert_identity_blocks(
             &format!("{what} isometry V⊗V ← W"),
             &w,

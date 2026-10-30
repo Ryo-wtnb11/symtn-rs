@@ -83,12 +83,13 @@ fn assert_bit_equal<D: DevicePayload>(what: &str, got: &[D], want: &[D]) {
 /// A destination of `case`'s result space with every block, including the
 /// blocks no GEMM writes, holding a nonzero dyadic value.
 fn filled_destination<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     case: &Case<R, D>,
 ) -> TensorMap<R, D> {
-    let host = case.host();
+    let host = case.host(engine);
     let (codomain, domain) = (host.codomain(), host.domain());
-    TensorMap::from_subblock_fn(runtime, codomain.iter(), domain.iter(), fill(97)).unwrap()
+    TensorMap::from_subblock_fn(engine, runtime, codomain.iter(), domain.iter(), fill(97)).unwrap()
 }
 
 /// Eager device `contract` and an alpha/beta grid of `contract_into`, each
@@ -99,27 +100,36 @@ fn filled_destination<R: DeviceRule, D: DevicePayload>(
 /// not depend on alpha or on beta, except that at `beta = 1` a core route
 /// skips the region moves that write `beta * destination` into the coupled
 /// sectors no GEMM reaches ([`UNREACHED_CORE_SECTORS`]).
-fn eager<R: DeviceRule, D: DevicePayload>(runtime: &Runtime, case: &Case<R, D>, family: &str) {
+fn eager<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    runtime: &Runtime,
+    case: &Case<R, D>,
+    family: &str,
+) {
     let name = format!("eager {family} {} {}", case.name, D::NAME);
     let spec = case.spec();
-    let host = case.host();
+    let host = case.host(engine);
     let output_bytes = std::mem::size_of_val(host.dense_data().unwrap()) as u64;
-    let (lhs, rhs) = (case.lhs.to_cuda().unwrap(), case.rhs.to_cuda().unwrap());
-    let device = lhs.contract(&rhs, &spec).unwrap();
+    let (lhs, rhs) = (
+        case.lhs.to_cuda(cuda).unwrap(),
+        case.rhs.to_cuda(cuda).unwrap(),
+    );
+    let device = lhs.contract(cuda, &rhs, &spec).unwrap();
     assert_bit_equal(
         &format!("{name} contract"),
-        device.to_host().unwrap().dense_data().unwrap(),
+        device.to_host(cuda).unwrap().dense_data().unwrap(),
         host.dense_data().unwrap(),
     );
-    let (_, warm) = delta(|| lhs.contract(&rhs, &spec).unwrap());
+    let (_, warm) = delta(|| lhs.contract(cuda, &rhs, &spec).unwrap());
     assert_eq!(
         warm[..4],
         [1, output_bytes, 0, 1],
         "{name} contract warm: (h2d_calls, h2d_bytes, d2h_calls, device_allocs)"
     );
     let mut submissions = Vec::new();
-    let filled = filled_destination(runtime, case);
-    let poisoned = poisoned_destination(case);
+    let filled = filled_destination(engine, runtime, case);
+    let poisoned = poisoned_destination(engine, case);
     let zero = D::entry(0.0, 0.0);
     let negative_zero = D::entry(-0.0, 0.0);
     for (alpha_label, alpha) in [
@@ -139,18 +149,18 @@ fn eager<R: DeviceRule, D: DevicePayload>(runtime: &Runtime, case: &Case<R, D>, 
             let what = format!("{name} into alpha={alpha_label} beta={beta_label}");
             // A deep copy: a clone shares the payload, which `contract_into`
             // rejects as a shared destination.
-            let mut expected = start.scale(D::entry(1.0, 0.0)).unwrap();
+            let mut expected = start.scale(engine, D::entry(1.0, 0.0)).unwrap();
             case.lhs
-                .contract_into(&case.rhs, &spec, &mut expected, alpha, beta)
+                .contract_into(engine, &case.rhs, &spec, &mut expected, alpha, beta)
                 .unwrap();
-            let mut destination = start.to_cuda().unwrap();
+            let mut destination = start.to_cuda(cuda).unwrap();
             let (_, counters) = delta(|| {
-                lhs.contract_into(&rhs, &spec, &mut destination, alpha, beta)
+                lhs.contract_into(cuda, &rhs, &spec, &mut destination, alpha, beta)
                     .unwrap()
             });
             assert_bit_equal(
                 &what,
-                destination.to_host().unwrap().dense_data().unwrap(),
+                destination.to_host(cuda).unwrap().dense_data().unwrap(),
                 expected.dense_data().unwrap(),
             );
             // The grid's first call is the first `contract_into` of this
@@ -194,37 +204,45 @@ const UNREACHED_CORE_SECTORS: &[&str] = &[
     "fB",
 ];
 
-fn eager_routes<D: DevicePayload>() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+fn eager_routes<D: DevicePayload>(
+    cuda: &mut dyn symtn::typed::Engine,
+    engine: &mut dyn symtn::typed::Engine,
+) {
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1_non_self_dual();
-    for (case, _) in candidate_core_probes::<_, D>(&runtime, &v) {
-        eager(&runtime, &case, "core");
+    for (case, _) in candidate_core_probes::<_, D>(engine, &runtime, &v) {
+        eager(engine, cuda, &runtime, &case, "core");
     }
-    for (case, _) in copy_c_probes::<_, D>(&runtime, &v) {
-        eager(&runtime, &case, "copyC");
+    for (case, _) in copy_c_probes::<_, D>(engine, &runtime, &v) {
+        eager(engine, cuda, &runtime, &case, "copyC");
     }
-    for case in u1_inactive_cases::<D>(&runtime) {
-        eager(&runtime, &case, "inactive");
+    for case in u1_inactive_cases::<D>(engine, &runtime) {
+        eager(engine, cuda, &runtime, &case, "inactive");
     }
-    eager(&runtime, &u1_reordered::<D>(&runtime), "tree");
+    let host_result = u1_reordered::<D>(engine, &runtime);
+    eager(engine, cuda, &runtime, &host_result, "tree");
     for case in fermionic_twist_roles::<FermionU1, D>(
+        engine,
         &runtime,
         &fermion_u1(),
         ["fA", "fcanonical", "fB", "fboth"],
         71,
     ) {
-        eager(&runtime, &case, "fermion");
+        eager(engine, cuda, &runtime, &case, "fermion");
     }
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn eager_device_routes_are_bit_equal_to_the_host_within_documented_costs() {
-    eager_routes::<f64>();
-    eager_routes::<Complex64>();
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    eager_routes::<f64>(cuda, engine);
+    eager_routes::<Complex64>(cuda, engine);
 }
 
 fn rescaled<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
     case: &Case<R, D>,
     call: usize,
     member: usize,
@@ -234,14 +252,17 @@ fn rescaled<R: DeviceRule, D: DevicePayload>(
         name: case.name,
         lhs: case
             .lhs
-            .scale(D::entry(
-                -0.75 - call / 8.0 + member / 64.0,
-                (call + 1.0) / 16.0 - member / 128.0,
-            ))
+            .scale(
+                engine,
+                D::entry(
+                    -0.75 - call / 8.0 + member / 64.0,
+                    (call + 1.0) / 16.0 - member / 128.0,
+                ),
+            )
             .unwrap(),
         rhs: case
             .rhs
-            .scale(D::entry(1.5 + call / 4.0 + member / 32.0, 0.0))
+            .scale(engine, D::entry(1.5 + call / 4.0 + member / 32.0, 0.0))
             .unwrap(),
         lhs_axes: case.lhs_axes.clone(),
         rhs_axes: case.rhs_axes.clone(),
@@ -260,9 +281,14 @@ fn rescaled<R: DeviceRule, D: DevicePayload>(
 /// nothing; `execute_into` transfers nothing below the member count's high
 /// water; nothing is downloaded; and the submissions of each call do not
 /// depend on `B`.
-fn members<R: DeviceRule, D: DevicePayload>(family: &str, case: &Case<R, D>) {
+fn members<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    family: &str,
+    case: &Case<R, D>,
+) {
     let spec = case.spec();
-    let member_bytes = std::mem::size_of_val(case.host().dense_data().unwrap()) as u64;
+    let member_bytes = std::mem::size_of_val(case.host(engine).dense_data().unwrap()) as u64;
     // Per call form, the `(gemm_calls, copy_calls)` of every call.
     let mut submissions: [Vec<Counters>; 3] = Default::default();
     let host_one =
@@ -270,12 +296,13 @@ fn members<R: DeviceRule, D: DevicePayload>(family: &str, case: &Case<R, D>) {
     let lhs_one = host_one(|m| &m.lhs);
     let rhs_one = host_one(|m| &m.rhs);
     let plan = ContractPlan::new(
-        &lhs_one.to_cuda().unwrap(),
-        &rhs_one.to_cuda().unwrap(),
+        engine,
+        &lhs_one.to_cuda(cuda).unwrap(),
+        &rhs_one.to_cuda(cuda).unwrap(),
         &spec,
     )
     .unwrap();
-    let host_plan = ContractPlan::new(&lhs_one, &rhs_one, &spec).unwrap();
+    let host_plan = ContractPlan::new(engine, &lhs_one, &rhs_one, &spec).unwrap();
     for sequence in [&[1usize, 2, 17, 1][..], &[4, 2, 4]] {
         let mut high_water = 0;
         let mut workspace = plan.workspace().unwrap();
@@ -287,61 +314,75 @@ fn members<R: DeviceRule, D: DevicePayload>(family: &str, case: &Case<R, D>) {
                 case.name,
                 D::NAME
             );
-            let cases: Vec<_> = (0..count).map(|i| rescaled(case, call, i)).collect();
+            let cases: Vec<_> = (0..count)
+                .map(|i| rescaled(engine, case, call, i))
+                .collect();
             let stack = |pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
                 StackedTensorMap::pack(&cases.iter().map(pick).collect::<Vec<_>>()).unwrap()
             };
             let (host_lhs, host_rhs) = (stack(|m| &m.lhs), stack(|m| &m.rhs));
-            let (lhs, rhs) = (host_lhs.to_cuda().unwrap(), host_rhs.to_cuda().unwrap());
+            let (lhs, rhs) = (
+                host_lhs.to_cuda(cuda).unwrap(),
+                host_rhs.to_cuda(cuda).unwrap(),
+            );
             // The first call writes stale values (a later call's scaling) into
             // the output the warm call reuses; a rejected call in between keeps
             // that buffer as the spare (#2123).
-            let stale: Vec<_> = (0..count).map(|i| rescaled(case, call + 8, i)).collect();
-            let stale_stack = |pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
-                StackedTensorMap::pack(&stale.iter().map(pick).collect::<Vec<_>>())
-                    .unwrap()
-                    .to_cuda()
-                    .unwrap()
-            };
-            let (stale_lhs, stale_rhs) = (stale_stack(|m| &m.lhs), stale_stack(|m| &m.rhs));
+            let stale: Vec<_> = (0..count)
+                .map(|i| rescaled(engine, case, call + 8, i))
+                .collect();
+            let stale_stack =
+                |cuda: &mut dyn symtn::typed::Engine, pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
+                    StackedTensorMap::pack(&stale.iter().map(pick).collect::<Vec<_>>())
+                        .unwrap()
+                        .to_cuda(cuda)
+                        .unwrap()
+                };
+            let (stale_lhs, stale_rhs) =
+                (stale_stack(cuda, |m| &m.lhs), stale_stack(cuda, |m| &m.rhs));
             let longer = StackedTensorMap::pack(&vec![&case.rhs; count + 1])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
             let (_, first) = delta(|| {
-                plan.execute(&stale_lhs, &stale_rhs, &mut workspace)
+                plan.execute(cuda, &stale_lhs, &stale_rhs, &mut workspace)
                     .unwrap();
             });
-            assert!(plan.execute(&lhs, &longer, &mut workspace).is_err());
+            assert!(plan.execute(cuda, &lhs, &longer, &mut workspace).is_err());
             assert!(workspace.take_output().is_none());
             let (_, warm) = delta(|| {
-                plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+                plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
             });
-            let returned = workspace.take_output().unwrap().to_host().unwrap();
-            let poison: Vec<_> = cases.iter().map(poisoned_destination).collect();
+            let returned = workspace.take_output().unwrap().to_host(cuda).unwrap();
+            let poison: Vec<_> = cases
+                .iter()
+                .map(|case| poisoned_destination(engine, case))
+                .collect();
             let mut dst = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
             let (_, written_counters) = delta(|| {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut into).unwrap();
+                plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut into)
+                    .unwrap();
             });
-            let written = dst.to_host().unwrap();
+            let written = dst.to_host(cuda).unwrap();
             let expected = host_plan
-                .execute(&host_lhs, &host_rhs, &mut host_workspace)
+                .execute(engine, &host_lhs, &host_rhs, &mut host_workspace)
                 .unwrap();
             for (i, member) in cases.iter().enumerate() {
+                let rhs_device = member.rhs.to_cuda(cuda).unwrap();
                 let eager = member
                     .lhs
-                    .to_cuda()
+                    .to_cuda(cuda)
                     .unwrap()
-                    .contract(&member.rhs.to_cuda().unwrap(), &spec)
+                    .contract(cuda, &rhs_device, &spec)
                     .unwrap()
-                    .to_host()
+                    .to_host(cuda)
                     .unwrap();
-                let host = expected.member(i).unwrap();
+                let host = expected.member(engine, i).unwrap();
                 for (form, actual) in [("execute", &returned), ("execute_into", &written)] {
-                    let actual = actual.member(i).unwrap();
+                    let actual = actual.member(engine, i).unwrap();
                     for (reference, value) in [("host member", &host), ("eager", &eager)] {
                         assert_bit_equal(
                             &format!("{key} {form} member {i} vs {reference}"),
@@ -381,42 +422,56 @@ fn members<R: DeviceRule, D: DevicePayload>(family: &str, case: &Case<R, D>) {
     }
 }
 
-fn member_routes<D: DevicePayload>() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let [_, identity_output, output_transform] = u1_inactive_cases::<D>(&runtime);
-    members("member", &identity_output);
+fn member_routes<D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+) {
+    let runtime = Runtime::builder().build().unwrap();
+    let [_, identity_output, output_transform] = u1_inactive_cases::<D>(engine, &runtime);
+    members(engine, cuda, "member", &identity_output);
     // `ContractPlan` resolves this geometry to CopyC (an output transform
     // over a direct core with one inactive block).
-    members("member", &output_transform);
-    members("member", &u1_reordered::<D>(&runtime));
+    members(engine, cuda, "member", &output_transform);
+    let host_result = u1_reordered::<D>(engine, &runtime);
+    members(engine, cuda, "member", &host_result);
     let [twisted_a, _, twisted_b, _] = fermionic_twist_roles::<FermionU1, D>(
+        engine,
         &runtime,
         &fermion_u1(),
         ["fA", "fcanonical", "fB", "fboth"],
         71,
     );
-    members("member", &twisted_a);
-    members("member", &twisted_b);
+    members(engine, cuda, "member", &twisted_a);
+    members(engine, cuda, "member", &twisted_b);
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn member_dynamic_tree_is_bit_equal_to_host_and_eager_within_documented_costs() {
-    member_routes::<f64>();
-    member_routes::<Complex64>();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    member_routes::<f64>(engine, cuda);
+    member_routes::<Complex64>(engine, cuda);
 }
 
 /// Fermionic `V <- V'` against `V' <- V` over fZ2 x U(1): a direct core
 /// with exact +1 and -1 job coefficients and one inactive destination block,
 /// as Core (identity output) and CopyC (reversed output), unswapped and
 /// swapped.
-fn signed_cases<D: DevicePayload>(runtime: &Runtime) -> [Case<FermionU1, D>; 4] {
+fn signed_cases<D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    runtime: &Runtime,
+) -> [Case<FermionU1, D>; 4] {
     let v = fermion_u1();
     let dual = v.try_dual().unwrap();
-    let map = |codomain: &GradedSpace<FermionU1>, domain: &GradedSpace<FermionU1>, salt| {
-        TensorMap::<_, D>::from_subblock_fn(runtime, [codomain], [domain], fill(salt)).unwrap()
+    let map = |engine: &mut dyn symtn::typed::Engine,
+               codomain: &GradedSpace<FermionU1>,
+               domain: &GradedSpace<FermionU1>,
+               salt| {
+        TensorMap::<_, D>::from_subblock_fn(engine, runtime, [codomain], [domain], fill(salt))
+            .unwrap()
     };
-    let (a, b) = (map(&v, &dual, 211), map(&dual, &v, 212));
+    let (a, b) = (map(engine, &v, &dual, 211), map(engine, &dual, &v, 212));
     let case = |name, swapped: bool, output: [usize; 2]| Case {
         name,
         lhs: if swapped { b.clone() } else { a.clone() },
@@ -436,29 +491,34 @@ fn signed_cases<D: DevicePayload>(runtime: &Runtime) -> [Case<FermionU1, D>; 4] 
 
 /// Member Core and CopyC (#1859): unit and signed direct cores, swapped
 /// and unswapped, with and without inactive destination blocks.
-fn direct_member_routes<D: DevicePayload>() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+fn direct_member_routes<D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+) {
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1_non_self_dual();
-    for (case, _) in candidate_core_probes::<_, D>(&runtime, &v) {
+    for (case, _) in candidate_core_probes::<_, D>(engine, &runtime, &v) {
         if matches!(case.name, "C0" | "C1" | "C2") {
-            members("direct member", &case);
+            members(engine, cuda, "direct member", &case);
         }
     }
-    for (case, _) in copy_c_probes::<_, D>(&runtime, &v) {
+    for (case, _) in copy_c_probes::<_, D>(engine, &runtime, &v) {
         if matches!(case.name, "C1p" | "C2p") {
-            members("direct member", &case);
+            members(engine, cuda, "direct member", &case);
         }
     }
-    let [core_inactive, _, _] = u1_inactive_cases::<D>(&runtime);
-    members("direct member", &core_inactive);
-    for case in signed_cases::<D>(&runtime) {
-        members("direct member", &case);
+    let [core_inactive, _, _] = u1_inactive_cases::<D>(engine, &runtime);
+    members(engine, cuda, "direct member", &core_inactive);
+    for case in signed_cases::<D>(engine, &runtime) {
+        members(engine, cuda, "direct member", &case);
     }
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn member_core_and_copy_c_are_bit_equal_to_host_and_eager_within_documented_costs() {
-    direct_member_routes::<f64>();
-    direct_member_routes::<Complex64>();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    direct_member_routes::<f64>(engine, cuda);
+    direct_member_routes::<Complex64>(engine, cuda);
 }

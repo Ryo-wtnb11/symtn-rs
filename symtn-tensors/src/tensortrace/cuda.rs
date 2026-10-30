@@ -23,7 +23,6 @@
 //! match, traces each dense block (`wbarray::trace`, one joint index per pair,
 //! wbarray.cc:3558) and adds it into its destination block.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use symtn_core::BlockStructure;
@@ -31,7 +30,6 @@ use symtn_dense::{
     cuda_region_scale, cuda_region_trace_accumulate, CudaDenseContext, CudaRegion, CudaScalar,
 };
 use symtn_operations::cuda::CudaStorage;
-use symtn_operations::CudaTreeTransformExecutor;
 
 use super::{validate_trace_data_extents, TensorTraceFusionStructure};
 use crate::{OperationError, RecouplingCoefficientAction};
@@ -53,15 +51,11 @@ use crate::{OperationError, RecouplingCoefficientAction};
 /// before the first submission, so a rejected call touches neither buffer.
 /// The ones and scaled templates are reserved to the largest traced extent
 /// first, so a replay uploads at most once each and a warm one never; each
-/// distinct non-unit `α′` costs one device refill of the scaled template. The
-/// transform executor reserves plan entries for the distinct term signatures
-/// (a high-water mark, under its plan-cache budget), so a warm replay of up
-/// to that budget rebuilds no plan.
+/// distinct non-unit `α′` costs one device refill of the scaled template.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn tensortrace_fusion_structure_into_on_cuda<C, D>(
     ctx: &mut CudaDenseContext,
-    transforms: &mut CudaTreeTransformExecutor,
     structure: &TensorTraceFusionStructure<C>,
     dst_structure: &Arc<BlockStructure>,
     dst: &mut CudaStorage<D>,
@@ -140,31 +134,6 @@ where
         }
     }
 
-    // A plan is keyed on the three operand layouts: the source and destination
-    // regions (offsets excepted, alignment being `size_of::<D>()` for every
-    // view) and the ones view, which the source's traced extents fix. The
-    // conjugation flag and the scale are the same for every term or not in
-    // the key, and a scaled term reads the scaled template through a view of
-    // the same metadata as the ones template.
-    // Each refill of the scaled template is one more packed `[len]` move.
-    let fills = moves
-        .iter()
-        .filter(|(_, _, scale, _)| *scale != D::ONE)
-        .map(|&(_, _, _, len)| len)
-        .collect::<HashSet<_>>()
-        .len();
-    let signatures = moves
-        .iter()
-        .map(|(src, dst, _, _)| (src.dims(), src.strides(), dst.strides()))
-        .collect::<HashSet<_>>()
-        .len()
-        + fills
-        + beta_regions
-            .iter()
-            .map(|region| (region.dims(), region.strides()))
-            .collect::<HashSet<_>>()
-            .len();
-    transforms.reserve_plan_entries_for_additional(ctx, signatures)?;
     ctx.reserve_zero_template::<D>(largest_layout)
         .map_err(OperationError::Dense)?;
     ctx.reserve_ones_template::<D>(largest_unit)

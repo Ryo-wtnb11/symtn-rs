@@ -35,11 +35,13 @@ where
     R::Mode: TypedTensorConstructionDispatch<R, D>,
     D: TensorScalar,
 {
-    TensorMap::zeros(runtime, [space], [space])
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    TensorMap::zeros(engine, runtime, [space], [space])
 }
 
 #[test]
 fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
 
     let u1 = GradedSpace::try_new(
@@ -47,7 +49,7 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
         [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2)],
     )
     .unwrap();
-    let u1_tensor = TensorMap::<U1FusionRule, f64>::zeros(&runtime, [&u1], [&u1]).unwrap();
+    let u1_tensor = TensorMap::<U1FusionRule, f64>::zeros(engine, &runtime, [&u1], [&u1]).unwrap();
     inspect_with_the_existing_root_bound(&u1_tensor);
     let generic_u1: TensorMap<U1FusionRule, f64> =
         zeros_with_the_construction_bound(&runtime, &u1).unwrap();
@@ -66,7 +68,8 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
         ],
     )
     .unwrap();
-    let su2_tensor = TensorMap::<SU2FusionRule, f64>::zeros(&runtime, [&su2], [&su2]).unwrap();
+    let su2_tensor =
+        TensorMap::<SU2FusionRule, f64>::zeros(engine, &runtime, [&su2], [&su2]).unwrap();
     assert!(su2_tensor.subblock_count() >= 2);
 
     let product = GradedSpace::try_new(
@@ -83,16 +86,19 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
         ],
     )
     .unwrap();
-    let product_tensor = TensorMap::<_, f64>::zeros(&runtime, [&product], [&product]).unwrap();
+    let product_tensor =
+        TensorMap::<_, f64>::zeros(engine, &runtime, [&product], [&product]).unwrap();
     assert_eq!(product_tensor.subblock_count(), 2);
 }
 
 #[test]
 fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space =
         GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let tensor = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&space],
         [&space],
@@ -105,12 +111,13 @@ fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
     .unwrap();
 
     let identity =
-        TensorMap::<U1FusionRule, f64>::isomorphism(&runtime, [&space], [&space]).unwrap();
+        TensorMap::<U1FusionRule, f64>::isomorphism(engine, &runtime, [&space], [&space]).unwrap();
     // Each entry sums the two-dimensional contracted leg.
     numerics::assert_slices_close(
         "identity contraction",
         identity
             .contract(
+                engine,
                 &tensor,
                 &ContractSpec {
                     lhs: &[1],
@@ -128,18 +135,19 @@ fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
     numerics::assert_slices_close(
         "double adjoint",
         tensor
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
         tensor.dense_data().unwrap(),
         1,
     );
-    assert_eq!(identity.tr().unwrap(), 2.0);
+    assert_eq!(identity.tr(engine).unwrap(), 2.0);
 
     let rank_three = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&space, &space],
         [&space],
@@ -147,27 +155,27 @@ fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
     )
     .unwrap();
     let roundtrip = rank_three
-        .permute(&[1, 0], &[2])
+        .permute(engine, &[1, 0], &[2])
         .unwrap()
-        .permute(&[1, 0], &[2])
+        .permute(engine, &[1, 0], &[2])
         .unwrap();
     assert_eq!(
         roundtrip.dense_data().unwrap(),
         rank_three.dense_data().unwrap()
     );
 
-    let Svd { u, s, vh } = tensor.svd_compact(&[0], &[1]).unwrap();
+    let Svd { u, s, vh } = tensor.svd_compact(engine, &[0], &[1]).unwrap();
     let found = s.domain()[0]
-        .find_truncated(&s.diagview().unwrap(), &Truncation::rank(2))
+        .find_truncated(&s.diagview(engine).unwrap(), &Truncation::rank(2))
         .unwrap();
     let u = u
-        .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+        .restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
         .unwrap();
     let s = s
-        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
         .unwrap();
-    let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
-    let reconstructed = u.compose(&s).unwrap().compose(&vh).unwrap();
+    let vh = vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap();
+    let reconstructed = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
     // Rank-two reconstruction of a rank-two block: two terms per entry.
     numerics::assert_slices_close(
         "truncated SVD reconstruction",

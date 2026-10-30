@@ -95,7 +95,7 @@ macro_rules! fz2_u1_leg {
 /// placement; owned dense; a payload allocation of its own; a write to the
 /// result stays in the result.
 macro_rules! assert_independent_owned_copy {
-    ($input:expr, $result:expr, $what:expr) => {{
+    ($engine:ident, $input:expr, $result:expr, $what:expr) => {{
         let (input, result, what) = (&$input, $result, $what);
         assert!(
             symtn::typed::__network::network_reuse_class(&result, false)
@@ -119,10 +119,15 @@ macro_rules! assert_independent_owned_copy {
             assert_ne!(payload, input_payload, "{what}: fresh payload");
         }
 
-        let before = input.materialize().unwrap().dense_data().unwrap().to_vec();
+        let before = input
+            .materialize($engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec();
         let mut written = result;
         let pointer = written.dense_data().unwrap().as_ptr();
-        written.scale_assign(2.0.into()).unwrap();
+        written.scale_assign($engine, 2.0.into()).unwrap();
         // In place means uniquely owned: nothing else holds this payload.
         assert_eq!(
             written.dense_data().unwrap().as_ptr(),
@@ -130,7 +135,7 @@ macro_rules! assert_independent_owned_copy {
             "{what}: writable in place"
         );
         assert_eq!(
-            input.materialize().unwrap().dense_data().unwrap(),
+            input.materialize($engine).unwrap().dense_data().unwrap(),
             before.as_slice(),
             "{what}: input unchanged"
         );
@@ -172,12 +177,13 @@ fn assert_physical_dagger<D: Scalar>(
 }
 
 macro_rules! physical_case {
-    ($leg:expr, $what:expr, $dtype:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
+    ($engine:ident, $leg:expr, $what:expr, $dtype:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
         let runtime = host_runtime();
         let leg = $leg;
         let dual = leg.try_dual().unwrap();
         let what: &str = $what;
         let tensor: TensorMap<_, $dtype> = TensorMap::rand_with_seed(
+            $engine,
             &runtime,
             $codomain(&leg, &dual),
             $domain(&leg, &dual),
@@ -187,23 +193,23 @@ macro_rules! physical_case {
         assert!(tensor.subblock_count() >= 2, "{what}: multi-block fixture");
 
         // Owned dense input: a copy with equal values.
-        let copy = tensor.materialize().unwrap();
+        let copy = tensor.materialize($engine).unwrap();
         assert_eq!(
             copy.dense_data().unwrap(),
             tensor.dense_data().unwrap(),
             "{what}: owned copy values"
         );
-        assert_independent_owned_copy!(tensor, copy, what);
+        assert_independent_owned_copy!($engine, tensor, copy, what);
 
         // Lazy adjoint input.
-        let lazy = tensor.adjoint().unwrap();
+        let lazy = tensor.adjoint($engine).unwrap();
         assert!(
             symtn::typed::__network::network_reuse_class(&lazy, false)
                 == NetworkReuseClass::LazyAdjoint
         );
-        let owned = lazy.materialize().unwrap();
-        let parent = tensor.to_physical_dense().unwrap();
-        let adjoint = owned.to_physical_dense().unwrap();
+        let owned = lazy.materialize($engine).unwrap();
+        let parent = tensor.to_physical_dense($engine).unwrap();
+        let adjoint = owned.to_physical_dense($engine).unwrap();
         let unconjugated = assert_physical_dagger::<$dtype>(
             what,
             &parent.shape,
@@ -212,15 +218,17 @@ macro_rules! physical_case {
             &adjoint.shape,
             &adjoint.data,
         );
-        assert_independent_owned_copy!(lazy, owned, what);
+        assert_independent_owned_copy!($engine, lazy, owned, what);
         (unconjugated, adjoint.data.len())
     }};
 }
 
 #[test]
 fn materialize_matches_the_physical_conjugate_transpose() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     for (unconjugated, len) in [
         physical_case!(
+            engine,
             u1_leg(),
             "U1 c64 2<-2",
             Complex64,
@@ -229,6 +237,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
             2
         ),
         physical_case!(
+            engine,
             u1_leg(),
             "U1 c64 1<-2",
             Complex64,
@@ -237,6 +246,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
             3
         ),
         physical_case!(
+            engine,
             u1_leg(),
             "U1 c64 3<-1",
             Complex64,
@@ -245,6 +255,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
             4
         ),
         physical_case!(
+            engine,
             su2_leg(),
             "SU2 c64 2<-2",
             Complex64,
@@ -253,6 +264,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
             6
         ),
         physical_case!(
+            engine,
             su2_leg(),
             "SU2 c64 1<-2",
             Complex64,
@@ -261,6 +273,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
             7
         ),
         physical_case!(
+            engine,
             su2_leg(),
             "SU2 c64 3<-1",
             Complex64,
@@ -273,6 +286,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
         assert!(unconjugated < len, "conjugation is not observable");
     }
     physical_case!(
+        engine,
         u1_leg(),
         "U1 f64 2<-2",
         f64,
@@ -280,8 +294,17 @@ fn materialize_matches_the_physical_conjugate_transpose() {
         |l, d| [l, d],
         1
     );
-    physical_case!(u1_leg(), "U1 f64 1<-2", f64, |l, _d| [l], |l, d| [d, l], 9);
     physical_case!(
+        engine,
+        u1_leg(),
+        "U1 f64 1<-2",
+        f64,
+        |l, _d| [l],
+        |l, d| [d, l],
+        9
+    );
+    physical_case!(
+        engine,
         su2_leg(),
         "SU2 f64 2<-2",
         f64,
@@ -290,6 +313,7 @@ fn materialize_matches_the_physical_conjugate_transpose() {
         5
     );
     physical_case!(
+        engine,
         su2_leg(),
         "SU2 f64 3<-1",
         f64,
@@ -371,12 +395,13 @@ macro_rules! assert_swapped_tree_dagger {
 }
 
 macro_rules! fermionic_case {
-    ($dtype:ty, $what:expr, $codomain:expr, $domain:expr, $seed:expr) => {{
+    ($engine:ident, $dtype:ty, $what:expr, $codomain:expr, $domain:expr, $seed:expr) => {{
         let runtime = host_runtime();
         let leg = fz2_u1_leg!();
         let dual = leg.try_dual().unwrap();
         let what: &str = $what;
         let tensor: TensorMap<_, $dtype> = TensorMap::rand_with_seed(
+            $engine,
             &runtime,
             $codomain(&leg, &dual),
             $domain(&leg, &dual),
@@ -384,25 +409,27 @@ macro_rules! fermionic_case {
         )
         .unwrap();
         assert!(tensor.subblock_count() >= 2, "{what}: multi-block fixture");
-        let copy = tensor.materialize().unwrap();
+        let copy = tensor.materialize($engine).unwrap();
         assert_eq!(
             copy.dense_data().unwrap(),
             tensor.dense_data().unwrap(),
             "{what}: owned copy values"
         );
-        assert_independent_owned_copy!(tensor, copy, what);
+        assert_independent_owned_copy!($engine, tensor, copy, what);
 
-        let lazy = tensor.adjoint().unwrap();
-        let owned = lazy.materialize().unwrap();
+        let lazy = tensor.adjoint($engine).unwrap();
+        let owned = lazy.materialize($engine).unwrap();
         let (unconjugated, entries, _) = assert_swapped_tree_dagger!(tensor, owned, what);
-        assert_independent_owned_copy!(lazy, owned, what);
+        assert_independent_owned_copy!($engine, lazy, owned, what);
         (unconjugated, entries)
     }};
 }
 
 #[test]
 fn materialize_matches_swapped_trees_for_fermionic_z2_times_u1() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let (unconjugated, entries) = fermionic_case!(
+        engine,
         Complex64,
         "fZ2xU1 c64 2<-2",
         |l, d| [l, d],
@@ -410,11 +437,31 @@ fn materialize_matches_swapped_trees_for_fermionic_z2_times_u1() {
         11
     );
     assert!(unconjugated < entries, "conjugation is not observable");
-    let (unconjugated, entries) =
-        fermionic_case!(Complex64, "fZ2xU1 c64 1<-2", |l, _d| [l], |l, d| [d, l], 12);
+    let (unconjugated, entries) = fermionic_case!(
+        engine,
+        Complex64,
+        "fZ2xU1 c64 1<-2",
+        |l, _d| [l],
+        |l, d| [d, l],
+        12
+    );
     assert!(unconjugated < entries, "conjugation is not observable");
-    fermionic_case!(f64, "fZ2xU1 f64 2<-2", |l, d| [l, d], |l, d| [l, d], 13);
-    fermionic_case!(f64, "fZ2xU1 f64 3<-1", |l, d| [d, l, l], |_l, d| [d], 14);
+    fermionic_case!(
+        engine,
+        f64,
+        "fZ2xU1 f64 2<-2",
+        |l, d| [l, d],
+        |l, d| [l, d],
+        13
+    );
+    fermionic_case!(
+        engine,
+        f64,
+        "fZ2xU1 f64 3<-1",
+        |l, d| [d, l, l],
+        |_l, d| [d],
+        14
+    );
 }
 
 /// The physical expansion of a compact diagonal, in TensorKit order: sectors
@@ -435,24 +482,24 @@ fn expected_diagonal<D: Scalar + Default>(blocks: &[(Vec<D>, usize)]) -> (usize,
 }
 
 macro_rules! diagonal_case {
-    ($bond:expr, $dtype:ty, $spectra:expr, $expected:expr, $what:expr) => {{
+    ($engine:ident, $bond:expr, $dtype:ty, $spectra:expr, $expected:expr, $what:expr) => {{
         let runtime = host_runtime();
         let what: &str = $what;
         let bond = $bond;
         let diagonal: TensorMap<_, $dtype> =
-            TensorMap::diagonal(&runtime, &bond, $spectra).unwrap();
+            TensorMap::diagonal($engine, &runtime, &bond, $spectra).unwrap();
         assert!(
             symtn::typed::__network::network_reuse_class(&diagonal, false)
                 == NetworkReuseClass::Compact
         );
-        let dense = diagonal.materialize().unwrap();
-        let physical = dense.to_physical_dense().unwrap();
+        let dense = diagonal.materialize($engine).unwrap();
+        let physical = dense.to_physical_dense($engine).unwrap();
         let (n, expected) = expected_diagonal::<$dtype>(&$expected);
         assert_eq!(physical.shape, vec![n, n], "{what}: shape");
         for (i, (&actual, &want)) in physical.data.iter().zip(&expected).enumerate() {
             assert!(actual.distance(want) < 1e-15, "{what}: entry {i}");
         }
-        assert_independent_owned_copy!(diagonal, dense, what);
+        assert_independent_owned_copy!($engine, diagonal, dense, what);
         // The input stays compact.
         assert!(
             symtn::typed::__network::network_reuse_class(&diagonal, false)
@@ -463,12 +510,14 @@ macro_rules! diagonal_case {
 
 #[test]
 fn materialize_densifies_a_compact_diagonal() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let c = |re: f64, im: f64| Complex64::new(re, im);
     // U(1) sector order is 0, 1, -1. The dual bond carries the dual labels
     // and is listed in the order of the space it dualizes.
     for (bond, sign) in [(u1_leg(), 1), (u1_leg().try_dual().unwrap(), -1)] {
         let q = |charge: i32| U1Irrep::new(sign * charge);
         diagonal_case!(
+            engine,
             bond,
             Complex64,
             [
@@ -495,6 +544,7 @@ fn materialize_densifies_a_compact_diagonal() {
     }
     // SU(2) order is 0, 1/2, 1 with carrier dimensions 1, 2, 3.
     diagonal_case!(
+        engine,
         su2_leg(),
         f64,
         [
@@ -518,14 +568,15 @@ fn materialize_densifies_a_compact_diagonal() {
 
 #[test]
 fn materialize_is_the_remedy_for_apis_that_reject_lazy_adjoints() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let leg = u1_leg();
     let tensor: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 21).unwrap();
-    let lazy = tensor.adjoint().unwrap();
-    assert!(lazy.diagview().is_err());
-    let diagonal = lazy.materialize().unwrap().diagview().unwrap();
-    let parent = tensor.diagview().unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 21).unwrap();
+    let lazy = tensor.adjoint(engine).unwrap();
+    assert!(lazy.diagview(engine).is_err());
+    let diagonal = lazy.materialize(engine).unwrap().diagview(engine).unwrap();
+    let parent = tensor.diagview(engine).unwrap();
     for (entry, parent) in diagonal.iter().zip(&parent) {
         assert_eq!(entry.sector, parent.sector);
         let conjugated: Vec<_> = parent.values.iter().map(|v| v.conj()).collect();
@@ -534,11 +585,12 @@ fn materialize_is_the_remedy_for_apis_that_reject_lazy_adjoints() {
 
     // An owned dense destination can be overwritten; the input is untouched.
     let before = tensor.dense_data().unwrap().to_vec();
-    let mut destination = tensor.materialize().unwrap();
+    let mut destination = tensor.materialize(engine).unwrap();
     let pointer = destination.dense_data().unwrap().as_ptr();
-    lazy.materialize()
+    lazy.materialize(engine)
         .unwrap()
         .permute_into(
+            engine,
             &[0],
             &[1],
             &mut destination,
@@ -556,7 +608,7 @@ mod checked_generic {
     use symtn::sector::LieGroupFusionRule;
 
     macro_rules! su3_case {
-        ($dtype:ty, $value:expr, $what:expr) => {{
+        ($engine:ident, $dtype:ty, $value:expr, $what:expr) => {{
             let (value, what): (fn(f64, f64) -> $dtype, &str) = ($value, $what);
             let runtime = host_runtime();
             let provider = Arc::new(
@@ -566,8 +618,12 @@ mod checked_generic {
             let a = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
             let b = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 3)]).unwrap();
             let b_dual = b.try_dual().unwrap();
-            let tensor: TensorMap<_, $dtype> =
-                TensorMap::from_subblock_fn(&runtime, [&a, &b], [&b_dual], |trees, index| {
+            let tensor: TensorMap<_, $dtype> = TensorMap::from_subblock_fn(
+                $engine,
+                &runtime,
+                [&a, &b],
+                [&b_dual],
+                |trees, index| {
                     let vertex = trees
                         .codomain_vertices()
                         .iter()
@@ -579,32 +635,33 @@ mod checked_generic {
                         .map(|(axis, i)| (i * (axis + 1) * 3) as f64)
                         .sum::<f64>();
                     value(1.0 + vertex * 10.0 + spread, 0.5 + index[0] as f64 - vertex)
-                })
-                .unwrap();
-            let copy = tensor.materialize().unwrap();
+                },
+            )
+            .unwrap();
+            let copy = tensor.materialize($engine).unwrap();
             assert_eq!(
                 copy.dense_data().unwrap(),
                 tensor.dense_data().unwrap(),
                 "{what}: owned copy values"
             );
-            assert_independent_owned_copy!(tensor, copy, what);
+            assert_independent_owned_copy!($engine, tensor, copy, what);
 
-            let lazy = tensor.adjoint().unwrap();
+            let lazy = tensor.adjoint($engine).unwrap();
             assert!(
                 symtn::typed::__network::network_reuse_class(&lazy, false)
                     == NetworkReuseClass::LazyAdjoint
             );
             // The #1545 consumer: a lazy adjoint's QR materializes it for the
             // call (#1755), so it factors exactly like the owned copy.
-            let owned = lazy.materialize().unwrap();
+            let owned = lazy.materialize($engine).unwrap();
             assert_eq!(
-                lazy.qr_compact(&[0], &[1, 2])
+                lazy.qr_compact($engine, &[0], &[1, 2])
                     .unwrap()
                     .r
                     .dense_data()
                     .unwrap(),
                 owned
-                    .qr_compact(&[0], &[1, 2])
+                    .qr_compact($engine, &[0], &[1, 2])
                     .unwrap()
                     .r
                     .dense_data()
@@ -616,15 +673,16 @@ mod checked_generic {
                 multiplicity,
                 "{what}: fixture must carry a vertex label above 1"
             );
-            assert_independent_owned_copy!(lazy, owned, what);
+            assert_independent_owned_copy!($engine, lazy, owned, what);
             (unconjugated, entries)
         }};
     }
 
     #[test]
     fn materialize_matches_swapped_trees_for_su3_with_multiplicity() {
-        let (unconjugated, entries) = su3_case!(Complex64, Complex64::new, "SU3 c64");
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let (unconjugated, entries) = su3_case!(engine, Complex64, Complex64::new, "SU3 c64");
         assert!(unconjugated < entries, "conjugation is not observable");
-        su3_case!(f64, |re, _| re, "SU3 f64");
+        su3_case!(engine, f64, |re, _| re, "SU3 f64");
     }
 }

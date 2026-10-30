@@ -136,8 +136,9 @@ impl ProbeScalar for Complex64 {
     }
 }
 
-fn context() -> CudaDenseContext {
-    CudaDenseContext::new(0).expect("CUDA device 0 must be available for the device suite")
+fn engine() -> symtn_dense::CudaEngine {
+    symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0))
+        .expect("CUDA device 0 must be available for the device suite")
 }
 
 fn upload<D: ProbeScalar>(ctx: &CudaDenseContext, data: &[D]) -> CudaDenseStorage {
@@ -333,7 +334,8 @@ fn gemm_sweep<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_gemm_matches_a_double_precision_oracle_for_every_dtype_and_op_pair() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     gemm_sweep::<f32>(&mut ctx);
     gemm_sweep::<f64>(&mut ctx);
     gemm_sweep::<Complex32>(&mut ctx);
@@ -547,7 +549,8 @@ fn assert_orthonormal_rows<D: ProbeScalar>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_svd_obeys_its_laws_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     for &(rows, cols) in &[(5usize, 3usize), (3, 5), (4, 4)] {
         svd_case::<f32>(&mut ctx, rows, cols);
         svd_case::<f64>(&mut ctx, rows, cols);
@@ -559,7 +562,8 @@ fn region_svd_obeys_its_laws_for_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_qr_obeys_its_laws_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     for &(rows, cols) in &[(5usize, 3usize), (3, 5), (4, 4)] {
         qr_case::<f32>(&mut ctx, rows, cols);
         qr_case::<f64>(&mut ctx, rows, cols);
@@ -571,7 +575,8 @@ fn region_qr_obeys_its_laws_for_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_eigh_obeys_its_laws_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     for n in [4usize, 6] {
         eigh_case::<f32>(&mut ctx, n);
         eigh_case::<f64>(&mut ctx, n);
@@ -632,7 +637,8 @@ fn spectrum_widening_case<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_spectra_are_widened_to_f64_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     spectrum_widening_case::<f32>(&mut ctx);
     spectrum_widening_case::<f64>(&mut ctx);
     spectrum_widening_case::<Complex32>(&mut ctx);
@@ -777,7 +783,8 @@ fn hermitian_tolerance_case<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_hermitian_rule_scales_with_the_payload_real_lane() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     hermitian_admits_an_exactly_hermitian_block::<f32>(&mut ctx);
     hermitian_admits_an_exactly_hermitian_block::<f64>(&mut ctx);
     hermitian_admits_an_exactly_hermitian_block::<Complex32>(&mut ctx);
@@ -823,7 +830,8 @@ fn the_hermitian_rule_scales_with_the_payload_real_lane() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn every_admitted_dtype_reports_its_own_tag_and_rejects_the_others() {
-    let ctx = context();
+    let mut engine = engine();
+    let ctx = CudaDenseContext::new(&mut engine).unwrap();
     let single = upload::<f32>(&ctx, &[1.0f32, 2.0, 3.0, 4.0]);
     let single_complex = upload::<Complex32>(&ctx, &[Complex32::new(1.0, -1.0); 4]);
 

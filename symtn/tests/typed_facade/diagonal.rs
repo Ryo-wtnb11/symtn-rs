@@ -1,68 +1,76 @@
 use super::*;
+use symtn::typed::Engine;
 
 #[test]
 fn compact_reductions_carry_the_su2_dimension_weight() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact reductions apply `dim(c)` exactly where the dense ones
     // do. Z2 alone cannot see this — every `dim(c)` is one there.
     let runtime = runtime();
     let typed = su2_tensor(&runtime);
-    let typed = typed.svd_compact(&[0], &[1]).unwrap().s;
+    let typed = typed.svd_compact(engine, &[0], &[1]).unwrap().s;
     let dense = forced_dense(&typed);
 
     // Compact and dense routes may sum in different orders; see above.
     let terms = dense.dense_data().unwrap().len();
     numerics::assert_close(
         "norm",
-        typed.norm(2.0).unwrap(),
-        dense.norm(2.0).unwrap(),
+        typed.norm(engine, 2.0).unwrap(),
+        dense.norm(engine, 2.0).unwrap(),
         terms,
     );
-    numerics::assert_close("tr", typed.tr().unwrap(), dense.tr().unwrap(), terms);
+    numerics::assert_close(
+        "tr",
+        typed.tr(engine).unwrap(),
+        dense.tr(engine).unwrap(),
+        terms,
+    );
     numerics::assert_close(
         "inner",
-        typed.inner(&typed).unwrap(),
-        dense.inner(&dense).unwrap(),
+        typed.inner(engine, &typed).unwrap(),
+        dense.inner(engine, &dense).unwrap(),
         terms,
     );
     // `<s, s>` is the squared norm: the identity that pins the weighting.
-    let norm = typed.norm(2.0).unwrap();
-    assert!((typed.inner(&typed).unwrap() - norm * norm).abs() < 1e-9 * norm * norm);
+    let norm = typed.norm(engine, 2.0).unwrap();
+    assert!((typed.inner(engine, &typed).unwrap() - norm * norm).abs() < 1e-9 * norm * norm);
     // The unweighted sum, for contrast: a dropped `dim(c)` would make `tr` this.
     let unweighted: f64 = typed
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
         .sum();
     assert!(
-        (typed.tr().unwrap() - unweighted).abs() > 1e-6,
+        (typed.tr(engine).unwrap() - unweighted).abs() > 1e-6,
         "the SU(2) spectrum trace is not dimension weighted"
     );
     // `norm(Inf)` is deliberately *not* weighted.
     assert_eq!(
-        typed.norm(f64::INFINITY).unwrap(),
-        dense.norm(f64::INFINITY).unwrap()
+        typed.norm(engine, f64::INFINITY).unwrap(),
+        dense.norm(engine, f64::INFINITY).unwrap()
     );
 }
 
 #[test]
 fn compact_add_matches_pointwise_values_on_both_arms() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: diagonal + diagonal stays diagonal, and diagonal + dense goes dense
     // — and both arms obey the pointwise linear-combination law.
     let runtime = runtime();
     let typed = z2_bond(&runtime);
 
-    let diagonal_sum = typed.axpby(0.75, &typed, -0.5).unwrap();
+    let diagonal_sum = typed.axpby(engine, 0.75, &typed, -0.5).unwrap();
     for (&actual, &source) in diagonal_sum
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(typed.materialize().unwrap().dense_data().unwrap())
+        .zip(typed.materialize(engine).unwrap().dense_data().unwrap())
     {
         let expected = 0.25 * source;
         assert!((actual - expected).abs() <= 1e-12 * expected.abs().max(1.0));
@@ -70,20 +78,20 @@ fn compact_add_matches_pointwise_values_on_both_arms() {
 
     // A dense operand on the same bond space: `id` is the cheapest one, and it
     // is not diagonal *storage* even though its values are diagonal.
-    let typed_dense = TensorMap::isomorphism(&runtime, &typed.domain(), &typed.domain())
+    let typed_dense = TensorMap::isomorphism(engine, &runtime, &typed.domain(), &typed.domain())
         .unwrap()
-        .scale(3.0)
+        .scale(engine, 3.0)
         .unwrap();
 
     for (alpha, beta) in [(0.75, -0.5), (1.0, 1.0)] {
-        let diagonal_dense = typed.axpby(alpha, &typed_dense, beta).unwrap();
-        let dense_diagonal = typed_dense.axpby(alpha, &typed, beta).unwrap();
+        let diagonal_dense = typed.axpby(engine, alpha, &typed_dense, beta).unwrap();
+        let dense_diagonal = typed_dense.axpby(engine, alpha, &typed, beta).unwrap();
         for (((&diagonal_dense, &dense_diagonal), &diagonal), &dense) in diagonal_dense
             .dense_data()
             .unwrap()
             .iter()
             .zip(dense_diagonal.dense_data().unwrap())
-            .zip(typed.materialize().unwrap().dense_data().unwrap())
+            .zip(typed.materialize(engine).unwrap().dense_data().unwrap())
             .zip(typed_dense.dense_data().unwrap())
         {
             let expected = alpha * diagonal + beta * dense;
@@ -96,6 +104,7 @@ fn compact_add_matches_pointwise_values_on_both_arms() {
 
 #[test]
 fn compose_takes_the_compact_paths_and_reconstructs_the_source() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `u * s * vh` runs through the bond-scaling arms rather than a
     // dense GEMM, and still reproduces the source — plus `s * s`, the
@@ -106,31 +115,35 @@ fn compose_takes_the_compact_paths_and_reconstructs_the_source() {
         u: tu,
         s: ts,
         vh: tvh,
-    } = typed.svd_compact(&[0, 1], &[2]).unwrap();
+    } = typed.svd_compact(engine, &[0, 1], &[2]).unwrap();
 
-    let tus = tu.compose(&ts).unwrap();
-    let svh = ts.compose(&tvh).unwrap();
-    let squared = ts.compose(&ts).unwrap();
+    let tus = tu.compose(engine, &ts).unwrap();
+    let svh = ts.compose(engine, &tvh).unwrap();
+    let squared = ts.compose(engine, &ts).unwrap();
     // `s * s` is still a spectrum: its entries are the squares.
     for (squared, original) in squared
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(ts.materialize().unwrap().dense_data().unwrap())
+        .zip(ts.materialize(engine).unwrap().dense_data().unwrap())
     {
         assert!((squared - original * original).abs() < 1e-12);
     }
 
     // Both associations reconstruct, separately pinning `t * D` and `D * t`.
-    for recon in [tus.compose(&tvh).unwrap(), tu.compose(&svh).unwrap()] {
+    for recon in [
+        tus.compose(engine, &tvh).unwrap(),
+        tu.compose(engine, &svh).unwrap(),
+    ] {
         assert_data_close_f64(recon.dense_data().unwrap(), typed.dense_data().unwrap());
     }
 }
 
 #[test]
 fn compose_declines_a_compact_arm_it_cannot_prove() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact arms fire on a proved destination, not on the storage
     // alone. Two spectra on different bond spaces are not composable at all,
@@ -150,22 +163,33 @@ fn compose_declines_a_compact_arm_it_cannot_prove() {
     )
     .unwrap();
     let mut next = 0.0;
-    let narrow = TensorMap::from_subblock_fn(&runtime, [&narrow_leg], [&narrow_leg], |_, _| {
-        next += 1.0;
-        next
-    })
-    .unwrap();
-    let wide_s = wide.svd_compact(&[0, 1], &[2]).unwrap().s;
-    let narrow_s = narrow.svd_compact(&[0], &[1]).unwrap().s;
+    let narrow =
+        TensorMap::from_subblock_fn(engine, &runtime, [&narrow_leg], [&narrow_leg], |_, _| {
+            next += 1.0;
+            next
+        })
+        .unwrap();
+    let wide_s = wide.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
+    let narrow_s = narrow.svd_compact(engine, &[0], &[1]).unwrap().s;
 
     assert_ne!(
-        wide_s.materialize().unwrap().dense_data().unwrap().len(),
-        narrow_s.materialize().unwrap().dense_data().unwrap().len(),
+        wide_s
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len(),
+        narrow_s
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len(),
         "the fixture's two bond spaces must differ for this to test anything"
     );
     assert!(
         wide_s
-            .compose(&narrow_s)
+            .compose(engine, &narrow_s)
             .err()
             .unwrap()
             .report()
@@ -175,13 +199,13 @@ fn compose_declines_a_compact_arm_it_cannot_prove() {
     // And the same for a dense operand whose contracted leg does not match the
     // spectrum's bond.
     assert!(wide
-        .compose(&narrow_s)
+        .compose(engine, &narrow_s)
         .err()
         .unwrap()
         .report()
         .contains("leg degeneracy mismatch"));
-    let wide_vh = wide.svd_compact(&[0, 1], &[2]).unwrap().vh;
-    let result = narrow_s.compose(&wide_vh);
+    let wide_vh = wide.svd_compact(engine, &[0, 1], &[2]).unwrap().vh;
+    let result = narrow_s.compose(engine, &wide_vh);
     assert!(
         matches!(result, Err(symtn::typed::Error::Operation(_)))
             && result
@@ -299,6 +323,7 @@ const DIAGONAL_CONTRACT_CASES: &[(&str, bool, ContractSpec<'static>)] = &[
 
 #[test]
 fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if crate::typed_facade::run_isolated_or_return(
@@ -312,10 +337,10 @@ fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let leg = u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let tensor: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 592_302).unwrap();
-    let spectrum = TensorMap::<_, f64>::isomorphism(&runtime, [&leg], [&leg])
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 592_302).unwrap();
+    let spectrum = TensorMap::<_, f64>::isomorphism(engine, &runtime, [&leg], [&leg])
         .unwrap()
-        .svd_compact(&[0], &[1])
+        .svd_compact(engine, &[0], &[1])
         .unwrap()
         .s;
     symtn::cache::clear();
@@ -323,6 +348,7 @@ fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
 
     let result = tensor
         .contract(
+            engine,
             &spectrum,
             &ContractSpec {
                 lhs: &[2],
@@ -342,23 +368,26 @@ fn compact_contract_identity_output_does_not_publish_a_transform_cache_entry() {
 
 #[test]
 fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
 
     macro_rules! exercise {
-        ($name:literal, $rule:expr, $sectors:expr) => {{
+        ($engine:ident, $name:literal, $rule:expr, $sectors:expr) => {{
             let left_leg = GradedSpace::try_new(Arc::new($rule), $sectors).unwrap();
             let right_leg = GradedSpace::try_new(Arc::new($rule), $sectors).unwrap();
-            let left = TensorMap::<_, f64>::isomorphism(&runtime, [&left_leg], [&left_leg])
-                .unwrap()
-                .scale(2.0)
-                .unwrap();
-            let right = TensorMap::<_, f64>::isomorphism(&runtime, [&right_leg], [&right_leg])
-                .unwrap()
-                .scale(3.0)
-                .unwrap();
-            let left_d = left.svd_compact(&[0], &[1]).unwrap().s;
-            let right_d = right.svd_compact(&[0], &[1]).unwrap().s;
+            let left =
+                TensorMap::<_, f64>::isomorphism($engine, &runtime, [&left_leg], [&left_leg])
+                    .unwrap()
+                    .scale($engine, 2.0)
+                    .unwrap();
+            let right =
+                TensorMap::<_, f64>::isomorphism($engine, &runtime, [&right_leg], [&right_leg])
+                    .unwrap()
+                    .scale($engine, 3.0)
+                    .unwrap();
+            let left_d = left.svd_compact($engine, &[0], &[1]).unwrap().s;
+            let right_d = right.svd_compact($engine, &[0], &[1]).unwrap().s;
             assert!(!std::ptr::eq(left.provider(), right.provider()));
 
             let left_dense = forced_dense(&left_d);
@@ -366,6 +395,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
 
             let actual = [
                 left.contract(
+                    $engine,
                     &right_d,
                     &ContractSpec {
                         lhs: &[1],
@@ -377,6 +407,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
                 .unwrap(),
                 right_d
                     .contract(
+                        $engine,
                         &left,
                         &ContractSpec {
                             lhs: &[1],
@@ -388,6 +419,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
                     .unwrap(),
                 right_d
                     .contract(
+                        $engine,
                         &left_d,
                         &ContractSpec {
                             lhs: &[1],
@@ -400,6 +432,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
             ];
             let expected = [
                 left.contract(
+                    $engine,
                     &right_dense,
                     &ContractSpec {
                         lhs: &[1],
@@ -411,6 +444,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
                 .unwrap(),
                 right_dense
                     .contract(
+                        $engine,
                         &left,
                         &ContractSpec {
                             lhs: &[1],
@@ -422,6 +456,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
                     .unwrap(),
                 right_dense
                     .contract(
+                        $engine,
                         &left_dense,
                         &ContractSpec {
                             lhs: &[1],
@@ -439,7 +474,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
                 assert_same_legs(&actual.codomain(), &expected.codomain());
                 assert_same_legs(&actual.domain(), &expected.domain());
                 assert_eq!(
-                    actual.materialize().unwrap().dense_data().unwrap(),
+                    actual.materialize($engine).unwrap().dense_data().unwrap(),
                     expected.dense_data().unwrap(),
                     "{} {arm} values",
                     $name
@@ -450,7 +485,9 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
                     $name
                 );
                 assert_eq!(
-                    symtn::expert::diagonal_spectrum(&actual).unwrap().is_some(),
+                    symtn::expert::diagonal_spectrum($engine, &actual)
+                        .unwrap()
+                        .is_some(),
                     index == 2,
                     "{} {arm} storage",
                     $name
@@ -460,6 +497,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
     }
 
     exercise!(
+        engine,
         "Z2",
         symtn::sector::Z2FusionRule,
         [
@@ -468,6 +506,7 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
         ]
     );
     exercise!(
+        engine,
         "U1",
         symtn::sector::U1FusionRule,
         [
@@ -479,12 +518,13 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
 
 #[test]
 fn complex_diagonal_contract_matches_the_typed_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: every complex compact arm agrees with the ordinary typed engine
     // route on the same spaces, including a compact `D · D` result.
     let runtime = runtime();
     let typed = z2_complex_tensor(&runtime);
-    let typed_s = typed.svd_compact(&[0, 1], &[2]).unwrap().s;
+    let typed_s = typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
     let dense_s = forced_dense(&typed_s);
 
     for &(_name, spectrum_on_the_right, spec) in DIAGONAL_CONTRACT_CASES {
@@ -493,8 +533,8 @@ fn complex_diagonal_contract_matches_the_typed_dense_route() {
         } else {
             (&typed_s, &typed, &dense_s, &typed)
         };
-        let expected = dense_lhs.contract(dense_rhs, &spec).unwrap();
-        let got = fast_lhs.contract(fast_rhs, &spec).unwrap();
+        let expected = dense_lhs.contract(engine, dense_rhs, &spec).unwrap();
+        let got = fast_lhs.contract(engine, fast_rhs, &spec).unwrap();
         assert_same_legs(&got.codomain(), &expected.codomain());
         assert_same_legs(&got.domain(), &expected.domain());
         assert_data_close_c64(got.dense_data().unwrap(), expected.dense_data().unwrap());
@@ -502,6 +542,7 @@ fn complex_diagonal_contract_matches_the_typed_dense_route() {
 
     let expected = dense_s
         .contract(
+            engine,
             &dense_s,
             &ContractSpec {
                 lhs: &[1],
@@ -513,6 +554,7 @@ fn complex_diagonal_contract_matches_the_typed_dense_route() {
         .unwrap();
     let got = typed_s
         .contract(
+            engine,
             &typed_s,
             &ContractSpec {
                 lhs: &[1],
@@ -525,14 +567,17 @@ fn complex_diagonal_contract_matches_the_typed_dense_route() {
     assert_same_legs(&got.codomain(), &expected.codomain());
     assert_same_legs(&got.domain(), &expected.domain());
     assert_data_close_c64(
-        got.materialize().unwrap().dense_data().unwrap(),
+        got.materialize(engine).unwrap().dense_data().unwrap(),
         expected.dense_data().unwrap(),
     );
-    assert!(symtn::expert::diagonal_spectrum(&got).unwrap().is_some());
+    assert!(symtn::expert::diagonal_spectrum(engine, &got)
+        .unwrap()
+        .is_some());
 }
 
 #[test]
 fn the_diagonal_contract_arm_keeps_fermionic_signs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: bends inside the compact arm's `permute` pick up the same parity
     // signs as the ordinary typed engine route.
@@ -548,7 +593,7 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
     // became constructible here.
     let runtime = runtime();
     let typed = fermionic_endo(&runtime);
-    let typed_s = typed.svd_compact(&[0], &[1]).unwrap().s;
+    let typed_s = typed.svd_compact(engine, &[0], &[1]).unwrap().s;
     let dense_s = forced_dense(&typed_s);
 
     for &(name, spectrum_on_the_right, output_axes) in &[
@@ -563,6 +608,7 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
         };
         let expected = dense_lhs
             .contract(
+                engine,
                 dense_rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -574,6 +620,7 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
             .unwrap();
         let got = fast_lhs
             .contract(
+                engine,
                 fast_rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -594,6 +641,7 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
 
     let expected = dense_s
         .contract(
+            engine,
             &dense_s,
             &ContractSpec {
                 lhs: &[1],
@@ -605,6 +653,7 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
         .unwrap();
     let got = typed_s
         .contract(
+            engine,
             &typed_s,
             &ContractSpec {
                 lhs: &[1],
@@ -617,15 +666,18 @@ fn the_diagonal_contract_arm_keeps_fermionic_signs() {
     assert_same_legs(&got.codomain(), &expected.codomain());
     assert_same_legs(&got.domain(), &expected.domain());
     assert_eq!(
-        got.materialize().unwrap().dense_data().unwrap(),
+        got.materialize(engine).unwrap().dense_data().unwrap(),
         expected.dense_data().unwrap(),
         "fermionic s*s"
     );
-    assert!(symtn::expert::diagonal_spectrum(&got).unwrap().is_some());
+    assert!(symtn::expert::diagonal_spectrum(engine, &got)
+        .unwrap()
+        .is_some());
 }
 
 #[test]
 fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the arm must not answer where the dense route would refuse. A
     // contracted leg whose duality flag does not match the spectrum's bond leg
@@ -641,16 +693,18 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
     )
     .unwrap();
     let dual = leg.try_dual().unwrap();
-    let typed = TensorMap::from_subblock_fn(&runtime, [&dual], [&leg], typed_fill_value).unwrap();
-    let s = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], typed_fill_value)
+    let typed =
+        TensorMap::from_subblock_fn(engine, &runtime, [&dual], [&leg], typed_fill_value).unwrap();
+    let s = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], typed_fill_value)
         .unwrap()
-        .svd_compact(&[0], &[1])
+        .svd_compact(engine, &[0], &[1])
         .unwrap()
         .s;
 
     // `s`'s domain leg is non-dual, `typed`'s leading codomain leg is dual.
     assert!(s
         .contract(
+            engine,
             &typed,
             &ContractSpec {
                 lhs: &[1],
@@ -668,9 +722,10 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
     // domain axis against `s`, whose bond leg is non-dual by construction, so
     // the two raw flags differ and the engine refuses the pair.
     let dual_domain =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&dual], typed_fill_value).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&dual], typed_fill_value).unwrap();
     assert!(dual_domain
         .contract(
+            engine,
             &s,
             &ContractSpec {
                 lhs: &[1],
@@ -694,14 +749,17 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
         ],
     )
     .unwrap();
-    let narrow_bond = TensorMap::from_subblock_fn(&runtime, [&narrow], [&narrow], typed_fill_value)
-        .unwrap()
-        .svd_compact(&[0], &[1])
-        .unwrap()
-        .s;
-    let wide = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], typed_fill_value).unwrap();
+    let narrow_bond =
+        TensorMap::from_subblock_fn(engine, &runtime, [&narrow], [&narrow], typed_fill_value)
+            .unwrap()
+            .svd_compact(engine, &[0], &[1])
+            .unwrap()
+            .s;
+    let wide =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], typed_fill_value).unwrap();
     assert!(wide
         .contract(
+            engine,
             &narrow_bond,
             &ContractSpec {
                 lhs: &[1],
@@ -716,6 +774,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
         .contains("leg degeneracy mismatch"));
     assert!(narrow_bond
         .contract(
+            engine,
             &wide,
             &ContractSpec {
                 lhs: &[1],
@@ -733,7 +792,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
     // out-of-range case, which the arm has to reject *before* indexing its own
     // source order with it.
     assert!(matches!(typed
-        .contract(
+        .contract(engine,
             &s,
             &ContractSpec {
                 lhs: &[1],
@@ -743,7 +802,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
             }
         ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 2, .. })));
     assert!(matches!(typed
-        .contract(
+        .contract(engine,
             &s,
             &ContractSpec {
                 lhs: &[1],
@@ -753,7 +812,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
             }
         ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 2, .. })));
     assert!(matches!(wide
-        .contract(
+        .contract(engine,
             &s,
             &ContractSpec {
                 lhs: &[1],
@@ -763,7 +822,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
             }
         ), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 2, .. })));
     assert!(matches!(typed
-        .contract(
+        .contract(engine,
             &s,
             &ContractSpec {
                 lhs: &[9],
@@ -820,6 +879,7 @@ fn all_output_orders(n: usize) -> Vec<Vec<usize>> {
 
 #[test]
 fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact arm never differs from the dense route it replaces.
     // This direct oracle catches a shared fast-path mistake or a divergence
@@ -838,7 +898,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
     for split in [1, 2] {
         let t = z2_tensor_split(&runtime, split);
         let s = t
-            .svd_compact(&codomain_axes(&t), &domain_axes(&t))
+            .svd_compact(engine, &codomain_axes(&t), &domain_axes(&t))
             .unwrap()
             .s;
         let s_dense = forced_dense(&s);
@@ -850,6 +910,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
                     for rhs_axis in 0..2 {
                         // `t · s`
                         let dense = t.contract(
+                            engine,
                             &s_dense,
                             &ContractSpec {
                                 lhs: &[lhs_axis],
@@ -859,6 +920,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
                             },
                         );
                         let fast = t.contract(
+                            engine,
                             &s,
                             &ContractSpec {
                                 lhs: &[lhs_axis],
@@ -892,6 +954,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
                         }
                         // `s · t`
                         let dense = s_dense.contract(
+                            engine,
                             &t,
                             &ContractSpec {
                                 lhs: &[rhs_axis],
@@ -901,6 +964,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
                             },
                         );
                         let fast = s.contract(
+                            engine,
                             &t,
                             &ContractSpec {
                                 lhs: &[rhs_axis],
@@ -943,6 +1007,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
             for lhs_axis in 0..2 {
                 for rhs_axis in 0..2 {
                     let dense = s_dense.contract(
+                        engine,
                         &s_dense,
                         &ContractSpec {
                             lhs: &[lhs_axis],
@@ -952,6 +1017,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
                         },
                     );
                     let fast = s.contract(
+                        engine,
                         &s,
                         &ContractSpec {
                             lhs: &[lhs_axis],
@@ -965,7 +1031,7 @@ fn the_diagonal_contract_arm_is_its_own_dense_route_on_every_axis_pattern() {
                         (Ok(dense), Ok(fast)) => {
                             assert_eq!(space_shape(&fast), space_shape(&dense), "{label} space");
                             assert_eq!(
-                                fast.materialize().unwrap().dense_data().unwrap(),
+                                fast.materialize(engine).unwrap().dense_data().unwrap(),
                                 dense.dense_data().unwrap(),
                                 "{label} payload"
                             );
@@ -997,18 +1063,20 @@ where
         + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     vec![
-        ("permute", tensor.permute(&[1], &[0]).unwrap()),
-        ("full transpose", full_transpose!(tensor).unwrap()),
-        ("transpose", tensor.transpose(&[1], &[0]).unwrap()),
-        ("repartition(1)", tensor.repartition(1).unwrap()),
-        ("repartition(0)", tensor.repartition(0).unwrap()),
-        ("repartition(2)", tensor.repartition(2).unwrap()),
+        ("permute", tensor.permute(engine, &[1], &[0]).unwrap()),
+        ("full transpose", full_transpose!(engine, tensor).unwrap()),
+        ("transpose", tensor.transpose(engine, &[1], &[0]).unwrap()),
+        ("repartition(1)", tensor.repartition(engine, 1).unwrap()),
+        ("repartition(0)", tensor.repartition(engine, 0).unwrap()),
+        ("repartition(2)", tensor.repartition(engine, 2).unwrap()),
     ]
 }
 
 #[test]
 fn compact_rank_one_swaps_match_the_forced_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: every re-ordering of a compact bond factor returns the tensor the
     // dense tree transform returns — same legs and same bytes.
@@ -1031,7 +1099,7 @@ fn compact_rank_one_swaps_match_the_forced_dense_route() {
             "{name} legs"
         );
         assert_eq!(
-            compact.materialize().unwrap().dense_data().unwrap(),
+            compact.materialize(engine).unwrap().dense_data().unwrap(),
             oracle.dense_data().unwrap(),
             "{name} payload"
         );
@@ -1040,6 +1108,7 @@ fn compact_rank_one_swaps_match_the_forced_dense_route() {
 
 #[test]
 fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the swap's per-sector coefficient is only observable where the two
     // ends of the bond are not interchangeable. Z3 is not self-dual, so the
@@ -1053,12 +1122,12 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
         let provider = Arc::new(external_z3());
         let leg = z3_leg(&provider, is_dual);
         let mut next = 0.0;
-        let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
+        let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             next += 1.0;
             next
         })
         .unwrap();
-        let compact = source.svd_compact(&[0], &[1]).unwrap().s;
+        let compact = source.svd_compact(engine, &[0], &[1]).unwrap().s;
         let dense = forced_dense(&compact);
         for ((name, actual), (_, expected)) in rank_one_reorderings(&compact)
             .into_iter()
@@ -1070,7 +1139,7 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
                 "z3 dual={is_dual} {name} legs"
             );
             assert_eq!(
-                actual.materialize().unwrap().dense_data().unwrap(),
+                actual.materialize(engine).unwrap().dense_data().unwrap(),
                 expected.dense_data().unwrap(),
                 "z3 dual={is_dual} {name} payload"
             );
@@ -1086,12 +1155,12 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
         .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
         .unwrap();
         let mut next = 0.0;
-        let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
+        let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             next += 1.0;
             next
         })
         .unwrap();
-        let compact = source.svd_compact(&[0], &[1]).unwrap().s;
+        let compact = source.svd_compact(engine, &[0], &[1]).unwrap().s;
         let dense = forced_dense(&compact);
         for ((name, actual), (_, expected)) in rank_one_reorderings(&compact)
             .into_iter()
@@ -1103,7 +1172,7 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
                 "fZ2 dual={is_dual} {name} legs"
             );
             assert_eq!(
-                actual.materialize().unwrap().dense_data().unwrap(),
+                actual.materialize(engine).unwrap().dense_data().unwrap(),
                 expected.dense_data().unwrap(),
                 "fZ2 dual={is_dual} {name} payload"
             );
@@ -1118,6 +1187,7 @@ fn z2_spectrum_fixture(
     runtime: &Runtime,
     rank_deficient: bool,
 ) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
         [
@@ -1128,21 +1198,23 @@ fn z2_spectrum_fixture(
     .unwrap();
     // A constant block is rank one, so all but one singular value per sector is
     // zero — the positive *semi*definite fixture `isposdef` must still reject.
-    let source = TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |sectors, indices| {
-        if rank_deficient {
-            1.0
-        } else {
-            typed_fill_value(sectors, indices)
-        }
-    })
-    .unwrap();
-    let s = source.svd_compact(&[0], &[1]).unwrap().s;
+    let source =
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |sectors, indices| {
+            if rank_deficient {
+                1.0
+            } else {
+                typed_fill_value(sectors, indices)
+            }
+        })
+        .unwrap();
+    let s = source.svd_compact(engine, &[0], &[1]).unwrap().s;
     if rank_deficient {
         // The trailing singular values of a rank-one block are zero only up to
         // the provider's rounding (exactly zero on faer, ~1e-17 on Accelerate).
         // Snap them so the fixture is the exactly semidefinite spectrum the
         // tests name.
-        s.map_diagonal(|v| if v > 1e-8 { v } else { 0.0 }).unwrap()
+        s.map_diagonal(engine, |v| if v > 1e-8 { v } else { 0.0 })
+            .unwrap()
     } else {
         s
     }
@@ -1150,6 +1222,7 @@ fn z2_spectrum_fixture(
 
 #[test]
 fn compact_is_posdef_matches_the_forced_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: reading the stored spectrum answers exactly what eigendecomposing
     // the materialization answers, on every sign pattern and at every
@@ -1159,8 +1232,8 @@ fn compact_is_posdef_matches_the_forced_dense_route() {
 
     let positive = z2_spectrum_fixture(&runtime, false);
     let semidefinite = z2_spectrum_fixture(&runtime, true);
-    let negative = positive.scale(-1.0).unwrap();
-    let indefinite = positive.axpby(1.0, &semidefinite, -3.0).unwrap();
+    let negative = positive.scale(engine, -1.0).unwrap();
+    let indefinite = positive.axpby(engine, 1.0, &semidefinite, -3.0).unwrap();
 
     for (name, tensor) in [
         ("positive", &positive),
@@ -1171,8 +1244,8 @@ fn compact_is_posdef_matches_the_forced_dense_route() {
         let oracle = forced_dense(tensor);
         for tol in [0.0, 1e-14, 1e-8, 1e-3, 0.5] {
             assert_eq!(
-                is_posdef_compact!(tensor, tol, |v: f64| v),
-                is_posdef!(oracle, tol),
+                is_posdef_compact!(engine, tensor, tol, |v: f64| v),
+                is_posdef!(engine, oracle, tol),
                 "{name} at tol {tol}"
             );
         }
@@ -1181,13 +1254,14 @@ fn compact_is_posdef_matches_the_forced_dense_route() {
     // The one case whose answer is asserted absolutely rather than only against
     // the oracle: a rank-deficient spectrum is positive semidefinite, and
     // `isposdef` is strict.
-    assert!(is_posdef_compact!(positive, 0.0, |v: f64| v));
-    assert!(!is_posdef_compact!(semidefinite, 0.0, |v: f64| v));
-    assert!(!is_posdef_compact!(negative, 0.0, |v: f64| v));
+    assert!(is_posdef_compact!(engine, positive, 0.0, |v: f64| v));
+    assert!(!is_posdef_compact!(engine, semidefinite, 0.0, |v: f64| v));
+    assert!(!is_posdef_compact!(engine, negative, 0.0, |v: f64| v));
 }
 
 #[test]
 fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a c64 payload whose stored values are real up to rounding is the
     // case where a compact branch could disagree with the dense one — the dense
@@ -1196,9 +1270,11 @@ fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum
     // modulus. The `d` of `eigh_full` is exactly that payload.
     let runtime = runtime();
     let real = z2_complex_tensor(&runtime);
+    let real_adjoint = real.adjoint(engine).unwrap();
     let square = real
         .contract(
-            &real.adjoint().unwrap(),
+            engine,
+            &real_adjoint,
             &ContractSpec {
                 lhs: &[2],
                 rhs: &[0],
@@ -1207,11 +1283,11 @@ fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum
             },
         )
         .unwrap();
-    let hermitian = square.repartition(2).unwrap();
-    assert!(is_hermitian!(hermitian, 1e-10));
+    let hermitian = square.repartition(engine, 2).unwrap();
+    assert!(is_hermitian!(engine, hermitian, 1e-10));
 
     let d = hermitian
-        .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap()
         .d;
 
@@ -1225,20 +1301,20 @@ fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum
     // can hold an exact zero, which the compact predicate rejects on its own
     // and which would therefore hide the gate rather than test it.
     let skewed = real
-        .svd_compact(&[0, 1], &[2])
+        .svd_compact(engine, &[0, 1], &[2])
         .unwrap()
         .s
-        .scale(Complex64::new(1.0, 1.0))
+        .scale(engine, Complex64::new(1.0, 1.0))
         .unwrap();
-    assert!(!is_hermitian!(skewed, 1e-10));
+    assert!(!is_hermitian!(engine, skewed, 1e-10));
     for tol in [0.0, 1e-14, 1e-8, 1e-3] {
         assert!(
-            !is_posdef_compact!(skewed, tol, |v: Complex64| v.re),
+            !is_posdef_compact!(engine, skewed, tol, |v: Complex64| v.re),
             "skewed at tol {tol}"
         );
         assert_eq!(
-            is_posdef_compact!(skewed, tol, |v: Complex64| v.re),
-            is_posdef!(forced_dense(&skewed), tol),
+            is_posdef_compact!(engine, skewed, tol, |v: Complex64| v.re),
+            is_posdef!(engine, forced_dense(&skewed), tol),
             "skewed at tol {tol}"
         );
     }
@@ -1246,14 +1322,14 @@ fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum
     let oracle = forced_dense(&d);
     for tol in [0.0, 1e-14, 1e-8, 1e-3] {
         assert_eq!(
-            is_posdef_compact!(d, tol, |v: Complex64| v.re),
-            is_posdef!(oracle, tol),
+            is_posdef_compact!(engine, d, tol, |v: Complex64| v.re),
+            is_posdef!(engine, oracle, tol),
             "gram at tol {tol}"
         );
-        let flipped = d.scale(Complex64::new(-1.0, 0.0)).unwrap();
+        let flipped = d.scale(engine, Complex64::new(-1.0, 0.0)).unwrap();
         assert_eq!(
-            is_posdef_compact!(flipped, tol, |v: Complex64| v.re),
-            is_posdef!(forced_dense(&flipped), tol),
+            is_posdef_compact!(engine, flipped, tol, |v: Complex64| v.re),
+            is_posdef!(engine, forced_dense(&flipped), tol),
             "negated gram at tol {tol}"
         );
     }
@@ -1282,14 +1358,15 @@ where
         + SectorCodec,
     D: symtn::typed::FactorizationScalar + std::fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut next: f64 = 0.0;
     let typed: TensorMap<R, D> =
-        TensorMap::from_subblock_fn(runtime, [typed_leg], [typed_leg], |_, _| {
+        TensorMap::from_subblock_fn(engine, runtime, [typed_leg], [typed_leg], |_, _| {
             next += 1.0;
             fill(next)
         })
         .unwrap();
-    typed.svd_compact(&[0], &[1]).unwrap().s
+    typed.svd_compact(engine, &[0], &[1]).unwrap().s
 }
 
 /// The typed compact trace against the typed forced-dense engine route, both
@@ -1309,10 +1386,23 @@ fn assert_compact_trace_matches_forced_dense<R, D>(
         + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dense: TensorMap<R, D> = forced_dense(typed);
     for pairs in [[(0usize, 1usize)], [(1usize, 0usize)]] {
-        let actual: Complex64 = widen(typed.trace_pairs(&pairs).unwrap().scalar().unwrap());
-        let oracle: Complex64 = widen(dense.trace_pairs(&pairs).unwrap().scalar().unwrap());
+        let actual: Complex64 = widen(
+            typed
+                .trace_pairs(engine, &pairs)
+                .unwrap()
+                .scalar(engine)
+                .unwrap(),
+        );
+        let oracle: Complex64 = widen(
+            dense
+                .trace_pairs(engine, &pairs)
+                .unwrap()
+                .scalar(engine)
+                .unwrap(),
+        );
         assert!(
             (actual - oracle).norm() <= 1e-12 * oracle.norm().max(1.0),
             "{label} {pairs:?}: compact {actual:?} vs dense route {oracle:?}"
@@ -1335,11 +1425,12 @@ fn sweep_compact_trace_variants<R, D>(
         + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let variants: Vec<(&str, TensorMap<R, D>)> = vec![
         ("plain", typed_s.clone()),
-        ("transposed", full_transpose!(typed_s).unwrap()),
-        ("permuted", typed_s.permute(&[1], &[0]).unwrap()),
-        ("adjoint", typed_s.adjoint().unwrap()),
+        ("transposed", full_transpose!(engine, typed_s).unwrap()),
+        ("permuted", typed_s.permute(engine, &[1], &[0]).unwrap()),
+        ("adjoint", typed_s.adjoint(engine).unwrap()),
     ];
     for (which, typed) in &variants {
         assert_compact_trace_matches_forced_dense(&format!("{label} {which}"), typed, widen);
@@ -1348,6 +1439,7 @@ fn sweep_compact_trace_variants<R, D>(
 
 #[test]
 fn compact_full_trace_matches_the_forced_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the full trace of a rank-(1,1) compact spectrum factor over its
     // only pair is the same number on compact and forced-dense storage — U(1),
@@ -1464,17 +1556,18 @@ fn compact_full_trace_matches_the_forced_dense_route() {
     .unwrap();
     let typed_s = compact_bond_trace(&runtime, &typed_leg, complex);
     let rotated: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        typed_s.scale(Complex64::new(0.8, -0.6)).unwrap();
+        typed_s.scale(engine, Complex64::new(0.8, -0.6)).unwrap();
     assert_compact_trace_matches_forced_dense("fz2 rotated c64", &rotated, widen_complex);
     assert_compact_trace_matches_forced_dense(
         "fz2 rotated transposed c64",
-        &full_transpose!(rotated).unwrap(),
+        &full_transpose!(engine, rotated).unwrap(),
         widen_complex,
     );
 }
 
 #[test]
 fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: on a single fermion-parity sector, `trace_pairs` and `tr` differ by
     // exactly the twist: an odd fZ2 bond flips the sign, an even one does not,
@@ -1487,15 +1580,25 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
     let runtime = runtime();
 
     let assert_supertrace =
-        |name: &str, sign: f64, s: &TensorMap<symtn::sector::FermionParityFusionRule, f64>| {
-            let positive: f64 = s.tr().unwrap();
-            let traced: f64 = s.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
+        |engine: &mut dyn Engine,
+         name: &str,
+         sign: f64,
+         s: &TensorMap<symtn::sector::FermionParityFusionRule, f64>| {
+            let positive: f64 = s.tr(engine).unwrap();
+            let traced: f64 = s
+                .trace_pairs(engine, &[(0, 1)])
+                .unwrap()
+                .scalar(engine)
+                .unwrap();
             assert_eq!(traced, sign * positive, "{name}");
             let transposed: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-                full_transpose!(s).unwrap();
-            let transposed_positive: f64 = transposed.tr().unwrap();
-            let transposed_traced: f64 =
-                transposed.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
+                full_transpose!(engine, s).unwrap();
+            let transposed_positive: f64 = transposed.tr(engine).unwrap();
+            let transposed_traced: f64 = transposed
+                .trace_pairs(engine, &[(0, 1)])
+                .unwrap()
+                .scalar(engine)
+                .unwrap();
             assert_eq!(transposed_traced, transposed_positive, "{name} transposed");
         };
 
@@ -1510,14 +1613,14 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
         .unwrap();
         let mut next: f64 = 0.0;
         let source: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
                 next += 1.0;
                 next
             })
             .unwrap();
         let s: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-            source.svd_compact(&[0], &[1]).unwrap().s;
-        assert_supertrace(name, sign, &s);
+            source.svd_compact(engine, &[0], &[1]).unwrap().s;
+        assert_supertrace(engine, name, sign, &s);
     }
 
     // The bosonic twin of the odd fixture: same parity label, twist +1, so the
@@ -1529,19 +1632,25 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
     .unwrap();
     let mut next: f64 = 0.0;
     let source: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             next += 1.0;
             next
         })
         .unwrap();
-    let s: TensorMap<symtn::sector::Z2FusionRule, f64> = source.svd_compact(&[0], &[1]).unwrap().s;
-    let positive: f64 = s.tr().unwrap();
-    let traced: f64 = s.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
+    let s: TensorMap<symtn::sector::Z2FusionRule, f64> =
+        source.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let positive: f64 = s.tr(engine).unwrap();
+    let traced: f64 = s
+        .trace_pairs(engine, &[(0, 1)])
+        .unwrap()
+        .scalar(engine)
+        .unwrap();
     assert_eq!(traced, positive, "z2 odd");
 }
 
 #[test]
 fn compact_trace_of_no_pairs_returns_the_source_and_malformed_pairs_fail_first() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact arm's boundaries. Tracing nothing on a compact factor
     // returns the source (the pre-guard short-circuit), and a malformed pair
@@ -1552,15 +1661,16 @@ fn compact_trace_of_no_pairs_returns_the_source_and_malformed_pairs_fail_first()
     let runtime = runtime();
     let s = z2_bond(&runtime);
 
-    let untouched: TensorMap<symtn::sector::Z2FusionRule, f64> = s.trace_pairs(&[]).unwrap();
+    let untouched: TensorMap<symtn::sector::Z2FusionRule, f64> =
+        s.trace_pairs(engine, &[]).unwrap();
     assert_eq!(
-        untouched.materialize().unwrap().dense_data().unwrap(),
-        s.materialize().unwrap().dense_data().unwrap()
+        untouched.materialize(engine).unwrap().dense_data().unwrap(),
+        s.materialize(engine).unwrap().dense_data().unwrap()
     );
 
     for pairs in [vec![(0usize, 9usize)], vec![(0, 0)], vec![(0, 1), (1, 0)]] {
         assert!(matches!(
-            s.trace_pairs(&pairs).unwrap_err(),
+            s.trace_pairs(engine, &pairs).unwrap_err(),
             symtn::typed::Error::Operation(operation)
                 if matches!(
                     *operation,

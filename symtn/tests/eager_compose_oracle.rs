@@ -44,7 +44,8 @@ fn assert_oracle<R, D>(
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
-    let actual = actual.materialize().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let actual = actual.materialize(engine).unwrap();
     let (expected, _) = compose_oracle(a, b, &actual);
     let found = actual.dense_data().unwrap();
     assert_eq!(found.len(), expected.len(), "{what}");
@@ -72,49 +73,61 @@ where
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let what = |case: &str| format!("{label} {} {case}", D::NAME);
     // A: V ⊗ V ← W, B: W ← V, C: V ← V.
     let a = members::<R, D>(&runtime, &[&v, &v], &[&w], 1, 1).remove(0);
     let b = members::<R, D>(&runtime, &[&w], &[&v], 1, 2).remove(0);
     let c = members::<R, D>(&runtime, &[&v], &[&v], 1, 3).remove(0);
-    let materialized = |t: &TensorMap<R, D>| t.adjoint().unwrap().materialize().unwrap();
+    let mut materialized =
+        |t: &TensorMap<R, D>| t.adjoint(engine).unwrap().materialize(engine).unwrap();
     let (a_h, b_h, c_h) = (materialized(&a), materialized(&b), materialized(&c));
 
-    let ab = a.compose(&b).unwrap();
+    let ab = a.compose(engine, &b).unwrap();
     assert_oracle(&what("A*B"), &ab, &a, &b);
+    let a_adjoint = a.adjoint(engine).unwrap();
     for (case, product) in [
         (
             "B'*A' lazy",
-            b.adjoint().unwrap().compose(&a.adjoint().unwrap()).unwrap(),
+            b.adjoint(engine)
+                .unwrap()
+                .compose(engine, &a_adjoint)
+                .unwrap(),
         ),
         (
             "B'*A' view",
-            b.adjoint().unwrap().compose(a.adjoint_view()).unwrap(),
+            b.adjoint(engine)
+                .unwrap()
+                .compose(engine, a.adjoint_view())
+                .unwrap(),
         ),
-        ("B'*A' mixed", b.adjoint().unwrap().compose(&a_h).unwrap()),
+        (
+            "B'*A' mixed",
+            b.adjoint(engine).unwrap().compose(engine, &a_h).unwrap(),
+        ),
     ] {
         assert_oracle(&what(case), &product, &b_h, &a_h);
     }
     assert_oracle(
         &what("C*C'"),
-        &c.compose(c.adjoint_view()).unwrap(),
+        &c.compose(engine, c.adjoint_view()).unwrap(),
         &c,
         &c_h,
     );
     // `A*B` was checked above, so it can stand in for its own oracle value.
-    assert_oracle(&what("(A*B)*C"), &ab.compose(&c).unwrap(), &ab, &c);
+    assert_oracle(&what("(A*B)*C"), &ab.compose(engine, &c).unwrap(), &ab, &c);
 
-    let other = Runtime::builder().dense_threads(1).build().unwrap();
+    let other = Runtime::builder().build().unwrap();
     let foreign = members::<R, D>(&other, &[&w], &[&v], 1, 2).remove(0);
     assert!(
-        matches!(a.compose(&foreign), Err(Error::RuntimeMismatch)),
+        matches!(a.compose(engine, &foreign), Err(Error::RuntimeMismatch)),
         "{}",
         what("runtime")
     );
     assert!(
         matches!(
-            a.compose(&a),
+            a.compose(engine, &a),
             Err(Error::Operation(error))
                 if matches!(*error, OperationError::ContractAxisCountMismatch { lhs: 1, rhs: 2 })
         ),
@@ -145,9 +158,13 @@ where
     } else {
         ((2, 3), (3, 2))
     };
-    assert!(space_mismatch(a.compose(&c), forward), "{}", what("space"));
     assert!(
-        space_mismatch(b.compose(a.adjoint_view()), backward),
+        space_mismatch(a.compose(engine, &c), forward),
+        "{}",
+        what("space")
+    );
+    assert!(
+        space_mismatch(b.compose(engine, a.adjoint_view()), backward),
         "{}",
         what("adjoint space")
     );

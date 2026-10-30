@@ -1,0 +1,5 @@
+error: contract! takes the caller's engine first; hint: write `contract!(&mut engine, [i; k] := …)`
+ --> tests/ui/missing_engine.rs:4:23
+  |
+4 |     let _ = contract!([i; k] := a[i; j] * b[j; k]);
+  |                       ^

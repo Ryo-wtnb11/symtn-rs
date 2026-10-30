@@ -287,6 +287,7 @@ where
         + num_traits::Zero
         + crate::ZeroBytes,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let pick = |indices: &[usize]| {
         indices
             .iter()
@@ -300,6 +301,7 @@ where
     crate::probe::take_completed_transformer_activity();
     let (output, data) = context
         .tensorcontract_checked_generic_in(
+            engine,
             direct_side(&lhs, &lhs_data),
             direct_side(&rhs, &rhs_data),
             entry_axes(TensorContractSpec::new(
@@ -488,6 +490,7 @@ fn checked_contraction_routes_match_sun_dense_cgc_oracle() {
 /// composition (`mul!`), then the output permute.
 #[test]
 fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (rule, vacuum, three, adjoint) = sun3();
     let rule = Arc::new(rule);
     let v: Leg = vec![(vacuum, 1), (three, 2), (adjoint, 1)];
@@ -556,6 +559,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
             TensorContractFusionExecutionContext::<Complex64, RuleIdentity>::default();
         let (output_space, data) = context
             .tensorcontract_checked_generic_in(
+                engine,
                 direct_side(&lhs, &lhs_data),
                 direct_side(&rhs, &rhs_data),
                 entry_axes(TensorContractSpec::new(
@@ -580,6 +584,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
             f64,
         >::default()
         .tree_transform_owned_checked_generic_in(
+            engine,
             &lhs,
             None,
             &lhs_data,
@@ -594,6 +599,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
             f64,
         >::default()
         .tree_transform_owned_checked_generic_in(
+            engine,
             &rhs,
             None,
             &rhs_data,
@@ -603,6 +609,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
         .unwrap();
         let (core, core_data) = context
             .tensorcompose_checked_generic_in(
+                engine,
                 direct_side(&lhs_core, &lhs_core_data),
                 direct_side(&rhs_core, &rhs_core_data),
             )
@@ -614,6 +621,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
             f64,
         >::default()
         .tree_transform_owned_checked_generic_in(
+            engine,
             &core,
             None,
             &core_data,

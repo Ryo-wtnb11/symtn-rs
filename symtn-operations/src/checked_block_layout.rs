@@ -640,8 +640,12 @@ mod tests {
             .collect()
     }
 
-    fn check<T>(values: &[T], coefficients: &[(T, T)], bits: fn(T) -> u128)
-    where
+    fn check<T>(
+        mut exec: strided_kernel::Exec<'_>,
+        values: &[T],
+        coefficients: &[(T, T)],
+        bits: fn(T) -> u128,
+    ) where
         T: Copy
             + Add<T, Output = T>
             + Mul<T, Output = T>
@@ -649,7 +653,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         let mut layout = CheckedBlockLayout::default();
         for (shape, strides, [dst_offset, lhs_offset, rhs_offset]) in cases() {
@@ -679,6 +684,7 @@ mod tests {
                         (&rhs, &strides[2], rhs_offset, rhs_conjugate, beta, T::one()),
                     ] {
                         tensoradd_raw_strided_kernel(
+                            exec.reborrow(),
                             &mut Vec::new(),
                             &mut expected,
                             source,
@@ -746,6 +752,7 @@ mod tests {
                     for b in [T::zero(), T::one(), beta] {
                         let mut expected = initial.clone();
                         tensoradd_raw_strided_kernel(
+                            exec.reborrow(),
                             &mut Vec::new(),
                             &mut expected,
                             &lhs,
@@ -850,6 +857,7 @@ mod tests {
             f64::MIN_POSITIVE / 4.0,
         ];
         check(
+            strided_kernel::Exec::serial(),
             &reals,
             &[
                 (1.0, 1.0),
@@ -871,6 +879,7 @@ mod tests {
         ];
         let one = Complex64::new(1.0, 0.0);
         check(
+            strided_kernel::Exec::serial(),
             &complexes,
             &[
                 (one, one),
@@ -886,6 +895,7 @@ mod tests {
 
     #[test]
     fn aliased_sources_and_a_repeating_destination_match_two_passes() {
+        let mut exec = strided_kernel::Exec::serial();
         let source: Vec<f64> = (0..12).map(|i| i as f64 * 0.75 - 2.0).collect();
         // A stride-zero destination axis visits each element three times, so
         // only the two-walk sequence reproduces the accumulation.
@@ -896,6 +906,7 @@ mod tests {
             for (src_strides, beta) in [(&strides[1], 0.0), (&strides[2], 1.0)] {
                 let alpha = if beta == 0.0 { 2.0 } else { -3.0 };
                 tensoradd_raw_strided_kernel(
+                    exec.reborrow(),
                     &mut Vec::new(),
                     &mut expected,
                     &source,

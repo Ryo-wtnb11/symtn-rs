@@ -24,6 +24,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{BlockFusionTrees, Complex64, GradedSpace, TensorMap};
@@ -121,23 +122,29 @@ macro_rules! entries {
 /// a general pair, a zero `alpha`, a zero `beta` (over a NaN destination for
 /// `axpby_into`) and a unit pair.
 macro_rules! axpby_rows {
-    ($rule:expr, $label:expr, $spin:expr, $D:ty, $conv:expr) => {{
+    ($engine:ident, $rule:expr, $label:expr, $spin:expr, $D:ty, $conv:expr) => {{
         let runtime = host_runtime();
         let spin = $spin;
         let conv = $conv;
         let key = |trees: &BlockFusionTrees<_>| twice(trees, spin);
         let v =
             GradedSpace::try_new(Arc::new($rule), SECTORS.map(|(s, k)| ($label(s), k))).unwrap();
-        let build = |seed: u64| {
-            TensorMap::<_, $D>::from_subblock_fn(&runtime, [&v, &v], [&v], |trees, ix| {
+        let build = |$engine: &mut dyn Engine, seed: u64| {
+            TensorMap::<_, $D>::from_subblock_fn($engine, &runtime, [&v, &v], [&v], |trees, ix| {
                 conv(value(seed, &twice(trees, spin), ix))
             })
             .unwrap()
         };
-        let (x, y) = (build(1).adjoint().unwrap(), build(2).adjoint().unwrap());
-        let (x_owned, y_owned) = (x.materialize().unwrap(), y.materialize().unwrap());
+        let (x, y) = (
+            build($engine, 1).adjoint($engine).unwrap(),
+            build($engine, 2).adjoint($engine).unwrap(),
+        );
+        let (x_owned, y_owned) = (
+            x.materialize($engine).unwrap(),
+            y.materialize($engine).unwrap(),
+        );
         let nan = conv(Complex64::new(f64::NAN, f64::NAN));
-        let poisoned = y_owned.scale(nan).unwrap();
+        let poisoned = y_owned.scale($engine, nan).unwrap();
         let pairs = [
             (Complex64::new(0.7, -0.3), Complex64::new(-1.1, 0.4)),
             (Complex64::new(0.0, 0.0), Complex64::new(-1.1, 0.4)),
@@ -148,32 +155,37 @@ macro_rules! axpby_rows {
         for (alpha, beta) in pairs {
             let zero_beta = beta == Complex64::new(0.0, 0.0);
             let (alpha, beta): ($D, $D) = (conv(alpha), conv(beta));
-            let mut row = |name: &str, actual: TensorMap<_, $D>, expected: TensorMap<_, $D>| {
+            let mut row = |$engine: &mut dyn Engine,
+                           name: &str,
+                           actual: TensorMap<_, $D>,
+                           expected: TensorMap<_, $D>| {
                 let name = format!("{name} alpha {alpha:?} beta {beta:?}");
-                let actual = entries!(actual.materialize().unwrap(), key);
+                let actual = entries!(actual.materialize($engine).unwrap(), key);
                 assert_close(&name, &actual, &entries!(expected, key));
                 rows.push((name, actual));
             };
-            let oracle = x_owned.axpby(alpha, &y_owned, beta).unwrap();
-            let lazy_owned = x.axpby(alpha, &y_owned, beta).unwrap();
+            let oracle = x_owned.axpby($engine, alpha, &y_owned, beta).unwrap();
+            let lazy_owned = x.axpby($engine, alpha, &y_owned, beta).unwrap();
             assert!(lazy_owned.dense_data().is_ok(), "mixed gives owned");
-            row("lazy + owned", lazy_owned, oracle.clone());
-            let owned_lazy = x_owned.axpby(alpha, &y, beta).unwrap();
+            row($engine, "lazy + owned", lazy_owned, oracle.clone());
+            let owned_lazy = x_owned.axpby($engine, alpha, &y, beta).unwrap();
             assert!(owned_lazy.dense_data().is_ok(), "mixed gives owned");
-            row("owned + lazy", owned_lazy, oracle.clone());
-            let lazy_lazy = x.axpby(alpha, &y, beta).unwrap();
+            row($engine, "owned + lazy", owned_lazy, oracle.clone());
+            let lazy_lazy = x.axpby($engine, alpha, &y, beta).unwrap();
             assert!(
                 lazy_lazy.dense_data().is_err(),
                 "A10: lazy + lazy stays lazy"
             );
-            row("lazy + lazy", lazy_lazy, oracle);
+            row($engine, "lazy + lazy", lazy_lazy, oracle);
 
             let start = if zero_beta { &poisoned } else { &y_owned };
-            let mut actual = start.materialize().unwrap();
-            x.axpby_into(&mut actual, alpha, beta).unwrap();
-            let mut expected = start.materialize().unwrap();
-            x_owned.axpby_into(&mut expected, alpha, beta).unwrap();
-            row("lazy axpby_into", actual, expected);
+            let mut actual = start.materialize($engine).unwrap();
+            x.axpby_into($engine, &mut actual, alpha, beta).unwrap();
+            let mut expected = start.materialize($engine).unwrap();
+            x_owned
+                .axpby_into($engine, &mut expected, alpha, beta)
+                .unwrap();
+            row($engine, "lazy axpby_into", actual, expected);
         }
         rows
     }};
@@ -205,8 +217,10 @@ fn assert_modes_agree(mf: Rows, checked: Rows) {
 
 #[test]
 fn lazy_axpby_rows_agree_across_modes_f64() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let real = |z: Complex64| z.re;
     let mf = axpby_rows!(
+        engine,
         SU2FusionRule,
         SU2Irrep::from_twice_spin,
         su2_spin,
@@ -214,6 +228,7 @@ fn lazy_axpby_rows_agree_across_modes_f64() {
         real
     );
     let checked = axpby_rows!(
+        engine,
         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         sun2,
         sun_spin,
@@ -225,8 +240,10 @@ fn lazy_axpby_rows_agree_across_modes_f64() {
 
 #[test]
 fn lazy_axpby_rows_agree_across_modes_c64() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let complex = |z: Complex64| z;
     let mf = axpby_rows!(
+        engine,
         SU2FusionRule,
         SU2Irrep::from_twice_spin,
         su2_spin,
@@ -234,6 +251,7 @@ fn lazy_axpby_rows_agree_across_modes_c64() {
         complex
     );
     let checked = axpby_rows!(
+        engine,
         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         sun2,
         sun_spin,

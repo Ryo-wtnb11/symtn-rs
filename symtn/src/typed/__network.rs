@@ -23,10 +23,11 @@ pub fn with_extension_slot<T>(runtime: &Runtime, f: impl FnOnce(&mut ExtensionSl
     runtime.with_extension_slot(f)
 }
 
-/// The CUDA device ordinal `runtime` was built with.
+/// The device ordinal of the caller's CUDA engine; a non-CUDA engine is a
+/// typed refusal. Opens no device work.
 #[cfg(feature = "cuda")]
-pub fn cuda_device_ordinal(runtime: &Runtime) -> Option<usize> {
-    runtime.cuda_device_ordinal()
+pub fn cuda_engine_device(engine: &mut dyn Engine) -> Result<usize, Error> {
+    Ok(crate::runtime::cuda_call(engine)?.device())
 }
 
 /// Parks an ordinary dense destination without its runtime and provider.
@@ -109,6 +110,7 @@ where
 
 /// Adds every block of `source` into the matching rectangle of `destination`.
 pub fn network_scatter_add_assign<R, D>(
+    engine: &mut dyn Engine,
     destination: &mut TensorMap<R, D>,
     source: &TensorMap<R, D>,
     ranges: &[Option<std::ops::Range<usize>>],
@@ -117,7 +119,7 @@ where
     R: TypedSectorAdmission,
     D: TensorScalar,
 {
-    destination.network_scatter_add_assign(source, ranges)
+    destination.network_scatter_add_assign(engine, source, ranges)
 }
 
 /// The raw logical leg of `space`, for typed network replay admission.

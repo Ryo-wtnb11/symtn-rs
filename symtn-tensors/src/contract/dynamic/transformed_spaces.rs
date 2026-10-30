@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::tree_transform::TreeTransformPlanning;
+use symtn_dense::Engine;
 
 #[derive(Clone, Debug)]
 pub(crate) struct DynamicFusionTransformedSourceEntry<C = f64> {
@@ -33,6 +34,7 @@ pub(crate) struct DynamicFusionCoreDstEntry<C = f64> {
 /// id on every call and only evict live transformers.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_transformed_source<R>(
+    engine: &mut dyn Engine,
     planning: &mut TreeTransformPlanning,
     rule: &R,
     src_space: &DynamicFusionMapSpace,
@@ -48,6 +50,7 @@ where
     if source_conjugate {
         let oriented = crate::FusionOperand::prepare_storage_ordered_adjoint(src_space, rule)?;
         return compile_transformed_source_oriented(
+            engine,
             planning,
             rule,
             &oriented,
@@ -59,6 +62,7 @@ where
     let dst_structure = Arc::clone(space.structure());
     let transform_structure =
         <MultiplicityFreeAdmissionMode as PlanningAlgebra<R>>::tree_structure(
+            engine,
             planning,
             rule,
             operation,
@@ -79,6 +83,7 @@ where
 /// The core-layout space of a lazy adjoint read through its parent's
 /// storage, and its oriented transformer.
 pub(super) fn compile_transformed_source_oriented<R>(
+    engine: &mut dyn Engine,
     planning: &mut TreeTransformPlanning,
     rule: &R,
     source: &FusionOperandLayout<'_>,
@@ -93,6 +98,7 @@ where
     let dst_structure = Arc::clone(space.structure());
     let transform_structure =
         <MultiplicityFreeAdmissionMode as PlanningAlgebra<R>>::tree_structure(
+            engine,
             planning,
             rule,
             operation,
@@ -114,7 +120,9 @@ where
 }
 
 /// The core destination space and the output transformer into `output_dst`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_core_dst<R>(
+    engine: &mut dyn Engine,
     planning: &mut TreeTransformPlanning,
     rule: &R,
     lhs: &DynamicFusionMapSpace,
@@ -131,6 +139,7 @@ where
     let src_structure = Arc::clone(space.structure());
     let output_transform_structure =
         <MultiplicityFreeAdmissionMode as PlanningAlgebra<R>>::tree_structure(
+            engine,
             planning,
             rule,
             plan.output_transform(),

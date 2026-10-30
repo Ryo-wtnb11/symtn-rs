@@ -1,16 +1,13 @@
 //! Standalone ops on a SHARED `Runtime` must be correct and deterministic when
-//! driven from many threads at once (#155): each op leases a per-rule
-//! execution context (and, for factorizations, a dense executor) from a pool
-//! instead of holding the coarse runtime lock, so this exercises that the
+//! driven from many threads at once (#155), each thread on its own engine:
+//! each op leases a per-rule execution context from the Runtime's pool
+//! instead of holding a coarse runtime lock, so this exercises that the
 //! pooled machinery never leaks state across concurrent ops.
 //!
 //! Determinism: every thread runs the SAME deterministic computation on its own
-//! seeded operands, so every result must be BIT-identical to the single-threaded
-//! reference (a leased context that carried torn state from another thread would
-//! change the value or panic). This is the concurrency guard behind the
-//! "recoupling_threads=1-vs-N" determinism promise, which the lease change does
-//! not otherwise touch (the recoupling worker count rides through `for_config`
-//! into every leased context unchanged).
+//! seeded operands and its own serial engine, so every result must be
+//! BIT-identical to the single-threaded reference (a leased context that
+//! carried torn state from another thread would change the value or panic).
 
 use std::sync::Arc;
 use std::thread;
@@ -35,11 +32,15 @@ fn space() -> GradedSpace<SU2FusionRule> {
 /// pool) on freshly seeded operands; returns (contract norm, first singular
 /// value) as a deterministic fingerprint of the results.
 fn work(rt: &Runtime, seed: u64) -> (f64, f64) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let v = space();
-    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(rt, [&v, &v], [&v, &v], seed).unwrap();
-    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(rt, [&v, &v], [&v, &v], seed + 1).unwrap();
+    let a: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, rt, [&v, &v], [&v, &v], seed).unwrap();
+    let b: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, rt, [&v, &v], [&v, &v], seed + 1).unwrap();
     let c = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[2, 3],
@@ -49,18 +50,18 @@ fn work(rt: &Runtime, seed: u64) -> (f64, f64) {
             },
         )
         .unwrap(); // ContextPool
-    let p = c.permute(&[1, 0], &[3, 2]).unwrap(); // ContextPool
-    let s = p.svd_vals(&[0, 1], &[2, 3]).unwrap(); // ExecutorPool
+    let p = c.permute(engine, &[1, 0], &[3, 2]).unwrap(); // ContextPool
+    let s = p.svd_vals(engine, &[0, 1], &[2, 3]).unwrap(); // per-call dense executor
     let first = s
         .first()
         .and_then(|spec| spec.values.first().copied())
         .unwrap();
-    (c.norm(2.0).unwrap(), first)
+    (c.norm(engine, 2.0).unwrap(), first)
 }
 
 #[test]
 fn shared_runtime_concurrent_ops_match_serial_bit_for_bit() {
-    let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    let rt = Runtime::builder().build().unwrap();
 
     // Single-threaded references, one per distinct seed.
     let seeds: Vec<u64> = (0..8).map(|t| 100 + t * 2).collect();

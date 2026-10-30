@@ -1,0 +1,138 @@
+//! The caller's engine owns every resource an operation runs on.
+//!
+//! - One configuration (engine width, inputs) gives identical bits on every
+//!   repetition, at widths 1, 4 and 8; across widths the results agree to
+//!   the numerical tolerance only.
+//! - Two engines on two threads, sharing one Runtime and its tensors, run at
+//!   the same time and both return the bits of the same width run alone.
+//! - A broken engine is refused with a typed error; symtn does not fall back
+//!   to a serial engine of its own.
+
+use std::sync::{Arc, Barrier};
+
+use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::typed::{CpuEngine, Engine, GradedSpace, Pool, Runtime, TensorMap};
+
+use crate::numerics;
+
+type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
+
+/// U(1) x SU(2) with degeneracies large enough that a threaded engine has
+/// real work to split in the recoupling replay, the contraction and the
+/// factorization.
+fn space() -> GradedSpace<U1Su2> {
+    let provider = Arc::new(U1Su2::try_new(U1FusionRule, SU2FusionRule).unwrap());
+    let sector =
+        |q, twice_spin| product_sector(U1Irrep::new(q), SU2Irrep::from_twice_spin(twice_spin));
+    GradedSpace::try_new(
+        provider,
+        [
+            (sector(0, 0), 18),
+            (sector(1, 1), 14),
+            (sector(-1, 1), 14),
+            (sector(0, 2), 12),
+        ],
+    )
+    .unwrap()
+}
+
+fn engine(threads: usize) -> CpuEngine {
+    if threads == 1 {
+        CpuEngine::serial()
+    } else {
+        CpuEngine::new(Pool::builder().threads(threads).build().unwrap())
+    }
+}
+
+/// A permute, a contraction and a compact SVD of `t`, as one payload.
+fn workload(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> Vec<f64> {
+    let permuted = t.permute(engine, &[2, 0], &[1]).unwrap();
+    let adjoint = t.adjoint(engine).unwrap();
+    let gram = t.compose(engine, &adjoint).unwrap();
+    let svd = t.svd_compact(engine, &[0, 1], &[2]).unwrap();
+    let mut out = permuted.dense_data().unwrap().to_vec();
+    out.extend_from_slice(gram.dense_data().unwrap());
+    for entry in svd.s.diagview(engine).unwrap() {
+        out.extend_from_slice(&entry.values);
+    }
+    out
+}
+
+fn bits(values: &[f64]) -> Vec<u64> {
+    values.iter().map(|x| x.to_bits()).collect()
+}
+
+fn fixture(runtime: &Runtime) -> TensorMap<U1Su2, f64> {
+    let v = space();
+    TensorMap::rand_with_seed(&mut CpuEngine::serial(), runtime, [&v, &v], [&v], 1531).unwrap()
+}
+
+#[test]
+fn one_configuration_repeats_its_bits_at_every_width() {
+    let runtime = Runtime::builder().build().unwrap();
+    let t = fixture(&runtime);
+    let serial = workload(&mut CpuEngine::serial(), &t);
+    for threads in [1, 4, 8] {
+        let mut engine = engine(threads);
+        let first = workload(&mut engine, &t);
+        let second = workload(&mut engine, &t);
+        let fresh = workload(&mut self::engine(threads), &t);
+        assert_eq!(
+            bits(&first),
+            bits(&second),
+            "width {threads}: repeated call"
+        );
+        assert_eq!(bits(&first), bits(&fresh), "width {threads}: fresh engine");
+        numerics::assert_slices_close(&format!("width {threads} vs 1"), &first, &serial, 64);
+    }
+}
+
+#[test]
+fn two_engines_on_two_threads_share_one_runtime() {
+    let runtime = Runtime::builder().build().unwrap();
+    let t = fixture(&runtime);
+    let alone = workload(&mut engine(4), &t);
+    let start = Barrier::new(2);
+    let results: Vec<Vec<f64>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut engine = engine(4);
+                    start.wait();
+                    workload(&mut engine, &t)
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for result in &results {
+        assert_eq!(bits(result), bits(&alone));
+    }
+}
+
+#[test]
+fn a_broken_engine_is_refused_with_a_typed_error() {
+    let runtime = Runtime::builder().build().unwrap();
+    let t = fixture(&runtime);
+    for threads in [1, 4] {
+        let mut engine = engine(threads);
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+        }));
+        assert!(panicked.is_err());
+        assert!(engine.is_broken());
+        assert!(
+            t.svd_compact(&mut engine, &[0, 1], &[2]).is_err(),
+            "width {threads}: svd"
+        );
+        assert!(
+            t.permute(&mut engine, &[2, 0], &[1]).is_err(),
+            "width {threads}: permute"
+        );
+        let adjoint = t.adjoint(&mut CpuEngine::serial()).unwrap();
+        assert!(
+            t.compose(&mut engine, &adjoint).is_err(),
+            "width {threads}: compose"
+        );
+    }
+}

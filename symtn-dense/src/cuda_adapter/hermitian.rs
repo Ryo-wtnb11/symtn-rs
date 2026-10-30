@@ -13,7 +13,7 @@ fn upload_scalar<R: CudaRealScalar>(
     value: f64,
 ) -> Result<Tensor, DenseError> {
     let host = R::into_tensor(vec![], vec![R::narrow(value)]).map_err(|err| cuda_error(op, err))?;
-    let tensor = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(op, err))?;
+    let tensor = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(op, err))?;
     record_h2d(std::mem::size_of::<R>());
     Ok(tensor)
 }
@@ -40,12 +40,18 @@ fn scale_by_power_of_two<D: CudaScalar>(
     operand: &Tensor,
 ) -> Result<Tensor, DenseError> {
     if D::IS_COMPLEX {
-        ctx.backend.mul(tensor, operand)
+        ctx.backend.mul_read(
+            TensorRead::from_tensor(tensor),
+            TensorRead::from_tensor(operand),
+        )
     } else {
         // Why not `mul`: Tenferro 0.7.1's real `mul` does not broadcast a
         // rank-0 operand, while its real `div` does and, unlike the
         // complex-by-real one, never squares the divisor.
-        ctx.backend.div(tensor, operand)
+        ctx.backend.div_read(
+            TensorRead::from_tensor(tensor),
+            TensorRead::from_tensor(operand),
+        )
     }
     .map_err(|err| cuda_error(op, err))
 }
@@ -62,7 +68,7 @@ fn magnitudes_for_sum_squares<D: CudaScalar>(
         return Ok(None);
     }
     ctx.backend
-        .abs(tensor)
+        .abs_read(TensorRead::from_tensor(tensor))
         .map(Some)
         .map_err(|err| cuda_error(op, err))
 }
@@ -235,11 +241,11 @@ fn admit_regions<D: CudaScalar>(
         let normal = members.materialize::<D>(ctx, src, n, [1, n], offset)?;
         let input_abs = ctx
             .backend
-            .abs(&normal)
+            .abs_read(TensorRead::from_tensor(&normal))
             .map_err(|err| cuda_error(op, err))?;
         maxima.push(
             ctx.backend
-                .reduce_max(&input_abs, &[0, 1])
+                .reduce_max_read(TensorRead::from_tensor(&input_abs), &[0, 1])
                 .map_err(|err| cuda_error(op, err))?,
         );
         inputs.push((index, normal));
@@ -271,7 +277,7 @@ fn admit_regions<D: CudaScalar>(
         // Conjugation is a backend op on the transposed copy, never a symtn loop.
         let transpose = if D::IS_COMPLEX {
             ctx.backend
-                .conj(&transpose)
+                .conj_read(TensorRead::from_tensor(&transpose))
                 .map_err(|err| cuda_error(op, err))?
         } else {
             transpose
@@ -283,15 +289,18 @@ fn admit_regions<D: CudaScalar>(
         input_sums.push(sum_of_squares::<D>(ctx, op, &normal_scaled)?);
         let residual = ctx
             .backend
-            .sub(&normal_scaled, &transpose_scaled)
+            .sub_read(
+                TensorRead::from_tensor(&normal_scaled),
+                TensorRead::from_tensor(&transpose_scaled),
+            )
             .map_err(|err| cuda_error(op, err))?;
         let residual_abs = ctx
             .backend
-            .abs(&residual)
+            .abs_read(TensorRead::from_tensor(&residual))
             .map_err(|err| cuda_error(op, err))?;
         residual_maxima.push(
             ctx.backend
-                .reduce_max(&residual_abs, &[0, 1])
+                .reduce_max_read(TensorRead::from_tensor(&residual_abs), &[0, 1])
                 .map_err(|err| cuda_error(op, err))?,
         );
         residuals.push((index, residual, normalizers));
@@ -393,7 +402,10 @@ impl MemberScale {
             Self::Scalar(operand) => scale_by_power_of_two::<D>(ctx, op, tensor, operand),
             Self::PerMember(divisor) => ctx
                 .backend
-                .div(tensor, divisor)
+                .div_read(
+                    TensorRead::from_tensor(tensor),
+                    TensorRead::from_tensor(divisor),
+                )
                 .map_err(|err| cuda_error(op, err)),
         }
     }
@@ -446,10 +458,14 @@ fn broadcast_member_divisors<D: CudaScalar>(
         .collect();
     let host =
         D::Real::into_tensor(vec![divisors.len()], values).map_err(|err| cuda_error(op, err))?;
-    let tensor = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(op, err))?;
+    let tensor = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(op, err))?;
     record_h2d(divisors.len() * std::mem::size_of::<D::Real>());
     ctx.backend
-        .broadcast_in_dim(&tensor, &[n, n, divisors.len()], &[2])
+        .broadcast_in_dim_read(
+            TensorRead::from_tensor(&tensor),
+            &[n, n, divisors.len()],
+            &[2],
+        )
         .map_err(|err| cuda_error(op, err))
 }
 /// Downloads rank-1 real reductions of `members` values each with one

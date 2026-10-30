@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
+use symtn::typed::Engine;
 
 use symtn::expert::TensorStorage;
 use symtn::sector::{
@@ -47,7 +48,7 @@ where
     network.plan(tensors, &GreedyDenseOptimizer).unwrap();
 }
 
-fn pair_case<R, D>(space: &GradedSpace<R>)
+fn pair_case<R, D>(engine: &mut dyn Engine, space: &GradedSpace<R>)
 where
     R: TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -63,14 +64,15 @@ where
     // direct call; the contracted length is bounded by the leg's weighted
     // dimension.
     let terms = space.dim().unwrap().ceil() as usize;
-    let lhs = TensorMap::<R, D>::rand_with_seed(&runtime, [space], [space], 1).unwrap();
-    let rhs = TensorMap::<R, D>::rand_with_seed(&runtime, [space], [space], 2).unwrap();
+    let lhs = TensorMap::<R, D>::rand_with_seed(engine, &runtime, [space], [space], 1).unwrap();
+    let rhs = TensorMap::<R, D>::rand_with_seed(engine, &runtime, [space], [space], 2).unwrap();
     let tensors = [&lhs, &rhs];
     let planned = pair_network()
         .plan(&tensors, &GreedyDenseOptimizer)
         .unwrap();
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -82,7 +84,7 @@ where
         .unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
     for _ in 0..2 {
-        let actual = planned.execute(&tensors, &mut workspace).unwrap();
+        let actual = planned.execute(engine, &tensors, &mut workspace).unwrap();
         numerics::assert_slices_close(
             "network vs direct contract",
             actual.dense_data().unwrap(),
@@ -94,7 +96,7 @@ where
     }
 }
 
-fn assert_same<R, D>(actual: &TensorMap<R, D>, expected: &TensorMap<R, D>)
+fn assert_same<R, D>(engine: &mut dyn Engine, actual: &TensorMap<R, D>, expected: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
         + MultiplicityFreeRigidSymbols<Scalar = f64>
@@ -105,16 +107,26 @@ where
     assert_eq!(actual.codomain(), expected.codomain());
     assert_eq!(actual.domain(), expected.domain());
     assert_eq!(
-        actual.materialize().unwrap().dense_data().unwrap().len(),
-        expected.materialize().unwrap().dense_data().unwrap().len()
+        actual
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len(),
+        expected
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len()
     );
     for (&got, &want) in actual
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(expected.materialize().unwrap().dense_data().unwrap())
+        .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
     {
         assert!(
             got.error(want) <= 1.0e-11 * (1.0 + want.magnitude()),
@@ -158,6 +170,7 @@ impl OracleScalar for Complex64 {
 }
 
 fn matrix<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     codomain: &GradedSpace<R>,
     domain: &GradedSpace<R>,
@@ -171,7 +184,7 @@ where
         + SectorCodec,
     D: OracleScalar,
 {
-    TensorMap::from_subblock_fn(runtime, [codomain], [domain], |trees, ij| {
+    TensorMap::from_subblock_fn(engine, runtime, [codomain], [domain], |trees, ij| {
         D::sample(salt + sector_tag(trees.coupled()) + 0.1 * ij[0] as f64 + 0.01 * ij[1] as f64)
     })
     .unwrap()
@@ -246,6 +259,7 @@ fn assert_chain_oracle<R, D>(
 }
 
 fn assert_chain_case<R, D>(
+    engine: &mut dyn Engine,
     plan: &PlannedNetwork,
     workspace: &mut NetworkExecutionWorkspace<R, D>,
     tensors: [&TensorMap<R, D>; 3],
@@ -260,14 +274,17 @@ where
         + SectorCodec,
     D: OracleScalar,
 {
-    let reused = plan.execute(&tensors, workspace).unwrap();
-    let fresh = plan.execute(&tensors, &mut Default::default()).unwrap();
-    assert_same(&reused, &fresh);
+    let reused = plan.execute(engine, &tensors, workspace).unwrap();
+    let fresh = plan
+        .execute(engine, &tensors, &mut Default::default())
+        .unwrap();
+    assert_same(engine, &reused, &fresh);
     assert_chain_oracle(&reused, tensors[0], tensors[1], tensors[2]);
     reused
 }
 
 fn run_shape_reuse_sequence<R, D>(
+    engine: &mut dyn Engine,
     provider: Arc<R>,
     make_space: impl Fn(&Arc<R>, &[(i32, usize)]) -> GradedSpace<R>,
     sector_tag: impl Fn(&<R as TypedSectorAdmission>::Sector) -> f64,
@@ -281,12 +298,12 @@ fn run_shape_reuse_sequence<R, D>(
         + SectorCodec,
     D: OracleScalar,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let initial = make_space(&provider, &[(0, 2), (1, 1)]);
     let initial_tensors = [
-        matrix(&runtime, &initial, &initial, 1.0, &sector_tag),
-        matrix(&runtime, &initial, &initial, 2.0, &sector_tag),
-        matrix(&runtime, &initial, &initial, 3.0, &sector_tag),
+        matrix(engine, &runtime, &initial, &initial, 1.0, &sector_tag),
+        matrix(engine, &runtime, &initial, &initial, 2.0, &sector_tag),
+        matrix(engine, &runtime, &initial, &initial, 3.0, &sector_tag),
     ];
     let network = Network::new(
         vec![vec!["a", "b"], vec!["b", "c"], vec!["c", "d"]],
@@ -320,7 +337,7 @@ fn run_shape_reuse_sequence<R, D>(
     );
 
     let mut workspace = NetworkExecutionWorkspace::default();
-    assert_chain_case(&plan, &mut workspace, initial_refs);
+    assert_chain_case(engine, &plan, &mut workspace, initial_refs);
     for (spec, salt) in [
         (vec![(0, 1), (1, 2)], 11.0),
         (vec![(0, 3), (1, 2)], 21.0),
@@ -332,8 +349,16 @@ fn run_shape_reuse_sequence<R, D>(
         let space = make_space(&provider, &spec);
         for value_shift in [0.0, 100.0] {
             let tensors = [
-                matrix(&runtime, &space, &space, salt + value_shift, &sector_tag),
                 matrix(
+                    engine,
+                    &runtime,
+                    &space,
+                    &space,
+                    salt + value_shift,
+                    &sector_tag,
+                ),
+                matrix(
+                    engine,
                     &runtime,
                     &space,
                     &space,
@@ -341,6 +366,7 @@ fn run_shape_reuse_sequence<R, D>(
                     &sector_tag,
                 ),
                 matrix(
+                    engine,
                     &runtime,
                     &space,
                     &space,
@@ -349,6 +375,7 @@ fn run_shape_reuse_sequence<R, D>(
                 ),
             ];
             assert_chain_case(
+                engine,
                 &plan,
                 &mut workspace,
                 [&tensors[0], &tensors[1], &tensors[2]],
@@ -361,11 +388,12 @@ fn run_shape_reuse_sequence<R, D>(
     let l = make_space(&provider, &[(1, 1), (2, 1)]);
     let y = make_space(&provider, &[(2, 1)]);
     let empty_chain = [
-        matrix(&runtime, &x, &k, 71.0, &sector_tag),
-        matrix(&runtime, &k, &l, 72.0, &sector_tag),
-        matrix(&runtime, &l, &y, 73.0, &sector_tag),
+        matrix(engine, &runtime, &x, &k, 71.0, &sector_tag),
+        matrix(engine, &runtime, &k, &l, 72.0, &sector_tag),
+        matrix(engine, &runtime, &l, &y, 73.0, &sector_tag),
     ];
     let empty = assert_chain_case(
+        engine,
         &plan,
         &mut workspace,
         [&empty_chain[0], &empty_chain[1], &empty_chain[2]],
@@ -375,24 +403,28 @@ fn run_shape_reuse_sequence<R, D>(
 
     let valid = initial_refs;
     let wrong_bond = make_space(&provider, &[(9, 1)]);
-    let invalid_b = matrix(&runtime, &wrong_bond, &initial, 81.0, &sector_tag);
+    let invalid_b = matrix(engine, &runtime, &wrong_bond, &initial, 81.0, &sector_tag);
     assert!(plan
-        .execute(&[valid[0], &invalid_b, valid[2]], &mut workspace)
+        .execute(engine, &[valid[0], &invalid_b, valid[2]], &mut workspace)
         .is_err());
-    assert_chain_case(&plan, &mut workspace, valid);
+    assert_chain_case(engine, &plan, &mut workspace, valid);
 
     let wrong_split =
-        TensorMap::from_subblock_fn(&runtime, [&initial, &initial], [], |trees, ij| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&initial, &initial], [], |trees, ij| {
             D::sample(91.0 + sector_tag(trees.coupled()) + 0.1 * ij[0] as f64 + 0.01 * ij[1] as f64)
         })
         .unwrap();
     assert!(plan
-        .execute(&[valid[0], &wrong_split, valid[2]], &mut workspace)
+        .execute(engine, &[valid[0], &wrong_split, valid[2]], &mut workspace)
         .is_err());
-    assert_chain_case(&plan, &mut workspace, valid);
+    assert_chain_case(engine, &plan, &mut workspace, valid);
 
-    let wrong_rank =
-        TensorMap::from_subblock_fn(&runtime, [&initial, &initial], [&initial], |trees, ij| {
+    let wrong_rank = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&initial, &initial],
+        [&initial],
+        |trees, ij| {
             D::sample(
                 101.0
                     + sector_tag(trees.coupled())
@@ -400,16 +432,18 @@ fn run_shape_reuse_sequence<R, D>(
                     + 0.01 * ij[1] as f64
                     + 0.001 * ij[2] as f64,
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert!(plan
-        .execute(&[valid[0], &wrong_rank, valid[2]], &mut workspace)
+        .execute(engine, &[valid[0], &wrong_rank, valid[2]], &mut workspace)
         .is_err());
-    assert_chain_case(&plan, &mut workspace, valid);
+    assert_chain_case(engine, &plan, &mut workspace, valid);
 }
 
 #[test]
 fn u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let make_space = |provider: &Arc<_>, spec: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -419,16 +453,17 @@ fn u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
         )
         .unwrap()
     };
-    run_shape_reuse_sequence::<_, f64>(Arc::clone(&provider), make_space, |sector| {
+    run_shape_reuse_sequence::<_, f64>(engine, Arc::clone(&provider), make_space, |sector| {
         f64::from(sector.charge())
     });
-    run_shape_reuse_sequence::<_, Complex64>(provider, make_space, |sector| {
+    run_shape_reuse_sequence::<_, Complex64>(engine, provider, make_space, |sector| {
         f64::from(sector.charge())
     });
 }
 
 #[test]
 fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(
         symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -460,19 +495,20 @@ fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
                 0.0
             }
     };
-    run_shape_reuse_sequence::<_, f64>(Arc::clone(&provider), make_space, sector_tag);
-    run_shape_reuse_sequence::<_, Complex64>(provider, make_space, sector_tag);
+    run_shape_reuse_sequence::<_, f64>(engine, Arc::clone(&provider), make_space, sector_tag);
+    run_shape_reuse_sequence::<_, Complex64>(engine, provider, make_space, sector_tag);
 }
 
 #[test]
 fn provider_and_dtype_matrix_matches_direct_contract() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    pair_case::<_, f64>(&u1);
-    pair_case::<_, Complex64>(&u1);
+    pair_case::<_, f64>(engine, &u1);
+    pair_case::<_, Complex64>(engine, &u1);
 
     let su2 = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
@@ -482,16 +518,16 @@ fn provider_and_dtype_matrix_matches_direct_contract() {
         ],
     )
     .unwrap();
-    pair_case::<_, f64>(&su2);
-    pair_case::<_, Complex64>(&su2);
+    pair_case::<_, f64>(engine, &su2);
+    pair_case::<_, Complex64>(engine, &su2);
 
     let fz2 = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule),
         [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
     )
     .unwrap();
-    pair_case::<_, f64>(&fz2);
-    pair_case::<_, Complex64>(&fz2);
+    pair_case::<_, f64>(engine, &fz2);
+    pair_case::<_, Complex64>(engine, &fz2);
 
     let product_rule = Arc::new(
         symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -505,8 +541,8 @@ fn provider_and_dtype_matrix_matches_direct_contract() {
         ],
     )
     .unwrap();
-    pair_case::<_, f64>(&product);
-    pair_case::<_, Complex64>(&product);
+    pair_case::<_, f64>(engine, &product);
+    pair_case::<_, Complex64>(engine, &product);
 }
 
 #[test]
@@ -528,9 +564,10 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
-        let a = TensorMap::<R, f64>::rand_with_seed(runtime, [x0, x1], [y], seed).unwrap();
-        let b = TensorMap::rand_with_seed(runtime, [x1], [z0, z1], seed + 1).unwrap();
-        let adjoint = a.adjoint().unwrap();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let a = TensorMap::<R, f64>::rand_with_seed(engine, runtime, [x0, x1], [y], seed).unwrap();
+        let b = TensorMap::rand_with_seed(engine, runtime, [x1], [z0, z1], seed + 1).unwrap();
+        let adjoint = a.adjoint(engine).unwrap();
         assert_eq!(adjoint.codomain(), vec![y.clone()]);
         assert_eq!(adjoint.domain(), vec![x0.clone(), x1.clone()]);
         let network = Network::new(
@@ -546,10 +583,11 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
         let actual = network
             .plan(&refs, &GreedyDenseOptimizer)
             .unwrap()
-            .execute(&refs, &mut Default::default())
+            .execute(engine, &refs, &mut Default::default())
             .unwrap();
         let expected = adjoint
             .contract(
+                engine,
                 &b,
                 &ContractSpec {
                     lhs: &[2],
@@ -561,7 +599,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
             .unwrap();
         assert_eq!(actual.codomain(), vec![y.clone(), x0.try_dual().unwrap()]);
         assert_eq!(actual.domain(), vec![z0.clone(), z1.clone()]);
-        assert_same(&actual, &expected);
+        assert_same(engine, &actual, &expected);
     }
 
     let runtime = Runtime::builder().build().unwrap();
@@ -618,6 +656,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
 
 #[test]
 fn single_scalar_split_and_heterogeneous_final_permutation() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| {
@@ -628,7 +667,8 @@ fn single_scalar_split_and_heterogeneous_final_permutation() {
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    let tensor = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 10).unwrap();
+    let tensor =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 10).unwrap();
 
     let single = Network::new(
         vec![vec!["i", "j"]],
@@ -639,12 +679,11 @@ fn single_scalar_split_and_heterogeneous_final_permutation() {
     )
     .unwrap();
     let single_plan = single.plan(&[&tensor], &GreedyDenseOptimizer).unwrap();
-    assert_same(
-        &single_plan
-            .execute(&[&tensor], &mut Default::default())
-            .unwrap(),
-        &tensor.permute(&[1], &[0]).unwrap(),
-    );
+    let single_plan_execute = &single_plan
+        .execute(engine, &[&tensor], &mut Default::default())
+        .unwrap();
+    let tensor_permute = &tensor.permute(engine, &[1], &[0]).unwrap();
+    assert_same(engine, single_plan_execute, tensor_permute);
 
     let scalar = Network::new(
         vec![vec!["i", "j"], vec!["i", "j"]],
@@ -658,22 +697,22 @@ fn single_scalar_split_and_heterogeneous_final_permutation() {
         .plan(&[&tensor, &tensor], &GreedyDenseOptimizer)
         .unwrap();
     let value = scalar_plan
-        .execute(&[&tensor, &tensor], &mut Default::default())
+        .execute(engine, &[&tensor, &tensor], &mut Default::default())
         .unwrap()
-        .scalar()
+        .scalar(engine)
         .unwrap();
-    let norm = tensor.norm(2.0).unwrap();
+    let norm = tensor.norm(engine, 2.0).unwrap();
     assert!((value - norm * norm).abs() <= 1e-12 * (1.0 + norm * norm));
     let other_provider = Arc::new(U1FusionRule);
     let other_v =
         GradedSpace::try_new(other_provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
-    let other = TensorMap::rand_with_seed(&runtime, [&other_v], [&other_v], 13).unwrap();
+    let other = TensorMap::rand_with_seed(engine, &runtime, [&other_v], [&other_v], 13).unwrap();
     let scalar_from_lhs = scalar_plan
-        .execute(&[&tensor, &other], &mut Default::default())
+        .execute(engine, &[&tensor, &other], &mut Default::default())
         .unwrap();
     assert!(std::ptr::eq(scalar_from_lhs.provider(), tensor.provider()));
     let scalar_from_other_lhs = scalar_plan
-        .execute(&[&other, &tensor], &mut Default::default())
+        .execute(engine, &[&other, &tensor], &mut Default::default())
         .unwrap();
     assert!(std::ptr::eq(
         scalar_from_other_lhs.provider(),
@@ -682,9 +721,11 @@ fn single_scalar_split_and_heterogeneous_final_permutation() {
 
     let (a, b, bond, c, d) = (space(2), space(3), space(4), space(5), space(6));
     let lhs =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&a, &b], [&bond], 11).unwrap();
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&a, &b], [&bond], 11)
+            .unwrap();
     let rhs =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&bond], [&c, &d], 12).unwrap();
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&bond], [&c, &d], 12)
+            .unwrap();
     let crossed = Network::new(
         vec![vec!["a", "b", "k"], vec!["k", "c", "d"]],
         vec![false, false],
@@ -697,6 +738,7 @@ fn single_scalar_split_and_heterogeneous_final_permutation() {
     let plan = crossed.plan(&refs, &GreedyDenseOptimizer).unwrap();
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[2],
@@ -706,18 +748,22 @@ fn single_scalar_split_and_heterogeneous_final_permutation() {
             },
         )
         .unwrap()
-        .permute(&[3, 0], &[1, 2])
+        .permute(engine, &[3, 0], &[1, 2])
         .unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
-    assert_same(&plan.execute(&refs, &mut workspace).unwrap(), &expected);
-    assert_same(&plan.execute(&refs, &mut workspace).unwrap(), &expected);
+    let plan_execute = &plan.execute(engine, &refs, &mut workspace).unwrap();
+    assert_same(engine, plan_execute, &expected);
+    let plan_execute = &plan.execute(engine, &refs, &mut workspace).unwrap();
+    assert_same(engine, plan_execute, &expected);
 }
 
 #[test]
 fn compact_and_lazy_representation_replay_stays_semantic() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
-    let dense = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 20).unwrap();
+    let dense =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 20).unwrap();
     let identity = Network::new(
         vec![vec!["i", "j"]],
         vec![false],
@@ -728,9 +774,11 @@ fn compact_and_lazy_representation_replay_stays_semantic() {
     .unwrap();
     let plan = identity.plan(&[&dense], &GreedyDenseOptimizer).unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
-    assert_same(&plan.execute(&[&dense], &mut workspace).unwrap(), &dense);
-    let lazy = dense.adjoint().unwrap();
-    assert_same(&plan.execute(&[&lazy], &mut workspace).unwrap(), &lazy);
+    let plan_execute = &plan.execute(engine, &[&dense], &mut workspace).unwrap();
+    assert_same(engine, plan_execute, &dense);
+    let lazy = dense.adjoint(engine).unwrap();
+    let plan_execute = &plan.execute(engine, &[&lazy], &mut workspace).unwrap();
+    assert_same(engine, plan_execute, &lazy);
     let conjugate = Network::new(
         vec![vec!["i", "j"]],
         vec![true],
@@ -741,34 +789,32 @@ fn compact_and_lazy_representation_replay_stays_semantic() {
     .unwrap();
     let lazy_conj_plan = conjugate.plan(&[&lazy], &GreedyDenseOptimizer).unwrap();
     for _ in 0..2 {
-        assert_same(
-            &lazy_conj_plan.execute(&[&lazy], &mut workspace).unwrap(),
-            &dense,
-        );
+        let lazy_conj_plan_execute = &lazy_conj_plan
+            .execute(engine, &[&lazy], &mut workspace)
+            .unwrap();
+        assert_same(engine, lazy_conj_plan_execute, &dense);
     }
 
-    let Svd { s: compact, .. } = dense.svd_compact(&[0], &[1]).unwrap();
+    let Svd { s: compact, .. } = dense.svd_compact(engine, &[0], &[1]).unwrap();
     let compact_plan = identity.plan(&[&compact], &GreedyDenseOptimizer).unwrap();
-    let scaled = compact.scale(2.0).unwrap();
-    assert_same(
-        &compact_plan.execute(&[&compact], &mut workspace).unwrap(),
-        &compact,
-    );
-    assert_same(
-        &compact_plan.execute(&[&scaled], &mut workspace).unwrap(),
-        &scaled,
-    );
+    let scaled = compact.scale(engine, 2.0).unwrap();
+    let compact_plan_execute = &compact_plan
+        .execute(engine, &[&compact], &mut workspace)
+        .unwrap();
+    assert_same(engine, compact_plan_execute, &compact);
+    let compact_plan_execute = &compact_plan
+        .execute(engine, &[&scaled], &mut workspace)
+        .unwrap();
+    assert_same(engine, compact_plan_execute, &scaled);
     let compact_conj_plan = conjugate.plan(&[&compact], &GreedyDenseOptimizer).unwrap();
-    let compact_adjoint = compact.adjoint().unwrap();
+    let compact_adjoint = compact.adjoint(engine).unwrap();
     for _ in 0..2 {
+        let compact_conj_plan_execute = &compact_conj_plan
+            .execute(engine, &[&compact], &mut workspace)
+            .unwrap();
         assert_eq!(
-            symtn::expert::diagonal_spectrum(
-                &compact_conj_plan
-                    .execute(&[&compact], &mut workspace)
-                    .unwrap()
-            )
-            .unwrap(),
-            symtn::expert::diagonal_spectrum(&compact_adjoint).unwrap()
+            symtn::expert::diagonal_spectrum(engine, compact_conj_plan_execute).unwrap(),
+            symtn::expert::diagonal_spectrum(engine, &compact_adjoint).unwrap()
         );
     }
 }
@@ -779,6 +825,7 @@ fn u1_space(provider: &Arc<U1FusionRule>, degeneracy: usize) -> GradedSpace<U1Fu
 
 #[test]
 fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime1 = Runtime::builder().build().unwrap();
     let runtime2 = Runtime::builder().build().unwrap();
     let provider1 = Arc::new(U1FusionRule);
@@ -786,13 +833,27 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
     let v1 = u1_space(&provider1, 2);
     let v2 = u1_space(&provider2, 2);
     let larger = u1_space(&provider1, 3);
-    let make = |runtime: &Runtime, space: &GradedSpace<U1FusionRule>, seed| {
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(runtime, [space], [space], seed).unwrap()
-    };
-    let (a1, b1) = (make(&runtime1, &v1, 30), make(&runtime1, &v1, 31));
-    let (a2, b2) = (make(&runtime1, &v2, 32), make(&runtime1, &v2, 33));
-    let (wide_a, wide_b) = (make(&runtime1, &larger, 34), make(&runtime1, &larger, 35));
-    let (foreign_a, foreign_b) = (make(&runtime2, &v1, 36), make(&runtime2, &v1, 37));
+    let make =
+        |engine: &mut dyn Engine, runtime: &Runtime, space: &GradedSpace<U1FusionRule>, seed| {
+            TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, runtime, [space], [space], seed)
+                .unwrap()
+        };
+    let (a1, b1) = (
+        make(engine, &runtime1, &v1, 30),
+        make(engine, &runtime1, &v1, 31),
+    );
+    let (a2, b2) = (
+        make(engine, &runtime1, &v2, 32),
+        make(engine, &runtime1, &v2, 33),
+    );
+    let (wide_a, wide_b) = (
+        make(engine, &runtime1, &larger, 34),
+        make(engine, &runtime1, &larger, 35),
+    );
+    let (foreign_a, foreign_b) = (
+        make(engine, &runtime2, &v1, 36),
+        make(engine, &runtime2, &v1, 37),
+    );
     let network = pair_network();
     let plan = network.plan(&[&a1, &b1], &GreedyDenseOptimizer).unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
@@ -803,9 +864,10 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
         [&wide_a, &wide_b],
         [&foreign_a, &foreign_b],
     ] {
-        let actual = plan.execute(&operands, &mut workspace).unwrap();
+        let actual = plan.execute(engine, &operands, &mut workspace).unwrap();
         let expected = operands[0]
             .contract(
+                engine,
                 operands[1],
                 &ContractSpec {
                     lhs: &[1],
@@ -815,13 +877,16 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
                 },
             )
             .unwrap();
-        assert_same(&actual, &expected);
+        assert_same(engine, &actual, &expected);
     }
 
-    assert!(plan.execute(&[&a1, &foreign_b], &mut workspace).is_err());
-    assert_same(
-        &plan.execute(&[&a1, &b1], &mut workspace).unwrap(),
-        &a1.contract(
+    assert!(plan
+        .execute(engine, &[&a1, &foreign_b], &mut workspace)
+        .is_err());
+    let plan_execute = &plan.execute(engine, &[&a1, &b1], &mut workspace).unwrap();
+    let a1_contract = &a1
+        .contract(
+            engine,
             &b1,
             &ContractSpec {
                 lhs: &[1],
@@ -830,18 +895,21 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
                 domain: &[1],
             },
         )
-        .unwrap(),
-    );
+        .unwrap();
+    assert_same(engine, plan_execute, a1_contract);
 
     let incompatible = u1_space(&provider1, 4);
-    let bad = make(&runtime1, &incompatible, 38);
-    assert!(plan.execute(&[&a1, &bad], &mut workspace).is_err());
-    assert!(plan.execute(&[&a1], &mut workspace).is_err());
+    let bad = make(engine, &runtime1, &incompatible, 38);
+    assert!(plan.execute(engine, &[&a1, &bad], &mut workspace).is_err());
+    assert!(plan.execute(engine, &[&a1], &mut workspace).is_err());
 
     let second_plan = network.plan(&[&a2, &b2], &GreedyDenseOptimizer).unwrap();
-    assert_same(
-        &second_plan.execute(&[&a2, &b2], &mut workspace).unwrap(),
-        &a2.contract(
+    let second_plan_execute = &second_plan
+        .execute(engine, &[&a2, &b2], &mut workspace)
+        .unwrap();
+    let a2_contract = &a2
+        .contract(
+            engine,
             &b2,
             &ContractSpec {
                 lhs: &[1],
@@ -850,22 +918,26 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
                 domain: &[1],
             },
         )
-        .unwrap(),
-    );
+        .unwrap();
+    assert_same(engine, second_plan_execute, a2_contract);
 }
 
 #[test]
 fn one_plan_replays_concurrently_with_distinct_workspaces() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let v = u1_space(&provider, 3);
-    let lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 40).unwrap();
-    let rhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 41).unwrap();
+    let lhs =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 40).unwrap();
+    let rhs =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 41).unwrap();
     let plan = pair_network()
         .plan(&[&lhs, &rhs], &GreedyDenseOptimizer)
         .unwrap();
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -879,19 +951,21 @@ fn one_plan_replays_concurrently_with_distinct_workspaces() {
         let handles = (0..4)
             .map(|_| {
                 scope.spawn(|| {
+                    let engine = &mut symtn::typed::CpuEngine::serial();
                     let mut workspace = NetworkExecutionWorkspace::default();
-                    plan.execute(&[&lhs, &rhs], &mut workspace).unwrap()
+                    plan.execute(engine, &[&lhs, &rhs], &mut workspace).unwrap()
                 })
             })
             .collect::<Vec<_>>();
         for handle in handles {
-            assert_same(&handle.join().unwrap(), &expected);
+            assert_same(engine, &handle.join().unwrap(), &expected);
         }
     });
 }
 
 #[test]
 fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule),
@@ -900,8 +974,14 @@ fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
     .unwrap();
     let tensors = (0..3)
         .map(|offset| {
-            TensorMap::<_, f64>::rand_with_seed(&runtime, [&space], [&space], 750_350 + offset)
-                .unwrap()
+            TensorMap::<_, f64>::rand_with_seed(
+                engine,
+                &runtime,
+                [&space],
+                [&space],
+                750_350 + offset,
+            )
+            .unwrap()
         })
         .collect::<Vec<_>>();
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
@@ -926,6 +1006,7 @@ fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
 
     let manual = tensors[0]
         .contract(
+            engine,
             &tensors[1],
             &ContractSpec {
                 lhs: &[1],
@@ -936,6 +1017,7 @@ fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
         )
         .unwrap()
         .contract(
+            engine,
             &tensors[2],
             &ContractSpec {
                 lhs: &[1],
@@ -945,22 +1027,27 @@ fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
             },
         )
         .unwrap();
-    assert_same(
-        &planned.execute(&refs, &mut Default::default()).unwrap(),
-        &manual,
-    );
+    let planned_execute = &planned
+        .execute(engine, &refs, &mut Default::default())
+        .unwrap();
+    assert_same(engine, planned_execute, &manual);
 }
 
 #[test]
 fn fermionic_interleaved_subtrees_keep_expression_order_and_signs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let large = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 3)]).unwrap();
     let small = GradedSpace::try_new(provider, [(Z2Irrep::ODD, 2)]).unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&large], [&large], 750_400).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&small], [&small], 750_401).unwrap();
-    let c = TensorMap::<_, f64>::rand_with_seed(&runtime, [&large], [&large], 750_402).unwrap();
-    let d = TensorMap::<_, f64>::rand_with_seed(&runtime, [&small], [&small], 750_403).unwrap();
+    let a =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&large], [&large], 750_400).unwrap();
+    let b =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&small], [&small], 750_401).unwrap();
+    let c =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&large], [&large], 750_402).unwrap();
+    let d =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&small], [&small], 750_403).unwrap();
     let refs = [&a, &b, &c, &d];
     let network = Network::new(
         vec![
@@ -996,6 +1083,7 @@ fn fermionic_interleaved_subtrees_keep_expression_order_and_signs() {
 
     let ac = a
         .contract(
+            engine,
             &c,
             &ContractSpec {
                 lhs: &[1],
@@ -1007,6 +1095,7 @@ fn fermionic_interleaved_subtrees_keep_expression_order_and_signs() {
         .unwrap();
     let bd = b
         .contract(
+            engine,
             &d,
             &ContractSpec {
                 lhs: &[1],
@@ -1018,6 +1107,7 @@ fn fermionic_interleaved_subtrees_keep_expression_order_and_signs() {
         .unwrap();
     let manual = ac
         .contract(
+            engine,
             &bd,
             &ContractSpec {
                 lhs: &[],
@@ -1027,23 +1117,24 @@ fn fermionic_interleaved_subtrees_keep_expression_order_and_signs() {
             },
         )
         .unwrap();
-    assert_same(
-        &planned.execute(&refs, &mut Default::default()).unwrap(),
-        &manual,
-    );
+    let planned_execute = &planned
+        .execute(engine, &refs, &mut Default::default())
+        .unwrap();
+    assert_same(engine, planned_execute, &manual);
 }
 
 #[test]
 fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| u1_space(&provider, degeneracy);
     let (va, vb, vc, vd, ve) = (space(4), space(8), space(4), space(2), space(2));
     let chain = [
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&va], [&vb], 51).unwrap(),
-        TensorMap::rand_with_seed(&runtime, [&vb], [&vc], 52).unwrap(),
-        TensorMap::rand_with_seed(&runtime, [&vc], [&vd], 53).unwrap(),
-        TensorMap::rand_with_seed(&runtime, [&vd], [&ve], 54).unwrap(),
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&va], [&vb], 51).unwrap(),
+        TensorMap::rand_with_seed(engine, &runtime, [&vb], [&vc], 52).unwrap(),
+        TensorMap::rand_with_seed(engine, &runtime, [&vc], [&vd], 53).unwrap(),
+        TensorMap::rand_with_seed(engine, &runtime, [&vd], [&ve], 54).unwrap(),
     ];
     let chain_refs = [&chain[0], &chain[1], &chain[2], &chain[3]];
     let chain_network = Network::new(
@@ -1077,9 +1168,11 @@ fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
     );
     assert!(greedy.plan().total_cost() < naive.plan().total_cost());
     let greedy_result = greedy
-        .execute(&chain_refs, &mut Default::default())
+        .execute(engine, &chain_refs, &mut Default::default())
         .unwrap();
-    let naive_result = naive.execute(&chain_refs, &mut Default::default()).unwrap();
+    let naive_result = naive
+        .execute(engine, &chain_refs, &mut Default::default())
+        .unwrap();
     assert_eq!(greedy_result.codomain(), naive_result.codomain());
     assert_eq!(greedy_result.domain(), naive_result.domain());
     assert!(greedy_result
@@ -1091,8 +1184,14 @@ fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
 
     let v = space(3);
     let ring = std::array::from_fn::<_, 4, _>(|index| {
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 60 + index as u64)
-            .unwrap()
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(
+            engine,
+            &runtime,
+            [&v],
+            [&v],
+            60 + index as u64,
+        )
+        .unwrap()
     });
     let ring_refs = [&ring[0], &ring[1], &ring[2], &ring[3]];
     let ring_network = Network::new(
@@ -1113,6 +1212,7 @@ fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
         .unwrap();
     let manual = ring[0]
         .contract(
+            engine,
             &ring[1],
             &ContractSpec {
                 lhs: &[1],
@@ -1123,6 +1223,7 @@ fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
         )
         .unwrap()
         .contract(
+            engine,
             &ring[2],
             &ContractSpec {
                 lhs: &[1],
@@ -1133,6 +1234,7 @@ fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
         )
         .unwrap()
         .contract(
+            engine,
             &ring[3],
             &ContractSpec {
                 lhs: &[1, 0],
@@ -1143,7 +1245,7 @@ fn greedy_order_and_four_site_ring_match_manual_typed_oracles() {
         )
         .unwrap();
     let actual = planned
-        .execute(&ring_refs, &mut Default::default())
+        .execute(engine, &ring_refs, &mut Default::default())
         .unwrap();
     assert_eq!(actual.codomain(), manual.codomain());
     assert_eq!(actual.domain(), manual.domain());

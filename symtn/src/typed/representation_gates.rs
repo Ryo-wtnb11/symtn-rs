@@ -11,6 +11,7 @@ mod contract;
 #[cfg(feature = "cuda")]
 mod cuda;
 mod cuda_factorize;
+mod dense_faults;
 mod dense_lease;
 #[cfg(feature = "cgc-gen")]
 mod factorize_checked;
@@ -157,24 +158,29 @@ fn owned<R, D, S>(tensor: &TensorMap<R, D, S>) -> &Arc<TypedTensorBody<R, D, S>>
 
 #[test]
 fn physical_projection_publishes_only_after_success_on_receiver_authority() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let half = SU2Irrep::from_twice_spin(1);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(half, 1)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg, &leg], [&leg], |trees, _| {
-        if trees.codomain_innerlines()[0].twice_spin() == 0 {
-            1.25
-        } else {
-            -0.75
-        }
-    })
-    .unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg, &leg], [&leg], |trees, _| {
+            if trees.codomain_innerlines()[0].twice_spin() == 0 {
+                1.25
+            } else {
+                -0.75
+            }
+        })
+        .unwrap();
     let target =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg, &leg], [&leg], |_, _| f64::NAN).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg, &leg], [&leg], |_, _| {
+            f64::NAN
+        })
+        .unwrap();
     let target_body = Arc::clone(owned(&target));
     let target_data = Arc::clone(&target_body.data);
-    let physical = source.to_physical_dense().unwrap();
-    let projected = target.project_physical_dense(&physical).unwrap();
+    let physical = source.to_physical_dense(engine).unwrap();
+    let projected = target.project_physical_dense(engine, &physical).unwrap();
 
     assert!(projected.runtime.same_runtime(&target.runtime));
     assert!(Arc::ptr_eq(
@@ -199,17 +205,34 @@ fn physical_projection_publishes_only_after_success_on_receiver_authority() {
         .iter()
         .all(|value| value.is_nan()));
 
-    let failure = target.project_physical_dense(&PhysicalDense {
-        shape: vec![2, 2],
-        data: vec![0.0; 4],
-    });
+    let failure = target.project_physical_dense(
+        engine,
+        &PhysicalDense {
+            shape: vec![2, 2],
+            data: vec![0.0; 4],
+        },
+    );
     assert!(failure.is_err());
     assert!(Arc::ptr_eq(owned(&target), &target_body));
     assert!(Arc::ptr_eq(&owned(&target).data, &target_data));
 }
 
-fn u1_lazy_fixture() -> TensorMap<U1FusionRule, f64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+/// `error` and every source below it, joined: the facade's own message
+/// names only the layer, and a refusal's cause is in its source chain.
+#[cfg(feature = "cuda")]
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(next) = source {
+        text.push_str(": ");
+        text.push_str(&next.to_string());
+        source = next.source();
+    }
+    text
+}
+
+fn u1_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<U1FusionRule, f64> {
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -231,15 +254,20 @@ fn u1_lazy_fixture() -> TensorMap<U1FusionRule, f64> {
         ],
     )
     .unwrap();
-    TensorMap::from_subblock_fn(&runtime, [&left, &right], [&domain], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
+    TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&left, &right],
+        [&domain],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
     .unwrap()
 }
 
 #[test]
 fn storage_parameter_clone_shares_non_clone_payload() {
-    let source = u1_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_lazy_fixture(engine);
     let tensor: TensorMap<_, _, NonCloneHost> = TensorMap {
         runtime: source.runtime.clone(),
         repr: owned_repr(TypedTensorBody::dense(
@@ -257,10 +285,11 @@ fn storage_parameter_clone_shares_non_clone_payload() {
 
 #[test]
 fn typed_placement_is_diagnostic_for_dense_compact_and_lazy_host_storage() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let source = u1_lazy_fixture();
-    let diagonal = source.svd_compact(&[0, 1], &[2]).unwrap().s;
-    let lazy = source.adjoint().unwrap();
+    let source = u1_lazy_fixture(engine);
+    let diagonal = source.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
+    let lazy = source.adjoint(engine).unwrap();
 
     assert_eq!(source.placement(), Placement::Host);
     assert_eq!(diagonal.placement(), Placement::Host);
@@ -270,11 +299,13 @@ fn typed_placement_is_diagnostic_for_dense_compact_and_lazy_host_storage() {
 
 #[test]
 fn typed_zeros_like_is_exact_and_representation_preserving() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let source = u1_lazy_fixture();
+    let source = u1_lazy_fixture(engine);
     let values = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -0.0];
     let index = std::cell::Cell::new(0usize);
     let dense = TensorMap::from_subblock_fn(
+        engine,
         source.runtime(),
         &source.codomain(),
         &source.domain(),
@@ -292,7 +323,7 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
         .map(|value| value.to_bits())
         .collect();
     let provider = dense.provider() as *const _;
-    let zero = dense.zeros_like().unwrap();
+    let zero = dense.zeros_like(engine).unwrap();
     assert!(zero
         .dense_data()
         .unwrap()
@@ -311,7 +342,7 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
     assert!(zero.runtime().same_runtime(dense.runtime()));
     assert_eq!(zero.logical_space().space(), dense.logical_space().space());
 
-    let complex = dense.convert::<Complex64>();
+    let complex = dense.convert::<Complex64>(engine).unwrap();
     let complex = complex.with_data(
         complex
             .dense_data()
@@ -326,14 +357,14 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
             })
             .collect(),
     );
-    let complex_zero = complex.zeros_like().unwrap();
+    let complex_zero = complex.zeros_like(engine).unwrap();
     assert!(complex_zero
         .dense_data()
         .unwrap()
         .iter()
         .all(|value| value.re.to_bits() == 0 && value.im.to_bits() == 0));
 
-    let compact = source.svd_compact(&[0, 1], &[2]).unwrap().s;
+    let compact = source.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
     let compact = compact.with_spectrum(
         compact
             .spectrum()
@@ -347,7 +378,7 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
             })
             .collect(),
     );
-    let compact_zero = compact.zeros_like().unwrap();
+    let compact_zero = compact.zeros_like(engine).unwrap();
     assert!(matches!(
         owned(&compact_zero).data.as_ref(),
         TypedData::Diagonal(_)
@@ -360,23 +391,31 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
         .all(|value| value.to_bits() == 0));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
-    let lazy = dense.adjoint().unwrap();
-    let lazy_zero = lazy.zeros_like().unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
+    let lazy_zero = lazy.zeros_like(engine).unwrap();
     assert!(matches!(lazy_zero.repr, TypedTensorRepr::Adjoint(_)));
     assert!(std::ptr::eq(lazy_zero.provider(), provider));
 
     let empty_leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 0)]).unwrap();
-    let empty =
-        TensorMap::from_subblock_fn(source.runtime(), [&empty_leg], [&empty_leg], |_, _| {
-            f64::NAN
-        })
-        .unwrap();
+    let empty = TensorMap::from_subblock_fn(
+        engine,
+        source.runtime(),
+        [&empty_leg],
+        [&empty_leg],
+        |_, _| f64::NAN,
+    )
+    .unwrap();
     assert!(empty.dense_data().unwrap().is_empty());
-    assert!(empty.zeros_like().unwrap().dense_data().unwrap().is_empty());
+    assert!(empty
+        .zeros_like(engine)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .is_empty());
 }
 
-fn su2_lazy_fixture() -> TensorMap<SU2FusionRule, f64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+fn su2_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<SU2FusionRule, f64> {
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -386,17 +425,18 @@ fn su2_lazy_fixture() -> TensorMap<SU2FusionRule, f64> {
         ],
     )
     .unwrap();
-    TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
+    TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap()
 }
 
 fn u1_matrix_fixture(
+    engine: &mut dyn Engine,
     codomain: impl IntoIterator<Item = (i32, usize)>,
     domain: impl IntoIterator<Item = (i32, usize)>,
 ) -> TensorMap<U1FusionRule, f64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let codomain = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -412,7 +452,7 @@ fn u1_matrix_fixture(
             .map(|(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
     )
     .unwrap();
-    TensorMap::from_subblock_fn(&runtime, [&codomain], [&domain], |_, indices| {
+    TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })
     .unwrap()
@@ -435,6 +475,7 @@ fn genuinely_complex<R>(source: &TensorMap<R, f64>) -> TensorMap<R, num_complex:
 }
 
 fn assert_typed_map_close<R, D>(
+    engine: &mut dyn Engine,
     actual: &TensorMap<R, D>,
     expected: &TensorMap<R, D>,
     tolerance: f64,
@@ -447,18 +488,19 @@ fn assert_typed_map_close<R, D>(
         expected.logical_space().space()
     );
     assert!(actual
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(expected.materialize().unwrap().dense_data().unwrap())
+        .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
         .all(|(&actual, &expected)| {
             (actual.widen_complex() - expected.widen_complex()).norm() < tolerance
         }));
 }
 
 fn assert_polar_factors<R, D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<R, D>,
     target: &TensorMap<R, D>,
     actual: &(TensorMap<R, D>, TensorMap<R, D>),
@@ -474,21 +516,21 @@ fn assert_polar_factors<R, D>(
         + SectorCodec,
     D: FactorizationScalar + core::fmt::Debug,
 {
-    let reconstructed = actual.0.compose(&actual.1).unwrap();
-    assert_typed_map_close(&reconstructed, target, 1e-10);
+    let reconstructed = actual.0.compose(engine, &actual.1).unwrap();
+    assert_typed_map_close(engine, &reconstructed, target, 1e-10);
     let (positive, isometry) = if left {
         (&actual.1, &actual.0)
     } else {
         (&actual.0, &actual.1)
     };
     assert!(if left {
-        is_isometric!(isometry, 1e-11)
+        is_isometric!(engine, isometry, 1e-11)
     } else {
-        is_isometric!(isometry.adjoint().unwrap(), 1e-11)
+        is_isometric!(engine, isometry.adjoint(engine).unwrap(), 1e-11)
     });
-    assert!(is_hermitian!(positive, 1e-11));
+    assert!(is_hermitian!(engine, positive, 1e-11));
     assert!(positive
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap()
         .iter()
         .all(|entry| entry.values.iter().all(|&value| value >= -1e-11)));
@@ -498,7 +540,7 @@ fn assert_polar_factors<R, D>(
             factor.logical_space().provider_arc(),
             source.logical_space().provider_arc()
         ));
-        let _ = factor.materialize().unwrap().dense_data().unwrap();
+        let _ = factor.materialize(engine).unwrap().dense_data().unwrap();
     }
     assert_eq!(
         actual.0.logical_space().space(),
@@ -538,11 +580,11 @@ const RANK_TWO_COMPOSE: ContractSpec<'static> = ContractSpec {
     domain: &[1],
 };
 
-fn fixture() -> TensorMap<Z2FusionRule, f64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+fn fixture(engine: &mut dyn Engine) -> TensorMap<Z2FusionRule, f64> {
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, 8)]).unwrap();
     let mut state = 0x5eed_0580u64;
-    TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], move |_, _| {
+    TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], move |_, _| {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         ((state >> 33) as f64) / (u32::MAX as f64) - 0.5
     })
@@ -551,10 +593,11 @@ fn fixture() -> TensorMap<Z2FusionRule, f64> {
 
 #[test]
 fn clone_copies_no_payload_bytes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: `clone` is O(1) in the payload. Measured structurally rather
     // than by an allocator, which cannot distinguish "no copy" from "a
     // copy the size of a warm cache line".
-    let tensor = fixture();
+    let tensor = fixture(engine);
     let twin = tensor.clone();
     assert!(Arc::ptr_eq(owned(&tensor), owned(&twin)));
     assert!(Arc::ptr_eq(&owned(&tensor).data, &owned(&twin).data));
@@ -571,8 +614,8 @@ fn clone_copies_no_payload_bytes() {
 /// sector (θ = 1 everywhere on it) while leg 1 and the domain leg carry
 /// the odd sector too — so one tensor exposes both twist short-circuit
 /// answers.
-fn fz2_fixture() -> TensorMap<symtn_core::FermionParityFusionRule, f64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+fn fz2_fixture(engine: &mut dyn Engine) -> TensorMap<symtn_core::FermionParityFusionRule, f64> {
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(symtn_core::FermionParityFusionRule);
     let even_only = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 2)]).unwrap();
     let mixed = GradedSpace::try_new(
@@ -581,26 +624,35 @@ fn fz2_fixture() -> TensorMap<symtn_core::FermionParityFusionRule, f64> {
     )
     .unwrap();
     let mut state = 0x5eed_0613u64;
-    TensorMap::from_subblock_fn(&runtime, [&even_only, &mixed], [&mixed], move |_, _| {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        ((state >> 33) as f64) / (u32::MAX as f64) - 0.5
-    })
+    TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&even_only, &mixed],
+        [&mixed],
+        move |_, _| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as f64) / (u32::MAX as f64) - 0.5
+        },
+    )
     .unwrap()
 }
 
 #[test]
 fn unit_insert_and_remove_share_the_dense_payload_arc() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
     // What (#580): payload reuse at pointer cost under a rewritten space,
     // through the real operations — a dense payload's `Arc` is shared
     // unchanged through an insert→remove round trip, and the fresh
     // bodies start with cold caches.
-    let tensor = fixture();
-    let inserted = tensor.insert_unit(1, Side::Domain, Duality::Plain).unwrap();
+    let tensor = fixture(engine);
+    let inserted = tensor
+        .insert_unit(engine, 1, Side::Domain, Duality::Plain)
+        .unwrap();
     assert!(!Arc::ptr_eq(owned(&tensor), owned(&inserted)));
     assert!(Arc::ptr_eq(&owned(&tensor).data, &owned(&inserted).data));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    let removed = inserted.remove_unit(1).unwrap();
+    let removed = inserted.remove_unit(engine, 1).unwrap();
     assert!(Arc::ptr_eq(&owned(&tensor).data, &owned(&removed).data));
     // One payload allocation, three bodies holding it.
     assert_eq!(Arc::strong_count(&owned(&tensor).data), 3);
@@ -612,47 +664,52 @@ fn unit_insert_and_remove_share_the_dense_payload_arc() {
 
 #[test]
 fn a_compact_payload_materializes_exactly_once_for_the_unit_ops() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#580, #613): the compact half of the unit-leg payload
     // contract — a `Diagonal` payload is materialized into a *fresh*
     // dense payload (one copy), and the subsequent remove shares that
     // dense `Arc` rather than copying again.
-    let s = fixture().svd_compact(&[0], &[1]).unwrap().s;
-    let inserted = s.insert_unit(0, Side::Domain, Duality::Plain).unwrap();
+    let s = fixture(engine).svd_compact(engine, &[0], &[1]).unwrap().s;
+    let inserted = s
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
+        .unwrap();
     assert!(!Arc::ptr_eq(&owned(&s).data, &owned(&inserted).data));
     assert!(matches!(&*owned(&inserted).data, TypedData::Dense(_)));
     assert!(matches!(&*owned(&s).data, TypedData::Diagonal(_)));
-    let removed = inserted.remove_unit(0).unwrap();
+    let removed = inserted.remove_unit(engine, 0).unwrap();
     assert!(Arc::ptr_eq(&owned(&inserted).data, &owned(&removed).data));
 }
 
 #[test]
 fn twist_identity_short_circuit_shares_the_whole_body() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#580): both identity answers allocate nothing —
     // the bosonic O(1) arm (Z2) and the fermionic per-block scan when no
     // requested leg touches a twisted sector (fZ2, even-only leg 0) both
     // return a body-sharing clone; a leg that does touch the odd sector
     // publishes a new body.
-    let tensor = fixture();
-    let twisted = tensor.twist(&[0, 1], Direction::Forward).unwrap();
+    let tensor = fixture(engine);
+    let twisted = tensor.twist(engine, &[0, 1], Direction::Forward).unwrap();
     assert!(Arc::ptr_eq(owned(&tensor), owned(&twisted)));
 
-    let fermionic = fz2_fixture();
-    let untouched = fermionic.twist(&[0], Direction::Forward).unwrap();
+    let fermionic = fz2_fixture(engine);
+    let untouched = fermionic.twist(engine, &[0], Direction::Forward).unwrap();
     assert!(Arc::ptr_eq(owned(&fermionic), owned(&untouched)));
-    let touched = fermionic.twist(&[1], Direction::Forward).unwrap();
+    let touched = fermionic.twist(engine, &[1], Direction::Forward).unwrap();
     assert!(!Arc::ptr_eq(owned(&fermionic), owned(&touched)));
 }
 
 #[test]
 fn a_written_payload_leaves_the_shared_one_untouched() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: clone-then-modify. Sharing is only sound if a write on one
     // handle cannot be seen through the other — every write route in this
     // module publishes a new payload rather than reaching through the `Arc`.
-    let tensor = fixture();
+    let tensor = fixture(engine);
     let twin = tensor.clone();
     let before: Vec<f64> = tensor.dense_data().unwrap().to_vec();
 
-    let scaled = twin.scale(2.0).unwrap();
+    let scaled = twin.scale(engine, 2.0).unwrap();
 
     assert_eq!(tensor.dense_data().unwrap(), before.as_slice());
     assert_eq!(twin.dense_data().unwrap(), before.as_slice());

@@ -14,6 +14,7 @@ fn label(name: &str) -> TemporaryLabel {
 
 #[test]
 fn common_lowering_is_unchanged_by_a_dense_plan_text_roundtrip() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let two = GradedSpace::try_new(
@@ -23,6 +24,7 @@ fn common_lowering_is_unchanged_by_a_dense_plan_text_roundtrip() {
     .unwrap();
     let vacuum = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
     let tensor = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
         &runtime,
         [&two, &two, &vacuum],
         std::iter::empty::<&GradedSpace<U1FusionRule>>(),
@@ -70,11 +72,13 @@ fn common_lowering_is_unchanged_by_a_dense_plan_text_roundtrip() {
 
 #[test]
 fn reconstruction_preserves_two_step_order_and_output_metadata() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let tensors = (0..3)
         .map(|seed| {
             TensorMap::<U1FusionRule, f64>::rand_with_seed(
+                engine,
                 &runtime,
                 [&space],
                 [&space],

@@ -9,7 +9,7 @@ use crate::prepared;
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
 use std::hint::black_box;
-use symtn::expert::{DefaultDenseExecutor, DenseExecutor, DenseRead, DenseView, SharedCpuContext};
+use symtn::expert::{DefaultDenseExecutor, DenseExecutor, DenseRead, DenseView};
 use symtn::typed::{EighFullPlan, HermitianTol, Runtime, StackedTensorMap};
 
 use prepared::eigh::hermitian_members;
@@ -17,33 +17,33 @@ use prepared::u1_legs;
 
 use crate::counting_alloc;
 
-fn executor() -> DefaultDenseExecutor {
-    DefaultDenseExecutor::with_shared_context(&SharedCpuContext::with_threads(1).unwrap(), None)
-        .unwrap()
-}
-
 /// Allocation calls of one warm `execute` over `count` members.
 fn warm_calls(runtime: &Runtime, count: usize) -> (u64, Vec<usize>) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (leg, _) = u1_legs();
     let stack =
         StackedTensorMap::pack(&hermitian_members(runtime, &[&leg, &leg], count, 5)).unwrap();
-    let plan = EighFullPlan::new(&stack, &[0, 1], &[2, 3], HermitianTol::DEFAULT).unwrap();
+    let plan = EighFullPlan::new(engine, &stack, &[0, 1], &[2, 3], HermitianTol::DEFAULT).unwrap();
     let mut workspace = plan.workspace().unwrap();
-    plan.execute(&stack, &mut workspace).unwrap();
-    plan.execute(&stack, &mut workspace).unwrap();
+    plan.execute(engine, &stack, &mut workspace).unwrap();
+    plan.execute(engine, &stack, &mut workspace).unwrap();
     let ((), allocs) = counting_alloc::measure(|| {
-        black_box(plan.execute(&stack, &mut workspace).unwrap());
+        black_box(plan.execute(engine, &stack, &mut workspace).unwrap());
     });
-    let orders = plan.execute(&stack, &mut workspace).unwrap().spectra[0]
+    let orders = plan
+        .execute(engine, &stack, &mut workspace)
+        .unwrap()
+        .spectra[0]
         .iter()
         .map(|entry| entry.values.len())
         .collect();
     (allocs.calls, orders)
 }
 
-/// Allocation calls of one dense `eigh` per order, on the same executor kind.
+/// Allocation calls of one dense `eigh` per order, on a serial engine.
 fn solver_calls(orders: &[usize]) -> u64 {
-    let mut dense = executor();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let mut dense = DefaultDenseExecutor::new();
     let matrices: Vec<Vec<f64>> = orders
         .iter()
         .map(|&n| {
@@ -52,11 +52,11 @@ fn solver_calls(orders: &[usize]) -> u64 {
                 .collect()
         })
         .collect();
-    let solve = |dense: &mut DefaultDenseExecutor| {
+    let mut solve = |dense: &mut DefaultDenseExecutor| {
         for (matrix, &n) in matrices.iter().zip(orders) {
             let (shape, strides) = ([n, n], [1, n]);
             let view = DenseView::new(matrix.as_slice(), &shape, &strides, 0).unwrap();
-            black_box(dense.eigh(DenseRead::F64(view)).unwrap());
+            black_box(dense.eigh(engine, DenseRead::F64(view)).unwrap());
         }
     };
     solve(&mut dense);
@@ -67,11 +67,7 @@ fn solver_calls(orders: &[usize]) -> u64 {
 #[test]
 fn warm_execute_allocates_per_member_only_the_dense_solver_outputs() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder()
-        .dense_threads(1)
-        .with_dense_executor(Box::new(executor()))
-        .build()
-        .unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (small, orders) = warm_calls(&runtime, 4);
     let (large, _) = warm_calls(&runtime, 12);
     let solver = solver_calls(&orders);

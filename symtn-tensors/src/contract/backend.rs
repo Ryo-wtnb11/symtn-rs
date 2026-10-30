@@ -1,6 +1,7 @@
 use num_traits::One;
 use std::sync::Arc;
 use symtn_core::{BlockStructure, Placement};
+use symtn_dense::Engine;
 use symtn_dense::{DenseExecutor, DenseView, DenseViewMut};
 use symtn_operations::fusion_replay::{
     direct_slice, direct_slice_mut, MatrixOp, Rank2GemmBatchJob,
@@ -38,6 +39,7 @@ where
     )]
     fn tensorcontract_structure_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         workspace: &mut Self::Workspace,
         structure: &TensorContractStructure<C>,
         dst_structure: &Arc<BlockStructure>,
@@ -58,6 +60,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn matmul_rank2_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -73,6 +76,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn matmul_rank2_axpby_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -85,7 +89,7 @@ where
     ) -> Result<(), OperationError> {
         if alpha.is_one() && beta.is_zero() {
             return self.matmul_rank2_into_raw(
-                workspace, dst_data, lhs_data, rhs_data, rows, contracted, cols,
+                engine, workspace, dst_data, lhs_data, rhs_data, rows, contracted, cols,
             );
         }
         Err(OperationError::UnsupportedTensorContractScope {
@@ -104,6 +108,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn matmul_rank2_batch_axpby_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -119,6 +124,7 @@ where
             let rhs_slice = direct_slice(rhs_data, job.rhs_offset, job.contracted, job.cols)?;
             let dst_slice = direct_slice_mut(dst_data, job.dst_offset, job.rows, job.cols)?;
             self.matmul_rank2_axpby_into_raw(
+                engine,
                 workspace,
                 dst_slice,
                 lhs_slice,
@@ -136,6 +142,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn matmul_rank2_batch_with_ops_axpby_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -149,7 +156,7 @@ where
     ) -> Result<(), OperationError> {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
             return self.matmul_rank2_batch_axpby_into_raw(
-                workspace, dst_data, lhs_data, rhs_data, jobs, runs, alpha, beta,
+                engine, workspace, dst_data, lhs_data, rhs_data, jobs, runs, alpha, beta,
             );
         }
         Err(OperationError::UnsupportedTensorContractScope {
@@ -242,6 +249,7 @@ where
 
     fn tensorcontract_structure_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         workspace: &mut Self::Workspace,
         structure: &TensorContractStructure<C>,
         dst_structure: &Arc<BlockStructure>,
@@ -254,6 +262,7 @@ where
         beta: D,
     ) -> Result<(), OperationError> {
         tensorcontract_structure_with_dense_executor_raw(
+            engine,
             self.dense_mut(),
             workspace,
             structure,
@@ -270,6 +279,7 @@ where
 
     fn matmul_rank2_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         _workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -307,12 +317,13 @@ where
             0,
         ));
         self.dense_mut()
-            .matmul_into(output, lhs, rhs)
+            .matmul_into(engine, output, lhs, rhs)
             .map_err(OperationError::Dense)
     }
 
     fn matmul_rank2_axpby_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         _workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -349,12 +360,20 @@ where
             0,
         ));
         self.dense_mut()
-            .matmul_axpby_into(output, lhs, rhs, alpha.dense_scalar(), beta.dense_scalar())
+            .matmul_axpby_into(
+                engine,
+                output,
+                lhs,
+                rhs,
+                alpha.dense_scalar(),
+                beta.dense_scalar(),
+            )
             .map_err(OperationError::Dense)
     }
 
     fn matmul_rank2_batch_axpby_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         _workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -391,6 +410,7 @@ where
         ));
         self.dense_mut()
             .matmul_batch_axpby_into(
+                engine,
                 output,
                 lhs,
                 rhs,
@@ -404,6 +424,7 @@ where
 
     fn matmul_rank2_batch_with_ops_axpby_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         _workspace: &mut Self::Workspace,
         dst_data: &mut [D],
         lhs_data: &[D],
@@ -439,6 +460,7 @@ where
         ));
         self.dense_mut()
             .matmul_batch_axpby_with_ops_into(
+                engine,
                 output,
                 lhs,
                 rhs,
@@ -456,6 +478,7 @@ where
 /// Replays a prepared tensor contraction structure on host slices.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensorcontract_structure_with_dense_executor_raw<E, D, C>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     workspace: &mut TensorContractWorkspace<D>,
     structure: &TensorContractStructure<C>,
@@ -482,6 +505,7 @@ where
     for term in descriptor.terms() {
         workspace.prepare_output(term.workspace_len, D::zero());
         tensorcontract_descriptor_term_with_output_scratch(
+            engine,
             dense,
             &mut workspace.zero_strides,
             descriptor,
@@ -536,6 +560,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn tensorcontract_descriptor_term_with_output_scratch<E, D, C>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     zero_strides: &mut Vec<isize>,
     descriptor: &TensorContractDescriptor<C>,
@@ -593,24 +618,26 @@ where
     // scratch holds.
     if !term_alpha.is_zero() {
         dense
-            .dot_general_into(output, lhs, rhs, descriptor.dot_config())
+            .dot_general_into(engine, output, lhs, rhs, descriptor.dot_config())
             .map_err(OperationError::Dense)?;
     }
     let term_beta = if term.apply_beta { beta } else { D::one() };
-    tensoradd_raw_strided_kernel(
-        zero_strides,
-        dst_data,
-        output_scratch,
-        descriptor.scatter_shape(term),
-        descriptor.dst_strides(term),
-        descriptor.workspace_strides(term),
-        term.dst_offset,
-        0,
-        false,
-        term_alpha,
-        term_beta,
-    )?;
-    Ok(())
+    symtn_operations::host_pool::with_exec(engine, |exec| {
+        tensoradd_raw_strided_kernel(
+            exec,
+            zero_strides,
+            dst_data,
+            output_scratch,
+            descriptor.scatter_shape(term),
+            descriptor.dst_strides(term),
+            descriptor.workspace_strides(term),
+            term.dst_offset,
+            0,
+            false,
+            term_alpha,
+            term_beta,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -624,6 +651,7 @@ mod tests {
 
         fn tensorcontract_structure_into_raw(
             &mut self,
+            _engine: &mut dyn Engine,
             _workspace: &mut Self::Workspace,
             _structure: &TensorContractStructure<f64>,
             _dst_structure: &Arc<BlockStructure>,
@@ -640,6 +668,7 @@ mod tests {
 
         fn matmul_rank2_into_raw(
             &mut self,
+            _engine: &mut dyn Engine,
             workspace: &mut Self::Workspace,
             dst_data: &mut [f64],
             lhs_data: &[f64],
@@ -686,6 +715,7 @@ mod tests {
 
     #[test]
     fn default_op_batch_delegates_identity_and_rejects_matrix_views() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: the backend-neutral default preserves existing Identity batches
         // and declines transpose/adjoint unless a backend opts into them.
         let jobs = [Rank2GemmBatchJob {
@@ -701,6 +731,7 @@ mod tests {
         let mut dst = [0.0];
         backend
             .matmul_rank2_batch_with_ops_axpby_into_raw(
+                engine,
                 &mut calls,
                 &mut dst,
                 &[2.0],
@@ -718,6 +749,7 @@ mod tests {
 
         let error = backend
             .matmul_rank2_batch_with_ops_axpby_into_raw(
+                engine,
                 &mut calls,
                 &mut dst,
                 &[2.0],
@@ -741,6 +773,7 @@ mod tests {
 
     #[test]
     fn dense_tree_backend_executes_op_bearing_batch() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: the built-in backend forwards matrix operations to its dense
         // executor instead of taking the backend-neutral rejection path.
         let jobs = [Rank2GemmBatchJob {
@@ -755,7 +788,7 @@ mod tests {
         let mut workspace = TensorContractWorkspace::default();
         let mut dst = [0.0];
         <DenseTreeTransformOperations as TensorContractBackend<f64, f64>>::matmul_rank2_batch_with_ops_axpby_into_raw(
-                &mut backend,
+                &mut backend, engine,
                 &mut workspace,
                 &mut dst,
                 &[2.0],

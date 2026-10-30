@@ -63,11 +63,12 @@ pub fn assert_bit_exact<D: Payload>(left: &[D], right: &[D], label: &str) {
 /// `$count` members `[a, a] <- [a]` of payload `$d`, member `k` filled with
 /// `Payload::value(1000 k + n)`.
 macro_rules! members {
-    ($runtime:expr, $a:expr, $d:ty, $count:expr) => {
+    ($engine:ident, $runtime:expr, $a:expr, $d:ty, $count:expr) => {
         (0..$count)
             .map(|member: usize| {
                 let mut index = 1000 * member;
                 symtn::typed::TensorMap::<_, $d>::from_subblock_fn(
+                    $engine,
                     $runtime,
                     [$a, $a],
                     [$a],
@@ -82,17 +83,17 @@ macro_rules! members {
     };
 }
 
-/// Calls `$check!(label, leg)` for U(1), SU(2), fZ2xU(1) and, with
+/// Calls `$check!($engine, label, leg)` for U(1), SU(2), fZ2xU(1) and, with
 /// `cgc-gen`, checked Generic SU(3). `leg(0)` is the base leg and
 /// `leg(1)` changes one degeneracy. Every base leg has a sector of
 /// degeneracy at least three, so [`selections`] can keep a non-contiguous
 /// set.
 macro_rules! for_each_symmetry {
-    ($check:ident) => {{
+    ($engine:ident, $check:ident $(, $extra:ident)*) => {{
         use fixtures::*;
         use std::sync::Arc;
         use symtn::typed::GradedSpace;
-        $check!("U1", |variant: usize| {
+        $check!($($extra,)* $engine, "U1", |variant: usize| {
             let q = U1Irrep::new;
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
@@ -100,7 +101,7 @@ macro_rules! for_each_symmetry {
             )
             .unwrap()
         });
-        $check!("SU2", |variant: usize| {
+        $check!($($extra,)* $engine, "SU2", |variant: usize| {
             let j = SU2Irrep::from_twice_spin;
             GradedSpace::try_new(
                 Arc::new(SU2FusionRule),
@@ -108,14 +109,14 @@ macro_rules! for_each_symmetry {
             )
             .unwrap()
         });
-        $check!("fZ2xU1", |variant: usize| {
+        $check!($($extra,)* $engine, "fZ2xU1", |variant: usize| {
             let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
             let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
             let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
             GradedSpace::try_new(rule, [(even(0), 3), (odd(1), 1 + variant), (odd(-1), 2)]).unwrap()
         });
         #[cfg(feature = "cgc-gen")]
-        $check!("SU3 checked Generic", |variant: usize| {
+        $check!($($extra,)* $engine, "SU3 checked Generic", |variant: usize| {
             let rule = Arc::new(
                 symtn::sector::LieGroupFusionRule::new(
                     fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -174,11 +175,12 @@ where
 /// `$count` members `[a, a*] <- [a, a*]` of payload `$d`: every leg kind
 /// (codomain/domain, dual/non-dual) appears once.
 macro_rules! mixed_members {
-    ($runtime:expr, $a:expr, $dual:expr, $d:ty, $count:expr) => {
+    ($engine:ident, $runtime:expr, $a:expr, $dual:expr, $d:ty, $count:expr) => {
         (0..$count)
             .map(|member: usize| {
                 let mut index = 1000 * member;
                 symtn::typed::TensorMap::<_, $d>::from_subblock_fn(
+                    $engine,
                     $runtime,
                     [$a, $dual],
                     [$a, $dual],

@@ -86,9 +86,11 @@ where
     R::Key: 'static + Clone + Eq + Hash + Send + Sync,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<f64> + Sample,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut out = vec![D::zero(); dst.space().required_len().unwrap()];
     context
         .tensorcontract_prelowered_into(
+            engine,
             dst,
             &mut out,
             crate::FusionOperand::adjoint(lhs.space()),

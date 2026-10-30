@@ -54,7 +54,6 @@ mod lazy_adjoint_contract_allocations;
 mod lazy_adjoint_factorization_allocations;
 mod permute_overwrite_allocations;
 mod planar_contract_allocations;
-mod pooled_dense_allocations;
 mod precision_conversions;
 mod prepared_compose_allocations;
 mod prepared_compose_pins;
@@ -88,7 +87,7 @@ mod complete_structure_working_set;
 
 mod composed_coefficient_cache;
 
-mod factorization_session_scope;
+mod factorization_foreign_threads;
 
 mod solve_leg_roles;
 

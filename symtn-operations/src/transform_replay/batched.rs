@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn effective_tree_transform_threads(
+    engine: &mut dyn Engine,
     schedule: &TreeTransformParallelSchedule,
     requested: usize,
 ) -> usize {
@@ -12,33 +13,44 @@ pub(super) fn effective_tree_transform_threads(
     let runnable = singles.max(schedule.pack_columns.len()).max(1);
     let requested = requested.max(1);
 
-    // Why not query the pool for serial replay: without an entered Host pool,
-    // current_num_threads initializes Rayon's global pool even though this
-    // call cannot use parallel execution.
+    // Why answer before reading the engine width: a serial replay needs no
+    // engine lookup at all.
     if requested == 1 || runnable == 1 {
         return 1;
     }
 
-    // Why not trust the requested count: the Host pool cannot execute more
-    // workers than it has, and scratch for phantom workers turns a harmless
+    // Why not trust the requested count: the caller's engine cannot execute
+    // more workers than it has, and scratch for phantom workers turns a harmless
     // large hint into an allocation overflow before any replay begins.
     requested
-        .min(crate::host_pool::current_threads())
+        .min(crate::host_pool::threads(engine))
         .min(runnable)
 }
 
-/// Every replay fork runs in the operation's Host pool. Only the outermost
-/// fork installs; nested forks already run on a worker of that pool.
-pub(super) fn replay_join<A, B, RA, RB>(left: A, right: B) -> (RA, RB)
+/// Runs a replay phase split over `threads` workers with the operation's
+/// engine token; a serial phase takes no token.
+pub(super) fn replay_region<R>(
+    engine: &mut dyn Engine,
+    threads: usize,
+    op: impl FnOnce(Exec<'_>) -> R,
+) -> Result<R, OperationError> {
+    if threads <= 1 {
+        return Ok(op(Exec::serial()));
+    }
+    crate::host_pool::region(engine, crate::host_pool::HostPoolSite::Replay, op)
+}
+
+/// One replay fork: both halves run as jobs of `exec`. The split itself (and
+/// so every per-worker scratch slice and the left-before-right error order)
+/// is fixed by the replay's `threads`, not by where the token places a job.
+pub(super) fn replay_join<A, B, RA, RB>(exec: Exec<'_>, left: A, right: B) -> (RA, RB)
 where
-    A: FnOnce() -> RA + Send,
-    B: FnOnce() -> RB + Send,
-    RA: Send,
-    RB: Send,
+    A: FnOnce(Exec<'_>) -> RA + Send + Sync,
+    B: FnOnce(Exec<'_>) -> RB + Send + Sync,
+    RA: Send + Sync,
+    RB: Send + Sync,
 {
-    crate::host_pool::install_region(crate::host_pool::HostPoolSite::Replay, || {
-        pool_join(left, right)
-    })
+    pool_join(exec, left, right)
 }
 
 /// Executes a validated tree-transform block list against a dense executor.
@@ -50,6 +62,7 @@ where
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_blocks_with_batched_recoupling<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -74,6 +87,55 @@ where
     // All-Single structures (abelian recoupling is diagonal) skip the batch
     // machinery entirely: no pack scratch, no job list, no scatter pass.
     if recoupling_plan.is_empty() {
+        return crate::host_pool::with_exec(engine, |mut exec| {
+            for block in task.blocks() {
+                let TreeTransformBlock::Single {
+                    dst_layout,
+                    src_layout,
+                    coefficient,
+                } = *block
+                else {
+                    unreachable!("checked above: no Multi blocks");
+                };
+                let start = profile.as_ref().map(|_| std::time::Instant::now());
+                tree_transform_single_with_strided_kernel(
+                    exec.reborrow(),
+                    kernels,
+                    &mut workspace.zero_strides,
+                    Some(workspace.fused_indices.as_mut_slice()),
+                    layouts,
+                    dst_layout,
+                    src_layout,
+                    task.single_coefficients()[coefficient],
+                    task.storage_conjugate(),
+                    dst_data,
+                    src_data,
+                    alpha.at(layouts.entry(dst_layout).offset),
+                    mode,
+                )?;
+                if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+                    let elapsed = start.elapsed();
+                    profile.single_blocks += 1;
+                    profile.single_total += elapsed;
+                    profile.strided_kernel += elapsed;
+                }
+            }
+            Ok(())
+        });
+    }
+
+    let start = profile.as_ref().map(|_| std::time::Instant::now());
+    let converted = ensure_recoupling_coefficients(workspace, task, structure_identity)?;
+    if converted {
+        if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+            profile.multi_coefficient_prepare += start.elapsed();
+        }
+    }
+
+    // Singles apply directly in replay order. Multi blocks are packed through
+    // the compile-time recoupling entries, whose order is chosen to form
+    // same-shape strided GEMM runs.
+    crate::host_pool::with_exec(engine, |mut exec| {
         for block in task.blocks() {
             let TreeTransformBlock::Single {
                 dst_layout,
@@ -81,10 +143,13 @@ where
                 coefficient,
             } = *block
             else {
-                unreachable!("checked above: no Multi blocks");
+                continue;
             };
+            // Timestamps only under profiling: the per-block clock reads are
+            // measurable against microsecond replays.
             let start = profile.as_ref().map(|_| std::time::Instant::now());
             tree_transform_single_with_strided_kernel(
+                exec.reborrow(),
                 kernels,
                 &mut workspace.zero_strides,
                 Some(workspace.fused_indices.as_mut_slice()),
@@ -105,53 +170,8 @@ where
                 profile.strided_kernel += elapsed;
             }
         }
-        return Ok(());
-    }
-
-    let start = profile.as_ref().map(|_| std::time::Instant::now());
-    let converted = ensure_recoupling_coefficients(workspace, task, structure_identity)?;
-    if converted {
-        if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-            profile.multi_coefficient_prepare += start.elapsed();
-        }
-    }
-
-    // Singles apply directly in replay order. Multi blocks are packed through
-    // the compile-time recoupling entries, whose order is chosen to form
-    // same-shape strided GEMM runs.
-    for block in task.blocks() {
-        let TreeTransformBlock::Single {
-            dst_layout,
-            src_layout,
-            coefficient,
-        } = *block
-        else {
-            continue;
-        };
-        // Timestamps only under profiling: the per-block clock reads are
-        // measurable against microsecond replays.
-        let start = profile.as_ref().map(|_| std::time::Instant::now());
-        tree_transform_single_with_strided_kernel(
-            kernels,
-            &mut workspace.zero_strides,
-            Some(workspace.fused_indices.as_mut_slice()),
-            layouts,
-            dst_layout,
-            src_layout,
-            task.single_coefficients()[coefficient],
-            task.storage_conjugate(),
-            dst_data,
-            src_data,
-            alpha.at(layouts.entry(dst_layout).offset),
-            mode,
-        )?;
-        if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-            let elapsed = start.elapsed();
-            profile.single_blocks += 1;
-            profile.single_total += elapsed;
-            profile.strided_kernel += elapsed;
-        }
-    }
+        Ok(())
+    })?;
 
     for (block_index, job) in recoupling_plan.entries() {
         let TreeTransformBlock::Multi {
@@ -180,18 +200,22 @@ where
             profile.multi_workspace_prepare += start.elapsed();
         }
         let start = profile.as_ref().map(|_| std::time::Instant::now());
-        for src_index in 0..src_count {
-            pack_layout_into_column(
-                kernels,
-                Some(workspace.fused_indices.as_mut_slice()),
-                layouts,
-                src_layout_start + src_index,
-                src_data,
-                workspace.packed.source_mut().as_mut_slice(),
-                src_index * element_count,
-                task.storage_conjugate(),
-            )?;
-        }
+        crate::host_pool::with_exec(engine, |mut exec| {
+            for src_index in 0..src_count {
+                pack_layout_into_column(
+                    exec.reborrow(),
+                    kernels,
+                    Some(workspace.fused_indices.as_mut_slice()),
+                    layouts,
+                    src_layout_start + src_index,
+                    src_data,
+                    workspace.packed.source_mut().as_mut_slice(),
+                    src_index * element_count,
+                    task.storage_conjugate(),
+                )?;
+            }
+            Ok(())
+        })?;
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.multi_blocks += 1;
             profile.packed_columns += src_count;
@@ -207,6 +231,7 @@ where
             };
             let (source, destination) = workspace.packed.source_and_destination_mut();
             recoupling_gemm_batch(
+                engine,
                 dense,
                 destination.as_mut_slice(),
                 source.as_slice(),
@@ -222,20 +247,24 @@ where
         }
 
         let start = profile.as_ref().map(|_| std::time::Instant::now());
-        for dst_index in 0..dst_count {
-            scatter_column_into_layout(
-                kernels,
-                &mut workspace.zero_strides,
-                Some(workspace.fused_indices.as_mut_slice()),
-                layouts,
-                dst_layout_start + dst_index,
-                workspace.packed.destination().as_slice(),
-                dst_index * element_count,
-                dst_data,
-                alpha.at(layouts.entry(dst_layout_start + dst_index).offset),
-                mode,
-            )?;
-        }
+        crate::host_pool::with_exec(engine, |mut exec| {
+            for dst_index in 0..dst_count {
+                scatter_column_into_layout(
+                    exec.reborrow(),
+                    kernels,
+                    &mut workspace.zero_strides,
+                    Some(workspace.fused_indices.as_mut_slice()),
+                    layouts,
+                    dst_layout_start + dst_index,
+                    workspace.packed.destination().as_slice(),
+                    dst_index * element_count,
+                    dst_data,
+                    alpha.at(layouts.entry(dst_layout_start + dst_index).offset),
+                    mode,
+                )?;
+            }
+            Ok(())
+        })?;
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.scattered_columns += dst_count;
             profile.multi_scatter += start.elapsed();
@@ -264,6 +293,7 @@ fn replay_pack_columns<A, D>(
     src_data: &[D],
     storage_conjugate: bool,
     threads: usize,
+    mut exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -276,6 +306,7 @@ where
         let fused_index = &mut fused_indices[..max_fused_rank];
         for item in items {
             pack_layout_into_column(
+                exec.reborrow(),
                 &mut kernels,
                 Some(&mut *fused_index),
                 layouts,
@@ -298,7 +329,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_pack_columns(
                 kernels,
                 left_indices,
@@ -310,9 +342,10 @@ where
                 src_data,
                 storage_conjugate,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_pack_columns(
                 right_kernels,
                 right_indices,
@@ -324,6 +357,7 @@ where
                 src_data,
                 storage_conjugate,
                 right_threads,
+                exec,
             )
         },
     );
@@ -347,6 +381,7 @@ pub(super) fn replay_single_blocks<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
+    mut exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -367,6 +402,7 @@ where
                 coefficients[coefficient],
             );
             kernels.transform_strided_baked(
+                exec.reborrow(),
                 &mut zero_strides,
                 dst_data,
                 src_data,
@@ -399,7 +435,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_single_blocks(
                 kernels,
                 left_indices,
@@ -415,9 +452,10 @@ where
                 alpha,
                 mode,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_single_blocks(
                 right_kernels,
                 right_indices,
@@ -433,6 +471,7 @@ where
                 alpha,
                 mode,
                 right_threads,
+                exec,
             )
         },
     );
@@ -473,6 +512,7 @@ fn replay_scatter_columns<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
+    mut exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -489,6 +529,7 @@ where
             let offset = layouts.entry(item.dst_layout).offset - dst_start;
             match mode {
                 DestinationMode::Axpby(beta) => kernels.axpby_strided_baked(
+                    exec.reborrow(),
                     dst_data,
                     packed_destination,
                     role.dims(),
@@ -502,6 +543,7 @@ where
                     Some(&mut *fused_index),
                 )?,
                 DestinationMode::Overwrite => kernels.copy_scale_strided_baked(
+                    exec.reborrow(),
                     dst_data,
                     packed_destination,
                     role.dims(),
@@ -530,7 +572,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_scatter_columns(
                 kernels,
                 left_indices,
@@ -544,9 +587,10 @@ where
                 alpha,
                 mode,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_scatter_columns(
                 right_kernels,
                 right_indices,
@@ -560,6 +604,7 @@ where
                 alpha,
                 mode,
                 right_threads,
+                exec,
             )
         },
     );
@@ -583,6 +628,7 @@ pub(super) fn replay_scatter_groups<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
+    exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -608,6 +654,7 @@ where
                 alpha,
                 mode,
                 1,
+                Exec::serial(),
             )?;
         }
         return Ok(());
@@ -624,7 +671,8 @@ where
     let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             replay_scatter_groups(
                 kernels,
                 left_indices,
@@ -640,9 +688,10 @@ where
                 alpha,
                 mode,
                 left_threads,
+                exec,
             )
         },
-        || {
+        |exec| {
             replay_scatter_groups(
                 right_kernels,
                 right_indices,
@@ -658,6 +707,7 @@ where
                 alpha,
                 mode,
                 right_threads,
+                exec,
             )
         },
     );
@@ -677,6 +727,7 @@ where
 /// scatter groups may be split by destination slice.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay_multi_chunk<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -745,18 +796,21 @@ where
         *pack_cursor += 1;
     }
     let start = profile.as_ref().map(|_| std::time::Instant::now());
-    replay_pack_columns(
-        kernels.clone(),
-        &mut workspace.fused_indices[..fused_index_len],
-        max_fused_rank,
-        layouts,
-        &schedule.pack_columns[pack_start..*pack_cursor],
-        workspace.packed.source_mut().as_mut_slice(),
-        source_start,
-        src_data,
-        storage_conjugate,
-        threads,
-    )?;
+    replay_region(engine, threads, |exec| {
+        replay_pack_columns(
+            kernels.clone(),
+            &mut workspace.fused_indices[..fused_index_len],
+            max_fused_rank,
+            layouts,
+            &schedule.pack_columns[pack_start..*pack_cursor],
+            workspace.packed.source_mut().as_mut_slice(),
+            source_start,
+            src_data,
+            storage_conjugate,
+            threads,
+            exec,
+        )
+    })??;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
         profile.packed_columns += chunk.iter().map(|job| job.contracted).sum::<usize>();
         profile.multi_pack += start.elapsed();
@@ -765,6 +819,7 @@ where
     let start = profile.as_ref().map(|_| std::time::Instant::now());
     let (source, destination) = workspace.packed.source_and_destination_mut();
     recoupling_gemm_batch(
+        engine,
         dense,
         destination.as_mut_slice(),
         source.as_slice(),
@@ -784,7 +839,7 @@ where
             .filter(|&group| !schedule.scatter_groups[group].columns.is_empty()),
     );
     // Why not sort/copy every scatter descriptor: only the at-most-T group
-    // indices need destination order for one safe Rayon split tree.
+    // indices need destination order for one safe replay split tree.
     workspace
         .chunk_scatter_groups
         .sort_unstable_by_key(|&group| {
@@ -809,7 +864,7 @@ where
 ///
 /// - Singles apply in parallel when their compiled slices are disjoint. Multi
 ///   blocks replay in concurrency-bounded chunks whose pack and scatter phases
-///   each enter Rayon once. Work items are independent because the compile step
+///   each take the engine token once. Work items are independent because the compile step
 ///   rejects duplicate destination blocks
 ///   (`OperationError::DuplicateTransformDestination`) and pack columns are
 ///   disjoint scratch ranges by construction; the workspace forbids `unsafe`,
@@ -821,8 +876,8 @@ where
 /// - Each chunk is one serial grouped GEMM call between its pack and scatter
 ///   phases. The dense executor owns its own parallelism, so no nesting arises.
 ///
-/// Parallel copy scheduling uses recursive `rayon::join` in the operation's
-/// Host pool, capped by the configured worker count. Replay descriptors and safe split
+/// Parallel copy scheduling forks the operation's engine token recursively
+/// (`replay_join`), capped by the configured worker count. Replay descriptors and safe split
 /// boundaries are compiled into the structure.
 ///
 /// Per-task traversal indices are disjoint slices of one workspace arena, split
@@ -834,6 +889,7 @@ where
 /// measure contention, not work.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_blocks_with_batched_recoupling_parallel<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -879,41 +935,49 @@ where
     {
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         if schedule.singles_slice_disjoint {
-            replay_single_blocks(
-                kernels.clone(),
-                &mut workspace.fused_indices[..fused_index_len],
-                max_fused_rank,
-                task.blocks(),
-                layouts,
-                task.single_coefficients(),
-                storage_conjugate,
-                &schedule.singles,
-                dst_data,
-                0,
-                src_data,
-                alpha,
-                mode,
-                threads,
-            )?;
+            replay_region(engine, threads, |exec| {
+                replay_single_blocks(
+                    kernels.clone(),
+                    &mut workspace.fused_indices[..fused_index_len],
+                    max_fused_rank,
+                    task.blocks(),
+                    layouts,
+                    task.single_coefficients(),
+                    storage_conjugate,
+                    &schedule.singles,
+                    dst_data,
+                    0,
+                    src_data,
+                    alpha,
+                    mode,
+                    threads,
+                    exec,
+                )
+            })??;
         } else {
             let mut zero_strides = Vec::new();
-            for &item in &schedule.singles {
-                let (dst_layout, src_layout, coefficient) = scheduled_single(task.blocks(), item)?;
-                tree_transform_single_with_strided_kernel(
-                    kernels,
-                    &mut zero_strides,
-                    Some(&mut workspace.fused_indices[..max_fused_rank]),
-                    layouts,
-                    dst_layout,
-                    src_layout,
-                    task.single_coefficients()[coefficient],
-                    storage_conjugate,
-                    dst_data,
-                    src_data,
-                    alpha.at(layouts.entry(dst_layout).offset),
-                    mode,
-                )?;
-            }
+            crate::host_pool::with_exec(engine, |mut exec| {
+                for &item in &schedule.singles {
+                    let (dst_layout, src_layout, coefficient) =
+                        scheduled_single(task.blocks(), item)?;
+                    tree_transform_single_with_strided_kernel(
+                        exec.reborrow(),
+                        kernels,
+                        &mut zero_strides,
+                        Some(&mut workspace.fused_indices[..max_fused_rank]),
+                        layouts,
+                        dst_layout,
+                        src_layout,
+                        task.single_coefficients()[coefficient],
+                        storage_conjugate,
+                        dst_data,
+                        src_data,
+                        alpha.at(layouts.entry(dst_layout).offset),
+                        mode,
+                    )?;
+                }
+                Ok(())
+            })?;
         }
 
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
@@ -931,6 +995,7 @@ where
     for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
         let scattered_column_count = chunk.iter().map(|job| job.cols).sum::<usize>();
         let (destination_start, scatter_slice_disjoint) = replay_multi_chunk(
+            engine,
             kernels,
             dense,
             workspace,
@@ -947,42 +1012,49 @@ where
 
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         if scatter_slice_disjoint {
-            replay_scatter_groups(
-                kernels.clone(),
-                &mut workspace.fused_indices[..fused_index_len],
-                max_fused_rank,
-                layouts,
-                &schedule.scatter_columns,
-                &schedule.scatter_groups,
-                &workspace.chunk_scatter_groups,
-                dst_data,
-                0,
-                packed_destination,
-                destination_start,
-                alpha,
-                mode,
-                threads,
-            )?;
+            replay_region(engine, threads, |exec| {
+                replay_scatter_groups(
+                    kernels.clone(),
+                    &mut workspace.fused_indices[..fused_index_len],
+                    max_fused_rank,
+                    layouts,
+                    &schedule.scatter_columns,
+                    &schedule.scatter_groups,
+                    &workspace.chunk_scatter_groups,
+                    dst_data,
+                    0,
+                    packed_destination,
+                    destination_start,
+                    alpha,
+                    mode,
+                    threads,
+                    exec,
+                )
+            })??;
         } else {
             let mut zero_strides = Vec::new();
-            for &group in &workspace.chunk_scatter_groups {
-                for item in
-                    &schedule.scatter_columns[schedule.scatter_groups[group].columns.clone()]
-                {
-                    scatter_column_into_layout(
-                        kernels,
-                        &mut zero_strides,
-                        Some(&mut workspace.fused_indices[..max_fused_rank]),
-                        layouts,
-                        item.dst_layout,
-                        packed_destination,
-                        item.packed_offset - destination_start,
-                        dst_data,
-                        alpha.at(layouts.entry(item.dst_layout).offset),
-                        mode,
-                    )?;
+            crate::host_pool::with_exec(engine, |mut exec| {
+                for &group in &workspace.chunk_scatter_groups {
+                    for item in
+                        &schedule.scatter_columns[schedule.scatter_groups[group].columns.clone()]
+                    {
+                        scatter_column_into_layout(
+                            exec.reborrow(),
+                            kernels,
+                            &mut zero_strides,
+                            Some(&mut workspace.fused_indices[..max_fused_rank]),
+                            layouts,
+                            item.dst_layout,
+                            packed_destination,
+                            item.packed_offset - destination_start,
+                            dst_data,
+                            alpha.at(layouts.entry(item.dst_layout).offset),
+                            mode,
+                        )?;
+                    }
                 }
-            }
+                Ok(())
+            })?;
         }
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.scattered_columns += scattered_column_count;
@@ -1044,6 +1116,7 @@ mod bounded_workspace_tests {
 
     #[test]
     fn many_groups_bound_serial_and_parallel_pack_scratch_by_concurrency() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (structure, transform, source) = many_group_fixture();
         let total_source = transform.recoupling_plan().source_len();
         let total_destination = transform.recoupling_plan().destination_len();
@@ -1052,6 +1125,7 @@ mod bounded_workspace_tests {
             let mut destination = vec![0.0; source.len()];
             let mut workspace = TreeTransformWorkspace::default();
             tree_transform_structure_with_structural_recoupling_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
                 &mut workspace,
@@ -1081,6 +1155,7 @@ mod bounded_workspace_tests {
 
     #[test]
     fn bounded_group_replay_preserves_complex_alpha_beta() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (structure, transform, source) = many_group_fixture();
         let source = source
             .into_iter()
@@ -1092,6 +1167,7 @@ mod bounded_workspace_tests {
         let mut destination = vec![initial; source.len()];
 
         tree_transform_structure_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),

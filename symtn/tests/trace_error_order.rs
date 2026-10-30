@@ -12,6 +12,7 @@
 //! `--features cuda -- --ignored`.
 
 use crate::report;
+use symtn::typed::Engine;
 
 use std::sync::Arc;
 
@@ -46,20 +47,33 @@ fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
 /// Every multiplicity-free misuse, eager and into a destination. `$lift`
 /// puts a Host tensor at the placement under test.
 macro_rules! multiplicity_free_matrix {
-    ($rt:expr, $d:ty, $lift:expr) => {{
+    ($engine:ident, $ops:ident, $rt:expr, $d:ty, $lift:expr) => {{
         let rt = $rt;
         let lift = $lift;
         let (v, w) = su2_legs();
         let vd = v.try_dual().unwrap();
-        let t = lift(&TensorMap::<_, $d>::rand_with_seed(rt, [&v, &vd, &v], [&v, &vd], 5).unwrap());
-        let mismatched = lift(&TensorMap::<_, $d>::rand_with_seed(rt, [&v], [&w], 7).unwrap());
+        let t =
+            TensorMap::<_, $d>::rand_with_seed($engine, rt, [&v, &vd, &v], [&v, &vd], 5).unwrap();
+        let t = lift($ops, &t);
+        let mismatched = TensorMap::<_, $d>::rand_with_seed($engine, rt, [&v], [&w], 7).unwrap();
+        let mismatched = lift($ops, &mismatched);
         // The result space of tracing (0, 2) on `t`: codomain [vd], domain [v, vd].
-        let non_dual_target = || lift(&TensorMap::<_, $d>::zeros(rt, [&vd], [&v, &vd]).unwrap());
+        let non_dual_target = |host: &mut dyn Engine, ops: &mut dyn Engine| {
+            lift(
+                ops,
+                &TensorMap::<_, $d>::zeros(host, rt, [&vd], [&v, &vd]).unwrap(),
+            )
+        };
         // Every leg dualized: never the result space.
-        let wrong_target = || lift(&TensorMap::<_, $d>::zeros(rt, [&v], [&vd, &v]).unwrap());
+        let wrong_target = |host: &mut dyn Engine, ops: &mut dyn Engine| {
+            lift(
+                ops,
+                &TensorMap::<_, $d>::zeros(host, rt, [&v], [&vd, &v]).unwrap(),
+            )
+        };
         let one = <$d>::from(1.0);
         let half = <$d>::from(0.5);
-        assert!(t.trace_pairs(&[(0, 3), (1, 4)]).is_ok());
+        assert!(t.trace_pairs($ops, &[(0, 3), (1, 4)]).is_ok());
 
         for (pairs, expected) in [
             (vec![(0, 9)], "pair list"),
@@ -67,42 +81,42 @@ macro_rules! multiplicity_free_matrix {
             (vec![(0, 2)], "non-dual pair"),
         ] {
             assert_eq!(
-                class(t.trace_pairs(&pairs).unwrap_err()),
+                class(t.trace_pairs($ops, &pairs).unwrap_err()),
                 expected,
                 "{pairs:?}"
             );
         }
         assert_eq!(
-            class(mismatched.trace_pairs(&[(0, 1)]).unwrap_err()),
+            class(mismatched.trace_pairs($ops, &[(0, 1)]).unwrap_err()),
             "non-dual pair"
         );
 
         // Into a destination: a pair-list error needs no destination.
         for pairs in [vec![(0, 9)], vec![(0, 0)]] {
-            let mut target = non_dual_target();
+            let mut target = non_dual_target($engine, $ops);
             assert_eq!(
                 class(
-                    t.trace_pairs_into(&pairs, &mut target, one, half)
+                    t.trace_pairs_into($ops, &pairs, &mut target, one, half)
                         .unwrap_err()
                 ),
                 "pair list"
             );
         }
         // The right destination space: the duality is the error.
-        let mut target = non_dual_target();
+        let mut target = non_dual_target($engine, $ops);
         assert_eq!(
             class(
-                t.trace_pairs_into(&[(0, 2)], &mut target, one, half)
+                t.trace_pairs_into($ops, &[(0, 2)], &mut target, one, half)
                     .unwrap_err()
             ),
             "non-dual pair"
         );
         // A wrong destination space comes first, as `space(tdst)` does in
         // TensorKit.
-        let mut target = wrong_target();
+        let mut target = wrong_target($engine, $ops);
         assert_eq!(
             class(
-                t.trace_pairs_into(&[(0, 2)], &mut target, one, half)
+                t.trace_pairs_into($ops, &[(0, 2)], &mut target, one, half)
                     .unwrap_err()
             ),
             "destination space"
@@ -110,15 +124,15 @@ macro_rules! multiplicity_free_matrix {
         // A scalar destination, shared on purpose (`lift` clones on Host): the
         // duality error must come before the destination's storage checks
         // (`DestinationShared`), which TensorKit does not have.
-        let scalar = TensorMap::<_, $d>::rand_with_seed(rt, [&v], [&v], 9)
+        let scalar = TensorMap::<_, $d>::rand_with_seed($engine, rt, [&v], [&v], 9)
             .unwrap()
-            .trace_pairs(&[(0, 1)])
+            .trace_pairs($engine, &[(0, 1)])
             .unwrap();
-        let mut target = lift(&scalar);
+        let mut target = lift($ops, &scalar);
         assert_eq!(
             class(
                 mismatched
-                    .trace_pairs_into(&[(0, 1)], &mut target, one, half)
+                    .trace_pairs_into($ops, &[(0, 1)], &mut target, one, half)
                     .unwrap_err()
             ),
             "non-dual pair"
@@ -128,28 +142,52 @@ macro_rules! multiplicity_free_matrix {
 
 #[test]
 fn multiplicity_free_host_trace_reports_one_error_per_misuse() {
-    let rt = Runtime::builder().dense_threads(1).build().unwrap();
-    multiplicity_free_matrix!(&rt, f64, |x: &TensorMap<_, f64>| x.clone());
-    multiplicity_free_matrix!(&rt, Complex64, |x: &TensorMap<_, Complex64>| x.clone());
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    // The operations' engine, apart from the fixtures' one.
+    let ops = &mut symtn::typed::CpuEngine::serial();
+    let rt = Runtime::builder().build().unwrap();
+    multiplicity_free_matrix!(
+        engine,
+        ops,
+        &rt,
+        f64,
+        |_: &mut dyn Engine, x: &TensorMap<_, f64>| x.clone()
+    );
+    multiplicity_free_matrix!(engine, ops, &rt, Complex64, |_: &mut dyn Engine,
+                                                            x: &TensorMap<
+        _,
+        Complex64,
+    >| x.clone());
 }
 
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn multiplicity_free_device_trace_reports_the_host_error_per_misuse() {
-    let rt = Runtime::builder().cuda(0).build().unwrap();
-    multiplicity_free_matrix!(&rt, f64, |x: &TensorMap<_, f64>| x.to_cuda().unwrap());
-    multiplicity_free_matrix!(&rt, Complex64, |x: &TensorMap<_, Complex64>| x
-        .to_cuda()
-        .unwrap());
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let rt = Runtime::builder().build().unwrap();
+    multiplicity_free_matrix!(
+        engine,
+        cuda,
+        &rt,
+        f64,
+        |e: &mut dyn Engine, x: &TensorMap<_, f64>| x.to_cuda(e).unwrap()
+    );
+    multiplicity_free_matrix!(engine, cuda, &rt, Complex64, |e: &mut dyn Engine,
+                                                             x: &TensorMap<
+        _,
+        Complex64,
+    >| x.to_cuda(e).unwrap());
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    let rt = Runtime::builder().build().unwrap();
     let rule =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let v = GradedSpace::try_new(
@@ -161,24 +199,26 @@ fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
     let vd = v.try_dual().unwrap();
     macro_rules! generic {
         ($d:ty) => {{
-            let t = TensorMap::<_, $d>::rand_with_seed(&rt, [&v, &vd, &v], [&v, &vd], 5).unwrap();
-            let mismatched = TensorMap::<_, $d>::rand_with_seed(&rt, [&v], [&w], 7).unwrap();
+            let t = TensorMap::<_, $d>::rand_with_seed(engine, &rt, [&v, &vd, &v], [&v, &vd], 5)
+                .unwrap();
+            let mismatched =
+                TensorMap::<_, $d>::rand_with_seed(engine, &rt, [&v], [&w], 7).unwrap();
             for (pairs, expected) in [
                 (vec![(0, 9)], "pair list"),
                 (vec![(0, 0)], "pair list"),
                 (vec![(0, 2)], "non-dual pair"),
             ] {
                 assert_eq!(
-                    class(t.trace_pairs(&pairs).unwrap_err()),
+                    class(t.trace_pairs(engine, &pairs).unwrap_err()),
                     expected,
                     "{pairs:?}"
                 );
             }
             assert_eq!(
-                class(mismatched.trace_pairs(&[(0, 1)]).unwrap_err()),
+                class(mismatched.trace_pairs(engine, &[(0, 1)]).unwrap_err()),
                 "non-dual pair"
             );
-            assert!(t.trace_pairs(&[(0, 3), (1, 4)]).is_ok());
+            assert!(t.trace_pairs(engine, &[(0, 3), (1, 4)]).is_ok());
         }};
     }
     generic!(f64);

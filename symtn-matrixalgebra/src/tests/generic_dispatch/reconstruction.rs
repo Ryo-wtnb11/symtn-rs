@@ -39,6 +39,7 @@ fn run_tsvd_reconstruction_case<R>(rule: &R, sectors: &[SectorId])
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey + Clone,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let degeneracy = 2usize;
     let leg = || SectorLeg::new(sectors.iter().map(|&sector| (sector, degeneracy)), false);
     let homspace = FusionTreeHomSpace::new(
@@ -57,6 +58,7 @@ where
 
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let svd = svd_compact(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
@@ -191,12 +193,18 @@ fn assert_matrix_product(
 
 #[test]
 fn compact_factors_do_not_relabel_the_lowest_u1_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: compact SVD, QR, and LQ return correctly oriented factors at the lowest U(1) label.
     let rule = U1FusionRule;
     let tensor = u1_lowest_label_matrix(3, 2);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
-    let svd = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let svd = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     assert_eq!(svd.u.tensor().dims(), &[3, 2]);
     assert_eq!(svd.s.tensor().dims(), &[2, 2]);
     assert_eq!(svd.vh.tensor().dims(), &[2, 2]);
@@ -209,12 +217,22 @@ fn compact_factors_do_not_relabel_the_lowest_u1_sector() {
     }
     assert_matrix_product(tensor.data(), 3, 2, 2, svd.u.data(), &scaled_vh);
 
-    let Qr { q, r } = qr_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Qr { q, r } = qr_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     assert_eq!(q.tensor().dims(), &[3, 2]);
     assert_eq!(r.tensor().dims(), &[2, 2]);
     assert_matrix_product(tensor.data(), 3, 2, 2, q.data(), r.data());
 
-    let Lq { l, q } = lq_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Lq { l, q } = lq_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     assert_eq!(l.tensor().dims(), &[3, 2]);
     assert_eq!(q.tensor().dims(), &[2, 2]);
     assert_matrix_product(tensor.data(), 3, 2, 2, l.data(), q.data());
@@ -223,6 +241,7 @@ fn compact_factors_do_not_relabel_the_lowest_u1_sector() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: product-sector factors inherit the no-relabel contract for compact SVD, QR, LQ, and full EIGH.
     let rule =
         symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -242,6 +261,7 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let svd = svd_compact(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule.clone()), &rectangular),
     )
@@ -251,6 +271,7 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     assert_eq!(svd.vh.tensor().dims(), &[2, 2]);
 
     let Qr { q, r } = qr_compact(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule.clone()), &rectangular),
     )
@@ -260,6 +281,7 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     assert_matrix_product(rectangular.data(), 3, 2, 2, q.data(), r.data());
 
     let Lq { l, q } = lq_compact(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule.clone()), &rectangular),
     )
@@ -269,7 +291,12 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     assert_matrix_product(rectangular.data(), 3, 2, 2, l.data(), q.data());
 
     let hermitian = matrix(2, 2, vec![4.0, 1.0, 1.0, 3.0]);
-    let result = eigh_full(&mut dense, &bound_tensor_ref!(Arc::new(rule), &hermitian)).unwrap();
+    let result = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &hermitian),
+    )
+    .unwrap();
     assert_eq!(result.v.tensor().dims(), &[2, 2]);
     assert_eq!(result.d.tensor().dims(), &[2, 2]);
     let values = &result.eigenvalues[0].values;
@@ -287,6 +314,7 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
 
 #[test]
 fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for (rule_case, sectors) in [
         (0usize, vec![SectorId::new(0), SectorId::new(1)]),
         (
@@ -302,6 +330,7 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
             let tensor = tsvd_test_tensor(&rule, &sectors);
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let Qr { q, r } = qr_compact(
+                engine,
                 &mut dense_executor,
                 &bound_tensor_ref!(Arc::new(rule), &tensor),
             )
@@ -313,6 +342,7 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
             let tensor = tsvd_test_tensor(&rule, &sectors);
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let Qr { q, r } = qr_compact(
+                engine,
                 &mut dense_executor,
                 &bound_tensor_ref!(Arc::new(rule), &tensor),
             )
@@ -325,11 +355,13 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
 
 #[test]
 fn rightorth_fusion_reconstructs_z2_and_su2_tensors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     {
         let rule = Z2FusionRule;
         let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
         let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
         let Lq { l, q } = lq_compact(
+            engine,
             &mut dense_executor,
             &bound_tensor_ref!(Arc::new(rule), &tensor),
         )
@@ -348,6 +380,7 @@ fn rightorth_fusion_reconstructs_z2_and_su2_tensors() {
         );
         let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
         let Lq { l, q } = lq_compact(
+            engine,
             &mut dense_executor,
             &bound_tensor_ref!(Arc::new(rule), &tensor),
         )
@@ -359,6 +392,7 @@ fn rightorth_fusion_reconstructs_z2_and_su2_tensors() {
 
 #[test]
 fn tsvd_singular_tensor_composes_u_s_vt() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;
     let tensor = tsvd_test_tensor(
         &rule,
@@ -369,6 +403,7 @@ fn tsvd_singular_tensor_composes_u_s_vt() {
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let svd = svd_compact(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
@@ -415,6 +450,7 @@ fn tsvd_singular_tensor_composes_u_s_vt() {
 
 #[test]
 fn full_factorizations_agree_with_compact_on_matching_square_support() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: on square support the full factorizations need no completion and
     // agree with the compact ones (path agreement under the workspace rule,
     // 2 = the block dimension); each builds only its returned buffers.
@@ -429,9 +465,9 @@ fn full_factorizations_agree_with_compact_on_matching_square_support() {
     let input = bound_tensor(Arc::new(rule), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
-    let compact = svd_compact(&mut dense, &input.as_ref()).unwrap();
+    let compact = svd_compact(engine, &mut dense, &input.as_ref()).unwrap();
     let buffer_builds_rec = crate::probe::record();
-    let full = svd_full(&mut dense, &input.as_ref()).unwrap();
+    let full = svd_full(engine, &mut dense, &input.as_ref()).unwrap();
     assert_eq!(
         buffer_builds_rec.factor_buffer_builds(),
         (1, 1),
@@ -444,28 +480,29 @@ fn full_factorizations_agree_with_compact_on_matching_square_support() {
     let Qr {
         q: q_compact,
         r: r_compact,
-    } = qr_compact(&mut dense, &input.as_ref()).unwrap();
+    } = qr_compact(engine, &mut dense, &input.as_ref()).unwrap();
     let Qr {
         q: q_full,
         r: r_full,
-    } = qr_full(&mut dense, &input.as_ref()).unwrap();
+    } = qr_full(engine, &mut dense, &input.as_ref()).unwrap();
     numerics::assert_slices_close("Q", q_full.data(), q_compact.data(), 2);
     numerics::assert_slices_close("R", r_full.data(), r_compact.data(), 2);
 
     let Lq {
         l: l_compact,
         q: q_compact,
-    } = lq_compact(&mut dense, &input.as_ref()).unwrap();
+    } = lq_compact(engine, &mut dense, &input.as_ref()).unwrap();
     let Lq {
         l: l_full,
         q: q_full,
-    } = lq_full(&mut dense, &input.as_ref()).unwrap();
+    } = lq_full(engine, &mut dense, &input.as_ref()).unwrap();
     numerics::assert_slices_close("L", l_full.data(), l_compact.data(), 2);
     numerics::assert_slices_close("Q", q_full.data(), q_compact.data(), 2);
 }
 
 #[test]
 fn full_factorizations_skip_dense_backend_for_disjoint_support() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = U1FusionRule;
     let positive = U1Irrep::new(1).sector_id();
     let neutral = U1Irrep::new(0).sector_id();
@@ -478,16 +515,19 @@ fn full_factorizations_skip_dense_backend_for_disjoint_support() {
     let input = bound_tensor(Arc::new(rule), &tensor);
 
     svd_full(
+        engine,
         &mut ScriptedExecutor::new(RejectExecutorCalls),
         &input.as_ref(),
     )
     .unwrap();
     qr_full(
+        engine,
         &mut ScriptedExecutor::new(RejectExecutorCalls),
         &input.as_ref(),
     )
     .unwrap();
     lq_full(
+        engine,
         &mut ScriptedExecutor::new(RejectExecutorCalls),
         &input.as_ref(),
     )
@@ -502,6 +542,7 @@ fn assert_value_region_paths_match<R, D>(
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let general_padded = padded_copy(rule.as_ref(), general);
     let hermitian_padded = padded_copy(rule.as_ref(), hermitian);
     let general_bound = bound_tensor(Arc::clone(&rule), general);
@@ -536,28 +577,32 @@ fn assert_value_region_paths_match<R, D>(
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let values_fallbacks_rec = crate::probe::record();
-    let direct_svd = svd_vals_dyn(&mut dense, &general_bound.as_ref().dynamic()).unwrap();
+    let direct_svd = svd_vals_dyn(engine, &mut dense, &general_bound.as_ref().dynamic()).unwrap();
     let direct_eigh = eigh_vals_dyn(
+        engine,
         &mut dense,
         &hermitian_bound.as_ref().dynamic(),
         HermitianTol::DEFAULT,
     )
     .unwrap();
-    let direct_eig = eig_vals_dyn(&mut dense, &general_bound.as_ref().dynamic()).unwrap();
+    let direct_eig = eig_vals_dyn(engine, &mut dense, &general_bound.as_ref().dynamic()).unwrap();
     assert_eq!(
         values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
         0
     );
 
     let values_fallbacks_rec = crate::probe::record();
-    let packed_svd = svd_vals_dyn(&mut dense, &general_fallback.as_ref().dynamic()).unwrap();
+    let packed_svd =
+        svd_vals_dyn(engine, &mut dense, &general_fallback.as_ref().dynamic()).unwrap();
     let packed_eigh = eigh_vals_dyn(
+        engine,
         &mut dense,
         &hermitian_fallback.as_ref().dynamic(),
         HermitianTol::DEFAULT,
     )
     .unwrap();
-    let packed_eig = eig_vals_dyn(&mut dense, &general_fallback.as_ref().dynamic()).unwrap();
+    let packed_eig =
+        eig_vals_dyn(engine, &mut dense, &general_fallback.as_ref().dynamic()).unwrap();
     assert_eq!(
         values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
         3
@@ -674,6 +719,7 @@ fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<Z2
 
 #[test]
 fn ordinary_factorizations_and_composition_inherit_lowered_layout_strategy() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: cold compact SVD, compact QR, full EIGH, adjoint, and factor
     // composition all retain the ordinary built-in layout-build strategy.
     let tensor = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
@@ -696,25 +742,27 @@ fn ordinary_factorizations_and_composition_inherit_lowered_layout_strategy() {
             if matches!(*e, symtn_core::FusionAlgebraError::InvalidSector { sector }
                 if sector == SectorId::new(99))));
     };
-    let svd = svd_compact_dyn(&mut dense, &input).unwrap();
+    let svd = svd_compact_dyn(engine, &mut dense, &input).unwrap();
     for factor in [svd.u(), svd.s(), svd.vh()] {
         rejects_invalid_sector(factor.space().prime_derived_homspace(&malformed));
     }
-    let Qr { q, r } = qr_compact_dyn(&mut dense, &input).unwrap();
+    let Qr { q, r } = qr_compact_dyn(engine, &mut dense, &input).unwrap();
     rejects_invalid_sector(q.space().prime_derived_homspace(&malformed));
     rejects_invalid_sector(r.space().prime_derived_homspace(&malformed));
-    let eigh = eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    let eigh = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
     rejects_invalid_sector(eigh.v().space().prime_derived_homspace(&malformed));
 
     let adjoint = crate::factorize::adjoint_bound_factor(svd.u()).unwrap();
     rejects_invalid_sector(adjoint.space().prime_derived_homspace(&malformed));
     let mut context = default_context();
-    let composed = crate::compose::compose_bound_dyn(&mut context, svd.u(), svd.s()).unwrap();
+    let composed =
+        crate::compose::compose_bound_dyn(engine, &mut context, svd.u(), svd.s()).unwrap();
     rejects_invalid_sector(composed.space().prime_derived_homspace(&malformed));
 }
 
 #[test]
 fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_arc() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: each owned output keeps the caller's provider allocation, not an
     // equal provider of the same type seen by an earlier call.
     let hermitian = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
@@ -728,22 +776,23 @@ fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_a
         let (hermitian, general, rectangular) =
             (hermitian.as_ref(), general.as_ref(), rectangular.as_ref());
         let (hermitian_dyn, general_dyn) = (hermitian.dynamic(), general.dynamic());
-        let eigh = eigh_full(&mut dense, &hermitian).unwrap();
-        let eigh_dyn = eigh_full_dyn(&mut dense, &hermitian_dyn, HermitianTol::DEFAULT).unwrap();
-        let eig = eig_full_dyn(&mut dense, &general_dyn).unwrap();
-        let exponential = exp_into_mf(&mut dense, &hermitian_dyn).unwrap();
-        let Qr { q: qr_q, r: qr_r } = qr_compact(&mut dense, &rectangular).unwrap();
-        let Lq { l: lq_l, q: lq_q } = lq_compact(&mut dense, &rectangular).unwrap();
+        let eigh = eigh_full(engine, &mut dense, &hermitian).unwrap();
+        let eigh_dyn =
+            eigh_full_dyn(engine, &mut dense, &hermitian_dyn, HermitianTol::DEFAULT).unwrap();
+        let eig = eig_full_dyn(engine, &mut dense, &general_dyn).unwrap();
+        let exponential = exp_into_mf(engine, &mut dense, &hermitian_dyn).unwrap();
+        let Qr { q: qr_q, r: qr_r } = qr_compact(engine, &mut dense, &rectangular).unwrap();
+        let Lq { l: lq_l, q: lq_q } = lq_compact(engine, &mut dense, &rectangular).unwrap();
         let LeftPolar {
             w: w_left,
             p: p_left,
-        } = left_polar_dyn(&mut dense, &hermitian_dyn).unwrap();
+        } = left_polar_dyn(engine, &mut dense, &hermitian_dyn).unwrap();
         let RightPolar {
             p: p_right,
             wh: w_right,
-        } = right_polar_dyn(&mut dense, &hermitian_dyn).unwrap();
-        let inverse = inv_into_mf(&mut dense, &hermitian_dyn).unwrap();
-        let pseudo_inverse = pinv_into_mf(&mut dense, &hermitian_dyn, 1.0e-13).unwrap();
+        } = right_polar_dyn(engine, &mut dense, &hermitian_dyn).unwrap();
+        let inverse = inv_into_mf(engine, &mut dense, &hermitian_dyn).unwrap();
+        let pseudo_inverse = pinv_into_mf(engine, &mut dense, &hermitian_dyn, 1.0e-13).unwrap();
         [
             ("eigh", eigh.v.space().provider_arc()),
             ("eigh_dyn", eigh_dyn.v().space().provider_arc()),
@@ -774,6 +823,7 @@ fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_a
 
 #[test]
 fn adjoint_composition_gives_the_identity_on_the_bond() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;
     let tensor = tsvd_test_tensor(
         &rule,
@@ -784,13 +834,14 @@ fn adjoint_composition_gives_the_identity_on_the_bond() {
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let Qr { q, .. } = qr_compact(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
     .unwrap();
     let qh = adjoint(&rule, &q).unwrap();
     let mut context = default_context();
-    let identity = crate::compose::compose(&mut context, &rule, &qh, &q).unwrap();
+    let identity = crate::compose::compose(engine, &mut context, &rule, &qh, &q).unwrap();
     assert_identity_matrices(&dense_sector_matrices(1, &identity));
 }
 
@@ -819,6 +870,7 @@ impl Observer for MalformedBatch {
 
 #[test]
 fn compact_factorizations_reject_a_malformed_executor_batch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a batch with a missing input entry, or an entry missing a factor,
     // is symtn's own typed arity error, never a dropped sector, a panic or a
     // backend error. A missing factor keeps the per-matrix path's error.
@@ -837,9 +889,13 @@ fn compact_factorizations_reject_a_malformed_executor_batch() {
                 OperationError::Dense(DenseError::ShapeMismatch { op, .. }) if *op == expected
             )
         };
-        let qr = qr_compact(&mut dense, &input).map(|_| ()).unwrap_err();
+        let qr = qr_compact(engine, &mut dense, &input)
+            .map(|_| ())
+            .unwrap_err();
         assert!(is_arity_error(&qr, qr_op), "qr_compact: {qr:?}");
-        let svd = svd_compact(&mut dense, &input).map(|_| ()).unwrap_err();
+        let svd = svd_compact(engine, &mut dense, &input)
+            .map(|_| ())
+            .unwrap_err();
         assert!(is_arity_error(&svd, svd_op), "svd_compact: {svd:?}");
     }
 }

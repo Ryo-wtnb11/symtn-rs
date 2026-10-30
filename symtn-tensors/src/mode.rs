@@ -30,6 +30,7 @@
 
 use core::ops::{Add, Mul};
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use num_traits::{One, Zero};
 use symtn_core::{
@@ -326,18 +327,20 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
 
     /// The tree-pair transform structure `dst <- operation(src)`.
     fn tree_structure(
+        engine: &mut dyn Engine,
         cache: &mut Self::StructureCache,
         rule: &R,
         operation: &TreeTransformOperation,
         dst: &Arc<BlockStructure>,
         src: TreeStructureSource<'_>,
     ) -> Result<TreeTransformStructure<Self::Scalar>, Self::Error> {
-        Self::tree_structure_with(cache, rule, operation, dst, src, None)
+        Self::tree_structure_with(engine, cache, rule, operation, dst, src, None)
     }
 
     /// [`Self::tree_structure`] whose source admission, when `proof` is
     /// given, the caller already ran: a miss builds without repeating it.
     fn tree_structure_with(
+        engine: &mut dyn Engine,
         cache: &mut Self::StructureCache,
         rule: &R,
         operation: &TreeTransformOperation,
@@ -463,6 +466,7 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// TensorKit `blas_contract!`'s `copyA`/`copyB` (`tensoroperations.jl:411-433`).
     #[allow(clippy::too_many_arguments)]
     fn transformed_source(
+        engine: &mut dyn Engine,
         cache: &mut Self::StructureCache,
         authority: Self::SpaceAuthority<'_>,
         rule: &R,
@@ -476,6 +480,7 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// from it into `output_dst`.
     #[allow(clippy::too_many_arguments)]
     fn core_destination(
+        engine: &mut dyn Engine,
         cache: &mut Self::StructureCache,
         authority: Self::SpaceAuthority<'_>,
         rule: &R,
@@ -529,6 +534,7 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// operand, whose sources are read through logical-key projections,
     /// over `plan` when the request fixes one (a planar contraction).
     fn prelowered_dynamic_tree_artifact(
+        engine: &mut dyn Engine,
         cache: &mut Self::StructureCache,
         target: PlanTarget<'_, R, Self::SpaceAuthority<'_>>,
         lhs: FusionOperand<'_>,
@@ -689,6 +695,7 @@ where
     }
 
     fn tree_structure_with(
+        engine: &mut dyn Engine,
         cache: &mut Self::StructureCache,
         rule: &R,
         operation: &TreeTransformOperation,
@@ -700,8 +707,11 @@ where
             TreeStructureSource::Stored {
                 structure,
                 storage_conjugate,
-            } => cache.resolve_tree_pair(rule, operation, dst, structure, storage_conjugate),
+            } => {
+                cache.resolve_tree_pair(engine, rule, operation, dst, structure, storage_conjugate)
+            }
             TreeStructureSource::Oriented(source) => cache.resolve_tree_pair_oriented(
+                engine,
                 rule,
                 operation,
                 dst,
@@ -722,6 +732,7 @@ where
             // keys and the entry is the one contraction's oriented path uses.
             TreeStructureSource::StorageMapped { logical, operand } => cache
                 .resolve_tree_pair_oriented_with(
+                    engine,
                     rule,
                     operation,
                     dst,
@@ -900,6 +911,7 @@ where
     }
 
     fn transformed_source(
+        engine: &mut dyn Engine,
         planning: &mut TreeTransformPlanning,
         primer: LayoutKeyBuilder<R>,
         rule: &R,
@@ -909,6 +921,7 @@ where
         source_conjugate: bool,
     ) -> Result<DynamicFusionTransformedSourceEntry<R::Scalar>, OperationError> {
         compile_transformed_source(
+            engine,
             planning,
             rule,
             source,
@@ -920,6 +933,7 @@ where
     }
 
     fn core_destination(
+        engine: &mut dyn Engine,
         planning: &mut TreeTransformPlanning,
         primer: LayoutKeyBuilder<R>,
         rule: &R,
@@ -929,7 +943,7 @@ where
         output_dst: &DynamicFusionMapSpace,
     ) -> Result<DynamicFusionCoreDstEntry<R::Scalar>, OperationError> {
         compile_core_dst(
-            planning, rule, core_left, core_right, plan, output_dst, primer,
+            engine, planning, rule, core_left, core_right, plan, output_dst, primer,
         )
     }
 
@@ -994,6 +1008,7 @@ where
     }
 
     fn prelowered_dynamic_tree_artifact(
+        engine: &mut dyn Engine,
         planning: &mut TreeTransformPlanning,
         target: PlanTarget<'_, R>,
         lhs: FusionOperand<'_>,
@@ -1004,7 +1019,7 @@ where
     where
         R::Scalar: DenseBlockScalar,
     {
-        compile_prelowered_dynamic_tree(planning, target, lhs, rhs, axes, plan)
+        compile_prelowered_dynamic_tree(engine, planning, target, lhs, rhs, axes, plan)
     }
 }
 
@@ -1173,6 +1188,7 @@ where
     }
 
     fn tree_structure_with(
+        _engine: &mut dyn Engine,
         txn: &mut CheckedContractTxn,
         rule: &R,
         operation: &TreeTransformOperation,
@@ -1563,6 +1579,7 @@ where
     /// under an identity the artifact may instead read the parent with a
     /// GEMM adjoint op and leave that copy unused.
     fn transformed_source(
+        engine: &mut dyn Engine,
         txn: &mut CheckedContractTxn,
         authority: CheckedAuthority<'_, R>,
         rule: &R,
@@ -1633,8 +1650,14 @@ where
                 storage_conjugate: false,
             }
         };
-        let transform_structure =
-            Self::tree_structure(txn, rule, operation, space.structure(), transform_source)?;
+        let transform_structure = Self::tree_structure(
+            engine,
+            txn,
+            rule,
+            operation,
+            space.structure(),
+            transform_source,
+        )?;
         Ok(DynamicFusionTransformedSourceEntry {
             space: Arc::new(space),
             replay_structure: Arc::clone(source_structure),
@@ -1650,6 +1673,7 @@ where
     }
 
     fn core_destination(
+        engine: &mut dyn Engine,
         txn: &mut CheckedContractTxn,
         authority: CheckedAuthority<'_, R>,
         rule: &R,
@@ -1679,6 +1703,7 @@ where
             })?;
         let space = txn.stage(prepared, None);
         let output_transform_structure = Self::tree_structure(
+            engine,
             txn,
             rule,
             plan.output_transform(),
@@ -1780,6 +1805,7 @@ where
     /// prelowered layouts: their layout primer has no checked counterpart,
     /// and the logical spaces are already in the authority.
     fn prelowered_dynamic_tree_artifact(
+        engine: &mut dyn Engine,
         txn: &mut CheckedContractTxn,
         target: PlanTarget<'_, R, CheckedAuthority<'_, R>>,
         lhs: FusionOperand<'_>,
@@ -1788,6 +1814,7 @@ where
         plan: Option<&FusionContractPlan>,
     ) -> Result<DynamicTreeExecutionArtifact<f64>, Self::Error> {
         compile_stored_dynamic_tree::<Self, R>(
+            engine,
             txn,
             target,
             (

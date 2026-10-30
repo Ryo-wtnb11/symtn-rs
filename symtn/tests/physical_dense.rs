@@ -7,9 +7,10 @@ fn su2_multitree<D: symtn::typed::TensorScalar>(
     runtime: &Runtime,
     value: impl Fn(&[SU2Irrep]) -> D,
 ) -> TensorMap<SU2FusionRule, D> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let half = SU2Irrep::from_twice_spin(1);
     let leg = GradedSpace::try_new(std::sync::Arc::new(SU2FusionRule), [(half, 1)]).unwrap();
-    TensorMap::from_subblock_fn(runtime, [&leg, &leg, &leg], [&leg], |trees, _| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg, &leg], [&leg], |trees, _| {
         value(trees.codomain_innerlines())
     })
     .unwrap()
@@ -31,6 +32,7 @@ fn assert_real_close(actual: &[f64], expected: &[f64]) {
 
 #[test]
 fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let real = su2_multitree(&runtime, |inner| {
         if inner[0].twice_spin() == 0 {
@@ -40,11 +42,11 @@ fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
         }
     });
     let real_reduced = real.dense_data().unwrap().to_vec();
-    let physical = real.to_physical_dense().unwrap();
+    let physical = real.to_physical_dense(engine).unwrap();
     assert_eq!(physical.shape, [2, 2, 2, 2]);
     assert_eq!(real.dense_data().unwrap(), real_reduced);
     assert_real_close(
-        real.project_physical_dense(&physical)
+        real.project_physical_dense(engine, &physical)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -59,15 +61,16 @@ fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
         }
     });
     let complex_reduced = complex.dense_data().unwrap().to_vec();
-    let physical = complex.to_physical_dense().unwrap();
+    let physical = complex.to_physical_dense(engine).unwrap();
     assert_eq!(physical.shape, [2, 2, 2, 2]);
-    let projected = complex.project_physical_dense(&physical).unwrap();
+    let projected = complex.project_physical_dense(engine, &physical).unwrap();
     assert_complex_close(projected.dense_data().unwrap(), &complex_reduced);
     assert_eq!(complex.dense_data().unwrap(), complex_reduced);
 }
 
 #[test]
 fn projection_validates_shape_and_length_without_changing_target() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let target = su2_multitree(&runtime, |_| 9.0);
     let before = target.dense_data().unwrap().to_vec();
@@ -76,7 +79,9 @@ fn projection_validates_shape_and_length_without_changing_target() {
         shape: vec![2, 2],
         data: vec![0.0; 4],
     };
-    let error = target.project_physical_dense(&bad_shape).unwrap_err();
+    let error = target
+        .project_physical_dense(engine, &bad_shape)
+        .unwrap_err();
     assert!(matches!(
         error,
         PhysicalDenseError::Operation(OperationError::ShapeMismatch { .. })
@@ -87,7 +92,9 @@ fn projection_validates_shape_and_length_without_changing_target() {
         shape: vec![2, 2, 2, 2],
         data: vec![0.0; 15],
     };
-    let error = target.project_physical_dense(&bad_length).unwrap_err();
+    let error = target
+        .project_physical_dense(engine, &bad_length)
+        .unwrap_err();
     assert!(matches!(
         error,
         PhysicalDenseError::Operation(OperationError::ElementCountMismatch { .. })
@@ -97,6 +104,7 @@ fn projection_validates_shape_and_length_without_changing_target() {
 
 #[test]
 fn physical_entries_match_tensorkit_su2_values() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let real = su2_multitree(&runtime, |inner| f64::from(inner[0].twice_spin() == 2));
     let inv_sqrt_6 = 1.0 / 6.0_f64.sqrt();
@@ -118,7 +126,10 @@ fn physical_entries_match_tensorkit_su2_values() {
         inv_sqrt_6,
         0.0,
     ];
-    assert_real_close(&real.to_physical_dense().unwrap().data, &expected_real);
+    assert_real_close(
+        &real.to_physical_dense(engine).unwrap().data,
+        &expected_real,
+    );
 
     let scale = Complex64::new(1.0, 2.0);
     let complex = su2_multitree(&runtime, |inner| {
@@ -139,7 +150,7 @@ fn physical_entries_match_tensorkit_su2_values() {
         expected_complex[index] = scale * coefficient;
     }
     assert_complex_close(
-        &complex.to_physical_dense().unwrap().data,
+        &complex.to_physical_dense(engine).unwrap().data,
         &expected_complex,
     );
 }
@@ -158,13 +169,15 @@ fn permute_each_axis<D: Copy>(physical: &PhysicalDense<D>, target_to_source: &[u
 
 #[test]
 fn su2_spin_one_singlet_projects_to_explicit_doubled_u1_charges() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let spin_one = SU2Irrep::from_twice_spin(2);
     let su2_leg =
         GradedSpace::try_new(std::sync::Arc::new(SU2FusionRule), [(spin_one, 1)]).unwrap();
     let singlet: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg, &su2_leg], [], |_, _| 1.0).unwrap();
-    let su2_physical = singlet.to_physical_dense().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg, &su2_leg], [], |_, _| 1.0)
+            .unwrap();
+    let su2_physical = singlet.to_physical_dense(engine).unwrap();
     assert_eq!(su2_physical.shape, [3, 3]);
 
     // SU(2) uses doubled magnetic labels (2, 0, -2), whereas this U(1)
@@ -183,8 +196,9 @@ fn su2_spin_one_singlet_projects_to_explicit_doubled_u1_charges() {
         ],
     )
     .unwrap();
-    let target: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&u1_leg, &u1_leg], []).unwrap();
-    let projected = target.project_physical_dense(&u1_physical).unwrap();
+    let target: TensorMap<_, f64> =
+        TensorMap::zeros(engine, &runtime, [&u1_leg, &u1_leg], []).unwrap();
+    let projected = target.project_physical_dense(engine, &u1_physical).unwrap();
 
     let inv_sqrt_3 = 1.0 / 3.0_f64.sqrt();
     let mut labelled = projected
@@ -213,7 +227,7 @@ fn su2_spin_one_singlet_projects_to_explicit_doubled_u1_charges() {
         assert!((actual - expected_value).abs() < 2.0e-12);
     }
     assert_real_close(
-        &projected.to_physical_dense().unwrap().data,
+        &projected.to_physical_dense(engine).unwrap().data,
         &u1_physical.data,
     );
 }
@@ -365,17 +379,17 @@ const PERMUTATIONS: [(&[usize], &[usize]); 6] = [
 /// permutations of the dense array and that projection inverts the
 /// expansion, and returns `(shape, data)` as complex values.
 macro_rules! checked_physical_dense {
-    ($tensor:expr, $to_complex:expr) => {{
+    ($engine:ident, $tensor:expr, $to_complex:expr) => {{
         let (tensor, to_complex) = (&$tensor, $to_complex);
-        let physical = tensor.to_physical_dense().unwrap();
+        let physical = tensor.to_physical_dense($engine).unwrap();
 
         // TensorKit's order makes bending or braiding a leg a plain axis
         // permutation of the dense array for these bosonic providers
         // (TensorKit 0.17.1 `convert(Array, permute(t, p))` has the same property).
         for (codomain, domain) in PERMUTATIONS {
             let axes = [codomain, domain].concat();
-            let permuted = tensor.permute(codomain, domain).unwrap();
-            let actual = permuted.to_physical_dense().unwrap();
+            let permuted = tensor.permute($engine, codomain, domain).unwrap();
+            let actual = permuted.to_physical_dense($engine).unwrap();
             let expected = permute_dense(&physical, &axes);
             assert_eq!(actual.shape, expected.shape, "{axes:?}");
             let actual = actual
@@ -392,7 +406,7 @@ macro_rules! checked_physical_dense {
         }
 
         let reduced = tensor.dense_data().unwrap().to_vec();
-        let projected = tensor.project_physical_dense(&physical).unwrap();
+        let projected = tensor.project_physical_dense($engine, &physical).unwrap();
         let projected = projected
             .dense_data()
             .unwrap()
@@ -436,6 +450,7 @@ fn u1_expected(complex: bool) -> Vec<Complex64> {
 
 #[test]
 fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
@@ -449,23 +464,25 @@ fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let dual = v.try_dual().unwrap();
     let label = |q: &U1Irrep| f64::from(q.charge());
     let real = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&v, &dual],
         [&dual, &v],
         |trees, index| fixture_value(trees, index, label, |re, _| re),
     )
     .unwrap();
-    let (shape, actual) = checked_physical_dense!(real, |x| Complex64::new(x, 0.0));
+    let (shape, actual) = checked_physical_dense!(engine, real, |x| Complex64::new(x, 0.0));
     assert_eq!(shape, [4, 4, 4, 4]);
     assert_complex_close(&actual, &u1_expected(false));
     let complex = TensorMap::<U1FusionRule, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         [&v, &dual],
         [&dual, &v],
         |trees, index| fixture_value(trees, index, label, Complex64::new),
     )
     .unwrap();
-    let (shape, actual) = checked_physical_dense!(complex, |x| x);
+    let (shape, actual) = checked_physical_dense!(engine, complex, |x| x);
     assert_eq!(shape, [4, 4, 4, 4]);
     assert_complex_close(&actual, &u1_expected(true));
 }
@@ -513,27 +530,30 @@ fn su2_non_dual_expected(complex: bool) -> Vec<Complex64> {
 
 #[test]
 fn su2_dense_matches_clebsch_gordan_expansion_without_dual_legs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let w = su2_space([1, 2, 1]);
     let label = |j: &SU2Irrep| j.twice_spin() as f64;
     let real = TensorMap::<SU2FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&w, &w, &w],
         [&w],
         |trees, index| fixture_value(trees, index, label, |re, _| re),
     )
     .unwrap();
-    let (shape, actual) = checked_physical_dense!(real, |x| Complex64::new(x, 0.0));
+    let (shape, actual) = checked_physical_dense!(engine, real, |x| Complex64::new(x, 0.0));
     assert_eq!(shape, [8, 8, 8, 8]);
     assert_complex_close(&actual, &su2_non_dual_expected(false));
     let complex = TensorMap::<SU2FusionRule, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         [&w, &w, &w],
         [&w],
         |trees, index| fixture_value(trees, index, label, Complex64::new),
     )
     .unwrap();
-    let (shape, actual) = checked_physical_dense!(complex, |x| x);
+    let (shape, actual) = checked_physical_dense!(engine, complex, |x| x);
     assert_eq!(shape, [8, 8, 8, 8]);
     assert_complex_close(&actual, &su2_non_dual_expected(true));
 }
@@ -563,28 +583,31 @@ fn assert_su2_dual_samples(actual: &[Complex64], complex: bool) {
 
 #[test]
 fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let w = su2_space([2, 1, 1]);
     let dual = w.try_dual().unwrap();
     let label = |j: &SU2Irrep| j.twice_spin() as f64;
     let real = TensorMap::<SU2FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&w, &dual, &w],
         [&dual],
         |trees, index| fixture_value(trees, index, label, |re, _| re),
     )
     .unwrap();
-    let (shape, actual) = checked_physical_dense!(real, |x| Complex64::new(x, 0.0));
+    let (shape, actual) = checked_physical_dense!(engine, real, |x| Complex64::new(x, 0.0));
     assert_eq!(shape, [7, 7, 7, 7]);
     assert_su2_dual_samples(&actual, false);
     let complex = TensorMap::<SU2FusionRule, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         [&w, &dual, &w],
         [&dual],
         |trees, index| fixture_value(trees, index, label, Complex64::new),
     )
     .unwrap();
-    let (shape, actual) = checked_physical_dense!(complex, |x| x);
+    let (shape, actual) = checked_physical_dense!(engine, complex, |x| x);
     assert_eq!(shape, [7, 7, 7, 7]);
     assert_su2_dual_samples(&actual, true);
 }

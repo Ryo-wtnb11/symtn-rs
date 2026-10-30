@@ -62,15 +62,16 @@ use super::*;
 /// use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let runtime = Runtime::builder().dense_threads(1).build()?;
+/// let engine = &mut symtn::typed::CpuEngine::serial();
+/// let runtime = Runtime::builder().build()?;
 /// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
 /// // Annotated, so the literals have a type to be.
-/// let t: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
+/// let t: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(engine,
 ///     &runtime,
 ///     &leg,
 ///     [SectorSpectrum { sector: U1Irrep::new(0), values: vec![2.0, 3.0] }],
 /// )?;
-/// assert!((t.tr()?.abs() - 5.0).abs() < 1e-12);
+/// assert!((t.tr(engine)?.abs() - 5.0).abs() < 1e-12);
 /// # Ok(())
 /// # }
 /// ```
@@ -107,12 +108,12 @@ use super::*;
 use symtn::sector::U1FusionRule;
 use symtn::typed::TensorMap;
 
-fn single_precision_upload(tensor: &TensorMap<U1FusionRule, f32>) {
-    let _ = tensor.to_cuda();
+fn single_precision_upload(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f32>) {
+    let _ = tensor.to_cuda(engine);
 }
 
-fn double_precision_upload(tensor: &TensorMap<U1FusionRule, f64>) {
-    let _ = tensor.to_cuda();
+fn double_precision_upload(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f64>) {
+    let _ = tensor.to_cuda(engine);
 }
 ```"
 )]
@@ -197,7 +198,7 @@ impl TensorScalar for num_complex::Complex32 {}
 /// in: a payload dtype taken *solely* from float literals is not pinned to
 /// `f64` by calling a factorization on it, because four payload types
 /// implement it. Inference waits for the end-of-function fallback, which is too late for a method call
-/// on the result — `t.eigh_full(&[0], &[1], HermitianTol::DEFAULT)?.d.diagview()?[0].values[0].abs()` on an
+/// on the result — `t.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)?.d.diagview(engine)?[0].values[0].abs()` on an
 /// un-annotated `from_subblock_fn` tensor needs the payload dtype written
 /// down. The same holds for [`GradedSpace::find_truncated`], whose spectrum
 /// type is `SpectrumMagnitude` and has four implementors.
@@ -208,8 +209,8 @@ impl TensorScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{TensorMap, TensorScalar};
 ///
-/// fn base_only<D: TensorScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+/// fn base_only<D: TensorScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -220,8 +221,8 @@ impl TensorScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{FactorizationScalar, TensorMap};
 ///
-/// fn factorizing<D: FactorizationScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+/// fn factorizing<D: FactorizationScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -231,8 +232,8 @@ impl TensorScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{TensorMap, TensorScalar};
 ///
-/// fn base_only<D: TensorScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.qr_compact(&[0], &[1]);
+/// fn base_only<D: TensorScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.qr_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -240,8 +241,8 @@ impl TensorScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{FactorizationScalar, TensorMap};
 ///
-/// fn factorizing<D: FactorizationScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.qr_compact(&[0], &[1]);
+/// fn factorizing<D: FactorizationScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.qr_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -257,12 +258,12 @@ impl TensorScalar for num_complex::Complex32 {}
 use symtn::sector::U1FusionRule;
 use symtn::typed::{CudaStorage, TensorMap};
 
-fn f32_device_svd(tensor: &TensorMap<U1FusionRule, f32, CudaStorage<f32>>) {
-    let _ = tensor.svd_compact(&[0], &[1]);
+fn f32_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f32, CudaStorage<f32>>) {
+    let _ = tensor.svd_compact(engine, &[0], &[1]);
 }
 
-fn f64_device_svd(tensor: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>) {
-    let _ = tensor.svd_compact(&[0], &[1]);
+fn f64_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>) {
+    let _ = tensor.svd_compact(engine, &[0], &[1]);
 }
 ```
 
@@ -271,8 +272,8 @@ use num_complex::Complex32;
 use symtn::sector::U1FusionRule;
 use symtn::typed::{CudaStorage, TensorMap};
 
-fn c32_device_qr(tensor: &TensorMap<U1FusionRule, Complex32, CudaStorage<Complex32>>) {
-    let _ = tensor.qr_compact(&[0], &[1]);
+fn c32_device_qr(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, Complex32, CudaStorage<Complex32>>) {
+    let _ = tensor.qr_compact(engine, &[0], &[1]);
 }
 ```"
 )]
@@ -323,8 +324,8 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{TensorMap, TensorScalar};
 ///
-/// fn base_only<D: TensorScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.exp(&[0], &[1]);
+/// fn base_only<D: TensorScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.exp(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -332,8 +333,8 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{FactorizationScalar, TensorMap};
 ///
-/// fn factorizing_only<D: FactorizationScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.exp(&[0], &[1]);
+/// fn factorizing_only<D: FactorizationScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.exp(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -343,10 +344,10 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{AdvancedLinalgScalar, TensorMap};
 ///
-/// fn advanced<D: AdvancedLinalgScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.exp(&[0], &[1]);
-///     let _ = tensor.inv(&[0], &[1]);
-///     let _ = tensor.solve(&[0], &[1], tensor, &[0], &[1]);
+/// fn advanced<D: AdvancedLinalgScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.exp(engine, &[0], &[1]);
+///     let _ = tensor.inv(engine, &[0], &[1]);
+///     let _ = tensor.solve(engine, &[0], &[1], tensor, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -356,8 +357,8 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{FactorizationScalar, TensorMap};
 ///
-/// fn factorizing_only<D: FactorizationScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.inv(&[0], &[1]);
+/// fn factorizing_only<D: FactorizationScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.inv(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -365,8 +366,8 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{AdvancedLinalgScalar, TensorMap};
 ///
-/// fn advanced<D: AdvancedLinalgScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-///     let _ = tensor.inv(&[0], &[1]);
+/// fn advanced<D: AdvancedLinalgScalar>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>) {
+///     let _ = tensor.inv(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -377,12 +378,12 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{FactorizationScalar, TensorMap, TensorScalar};
 ///
-/// fn factorizing_only<D>(tensor: &TensorMap<U1FusionRule, D>)
+/// fn factorizing_only<D>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>)
 /// where
 ///     D: FactorizationScalar,
 ///     D::Eig: TensorScalar,
 /// {
-///     let _ = tensor.eig_full(&[0], &[1]);
+///     let _ = tensor.eig_full(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -390,12 +391,12 @@ impl FactorizationScalar for num_complex::Complex32 {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{AdvancedLinalgScalar, TensorMap, TensorScalar};
 ///
-/// fn advanced<D>(tensor: &TensorMap<U1FusionRule, D>)
+/// fn advanced<D>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D>)
 /// where
 ///     D: AdvancedLinalgScalar,
 ///     D::Eig: TensorScalar,
 /// {
-///     let _ = tensor.eig_full(&[0], &[1]);
+///     let _ = tensor.eig_full(engine, &[0], &[1]);
 /// }
 /// ```
 pub trait AdvancedLinalgScalar: FactorizationScalar {}
@@ -478,11 +479,8 @@ pub(crate) trait ScalarOps:
     const CONJUGATION_IS_IDENTITY: bool;
 
     /// Returns the execution lane for this payload dtype, building it if the
-    /// runtime has not needed it yet.
-    ///
-    /// # Errors
-    ///
-    /// Propagates the dense-executor construction error of a deferred lane.
+    /// execution context has not needed it yet. Building a lane cannot fail
+    /// today; the `Result` is the facade's error path for lane selection.
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
         ctxs: &mut Ctxs<Key>,
     ) -> Result<&mut Ctx<Self, Key>, Error>;
@@ -527,17 +525,18 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let rt = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [-1, 0, 1].map(|q| (U1Irrep::new(q), 1)))?;
-    /// let id = TensorMap::<U1FusionRule, f64>::isomorphism(&rt, [&v], [&v])?;
+    /// let id = TensorMap::<U1FusionRule, f64>::isomorphism(engine, &rt, [&v], [&v])?;
     ///
     /// // `V <- V`.
-    /// let matrix = id.to_physical_dense().expect("U(1) has a physical basis");
+    /// let matrix = id.to_physical_dense(engine).expect("U(1) has a physical basis");
     /// assert_eq!(matrix.data, [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     ///
     /// // `V ⊗ V' <- ()`: the same entries.
-    /// let bent = id.permute(&[0, 1], &[])?;
-    /// let vector = bent.to_physical_dense().expect("U(1) has a physical basis");
+    /// let bent = id.permute(engine, &[0, 1], &[])?;
+    /// let vector = bent.to_physical_dense(engine).expect("U(1) has a physical basis");
     /// assert_eq!(vector.data, matrix.data);
     /// # Ok::<(), Error>(())
     /// ```
@@ -549,13 +548,16 @@ where
     /// use symtn::sector::Z2FusionRule;
     /// use symtn::typed::TensorMap;
     ///
-    /// fn unsupported(tensor: &TensorMap<Z2FusionRule, f64>) {
-    ///     let _ = tensor.to_physical_dense();
+    /// fn unsupported(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Z2FusionRule, f64>) {
+    ///     let _ = tensor.to_physical_dense(engine);
     /// }
     /// ```
     pub fn to_physical_dense(
         &self,
+        engine: &mut dyn Engine,
     ) -> Result<PhysicalDense<D>, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         // Why an operation-local copy rather than `Unsupported`: the physical
         // output is never smaller than the reduced payload, so the copy at
         // most doubles the bytes this conversion already writes, and
@@ -587,8 +589,11 @@ where
     /// constructed.
     pub fn project_physical_dense(
         &self,
+        engine: &mut dyn Engine,
         physical: &PhysicalDense<D>,
     ) -> Result<Self, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         let data = project_physical_host(
             self.logical_space(),
             physical.shape.as_slice(),

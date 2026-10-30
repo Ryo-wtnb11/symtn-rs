@@ -76,6 +76,7 @@ where
     let one = T::from_parts(1.0, 0.0);
     if overwrite {
         tree_transform_structure_overwrite_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &structure,
@@ -88,6 +89,7 @@ where
         .unwrap();
     } else {
         tree_transform_structure_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &structure,

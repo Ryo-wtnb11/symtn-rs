@@ -33,6 +33,7 @@ fn bench_noncontiguous_combine(c: &mut Criterion) {
     c.bench_function("strided_combine_noncontiguous_rank4_d4", |bencher| {
         bencher.iter(|| {
             tensoradd_raw_strided_kernel(
+                strided_kernel::Exec::serial(),
                 &mut zero_strides,
                 black_box(&mut dst),
                 black_box(&src),
@@ -126,6 +127,7 @@ fn bench_fused_rank_gate(c: &mut Criterion) {
             group.bench_function(format!("{name}_{action}"), |bencher| {
                 bencher.iter(|| {
                     tensoradd_raw_strided_kernel(
+                        strided_kernel::Exec::serial(),
                         &mut zero_strides,
                         black_box(&mut dst),
                         black_box(&src),

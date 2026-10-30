@@ -51,7 +51,6 @@ once, and every test takes [the shared serial guard](../tests/support/counting_a
 first. Cold-cache tests establish their preconditions through public clear/reset
 APIs. Runtime-local caches and thread-local CUDA transfer counters do not require
 serialization. Tests requiring set-once process state keep separate targets:
-`runtime_owned_cpu_pool`, `cuda_stream_config_{conflict,single}`, and
 `intermediate_allocations`. Run a member with a module filter, for example
 `cargo test -p symtn --no-default-features --features krylov,blas-openblas --test serial krylov_vector::`.
 

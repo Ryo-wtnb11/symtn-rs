@@ -15,64 +15,68 @@ trait ChainCoefficient: Copy {
 /// `‖t - t†‖ <= tol · max(‖t‖, 1)`; a non-endomorphism is `false`.
 #[allow(unused_macros)]
 macro_rules! is_hermitian {
-    ($tensor:expr, $tol:expr) => {{
+    ($engine:ident, $tensor:expr, $tol:expr) => {{
         let t = &$tensor;
-        t.codomain() == t.domain()
-            && t.axpby(
+        t.codomain() == t.domain() && {
+            let t_adjoint = &t.adjoint($engine).unwrap();
+            t.axpby($engine,
                 ChainCoefficient::real(1.0),
-                &t.adjoint().unwrap(),
+                t_adjoint,
                 ChainCoefficient::real(-1.0),
             )
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap()
-                <= ($tol) * t.norm(2.0).unwrap().max(1.0)
+                <= ($tol) * t.norm($engine, 2.0).unwrap().max(1.0)
+        }
     }};
 }
 
 /// `‖t + t†‖ <= tol · max(‖t‖, 1)`; a non-endomorphism is `false`.
 #[allow(unused_macros)]
 macro_rules! is_antihermitian {
-    ($tensor:expr, $tol:expr) => {{
+    ($engine:ident, $tensor:expr, $tol:expr) => {{
         let t = &$tensor;
-        t.codomain() == t.domain()
-            && t.axpby(
+        t.codomain() == t.domain() && {
+            let adjoint = t.adjoint($engine).unwrap();
+            t.axpby($engine,
                 ChainCoefficient::real(1.0),
-                &t.adjoint().unwrap(),
+                &adjoint,
                 ChainCoefficient::real(1.0),
             )
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap()
-                <= ($tol) * t.norm(2.0).unwrap().max(1.0)
+                <= ($tol) * t.norm($engine, 2.0).unwrap().max(1.0)
+        }
     }};
 }
 
 /// `‖t†t - id‖ <= tol · max(‖t†t‖, 1)` on the domain.
 #[allow(unused_macros)]
 macro_rules! is_isometric {
-    ($tensor:expr, $tol:expr) => {{
+    ($engine:ident, $tensor:expr, $tol:expr) => {{
         let t: &TensorMap<_, _> = &$tensor;
-        let gram = t.adjoint().unwrap().compose(t).unwrap();
-        let identity = TensorMap::isomorphism(t.runtime(), &t.domain(), &t.domain()).unwrap();
-        gram.axpby(
+        let gram = t.adjoint($engine).unwrap().compose($engine, t).unwrap();
+        let identity = TensorMap::isomorphism($engine, t.runtime(), &t.domain(), &t.domain()).unwrap();
+        gram.axpby($engine,
             ChainCoefficient::real(1.0),
             &identity,
             ChainCoefficient::real(-1.0),
         )
         .unwrap()
-        .norm(2.0)
+        .norm($engine, 2.0)
         .unwrap()
-            <= ($tol) * gram.norm(2.0).unwrap().max(1.0)
+            <= ($tol) * gram.norm($engine, 2.0).unwrap().max(1.0)
     }};
 }
 
 /// Isometric in both directions.
 #[allow(unused_macros)]
 macro_rules! is_unitary {
-    ($tensor:expr, $tol:expr) => {{
+    ($engine:ident, $tensor:expr, $tol:expr) => {{
         let t = &$tensor;
-        is_isometric!(t, $tol) && is_isometric!(t.adjoint().unwrap(), $tol)
+        is_isometric!($engine, t, $tol) && is_isometric!($engine, t.adjoint($engine).unwrap(), $tol)
     }};
 }
 
@@ -80,11 +84,11 @@ macro_rules! is_unitary {
 /// `tol · max(‖t‖, 1)`.
 #[allow(unused_macros)]
 macro_rules! is_posdef {
-    ($tensor:expr, $tol:expr) => {{
+    ($engine:ident, $tensor:expr, $tol:expr) => {{
         let t = &$tensor;
-        is_hermitian!(t, $tol) && {
-            let threshold = ($tol) * t.norm(2.0).unwrap().max(1.0);
-            t.eigh_vals(&codomain_axes(&t), &domain_axes(&t), symtn::typed::HermitianTol::DEFAULT)
+        is_hermitian!($engine, t, $tol) && {
+            let threshold = ($tol) * t.norm($engine, 2.0).unwrap().max(1.0);
+            t.eigh_vals($engine, &codomain_axes(&t), &domain_axes(&t), symtn::typed::HermitianTol::DEFAULT)
                 .unwrap()
                 .iter()
                 .flat_map(|spectrum| spectrum.values.iter())
@@ -98,12 +102,12 @@ macro_rules! is_posdef {
 /// real part of one stored value as `f64`.
 #[allow(unused_macros)]
 macro_rules! is_posdef_compact {
-    ($tensor:expr, $tol:expr, $re:expr) => {{
+    ($engine:ident, $tensor:expr, $tol:expr, $re:expr) => {{
         let t = &$tensor;
-        is_hermitian!(t, $tol) && {
-            let threshold = ($tol) * t.norm(2.0).unwrap().max(1.0);
+        is_hermitian!($engine, t, $tol) && {
+            let threshold = ($tol) * t.norm($engine, 2.0).unwrap().max(1.0);
             let re = $re;
-            t.diagview()
+            t.diagview($engine)
                 .unwrap()
                 .iter()
                 .flat_map(|spectrum| spectrum.values.iter())
@@ -115,10 +119,10 @@ macro_rules! is_posdef_compact {
 /// `(t + t†)/2`.
 #[allow(unused_macros)]
 macro_rules! project_hermitian {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let t = &$tensor;
-        t.adjoint().and_then(|adjoint| {
-            t.axpby(
+        t.adjoint($engine).and_then(|adjoint| {
+            t.axpby($engine,
                 ChainCoefficient::real(0.5),
                 &adjoint,
                 ChainCoefficient::real(0.5),
@@ -130,10 +134,10 @@ macro_rules! project_hermitian {
 /// `(t - t†)/2`.
 #[allow(unused_macros)]
 macro_rules! project_antihermitian {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let t = &$tensor;
-        t.adjoint().and_then(|adjoint| {
-            t.axpby(
+        t.adjoint($engine).and_then(|adjoint| {
+            t.axpby($engine,
                 ChainCoefficient::real(0.5),
                 &adjoint,
                 ChainCoefficient::real(-0.5),

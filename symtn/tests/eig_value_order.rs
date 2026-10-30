@@ -44,7 +44,7 @@ impl Payload for f32 {
         Complex64::new(value.re.into(), value.im.into())
     }
     fn to_eig(t: &TensorMap<U1FusionRule, Self>) -> TensorMap<U1FusionRule, Complex32> {
-        t.convert()
+        t.convert(&mut symtn_dense::CpuEngine::serial()).unwrap()
     }
 }
 
@@ -62,7 +62,7 @@ impl Payload for f64 {
         value
     }
     fn to_eig(t: &TensorMap<U1FusionRule, Self>) -> TensorMap<U1FusionRule, Complex64> {
-        t.convert()
+        t.convert(&mut symtn_dense::CpuEngine::serial()).unwrap()
     }
 }
 
@@ -202,7 +202,7 @@ fn assert_relation(left: &[Complex64], right: &[Complex64], tol: f64, what: &str
 }
 
 macro_rules! check_dtype {
-    ($dtype:ty) => {{
+    ($engine:ident, $dtype:ty) => {{
         type D = $dtype;
         let runtime = host_runtime();
         let complex = <D as Payload>::COMPLEX;
@@ -217,7 +217,7 @@ macro_rules! check_dtype {
         // Hermitian, dense route.
         let space = leg([3, 2]);
         let h: TensorMap<_, D> =
-            TensorMap::from_subblock_fn(&runtime, [&space], [&space], |trees, index| {
+            TensorMap::from_subblock_fn($engine, &runtime, [&space], [&space], |trees, index| {
                 D::lift(hermitian_entry(
                     charge(trees.coupled()),
                     index[0],
@@ -226,9 +226,13 @@ macro_rules! check_dtype {
                 ))
             })
             .unwrap();
-        let Eigh { d, v } = h.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
-        let spectra = d.diagview().unwrap();
-        let values = h.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+        let Eigh { d, v } = h
+            .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap();
+        let spectra = d.diagview($engine).unwrap();
+        let values = h
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap();
         assert_eq!(spectra.len(), 2);
         for (entry, vals) in spectra.iter().zip(&values) {
             assert_eq!(entry.sector, vals.sector);
@@ -240,8 +244,8 @@ macro_rules! check_dtype {
             }
         }
         assert_relation(
-            &widen(h.compose(&v).unwrap().dense_data().unwrap()),
-            &widen(v.compose(&d).unwrap().dense_data().unwrap()),
+            &widen(h.compose($engine, &v).unwrap().dense_data().unwrap()),
+            &widen(v.compose($engine, &d).unwrap().dense_data().unwrap()),
             tol,
             "eigh t v = v d",
         );
@@ -249,7 +253,7 @@ macro_rules! check_dtype {
         // General, dense route.
         let space = leg([eig_values(0, complex).len(), 2]);
         let g: TensorMap<_, D> =
-            TensorMap::from_subblock_fn(&runtime, [&space], [&space], |trees, index| {
+            TensorMap::from_subblock_fn($engine, &runtime, [&space], [&space], |trees, index| {
                 D::lift(general_entry(
                     charge(trees.coupled()),
                     index[0],
@@ -258,9 +262,9 @@ macro_rules! check_dtype {
                 ))
             })
             .unwrap();
-        let Eig { d, v } = g.eig_full(&[0], &[1]).unwrap();
-        let spectra = d.diagview().unwrap();
-        let values = g.eig_vals(&[0], &[1]).unwrap();
+        let Eig { d, v } = g.eig_full($engine, &[0], &[1]).unwrap();
+        let spectra = d.diagview($engine).unwrap();
+        let values = g.eig_vals($engine, &[0], &[1]).unwrap();
         assert_eq!(spectra.len(), 2);
         for (entry, vals) in spectra.iter().zip(&values) {
             let want = lexicographic(eig_values(charge(&entry.sector), complex));
@@ -273,8 +277,8 @@ macro_rules! check_dtype {
         }
         let lifted = <D as Payload>::to_eig(&g);
         assert_relation(
-            &widen_eig(lifted.compose(&v).unwrap().dense_data().unwrap()),
-            &widen_eig(v.compose(&d).unwrap().dense_data().unwrap()),
+            &widen_eig(lifted.compose($engine, &v).unwrap().dense_data().unwrap()),
+            &widen_eig(v.compose($engine, &d).unwrap().dense_data().unwrap()),
             tol,
             "eig t v = v d",
         );
@@ -283,6 +287,7 @@ macro_rules! check_dtype {
         // and `v` is that permutation.
         let space = leg([3, 2]);
         let compact: TensorMap<_, D> = TensorMap::diagonal(
+            $engine,
             &runtime,
             &space,
             [0, 1].map(|charge| SectorSpectrum {
@@ -295,20 +300,20 @@ macro_rules! check_dtype {
         )
         .unwrap();
         let Eigh { d, v } = compact
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap();
         let values = compact
-            .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap();
-        for (entry, vals) in d.diagview().unwrap().iter().zip(&values) {
+        for (entry, vals) in d.diagview($engine).unwrap().iter().zip(&values) {
             let want = ascending(eigh_values(charge(&entry.sector)));
             let got: Vec<f64> = entry.values.iter().map(|&x| x.widen().re).collect();
             assert_eq!(got, want);
             assert_eq!(vals.values, want);
         }
         assert_relation(
-            &widen(compact.compose(&v).unwrap().dense_data().unwrap()),
-            &widen(v.compose(&d).unwrap().dense_data().unwrap()),
+            &widen(compact.compose($engine, &v).unwrap().dense_data().unwrap()),
+            &widen(v.compose($engine, &d).unwrap().dense_data().unwrap()),
             0.0,
             "compact eigh t v = v d",
         );
@@ -326,6 +331,7 @@ macro_rules! check_dtype {
         };
         let space = leg([stored(0).len(), 2]);
         let compact: TensorMap<_, D> = TensorMap::diagonal(
+            $engine,
             &runtime,
             &space,
             [0, 1].map(|charge| SectorSpectrum {
@@ -334,9 +340,9 @@ macro_rules! check_dtype {
             }),
         )
         .unwrap();
-        let Eig { d, v } = compact.eig_full(&[0], &[1]).unwrap();
-        let values = compact.eig_vals(&[0], &[1]).unwrap();
-        for (entry, vals) in d.diagview().unwrap().iter().zip(&values) {
+        let Eig { d, v } = compact.eig_full($engine, &[0], &[1]).unwrap();
+        let values = compact.eig_vals($engine, &[0], &[1]).unwrap();
+        for (entry, vals) in d.diagview($engine).unwrap().iter().zip(&values) {
             let want = lexicographic(stored(charge(&entry.sector)));
             let got: Vec<Complex64> = entry
                 .values
@@ -348,8 +354,8 @@ macro_rules! check_dtype {
         }
         let lifted = <D as Payload>::to_eig(&compact);
         assert_relation(
-            &widen_eig(lifted.compose(&v).unwrap().dense_data().unwrap()),
-            &widen_eig(v.compose(&d).unwrap().dense_data().unwrap()),
+            &widen_eig(lifted.compose($engine, &v).unwrap().dense_data().unwrap()),
+            &widen_eig(v.compose($engine, &d).unwrap().dense_data().unwrap()),
             0.0,
             "compact eig t v = v d",
         );
@@ -358,20 +364,24 @@ macro_rules! check_dtype {
 
 #[test]
 fn f32_eigenvalues_follow_the_published_order() {
-    check_dtype!(f32);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    check_dtype!(engine, f32);
 }
 
 #[test]
 fn f64_eigenvalues_follow_the_published_order() {
-    check_dtype!(f64);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    check_dtype!(engine, f64);
 }
 
 #[test]
 fn complex32_eigenvalues_follow_the_published_order() {
-    check_dtype!(Complex32);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    check_dtype!(engine, Complex32);
 }
 
 #[test]
 fn complex64_eigenvalues_follow_the_published_order() {
-    check_dtype!(Complex64);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    check_dtype!(engine, Complex64);
 }

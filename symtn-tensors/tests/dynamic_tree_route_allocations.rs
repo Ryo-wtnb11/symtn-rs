@@ -5,6 +5,7 @@
 //! separate eager and member replays; bytes are reported, not asserted.
 
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols, SU2FusionRule, SU2Irrep,
@@ -103,7 +104,7 @@ struct Row {
     member1_retained: usize,
 }
 
-fn row<R>(case: &Case<R>) -> Row
+fn row<R>(engine: &mut dyn Engine, case: &Case<R>) -> Row
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
@@ -126,10 +127,11 @@ where
 
     let mut context = Context::default();
     let mut out = vec![0.0; dst_len];
-    let eager = |context: &mut Context, out: &mut [f64]| {
+    let mut eager = |context: &mut Context, out: &mut [f64]| {
         counting_alloc::measure(|| {
             context
                 .tensorcontract_planned_into(
+                    engine,
                     &dst,
                     out,
                     (FusionOperand::direct(case.lhs.space()), &lhs[..lhs_len]),
@@ -150,6 +152,7 @@ where
     let mut context = Context::default();
     let resolution = context
         .plan_contract::<DirectCoreExecutor, _>(
+            engine,
             &dst,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -167,6 +170,7 @@ where
             counting_alloc::measure(|| {
                 context
                     .execute_storage_contract_members_host(
+                        engine,
                         &resolution,
                         (dst.space().structure(), out),
                         (case.lhs.space().structure(), &lhs[..members * lhs_len]),
@@ -199,17 +203,24 @@ where
 
 #[test]
 fn dynamic_tree_route_allocations_are_bounded_by_base() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let rows = [
-        ("U1 transformed", row(&transformed(U1FusionRule, u1_leg))),
+        (
+            "U1 transformed",
+            row(engine, &transformed(U1FusionRule, u1_leg)),
+        ),
         (
             "U1 identity output",
-            row(&identity_output(U1FusionRule, u1_leg)),
+            row(engine, &identity_output(U1FusionRule, u1_leg)),
         ),
-        ("SU2 transformed", row(&transformed(SU2FusionRule, su2_leg))),
+        (
+            "SU2 transformed",
+            row(engine, &transformed(SU2FusionRule, su2_leg)),
+        ),
         (
             "SU2 identity output",
-            row(&identity_output(SU2FusionRule, su2_leg)),
+            row(engine, &identity_output(SU2FusionRule, su2_leg)),
         ),
     ];
     for ((name, row), (base_name, base)) in rows.iter().zip(BASE) {

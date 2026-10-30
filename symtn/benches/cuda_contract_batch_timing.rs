@@ -33,7 +33,9 @@ use contract_cases::{
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
-use symtn::typed::{ContractPlan, Runtime, StackedTensorMap, TensorMap};
+use symtn::typed::{
+    ContractPlan, CpuEngine, CudaDeviceId, CudaEngine, Engine, Runtime, StackedTensorMap, TensorMap,
+};
 
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
@@ -93,43 +95,61 @@ fn median(mut samples: Vec<Observation>) -> Observation {
 }
 
 fn dynamic_tree_release_measurement() {
-    fn run<R: DeviceRule>(case: &Case<R, f64>) {
+    fn run<R: DeviceRule>(cpu: &mut dyn Engine, cuda: &mut dyn Engine, case: &Case<R, f64>) {
         for count in [1, 2, 17] {
             let left: Vec<_> = (0..count)
-                .map(|i| case.lhs.scale(1.0 + i as f64 / 8.0).unwrap())
+                .map(|i| case.lhs.scale(&mut *cpu, 1.0 + i as f64 / 8.0).unwrap())
                 .collect();
             let right: Vec<_> = (0..count)
-                .map(|i| case.rhs.scale(1.0 - i as f64 / 32.0).unwrap())
+                .map(|i| case.rhs.scale(&mut *cpu, 1.0 - i as f64 / 32.0).unwrap())
                 .collect();
-            let lhs = StackedTensorMap::pack(&left).unwrap().to_cuda().unwrap();
-            let rhs = StackedTensorMap::pack(&right).unwrap().to_cuda().unwrap();
-            let (plan, compile) = observe(|| ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap());
+            let lhs = StackedTensorMap::pack(&left)
+                .unwrap()
+                .to_cuda(cuda)
+                .unwrap();
+            let rhs = StackedTensorMap::pack(&right)
+                .unwrap()
+                .to_cuda(cuda)
+                .unwrap();
+            let (plan, compile) =
+                observe(|| ContractPlan::new(&mut *cuda, &lhs, &rhs, &case.spec()).unwrap());
             let (mut workspace, reserve) = observe(|| plan.workspace().unwrap());
             let (_, cold) = observe(|| {
-                black_box(plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                black_box(
+                    plan.execute(&mut *cuda, &lhs, &rhs, &mut workspace)
+                        .unwrap(),
+                );
             });
             let median_of =
                 |run: &mut dyn FnMut()| median((0..11).map(|_| observe(&mut *run).1).collect());
             let warm = median_of(&mut || {
-                black_box(plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                black_box(
+                    plan.execute(&mut *cuda, &lhs, &rhs, &mut workspace)
+                        .unwrap(),
+                );
             });
-            let dest = case.host();
+            let dest = case.host(&mut *cpu);
             let mut dst = StackedTensorMap::pack(&vec![&dest; count])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(&mut *cuda)
                 .unwrap();
             let warm_into = median_of(&mut || {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
                     .unwrap();
             });
             let eager_inputs: Vec<_> = left
                 .iter()
                 .zip(&right)
-                .map(|(a, b)| (a.to_cuda().unwrap(), b.to_cuda().unwrap()))
+                .map(|(a, b)| {
+                    (
+                        a.to_cuda(&mut *cuda).unwrap(),
+                        b.to_cuda(&mut *cuda).unwrap(),
+                    )
+                })
                 .collect();
             let eager = median_of(&mut || {
                 for (a, b) in &eager_inputs {
-                    black_box(a.contract(b, &case.spec()).unwrap());
+                    black_box(a.contract(&mut *cuda, b, &case.spec()).unwrap());
                 }
             });
             eprintln!(
@@ -139,16 +159,15 @@ fn dynamic_tree_release_measurement() {
             );
         }
     }
-    let runtime = Runtime::builder()
-        .cuda(0)
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
-    run(&u1_inactive_cases::<f64>(&runtime)[1]);
-    run(&u1_reordered::<f64>(&runtime));
+    let cpu = &mut CpuEngine::serial();
+    let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let case = &u1_inactive_cases::<f64>(cpu, &runtime)[1];
+    run(cpu, cuda, case);
+    let case = u1_reordered::<f64>(cpu, &runtime);
+    run(cpu, cuda, &case);
     for case in fermionic_twist_roles::<FermionU1, f64>(
+        cpu,
         &runtime,
         &fermion_u1(),
         [
@@ -159,28 +178,24 @@ fn dynamic_tree_release_measurement() {
         ],
         71,
     ) {
-        run(&case);
+        run(cpu, cuda, &case);
     }
 }
 
 fn direct_core_release_measurement() {
-    let runtime = Runtime::builder()
-        .cuda(0)
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
-    for (case, _) in candidate_core_probes::<_, f64>(&runtime, &su2()) {
+    let cpu = &mut CpuEngine::serial();
+    let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    for (case, _) in candidate_core_probes::<_, f64>(cpu, &runtime, &su2()) {
         if !matches!(case.name, "C1" | "C2") {
             continue;
         }
         for count in [1, 2, 17] {
             let left: Vec<_> = (0..count)
-                .map(|i| case.lhs.scale(1.0 + i as f64 / 8.0).unwrap())
+                .map(|i| case.lhs.scale(&mut *cpu, 1.0 + i as f64 / 8.0).unwrap())
                 .collect();
             let right: Vec<_> = (0..count)
-                .map(|i| case.rhs.scale(1.0 - i as f64 / 32.0).unwrap())
+                .map(|i| case.rhs.scale(&mut *cpu, 1.0 - i as f64 / 32.0).unwrap())
                 .collect();
             let ((host_lhs, host_rhs), pack) = observe(|| {
                 (
@@ -188,32 +203,41 @@ fn direct_core_release_measurement() {
                     StackedTensorMap::pack(&right).unwrap(),
                 )
             });
-            let ((lhs, rhs), upload) =
-                observe(|| (host_lhs.to_cuda().unwrap(), host_rhs.to_cuda().unwrap()));
-            let (plan, compile) = observe(|| ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap());
-            let cache_before = runtime.cuda_plan_cache_stats().unwrap().unwrap();
+            let ((lhs, rhs), upload) = observe(|| {
+                (
+                    host_lhs.to_cuda(&mut *cuda).unwrap(),
+                    host_rhs.to_cuda(&mut *cuda).unwrap(),
+                )
+            });
+            let (plan, compile) =
+                observe(|| ContractPlan::new(&mut *cuda, &lhs, &rhs, &case.spec()).unwrap());
             let (mut workspace, reserve) = observe(|| plan.workspace().unwrap());
-            let cache_held = runtime.cuda_plan_cache_stats().unwrap().unwrap();
             let (_, cold_returned) = observe(|| {
-                black_box(plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                black_box(
+                    plan.execute(&mut *cuda, &lhs, &rhs, &mut workspace)
+                        .unwrap(),
+                );
             });
             let warm_returned = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
-                            black_box(plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                            black_box(
+                                plan.execute(&mut *cuda, &lhs, &rhs, &mut workspace)
+                                    .unwrap(),
+                            );
                         })
                         .1
                     })
                     .collect(),
             );
-            let dest = case.host();
+            let dest = case.host(&mut *cpu);
             let mut dst = StackedTensorMap::pack(&vec![&dest; count])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(&mut *cuda)
                 .unwrap();
             let (_, first_into) = observe(|| {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
                     .unwrap();
                 black_box(&dst);
             });
@@ -221,7 +245,7 @@ fn direct_core_release_measurement() {
                 (0..11)
                     .map(|_| {
                         observe(|| {
-                            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                            plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
                                 .unwrap();
                             black_box(&dst);
                         })
@@ -232,14 +256,19 @@ fn direct_core_release_measurement() {
             let eager_inputs: Vec<_> = left
                 .iter()
                 .zip(&right)
-                .map(|(a, b)| (a.to_cuda().unwrap(), b.to_cuda().unwrap()))
+                .map(|(a, b)| {
+                    (
+                        a.to_cuda(&mut *cuda).unwrap(),
+                        b.to_cuda(&mut *cuda).unwrap(),
+                    )
+                })
                 .collect();
             let eager = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
                             for (a, b) in &eager_inputs {
-                                black_box(a.contract(b, &case.spec()).unwrap());
+                                black_box(a.contract(&mut *cuda, b, &case.spec()).unwrap());
                             }
                         })
                         .1
@@ -247,35 +276,28 @@ fn direct_core_release_measurement() {
                     .collect(),
             );
             let retained = workspace.retained_bytes();
-            let scalar_template_bytes = runtime
-                .cuda_tree_transform_stats()
-                .unwrap()
-                .context_scalar_operand_bytes;
             let (_, teardown) = observe(|| {
                 drop(workspace);
                 drop(plan);
             });
-            let cache_after = runtime.cuda_plan_cache_stats().unwrap().unwrap();
             let zero_submissions = warm_returned.cuda.gemm_calls - cold_returned.cuda.gemm_calls;
-            eprintln!("{} B={count} f64 CUDA0 Faer1: pack={pack}; upload={upload}; compile={compile}; workspace={reserve}; cold_returned={cold_returned}; warm_returned={warm_returned}; first_into={first_into}; warm_into={warm_into}; eager_members={eager}; zero_region_submissions_per_warm={zero_submissions}; retained_workspace_bytes={retained}; runtime_scalar_template_bytes={scalar_template_bytes}; plan_ledger={}/{}/{}; plan_cache_bytes={}/{}/{}; teardown={teardown}", case.name,
-                cache_before.reserved_entries, cache_held.reserved_entries, cache_after.reserved_entries,
-                cache_before.retained_bytes, cache_held.retained_bytes, cache_after.retained_bytes);
+            eprintln!("{} B={count} f64 CUDA0: pack={pack}; upload={upload}; compile={compile}; workspace={reserve}; cold_returned={cold_returned}; warm_returned={warm_returned}; first_into={first_into}; warm_into={warm_into}; eager_members={eager}; zero_region_submissions_per_warm={zero_submissions}; retained_workspace_bytes={retained}; teardown={teardown}", case.name);
         }
     }
 }
 
 fn signed_core_release_measurement() {
-    let runtime = Runtime::builder()
-        .cuda(0)
-        .dense_threads(1)
-        .gemm_backend(symtn::typed::LinalgBackend::Faer)
-        .linalg_backend(symtn::typed::LinalgBackend::Faer)
-        .build()
-        .unwrap();
+    let cpu = &mut CpuEngine::serial();
+    let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = fermion_u1();
     let dual = space.try_dual().unwrap();
-    let a = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&space], [&dual], fill(201)).unwrap();
-    let b = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&dual], [&space], fill(202)).unwrap();
+    let a =
+        TensorMap::<_, f64>::from_subblock_fn(&mut *cpu, &runtime, [&space], [&dual], fill(201))
+            .unwrap();
+    let b =
+        TensorMap::<_, f64>::from_subblock_fn(&mut *cpu, &runtime, [&dual], [&space], fill(202))
+            .unwrap();
     for swapped in [false, true] {
         let case = Case {
             name: if swapped {
@@ -292,10 +314,10 @@ fn signed_core_release_measurement() {
         };
         for count in [1, 2, 17] {
             let left: Vec<_> = (0..count)
-                .map(|i| case.lhs.scale(1.0 + i as f64 / 8.0).unwrap())
+                .map(|i| case.lhs.scale(&mut *cpu, 1.0 + i as f64 / 8.0).unwrap())
                 .collect();
             let right: Vec<_> = (0..count)
-                .map(|i| case.rhs.scale(1.0 - i as f64 / 32.0).unwrap())
+                .map(|i| case.rhs.scale(&mut *cpu, 1.0 - i as f64 / 32.0).unwrap())
                 .collect();
             let ((host_lhs, host_rhs), pack) = observe(|| {
                 (
@@ -303,39 +325,48 @@ fn signed_core_release_measurement() {
                     StackedTensorMap::pack(&right).unwrap(),
                 )
             });
-            let ((lhs, rhs), upload) =
-                observe(|| (host_lhs.to_cuda().unwrap(), host_rhs.to_cuda().unwrap()));
-            let (plan, compile) = observe(|| ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap());
-            let ledger_before = runtime.cuda_plan_cache_stats().unwrap().unwrap();
+            let ((lhs, rhs), upload) = observe(|| {
+                (
+                    host_lhs.to_cuda(&mut *cuda).unwrap(),
+                    host_rhs.to_cuda(&mut *cuda).unwrap(),
+                )
+            });
+            let (plan, compile) =
+                observe(|| ContractPlan::new(&mut *cuda, &lhs, &rhs, &case.spec()).unwrap());
             let (mut workspace, reserve) = observe(|| plan.workspace().unwrap());
-            let ledger_held = runtime.cuda_plan_cache_stats().unwrap().unwrap();
             let (_, cold) = observe(|| {
-                black_box(plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                black_box(
+                    plan.execute(&mut *cuda, &lhs, &rhs, &mut workspace)
+                        .unwrap(),
+                );
             });
             let warm = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
-                            black_box(plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                            black_box(
+                                plan.execute(&mut *cuda, &lhs, &rhs, &mut workspace)
+                                    .unwrap(),
+                            );
                         })
                         .1
                     })
                     .collect(),
             );
-            let dest = case.host();
+            let dest = case.host(&mut *cpu);
             let mut dst = StackedTensorMap::pack(&vec![&dest; count])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(&mut *cuda)
                 .unwrap();
             let (_, first_into) = observe(|| {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
                     .unwrap()
             });
             let warm_into = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
-                            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                            plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
                                 .unwrap();
                         })
                         .1
@@ -345,14 +376,19 @@ fn signed_core_release_measurement() {
             let eager_inputs: Vec<_> = left
                 .iter()
                 .zip(&right)
-                .map(|(a, b)| (a.to_cuda().unwrap(), b.to_cuda().unwrap()))
+                .map(|(a, b)| {
+                    (
+                        a.to_cuda(&mut *cuda).unwrap(),
+                        b.to_cuda(&mut *cuda).unwrap(),
+                    )
+                })
                 .collect();
             let eager = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
                             for (a, b) in &eager_inputs {
-                                black_box(a.contract(b, &case.spec()).unwrap());
+                                black_box(a.contract(&mut *cuda, b, &case.spec()).unwrap());
                             }
                         })
                         .1
@@ -364,10 +400,8 @@ fn signed_core_release_measurement() {
                 drop(workspace);
                 drop(plan);
             });
-            let ledger_after = runtime.cuda_plan_cache_stats().unwrap().unwrap();
-            eprintln!("{} B={count} f64 CUDA0 Faer1 unsynchronized_host_submission: pack={pack}; upload={upload}; compile={compile}; workspace={reserve}; cold={cold}; warm_median={warm}; first_into={first_into}; warm_into_median={warm_into}; eager_members={eager}; retained_workspace_bytes={retained}; plan_ledger={}/{}/{}; plan_cache_bytes={}/{}/{}; teardown={teardown}",
-                case.name, ledger_before.reserved_entries, ledger_held.reserved_entries, ledger_after.reserved_entries,
-                ledger_before.retained_bytes, ledger_held.retained_bytes, ledger_after.retained_bytes);
+            eprintln!("{} B={count} f64 CUDA0 unsynchronized_host_submission: pack={pack}; upload={upload}; compile={compile}; workspace={reserve}; cold={cold}; warm_median={warm}; first_into={first_into}; warm_into_median={warm_into}; eager_members={eager}; retained_workspace_bytes={retained}; teardown={teardown}",
+                case.name);
         }
     }
 }

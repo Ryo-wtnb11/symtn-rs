@@ -37,6 +37,7 @@ fn run_nan_poisoned_destination_case(
     scratch: &mut DynamicFusionScratchWorkspace<f64>,
     open_degeneracy: usize,
 ) -> (Vec<f64>, usize, usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let wide = || {
         SectorLeg::new(
@@ -93,6 +94,7 @@ fn run_nan_poisoned_destination_case(
         TreeTransformExecutionContext::new(DenseTreeTransformOperations::default_executor());
     let artifact =
         compile_dynamic_tree_execution_artifact::<symtn_core::MultiplicityFreeAdmissionMode, _>(
+            engine,
             tree_context.planning(),
             provider.as_ref(),
             encoded_layout_primer::<U1FusionRule>,
@@ -114,25 +116,27 @@ fn run_nan_poisoned_destination_case(
     let rhs_data = (0..rhs.space().required_len().unwrap())
         .map(|index| (index as f64 * 0.23 + 0.2).cos())
         .collect::<Vec<_>>();
-    let execute = |tree_context: &mut TreeTransformExecutionContext<f64, crate::RuleIdentity>,
-                   scratch: &mut DynamicFusionScratchWorkspace<f64>,
-                   output: &mut [f64]| {
-        execute_dynamic_tree_execution_artifact(
-            tree_context,
-            &mut DenseTreeTransformOperations::default(),
-            &mut super::super::backend::TensorContractWorkspace::default(),
-            &mut FusionBlockContractWorkspace::default(),
-            scratch,
-            &artifact,
-            dst.space().structure(),
-            output,
-            &lhs_data,
-            &rhs_data,
-            1.0,
-            0.0,
-        )
-        .unwrap();
-    };
+    let mut execute =
+        |tree_context: &mut TreeTransformExecutionContext<f64, crate::RuleIdentity>,
+         scratch: &mut DynamicFusionScratchWorkspace<f64>,
+         output: &mut [f64]| {
+            execute_dynamic_tree_execution_artifact(
+                engine,
+                tree_context,
+                &mut DenseTreeTransformOperations::default(),
+                &mut super::super::backend::TensorContractWorkspace::default(),
+                &mut FusionBlockContractWorkspace::default(),
+                scratch,
+                &artifact,
+                dst.space().structure(),
+                output,
+                &lhs_data,
+                &rhs_data,
+                1.0,
+                0.0,
+            )
+            .unwrap();
+        };
     let mut expected = vec![0.0; dst.space().required_len().unwrap()];
     execute(
         &mut tree_context,
@@ -188,6 +192,7 @@ fn dynamic_core_strong_zero_overwrites_nan_scratch_after_shape_change() {
 
 #[test]
 fn direct_prelowered_source_reuses_ordinary_transform_entry() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = U1FusionRule;
     let charges = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
     let codomain = SectorLeg::new(charges.map(|sector| (sector, 1)), false);
@@ -232,6 +237,7 @@ fn direct_prelowered_source_reuses_ordinary_transform_entry() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::testing::mark_structure_canonical(source.structure());
     let ordinary_cold = compile_transformed_source(
+        engine,
         tree_context.planning(),
         &rule,
         &source,
@@ -242,6 +248,7 @@ fn direct_prelowered_source_reuses_ordinary_transform_entry() {
     )
     .unwrap();
     let direct_hit = compile_prelowered_source_transform(
+        engine,
         tree_context.planning(),
         &rule,
         &layout,
@@ -269,6 +276,7 @@ fn direct_prelowered_source_reuses_ordinary_transform_entry() {
 
 #[test]
 fn execution_layout_primer_runs_once_per_derivation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: transformed-source and nonidentity-output core spaces invoke
     // the selected primer once per derivation.
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -313,9 +321,10 @@ fn execution_layout_primer_runs_once_per_derivation() {
     let mut tree_context =
         TreeTransformExecutionContext::new(DenseTreeTransformOperations::default_executor());
     reset_execution_primer_calls();
-    let derive_source =
+    let mut derive_source =
         |tree_context: &mut TreeTransformExecutionContext<f64, crate::RuleIdentity>| {
             compile_transformed_source(
+                engine,
                 tree_context.planning(),
                 &rule,
                 &source,
@@ -348,9 +357,10 @@ fn execution_layout_primer_runs_once_per_derivation() {
 
     symtn_core::clear_structure_caches();
     reset_execution_primer_calls();
-    let derive_core =
+    let mut derive_core =
         |tree_context: &mut TreeTransformExecutionContext<f64, crate::RuleIdentity>| {
             compile_core_dst(
+                engine,
                 tree_context.planning(),
                 &rule,
                 &source,
@@ -376,12 +386,13 @@ fn execution_layout_primer_runs_once_per_derivation() {
     let output_bound = output_bound
         .clone()
         .with_test_layout_primer(counting_su2_primer);
-    let compile =
+    let mut compile =
         |context: &mut crate::TensorContractFusionExecutionContext<f64, crate::RuleIdentity>,
          output: &super::super::dynamic_space::BoundDynamicFusionMapSpace<_>,
          axes| {
             let resolution = context
                 .compile_storage_contract_resolution(
+                    engine,
                     output,
                     crate::FusionOperand::direct(source_bound.space()),
                     crate::FusionOperand::direct(scalar_bound.space()),

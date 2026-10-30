@@ -120,7 +120,9 @@ fn stats_delta(
 fn owned_f64_transfers_cost_no_redundant_host_copy() {
     let _serial = crate::counting_alloc::serial();
     let _serialized = DEVICE.lock().unwrap_or_else(|err| err.into_inner());
-    let ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let ctx = CudaDenseContext::new(&mut engine).unwrap();
     let data: Vec<f64> = (0..ELEMENTS).map(|index| index as f64).collect();
     assert_transfer_copies(&ctx, data, OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_F64);
 }
@@ -130,7 +132,9 @@ fn owned_f64_transfers_cost_no_redundant_host_copy() {
 fn owned_complex64_transfers_cost_no_redundant_host_copy() {
     let _serial = crate::counting_alloc::serial();
     let _serialized = DEVICE.lock().unwrap_or_else(|err| err.into_inner());
-    let ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let ctx = CudaDenseContext::new(&mut engine).unwrap();
     let data: Vec<Complex64> = (0..ELEMENTS)
         .map(|index| Complex64::new(index as f64, -(index as f64) - 0.5))
         .collect();

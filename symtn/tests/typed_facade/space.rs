@@ -19,12 +19,14 @@ fn fibonacci_codec_reaches_public_graded_space_construction() {
 
 #[test]
 fn fibonacci_complex_tensor_reaches_all_checked_constructors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let space =
         GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(VACUUM, 1), (TAU, 1)]).unwrap();
 
-    let zeros: TensorMap<_, Complex64> = TensorMap::zeros(&runtime, [&space], [&space]).unwrap();
+    let zeros: TensorMap<_, Complex64> =
+        TensorMap::zeros(engine, &runtime, [&space], [&space]).unwrap();
     assert!(zeros
         .dense_data()
         .unwrap()
@@ -32,7 +34,7 @@ fn fibonacci_complex_tensor_reaches_all_checked_constructors() {
         .all(|&value| value == Complex64::new(0.0, 0.0)));
 
     let filled: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&space], [&space], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |trees, indices| {
             Complex64::new(
                 (indices.iter().sum::<usize>() + 1) as f64,
                 if trees.coupled() == &TAU { 1.0 } else { -1.0 },
@@ -46,9 +48,10 @@ fn fibonacci_complex_tensor_reaches_all_checked_constructors() {
         .any(|value| value.im != 0.0));
 
     let random: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space], 0x9E37_79B9_7F4A_7C15).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space], [&space], 0x9E37_79B9_7F4A_7C15)
+            .unwrap();
     let seeded: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space], 592_301).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space], [&space], 592_301).unwrap();
     assert_eq!(
         random.dense_data().unwrap().len(),
         zeros.dense_data().unwrap().len()
@@ -65,14 +68,19 @@ fn fibonacci_complex_tensor_reaches_all_checked_constructors() {
 }
 
 fn fibonacci_tau_braid_fixture(runtime: &Runtime) -> TensorMap<TableRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tau = GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TAU, 1)]).unwrap();
-    TensorMap::from_subblock_fn(runtime, [&tau, &tau, &tau], [&tau], |trees, _| match trees
-        .codomain_innerlines()
-    {
-        [VACUUM] => Complex64::new(1.0, 0.0),
-        [TAU] => Complex64::new(0.0, 0.0),
-        inner => panic!("unexpected Fibonacci fusion path {inner:?}"),
-    })
+    TensorMap::from_subblock_fn(
+        engine,
+        runtime,
+        [&tau, &tau, &tau],
+        [&tau],
+        |trees, _| match trees.codomain_innerlines() {
+            [VACUUM] => Complex64::new(1.0, 0.0),
+            [TAU] => Complex64::new(0.0, 0.0),
+            inner => panic!("unexpected Fibonacci fusion path {inner:?}"),
+        },
+    )
     .unwrap()
 }
 
@@ -94,6 +102,7 @@ fn fibonacci_tau_channel(tensor: &TensorMap<TableRule, Complex64>) -> [Complex64
 
 #[test]
 fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if crate::typed_facade::run_isolated_or_return(
@@ -105,10 +114,14 @@ fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
     let runtime = runtime();
     let source = fibonacci_tau_braid_fixture(&runtime);
     symtn::cache::clear();
-    let braided = source.braid(&[0, 2, 1], &[3], &[0, 1, 2, 3]).unwrap();
+    let braided = source
+        .braid(engine, &[0, 2, 1], &[3], &[0, 1, 2, 3])
+        .unwrap();
     let cold = crate::typed_facade::completed_transformers();
     assert_eq!((cold.entries(), cold.misses(), cold.hits()), (1, 1, 0));
-    let warm = source.braid(&[0, 2, 1], &[3], &[0, 1, 2, 3]).unwrap();
+    let warm = source
+        .braid(engine, &[0, 2, 1], &[3], &[0, 1, 2, 3])
+        .unwrap();
     assert_eq!(warm.dense_data().unwrap(), braided.dense_data().unwrap());
     let warm_info = crate::typed_facade::completed_transformers();
     assert_eq!(
@@ -144,7 +157,9 @@ fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
         assert!((value - oracle).norm() < 1e-12, "{value:?} != {oracle:?}");
     }
 
-    let back = braided.braid(&[0, 2, 1], &[3], &[0, 2, 1, 3]).unwrap();
+    let back = braided
+        .braid(engine, &[0, 2, 1], &[3], &[0, 2, 1, 3])
+        .unwrap();
     for (value, oracle) in fibonacci_tau_channel(&back)
         .into_iter()
         .zip(fibonacci_tau_channel(&source))
@@ -155,6 +170,7 @@ fn fibonacci_forward_braid_matches_closed_form_and_tensorkit_fixture() {
 
 #[test]
 fn fibonacci_planar_transforms_roundtrip_without_braiding() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let source = fibonacci_tau_braid_fixture(&runtime);
@@ -175,7 +191,7 @@ fn fibonacci_planar_transforms_roundtrip_without_braiding() {
         [false]
     );
 
-    let repartitioned = source.repartition(2).unwrap();
+    let repartitioned = source.repartition(engine, 2).unwrap();
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
     // Pinned TensorKit `repartition` fixture; the same value is the
     // independent rigidity oracle sqrt(d_tau).
@@ -206,11 +222,15 @@ fn fibonacci_planar_transforms_roundtrip_without_braiding() {
         [false, true]
     );
     assert_data_close_c64(
-        repartitioned.repartition(3).unwrap().dense_data().unwrap(),
+        repartitioned
+            .repartition(engine, 3)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         source.dense_data().unwrap(),
     );
 
-    let transposed = full_transpose!(source).unwrap();
+    let transposed = full_transpose!(engine, source).unwrap();
     // Pinned TensorKit planar-transpose fixture and the closed-form first row
     // of the Fibonacci F matrix.
     assert_data_close_c64(
@@ -241,11 +261,14 @@ fn fibonacci_planar_transforms_roundtrip_without_braiding() {
         [true, true, true]
     );
     assert_data_close_c64(
-        full_transpose!(transposed).unwrap().dense_data().unwrap(),
+        full_transpose!(engine, transposed)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         source.dense_data().unwrap(),
     );
 
-    let explicit = source.transpose(&[3], &[2, 1, 0]).unwrap();
+    let explicit = source.transpose(engine, &[3], &[2, 1, 0]).unwrap();
     assert_data_close_c64(
         explicit.dense_data().unwrap(),
         transposed.dense_data().unwrap(),
@@ -258,6 +281,7 @@ fn fibonacci_planar_transforms_roundtrip_without_braiding() {
 
 #[test]
 fn fibonacci_otimes_matches_the_nontrivial_tensorkit_fixture() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let tau = GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TAU, 1)]).unwrap();
@@ -268,8 +292,9 @@ fn fibonacci_otimes_matches_the_nontrivial_tensorkit_fixture() {
     assert_eq!(gamma, Complex64::new(-8.0, 1.0));
 
     let lhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&tau], [&tau], |_, _| alpha).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&tau], [&tau], |_, _| alpha).unwrap();
     let rhs: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&dual_tau, &tau],
         [&dual_tau, &tau],
@@ -282,7 +307,7 @@ fn fibonacci_otimes_matches_the_nontrivial_tensorkit_fixture() {
         },
     )
     .unwrap();
-    let product = lhs.otimes(&rhs).unwrap();
+    let product = lhs.otimes(engine, &rhs).unwrap();
 
     assert_eq!(
         product
@@ -345,6 +370,7 @@ fn fibonacci_matrix_entry(seed: f64, sector: &TableSector, row: usize, column: u
 
 #[test]
 fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if crate::typed_facade::run_isolated_or_return(
@@ -362,22 +388,22 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     let shared = GradedSpace::try_new(Arc::clone(&provider), [(VACUUM, 2), (TAU, 3)]).unwrap();
     let columns = GradedSpace::try_new(Arc::clone(&provider), [(VACUUM, 2), (TAU, 1)]).unwrap();
     let lhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&rows], [&shared], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&shared], |trees, indices| {
             fibonacci_matrix_entry(1.0, trees.coupled(), indices[0], indices[1])
         })
         .unwrap();
     let rhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&shared], [&columns], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&shared], [&columns], |trees, indices| {
             fibonacci_matrix_entry(5.0, trees.coupled(), indices[0], indices[1])
         })
         .unwrap();
     symtn::cache::clear();
     let before = crate::typed_facade::completed_transformers();
-    let cold = lhs.compose(&rhs).unwrap();
+    let cold = lhs.compose(engine, &rhs).unwrap();
     let after_cold = crate::typed_facade::completed_transformers();
-    let warm = lhs.compose(&rhs).unwrap();
+    let warm = lhs.compose(engine, &rhs).unwrap();
     let expected: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&rows], [&columns], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&columns], |trees, indices| {
             let inner = match *trees.coupled() {
                 VACUUM => 2,
                 TAU => 3,
@@ -400,22 +426,24 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
 
     // What: the same genuinely complex blocks are associative, while ordinary
     // contraction refuses even this crossing-free boundary.
-    let matrix = |seed| {
-        TensorMap::from_subblock_fn(&runtime, [&shared], [&shared], |trees, indices| {
+    let mut matrix = |seed| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&shared], [&shared], |trees, indices| {
             fibonacci_matrix_entry(seed, trees.coupled(), indices[0], indices[1])
         })
         .unwrap()
     };
     let (a, b, c): (_, _, TensorMap<_, Complex64>) = (matrix(1.0), matrix(3.0), matrix(8.0));
 
-    let left = a.compose(&b).unwrap().compose(&c).unwrap();
-    let right = a.compose(&b.compose(&c).unwrap()).unwrap();
+    let left = a.compose(engine, &b).unwrap().compose(engine, &c).unwrap();
+    let b_compose = &b.compose(engine, &c).unwrap();
+    let right = a.compose(engine, b_compose).unwrap();
     assert_data_close_c64(left.dense_data().unwrap(), right.dense_data().unwrap());
 
     symtn::cache::clear();
     let before = crate::typed_facade::completed_transformers();
     let error = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[1],
@@ -433,17 +461,21 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     assert_eq!(crate::typed_facade::completed_transformers(), before);
 
     let other_runtime = Runtime::builder().build().unwrap();
-    let other: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&other_runtime, [&shared], [&shared], |trees, indices| {
-            fibonacci_matrix_entry(2.0, trees.coupled(), indices[0], indices[1])
-        })
-        .unwrap();
+    let other: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &other_runtime,
+        [&shared],
+        [&shared],
+        |trees, indices| fibonacci_matrix_entry(2.0, trees.coupled(), indices[0], indices[1]),
+    )
+    .unwrap();
     assert!(matches!(
-        a.compose(&other).unwrap_err(),
+        a.compose(engine, &other).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     ));
     assert!(matches!(
         a.contract(
+            engine,
             &other,
             &ContractSpec {
                 lhs: &[1],
@@ -459,6 +491,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
 
 #[test]
 fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if crate::typed_facade::run_isolated_or_return(
@@ -471,7 +504,7 @@ fn fibonacci_ordinary_permute_rejection_does_not_publish_a_cache_entry() {
     let source = fibonacci_tau_braid_fixture(&runtime);
     symtn::cache::clear();
     let before = crate::typed_facade::completed_transformers();
-    let error = source.permute(&[0, 2, 1], &[3]).unwrap_err();
+    let error = source.permute(engine, &[0, 2, 1], &[3]).unwrap_err();
     assert!(
         matches!(
             crate::report::cause::<symtn::typed::OperationError>(&error),

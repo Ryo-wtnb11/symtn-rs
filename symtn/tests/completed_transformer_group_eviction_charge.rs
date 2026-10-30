@@ -28,6 +28,7 @@ fn su2(degeneracies: [usize; 4]) -> GradedSpace<SU2FusionRule> {
 
 #[test]
 fn completed_transformer_charge_covers_what_it_frees_after_group_eviction() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let (groups, completed) = (
         StructureCacheKind::TreeTransformCoefficients,
@@ -38,7 +39,7 @@ fn completed_transformer_charge_covers_what_it_frees_after_group_eviction() {
 
     // An SU(2) permute with recoupling (Multi specs), so cache 3's core is
     // bound from cache-4 groups.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let phys =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
     let (l, u, r, d) = (
@@ -47,8 +48,9 @@ fn completed_transformer_charge_covers_what_it_frees_after_group_eviction() {
         su2([5, 4, 2, 2]),
         su2([3, 5, 2, 1]),
     );
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&l, &u, &phys], [&r, &d], 3).unwrap();
-    drop(a.permute(&[0, 2, 3], &[1, 4]).unwrap());
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&l, &u, &phys], [&r, &d], 3)
+        .unwrap();
+    drop(a.permute(engine, &[0, 2, 3], &[1, 4]).unwrap());
     drop(a);
     assert!(info(groups).entries() > 0);
     let resident = info(completed);

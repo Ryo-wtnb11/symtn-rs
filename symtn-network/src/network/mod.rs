@@ -101,19 +101,20 @@ pub use execute::{NetworkExecutionWorkspace, PlannedNetwork};
 /// ```
 /// use std::sync::Arc;
 /// use symtn::sector::{U1FusionRule, U1Irrep};
-/// use symtn::typed::{GradedSpace, Runtime, TensorMap};
+/// use symtn::typed::{CpuEngine, GradedSpace, Runtime, TensorMap};
 /// use symtn_network::Network;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut engine = CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
 /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)])?;
 /// // a[i, k; i, l] traced over its first codomain and domain legs, then
 /// // contracted with b[l; m] over `l`.
-/// let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 1)?;
-/// let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 2)?;
-/// let traced = a.trace_pairs(&[(0, 2)])?; // legs [k; l]
+/// let a = TensorMap::<_, f64>::rand_with_seed(&mut engine, &runtime, [&v, &v], [&v, &v], 1)?;
+/// let b = TensorMap::<_, f64>::rand_with_seed(&mut engine, &runtime, [&v], [&v], 2)?;
+/// let traced = a.trace_pairs(&mut engine, &[(0, 2)])?; // legs [k; l]
 /// let network = Network::new([["k", "l"], ["l", "m"]], [false, false], [1, 1], ["k", "m"], Some(1))?;
-/// let result = network.contract(&[&traced, &b])?;
+/// let result = network.contract(&mut engine, &[&traced, &b])?;
 /// assert_eq!(result.rank(), 2);
 /// # Ok(())
 /// # }

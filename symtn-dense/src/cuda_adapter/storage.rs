@@ -1,6 +1,6 @@
 use super::*;
 
-/// Flat [`CudaScalar`] buffer resident on one CUDA device.
+/// Flat [`CudaScalar`] buffer owned by one CUDA engine's allocation domain.
 ///
 /// The handle itself is dtype-erased; every typed access names the payload
 /// dtype and reports a mismatch as [`DenseError::DTypeMismatch`].
@@ -10,7 +10,7 @@ pub struct CudaDenseStorage {
     // dtype, which since 0.6.0 includes the unmappable `DType::External`.
     pub(super) dtype: DenseDType,
     pub(super) len: usize,
-    pub(super) device: usize,
+    pub(super) device: CudaPlacement,
 }
 impl CudaDenseStorage {
     /// Uploads borrowed host data as a flat device buffer.
@@ -69,8 +69,8 @@ impl CudaDenseStorage {
         let bytes = std::mem::size_of_val(data.as_slice());
         let host = Tensor::from_vec_col_major(shape, data)
             .map_err(|err| cuda_error("cuda_upload", err))?;
-        let tensor = upload_tensor(ctx.backend.runtime(), &host)
-            .map_err(|err| cuda_error("cuda_upload", err))?;
+        let tensor =
+            upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error("cuda_upload", err))?;
         record_h2d(bytes);
         Ok(Self {
             tensor,
@@ -87,7 +87,7 @@ impl CudaDenseStorage {
     /// `types.rs:7248`) rather than copied out of again.
     pub fn download<D: CudaScalar>(&self, ctx: &CudaDenseContext) -> Result<Vec<D>, DenseError> {
         ensure_cuda_device(ctx.device, "cuda_download", &[("source", self.device)])?;
-        let host = download_tensor(ctx.backend.runtime(), &self.tensor)
+        let host = download_tensor(&ctx.runtime, &self.tensor)
             .map_err(|err| cuda_error("cuda_download", err))?;
         if host.dtype() != D::dtype() {
             return Err(dtype_mismatch::<D>("cuda_download", &host));
@@ -119,8 +119,9 @@ impl CudaDenseStorage {
         self.len == 0
     }
 
+    /// The CUDA device ordinal of the engine that owns this buffer.
     pub fn device(&self) -> usize {
-        self.device
+        self.device.ordinal
     }
 
     /// Elements the device allocation holds; at least [`Self::len`].
@@ -176,7 +177,7 @@ impl CudaDenseStorage {
     pub(super) fn from_tensor<D: CudaScalar>(
         op: &'static str,
         tensor: Tensor,
-        device: usize,
+        device: CudaPlacement,
     ) -> Result<Self, DenseError> {
         if D::typed(&tensor).is_none() {
             return Err(dtype_mismatch::<D>(op, &tensor));

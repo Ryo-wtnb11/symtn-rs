@@ -56,6 +56,7 @@ fn provider_inject_rejects_values_only_before_backend_work() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_dtypes() {
+    let engine = &mut CpuEngine::serial();
     let lhs_shape = [2, 3];
     let lhs_strides = [1, 2];
     let rhs_shape = [3, 2];
@@ -71,6 +72,7 @@ fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_d
     let mut out_f32 = vec![-1.0_f32; 8];
     executor
         .matmul_into(
+            engine,
             DenseWrite::F32(
                 DenseViewMut::new(&mut out_f32, &out_shape, &out_strides, out_offset).unwrap(),
             ),
@@ -88,6 +90,7 @@ fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_d
     let mut out_f64 = vec![-1.0_f64; 8];
     executor
         .matmul_into(
+            engine,
             DenseWrite::F64(
                 DenseViewMut::new(&mut out_f64, &out_shape, &out_strides, out_offset).unwrap(),
             ),
@@ -111,6 +114,7 @@ fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_d
     let mut out_c32 = vec![Complex32::new(-1.0, -2.0); 8];
     executor
         .matmul_into(
+            engine,
             DenseWrite::C32(
                 DenseViewMut::new(&mut out_c32, &out_shape, &out_strides, out_offset).unwrap(),
             ),
@@ -143,6 +147,7 @@ fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_d
     let mut out_c64 = vec![Complex64::new(-1.0, -2.0); 8];
     executor
         .matmul_into(
+            engine,
             DenseWrite::C64(
                 DenseViewMut::new(&mut out_c64, &out_shape, &out_strides, out_offset).unwrap(),
             ),
@@ -167,6 +172,7 @@ fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_d
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
+    let engine = &mut CpuEngine::serial();
     // Four same-shape constant-stride jobs form one affine run, so the batch
     // routes through the strided-batch seam as a single dispatch rather than
     // one call per job.
@@ -198,6 +204,7 @@ fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &flat_shape, &flat_strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &flat_shape, &flat_strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &flat_shape, &flat_strides, 0).unwrap()),
@@ -238,6 +245,7 @@ fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
     let mut executor = DefaultDenseExecutor::new();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F32(
                 DenseViewMut::new(&mut output_f32, &flat_shape, &flat_strides, 0).unwrap(),
             ),
@@ -276,6 +284,7 @@ fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
     let mut executor = DefaultDenseExecutor::new();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::C32(
                 DenseViewMut::new(&mut output_c32, &flat_shape, &flat_strides, 0).unwrap(),
             ),
@@ -314,6 +323,7 @@ fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
     let mut executor = DefaultDenseExecutor::new();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::C64(
                 DenseViewMut::new(&mut output_c64, &flat_shape, &flat_strides, 0).unwrap(),
             ),
@@ -343,6 +353,7 @@ fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_bundles_short_runs_into_one_seam_dispatch() {
+    let engine = &mut CpuEngine::serial();
     // Structural guard for issue #103: a fragmented batch (three runs — two
     // length-2 same-shape runs plus a singleton) is not one affine run, so it
     // must dispatch ONE grouped seam call, not one per run. Seam-call count
@@ -408,6 +419,7 @@ fn default_executor_bundles_short_runs_into_one_seam_dispatch() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &flat_shape, &flat_strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &flat_shape, &flat_strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &flat_shape, &flat_strides, 0).unwrap()),
@@ -443,6 +455,7 @@ fn default_executor_bundles_short_runs_into_one_seam_dispatch() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_qr_reads_transposed_views_for_all_linalg_dtypes() {
+    let engine = &mut CpuEngine::serial();
     let f32_data = vec![1.0_f32, -2.0, 3.0, 0.5, -1.0, 4.0];
     let f64_data = vec![1.0_f64, -2.0, 3.0, 0.5, -1.0, 4.0];
     let c32_data = vec![
@@ -466,9 +479,10 @@ fn default_executor_qr_reads_transposed_views_for_all_linalg_dtypes() {
     let mut executor = DefaultDenseExecutor::new();
 
     let outputs = executor
-        .qr(DenseRead::F32(
-            DenseView::new(&f32_data, &shape, &strides, 0).unwrap(),
-        ))
+        .qr(
+            engine,
+            DenseRead::F32(DenseView::new(&f32_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::F32);
     let recon = matmul_f32(
@@ -484,9 +498,10 @@ fn default_executor_qr_reads_transposed_views_for_all_linalg_dtypes() {
     }
 
     let outputs = executor
-        .qr(DenseRead::F64(
-            DenseView::new(&f64_data, &shape, &strides, 0).unwrap(),
-        ))
+        .qr(
+            engine,
+            DenseRead::F64(DenseView::new(&f64_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::F64);
     let recon = matmul_f64(
@@ -502,9 +517,10 @@ fn default_executor_qr_reads_transposed_views_for_all_linalg_dtypes() {
     }
 
     let outputs = executor
-        .qr(DenseRead::C32(
-            DenseView::new(&c32_data, &shape, &strides, 0).unwrap(),
-        ))
+        .qr(
+            engine,
+            DenseRead::C32(DenseView::new(&c32_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::C32);
     let recon = matmul_c32(
@@ -520,9 +536,10 @@ fn default_executor_qr_reads_transposed_views_for_all_linalg_dtypes() {
     }
 
     let outputs = executor
-        .qr(DenseRead::C64(
-            DenseView::new(&c64_data, &shape, &strides, 0).unwrap(),
-        ))
+        .qr(
+            engine,
+            DenseRead::C64(DenseView::new(&c64_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::C64);
     let recon = matmul_c64(
@@ -540,6 +557,7 @@ fn default_executor_qr_reads_transposed_views_for_all_linalg_dtypes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_eigh_reads_transposed_views_for_all_linalg_dtypes() {
+    let engine = &mut CpuEngine::serial();
     let f32_data = vec![4.0_f32, 1.0, 1.0, 3.0];
     let f64_data = vec![4.0_f64, 1.0, 1.0, 3.0];
     let c32_data = vec![
@@ -559,9 +577,10 @@ fn default_executor_eigh_reads_transposed_views_for_all_linalg_dtypes() {
     let mut executor = DefaultDenseExecutor::new();
 
     let outputs = executor
-        .eigh(DenseRead::F32(
-            DenseView::new(&f32_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh(
+            engine,
+            DenseRead::F32(DenseView::new(&f32_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::F32);
     assert_eq!(outputs[1].dtype(), DenseDType::F32);
@@ -580,9 +599,10 @@ fn default_executor_eigh_reads_transposed_views_for_all_linalg_dtypes() {
     }
 
     let outputs = executor
-        .eigh(DenseRead::F64(
-            DenseView::new(&f64_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh(
+            engine,
+            DenseRead::F64(DenseView::new(&f64_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::F64);
     assert_eq!(outputs[1].dtype(), DenseDType::F64);
@@ -601,9 +621,10 @@ fn default_executor_eigh_reads_transposed_views_for_all_linalg_dtypes() {
     }
 
     let outputs = executor
-        .eigh(DenseRead::C32(
-            DenseView::new(&c32_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh(
+            engine,
+            DenseRead::C32(DenseView::new(&c32_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::F32);
     assert_eq!(outputs[1].dtype(), DenseDType::C32);
@@ -622,9 +643,10 @@ fn default_executor_eigh_reads_transposed_views_for_all_linalg_dtypes() {
     }
 
     let outputs = executor
-        .eigh(DenseRead::C64(
-            DenseView::new(&c64_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh(
+            engine,
+            DenseRead::C64(DenseView::new(&c64_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(outputs[0].dtype(), DenseDType::F64);
     assert_eq!(outputs[1].dtype(), DenseDType::C64);
@@ -645,6 +667,7 @@ fn default_executor_eigh_reads_transposed_views_for_all_linalg_dtypes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_svd_accepts_all_supported_linalg_dtypes() {
+    let engine = &mut CpuEngine::serial();
     let f32_data = [1.0_f32, -2.0, 0.5, 4.0];
     let f64_data = [1.0_f64, -2.0, 0.5, 4.0];
     let c32_data = [
@@ -681,7 +704,7 @@ fn default_executor_svd_accepts_all_supported_linalg_dtypes() {
             DenseDType::C64,
         ),
     ] {
-        let outputs = executor.svd(input).unwrap();
+        let outputs = executor.svd(engine, input).unwrap();
         assert_eq!(outputs[0].dtype(), dtype);
         assert!(matches!(
             (dtype, outputs[1].dtype()),
@@ -696,13 +719,14 @@ fn default_executor_svd_accepts_all_supported_linalg_dtypes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_svd_into_writes_strided_destination_views() {
+    let engine = &mut CpuEngine::serial();
     let data = [1.0_f64, -2.0, 0.5, 4.0];
     let input_shape = [2, 2];
     let input_strides = [1, 2];
     let input = DenseRead::F64(DenseView::new(&data, &input_shape, &input_strides, 0).unwrap());
 
     let mut executor = DefaultDenseExecutor::new();
-    let expected = executor.svd(input).unwrap();
+    let expected = executor.svd(engine, input).unwrap();
 
     let mut u = vec![-99.0; 8];
     let mut s = vec![-99.0; 4];
@@ -713,6 +737,7 @@ fn default_executor_svd_into_writes_strided_destination_views() {
     let s_strides = [2];
     executor
         .svd_into(
+            engine,
             input,
             DenseWrite::F64(DenseViewMut::new(&mut u, &matrix_shape, &matrix_strides, 1).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut s, &s_shape, &s_strides, 0).unwrap()),
@@ -736,6 +761,7 @@ fn default_executor_svd_into_writes_strided_destination_views() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_qr_into_writes_strided_destination_views() {
+    let engine = &mut CpuEngine::serial();
     let data = [
         Complex64::new(1.0, 0.5),
         Complex64::new(-2.0, 1.0),
@@ -747,7 +773,7 @@ fn default_executor_qr_into_writes_strided_destination_views() {
     let input = DenseRead::C64(DenseView::new(&data, &input_shape, &input_strides, 0).unwrap());
 
     let mut executor = DefaultDenseExecutor::new();
-    let expected = executor.qr(input).unwrap();
+    let expected = executor.qr(engine, input).unwrap();
 
     let sentinel = Complex64::new(-99.0, 0.0);
     let mut q = vec![sentinel; 8];
@@ -756,6 +782,7 @@ fn default_executor_qr_into_writes_strided_destination_views() {
     let matrix_strides = [1, 3];
     executor
         .qr_into(
+            engine,
             input,
             DenseWrite::C64(DenseViewMut::new(&mut q, &matrix_shape, &matrix_strides, 1).unwrap()),
             DenseWrite::C64(DenseViewMut::new(&mut r, &matrix_shape, &matrix_strides, 1).unwrap()),
@@ -774,6 +801,7 @@ fn default_executor_qr_into_writes_strided_destination_views() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_eigh_into_writes_strided_destination_views() {
+    let engine = &mut CpuEngine::serial();
     let data = [
         Complex64::new(4.0, 0.0),
         Complex64::new(1.0, 0.5),
@@ -785,7 +813,7 @@ fn default_executor_eigh_into_writes_strided_destination_views() {
     let input = DenseRead::C64(DenseView::new(&data, &input_shape, &input_strides, 0).unwrap());
 
     let mut executor = DefaultDenseExecutor::new();
-    let expected = executor.eigh(input).unwrap();
+    let expected = executor.eigh(engine, input).unwrap();
 
     let mut values = vec![-99.0; 4];
     let sentinel = Complex64::new(-99.0, 0.0);
@@ -796,6 +824,7 @@ fn default_executor_eigh_into_writes_strided_destination_views() {
     let matrix_strides = [1, 3];
     executor
         .eigh_into(
+            engine,
             input,
             DenseWrite::F64(
                 DenseViewMut::new(&mut values, &values_shape, &values_strides, 1).unwrap(),
@@ -824,13 +853,14 @@ fn default_executor_eigh_into_writes_strided_destination_views() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_rejects_integer_linalg_view() {
+    let engine = &mut CpuEngine::serial();
     let data = [1_i32, 0, 0, 1];
     let shape = [2, 2];
     let strides = [1, 2];
     let view = DenseView::new(&data, &shape, &strides, 0).unwrap();
 
     let mut executor = DefaultDenseExecutor::new();
-    let err = executor.qr(DenseRead::I32(view)).unwrap_err();
+    let err = executor.qr(engine, DenseRead::I32(view)).unwrap_err();
 
     assert!(matches!(
         err,
@@ -840,53 +870,59 @@ fn default_executor_rejects_integer_linalg_view() {
         } if message.contains("does not support dtype I32")
     ));
 }
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
-#[test]
-fn faer_only_build_rejects_uncompiled_blas_provider() {
-    let error = DefaultDenseExecutor::with_kind(CpuBackendKind::Blas).unwrap_err();
-    assert!(error.to_string().contains("cpu-blas"));
-}
-#[cfg(all(feature = "cpu-blas-core", not(feature = "cpu-faer")))]
-#[test]
-fn blas_only_build_rejects_uncompiled_faer_provider() {
-    let error = DefaultDenseExecutor::with_kind(CpuBackendKind::Faer).unwrap_err();
-    assert!(error.to_string().contains("cpu-faer"));
-}
 struct FullOnly(DefaultDenseExecutor);
 impl DenseExecutor for FullOnly {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.svd(input)
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
     }
 
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.qr(input)
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
     }
 
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.eigh(input)
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
     }
 
-    fn eig(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.eig(input)
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eig(engine, input)
     }
 
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
         config: &DenseDotConfig,
     ) -> Result<(), DenseError> {
-        self.0.dot_general_into(output, lhs, rhs, config)
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
 }
 #[test]
 fn owned_full_svd_default_is_explicitly_unsupported() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = FullOnly(DefaultDenseExecutor::new());
 
     assert!(!executor.supports_svd_full());
     let error = executor
-        .svd_full_owned(DenseOwned::F64(vec![1.0]), 1, 1)
+        .svd_full_owned(engine, DenseOwned::F64(vec![1.0]), 1, 1)
         .unwrap_err();
 
     assert!(matches!(
@@ -904,20 +940,33 @@ struct NoAxpby {
     dot_calls: usize,
 }
 impl DenseExecutor for NoAxpby {
-    fn svd(&mut self, _input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         unreachable!("the accumulate-form matmul default never factorizes")
     }
 
-    fn qr(&mut self, _input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn qr(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         unreachable!("the accumulate-form matmul default never factorizes")
     }
 
-    fn eigh(&mut self, _input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         unreachable!("the accumulate-form matmul default never factorizes")
     }
 
     fn dot_general_into(
         &mut self,
+        _engine: &mut dyn Engine,
         _output: DenseWrite<'_>,
         _lhs: DenseRead<'_>,
         _rhs: DenseRead<'_>,
@@ -929,6 +978,7 @@ impl DenseExecutor for NoAxpby {
 }
 #[test]
 fn accumulate_form_matmul_default_overwrites_then_reports_unsupported() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = NoAxpby::default();
     let lhs = [1.0_f64];
     let rhs = [1.0_f64];
@@ -938,6 +988,7 @@ fn accumulate_form_matmul_default_overwrites_then_reports_unsupported() {
 
     executor
         .matmul_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &shape, &strides, 0).unwrap()),
@@ -952,6 +1003,7 @@ fn accumulate_form_matmul_default_overwrites_then_reports_unsupported() {
 
     let error = executor
         .matmul_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &shape, &strides, 0).unwrap()),
@@ -988,43 +1040,44 @@ fn default_executor_advertises_native_owned_full_svd() {
 ))]
 #[test]
 fn native_owned_full_svd_validates_overflow_length_then_zero_extent() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     let inputs = crate::probe::record();
 
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(Vec::new()), usize::MAX, 2),
+        executor.svd_full_owned(engine, DenseOwned::F64(Vec::new()), usize::MAX, 2),
         Err(DenseError::ElementCountOverflow)
     ));
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(vec![1.0]), 2, 2),
+        executor.svd_full_owned(engine, DenseOwned::F64(vec![1.0]), 2, 2),
         Err(DenseError::ShapeMismatch {
             op: "svd_full_owned",
             ..
         })
     ));
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(Vec::new()), 0, 2),
+        executor.svd_full_owned(engine, DenseOwned::F64(Vec::new()), 0, 2),
         Err(DenseError::Unsupported {
             op: "svd_full_owned",
             ..
         })
     ));
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(Vec::new()), 2, 0),
+        executor.svd_full_owned(engine, DenseOwned::F64(Vec::new()), 2, 0),
         Err(DenseError::Unsupported {
             op: "svd_full_owned",
             ..
         })
     ));
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(Vec::new()), 0, 0),
+        executor.svd_full_owned(engine, DenseOwned::F64(Vec::new()), 0, 0),
         Err(DenseError::Unsupported {
             op: "svd_full_owned",
             ..
         })
     ));
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(vec![1.0]), 0, 2),
+        executor.svd_full_owned(engine, DenseOwned::F64(vec![1.0]), 0, 2),
         Err(DenseError::ShapeMismatch {
             op: "svd_full_owned",
             ..
@@ -1038,6 +1091,7 @@ fn native_owned_full_svd_validates_overflow_length_then_zero_extent() {
 ))]
 #[test]
 fn native_owned_full_svd_moves_each_dtype_input_buffer() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     let inputs = crate::probe::record();
     let mut expected = Vec::new();
@@ -1046,7 +1100,7 @@ fn native_owned_full_svd_moves_each_dtype_input_buffer() {
     expected.push(f32.as_ptr() as usize);
     assert_eq!(
         executor
-            .svd_full_owned(DenseOwned::F32(f32), 2, 2)
+            .svd_full_owned(engine, DenseOwned::F32(f32), 2, 2)
             .unwrap()
             .len(),
         3
@@ -1055,7 +1109,7 @@ fn native_owned_full_svd_moves_each_dtype_input_buffer() {
     expected.push(f64.as_ptr() as usize);
     assert_eq!(
         executor
-            .svd_full_owned(DenseOwned::F64(f64), 2, 2)
+            .svd_full_owned(engine, DenseOwned::F64(f64), 2, 2)
             .unwrap()
             .len(),
         3
@@ -1064,7 +1118,7 @@ fn native_owned_full_svd_moves_each_dtype_input_buffer() {
     expected.push(c32.as_ptr() as usize);
     assert_eq!(
         executor
-            .svd_full_owned(DenseOwned::C32(c32), 2, 2)
+            .svd_full_owned(engine, DenseOwned::C32(c32), 2, 2)
             .unwrap()
             .len(),
         3
@@ -1073,7 +1127,7 @@ fn native_owned_full_svd_moves_each_dtype_input_buffer() {
     expected.push(c64.as_ptr() as usize);
     assert_eq!(
         executor
-            .svd_full_owned(DenseOwned::C64(c64), 2, 2)
+            .svd_full_owned(engine, DenseOwned::C64(c64), 2, 2)
             .unwrap()
             .len(),
         3
@@ -1083,6 +1137,7 @@ fn native_owned_full_svd_moves_each_dtype_input_buffer() {
 }
 #[test]
 fn solve_default_is_explicitly_unsupported_without_writing() {
+    let engine = &mut CpuEngine::serial();
     // What: executors without solve capability reject the operation before
     // publishing anything into the caller's destination.
     let a = [1.0_f64];
@@ -1094,6 +1149,7 @@ fn solve_default_is_explicitly_unsupported_without_writing() {
 
     let error = executor
         .solve_into(
+            engine,
             DenseRead::F64(DenseView::new(&a, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&b, &shape, &strides, 0).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut x, &shape, &strides, 0).unwrap()),
@@ -1111,6 +1167,7 @@ fn solve_default_is_explicitly_unsupported_without_writing() {
 }
 #[test]
 fn default_executor_solves_f64_from_and_into_strided_views() {
+    let engine = &mut CpuEngine::serial();
     // What: solve reads legal noncontiguous coefficients and writes only the
     // logical elements of a noncontiguous caller-owned destination.
     let mut a = vec![-99.0; 10];
@@ -1128,10 +1185,11 @@ fn default_executor_solves_f64_from_and_into_strided_views() {
     let a_strides = [2, 5];
     let b_strides = [3, 6];
     let x_strides = [2, 5];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
 
     executor
         .solve_into(
+            engine,
             DenseRead::F64(DenseView::new(&a, &shape, &a_strides, 1).unwrap()),
             DenseRead::F64(DenseView::new(&b, &shape, &b_strides, 2).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut x, &shape, &x_strides, 0).unwrap()),
@@ -1148,6 +1206,7 @@ fn default_executor_solves_f64_from_and_into_strided_views() {
 }
 #[test]
 fn default_executor_solves_c64_system() {
+    let engine = &mut CpuEngine::serial();
     // What: complex solve preserves both real and imaginary components for a
     // rank-2 right-hand side.
     let c = |re, im| Complex64::new(re, im);
@@ -1157,10 +1216,11 @@ fn default_executor_solves_c64_system() {
     let a_shape = [2, 2];
     let b_shape = [2, 1];
     let strides = [1, 2];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
 
     executor
         .solve_into(
+            engine,
             DenseRead::C64(DenseView::new(&a, &a_shape, &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&b, &b_shape, &strides, 0).unwrap()),
             DenseWrite::C64(DenseViewMut::new(&mut x, &b_shape, &strides, 0).unwrap()),
@@ -1172,6 +1232,7 @@ fn default_executor_solves_c64_system() {
 }
 #[test]
 fn solve_validates_destination_before_singular_factorization() {
+    let engine = &mut CpuEngine::serial();
     // What: destination dtype and shape errors take precedence over a singular
     // factorization, while a valid destination exposes the numerical failure;
     // no failed call publishes output.
@@ -1180,11 +1241,12 @@ fn solve_validates_destination_before_singular_factorization() {
     let a_shape = [2, 2];
     let b_shape = [2, 1];
     let strides = [1, 2];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
 
     let mut wrong_dtype = [Complex64::new(19.0, 23.0); 2];
     let error = executor
         .solve_into(
+            engine,
             DenseRead::F64(DenseView::new(&a, &a_shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&b, &b_shape, &strides, 0).unwrap()),
             DenseWrite::C64(DenseViewMut::new(&mut wrong_dtype, &b_shape, &strides, 0).unwrap()),
@@ -1204,6 +1266,7 @@ fn solve_validates_destination_before_singular_factorization() {
     let wrong_shape_dims = [1, 1];
     let error = executor
         .solve_into(
+            engine,
             DenseRead::F64(DenseView::new(&a, &a_shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&b, &b_shape, &strides, 0).unwrap()),
             DenseWrite::F64(
@@ -1224,6 +1287,7 @@ fn solve_validates_destination_before_singular_factorization() {
     let mut x = [13.0_f64, 17.0];
     let error = executor
         .solve_into(
+            engine,
             DenseRead::F64(DenseView::new(&a, &a_shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&b, &b_shape, &strides, 0).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut x, &b_shape, &strides, 0).unwrap()),
@@ -1247,6 +1311,7 @@ fn solve_validates_destination_before_singular_factorization() {
 // backend's no-vector override to LAPACK precision.
 #[test]
 fn values_only_defaults_fall_back_to_the_full_decomposition_spectrum() {
+    let engine = &mut CpuEngine::serial();
     let shape = [2usize, 2];
     let strides = [1usize, 2]; // column-major
     let m = vec![2.0f64, 1.0, 1.0, 3.0]; // symmetric, so eigh applies too
@@ -1258,24 +1323,32 @@ fn values_only_defaults_fall_back_to_the_full_decomposition_spectrum() {
     let mut direct = DefaultDenseExecutor::new();
     let tol = 1e-10;
 
-    let f = fallback.svd_vals(view(&m, &shape, &strides)).unwrap();
-    let d = direct.svd_vals(view(&m, &shape, &strides)).unwrap();
+    let f = fallback
+        .svd_vals(engine, view(&m, &shape, &strides))
+        .unwrap();
+    let d = direct.svd_vals(engine, view(&m, &shape, &strides)).unwrap();
     let (f, d) = (f.as_f64_slice().unwrap(), d.as_f64_slice().unwrap());
     assert_eq!(f.len(), 2);
     for (a, b) in f.iter().zip(d) {
         assert_f64_close(*a, *b, tol);
     }
 
-    let f = fallback.eigh_vals(view(&m, &shape, &strides)).unwrap();
-    let d = direct.eigh_vals(view(&m, &shape, &strides)).unwrap();
+    let f = fallback
+        .eigh_vals(engine, view(&m, &shape, &strides))
+        .unwrap();
+    let d = direct
+        .eigh_vals(engine, view(&m, &shape, &strides))
+        .unwrap();
     let (f, d) = (f.as_f64_slice().unwrap(), d.as_f64_slice().unwrap());
     assert_eq!(f.len(), 2);
     for (a, b) in f.iter().zip(d) {
         assert_f64_close(*a, *b, tol);
     }
 
-    let f = fallback.eig_vals(view(&m, &shape, &strides)).unwrap();
-    let d = direct.eig_vals(view(&m, &shape, &strides)).unwrap();
+    let f = fallback
+        .eig_vals(engine, view(&m, &shape, &strides))
+        .unwrap();
+    let d = direct.eig_vals(engine, view(&m, &shape, &strides)).unwrap();
     let (f, d) = (f.as_c64_slice().unwrap(), d.as_c64_slice().unwrap());
     assert_eq!(f.len(), 2);
     for (a, b) in f.iter().zip(d) {
@@ -1285,6 +1358,7 @@ fn values_only_defaults_fall_back_to_the_full_decomposition_spectrum() {
 #[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     let c32 = |re, im| Complex32::new(re, im);
     let c64 = |re, im| Complex64::new(re, im);
@@ -1293,9 +1367,10 @@ fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
     let f32_data = [0.0_f32, 0.0, 3.0, 0.0, 4.0, 0.0];
     let f32_before = f32_data;
     let values = executor
-        .svd_vals(DenseRead::F32(
-            DenseView::new(&f32_data, &f32_shape, &[1, 2], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F32(DenseView::new(&f32_data, &f32_shape, &[1, 2], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F32);
     let values = values.as_f32_slice().unwrap();
@@ -1309,9 +1384,10 @@ fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
     let f64_data = [3.0_f64, 4.0, 0.0, 0.0, 0.0, 0.0];
     let f64_before = f64_data;
     let values = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&f64_data, &f64_shape, &[1, 3], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&f64_data, &f64_shape, &[1, 3], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F64);
     let values = values.as_f64_slice().unwrap();
@@ -1325,9 +1401,10 @@ fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
     let c32_data = [c32(1.0, 0.0), c32(0.0, 1.0), c32(0.0, 1.0), c32(1.0, 0.0)];
     let c32_before = c32_data;
     let values = executor
-        .svd_vals(DenseRead::C32(
-            DenseView::new(&c32_data, &c32_shape, &[1, 2], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::C32(DenseView::new(&c32_data, &c32_shape, &[1, 2], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F32);
     let values = values.as_f32_slice().unwrap();
@@ -1341,9 +1418,10 @@ fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
     let c64_data = [c64(1.0, 0.0), c64(0.0, 1.0), c64(0.0, 1.0), c64(1.0, 0.0)];
     let c64_before = c64_data;
     let values = executor
-        .svd_vals(DenseRead::C64(
-            DenseView::new(&c64_data, &c64_shape, &[1, 2], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::C64(DenseView::new(&c64_data, &c64_shape, &[1, 2], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F64);
     let values = values.as_f64_slice().unwrap();
@@ -1356,6 +1434,7 @@ fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
 #[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     let c32 = |re, im| Complex32::new(re, im);
     let c64 = |re, im| Complex64::new(re, im);
@@ -1365,9 +1444,10 @@ fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
     let f32_data = [-2.0_f32, 0.0, 0.0, 3.0];
     let f32_before = f32_data;
     let values = executor
-        .eigh_vals(DenseRead::F32(
-            DenseView::new(&f32_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F32(DenseView::new(&f32_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F32);
     let values = values.as_f32_slice().unwrap();
@@ -1380,9 +1460,10 @@ fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
     let f64_data = [1.0_f64, 2.0, 2.0, 1.0];
     let f64_before = f64_data;
     let values = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&f64_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&f64_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F64);
     let values = values.as_f64_slice().unwrap();
@@ -1395,9 +1476,10 @@ fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
     let c32_data = [c32(2.0, 0.0), c32(0.0, -1.0), c32(0.0, 1.0), c32(2.0, 0.0)];
     let c32_before = c32_data;
     let values = executor
-        .eigh_vals(DenseRead::C32(
-            DenseView::new(&c32_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::C32(DenseView::new(&c32_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F32);
     let values = values.as_f32_slice().unwrap();
@@ -1410,9 +1492,10 @@ fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
     let c64_data = [c64(2.0, 0.0), c64(0.0, -1.0), c64(0.0, 1.0), c64(2.0, 0.0)];
     let c64_before = c64_data;
     let values = executor
-        .eigh_vals(DenseRead::C64(
-            DenseView::new(&c64_data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::C64(DenseView::new(&c64_data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.dtype(), DenseDType::F64);
     let values = values.as_f64_slice().unwrap();
@@ -1425,6 +1508,7 @@ fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
 #[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_reads_offset_padded_transposed_views() {
+    let engine = &mut CpuEngine::serial();
     let shape = [2, 2];
     let strides = [7, 3];
     let mut executor = DefaultDenseExecutor::new();
@@ -1436,9 +1520,10 @@ fn default_executor_values_only_reads_offset_padded_transposed_views() {
     svd_data[11] = 0.0;
     let svd_before = svd_data.clone();
     let values = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&svd_data, &shape, &strides, 1).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&svd_data, &shape, &strides, 1).unwrap()),
+        )
         .unwrap();
     let values = values.as_f64_slice().unwrap();
     assert_eq!(values.len(), 2);
@@ -1455,9 +1540,10 @@ fn default_executor_values_only_reads_offset_padded_transposed_views() {
     eigh_data[11] = c(2.0, 0.0);
     let eigh_before = eigh_data.clone();
     let values = executor
-        .eigh_vals(DenseRead::C64(
-            DenseView::new(&eigh_data, &shape, &strides, 1).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::C64(DenseView::new(&eigh_data, &shape, &strides, 1).unwrap()),
+        )
         .unwrap();
     let values = values.as_f64_slice().unwrap();
     assert_eq!(values.len(), 2);
@@ -1468,9 +1554,10 @@ fn default_executor_values_only_reads_offset_padded_transposed_views() {
 
     let overlap_data = [2.0_f64];
     let values = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&overlap_data, &shape, &[0, 0], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&overlap_data, &shape, &[0, 0], 0).unwrap()),
+        )
         .unwrap();
     let values = values.as_f64_slice().unwrap();
     assert_eq!(values.len(), 2);
@@ -1480,9 +1567,10 @@ fn default_executor_values_only_reads_offset_padded_transposed_views() {
     assert_eq!(overlap_data, [2.0]);
 
     let values = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&overlap_data, &shape, &[0, 0], 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&overlap_data, &shape, &[0, 0], 0).unwrap()),
+        )
         .unwrap();
     let values = values.as_f64_slice().unwrap();
     assert_eq!(values.len(), 2);
@@ -1494,15 +1582,17 @@ fn default_executor_values_only_reads_offset_padded_transposed_views() {
 #[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_admits_batches_and_zero_extents() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
 
     let batch_shape = [2, 2, 2];
     let batch_data = [3.0_f64, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 2.0];
     let batch_before = batch_data;
     let values = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&batch_data, &batch_shape, &[1, 2, 4], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&batch_data, &batch_shape, &[1, 2, 4], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.shape(), &[2, 2]);
     for (actual, expected) in values
@@ -1516,9 +1606,10 @@ fn default_executor_values_only_admits_batches_and_zero_extents() {
     assert_eq!(batch_data, batch_before);
 
     let values = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&batch_data, &batch_shape, &[1, 2, 4], 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&batch_data, &batch_shape, &[1, 2, 4], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.shape(), &[2, 2]);
     for (actual, expected) in values
@@ -1533,26 +1624,29 @@ fn default_executor_values_only_admits_batches_and_zero_extents() {
 
     for (shape, strides) in [([0, 3], [1, 0]), ([3, 0], [1, 3]), ([0, 0], [1, 0])] {
         let values = executor
-            .svd_vals(DenseRead::F64(
-                DenseView::new(&[] as &[f64], &shape, &strides, 0).unwrap(),
-            ))
+            .svd_vals(
+                engine,
+                DenseRead::F64(DenseView::new(&[] as &[f64], &shape, &strides, 0).unwrap()),
+            )
             .unwrap();
         assert_eq!(values.shape(), &[0]);
         assert!(values.as_f64_slice().unwrap().is_empty());
     }
 
     let values = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&[] as &[f64], &[0, 0], &[1, 0], 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&[] as &[f64], &[0, 0], &[1, 0], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.shape(), &[0]);
     assert!(values.as_f64_slice().unwrap().is_empty());
 
     let values = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&[] as &[f64], &[2, 2, 0], &[1, 2, 4], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&[] as &[f64], &[2, 2, 0], &[1, 2, 4], 0).unwrap()),
+        )
         .unwrap();
     assert_eq!(values.shape(), &[2, 0]);
     assert!(values.as_f64_slice().unwrap().is_empty());
@@ -1560,13 +1654,15 @@ fn default_executor_values_only_admits_batches_and_zero_extents() {
 #[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
 
     let svd_rank_one = [1.0_f64, 2.0];
     let error = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&svd_rank_one, &[2], &[1], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&svd_rank_one, &[2], &[1], 0).unwrap()),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -1579,9 +1675,10 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
 
     let rank_zero = [1.0_f64];
     let error = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&rank_zero, &[], &[], 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&rank_zero, &[], &[], 0).unwrap()),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -1594,9 +1691,10 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
 
     let nonsquare = [1.0_f64; 6];
     let error = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&nonsquare, &[2, 3], &[1, 2], 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&nonsquare, &[2, 3], &[1, 2], 0).unwrap()),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -1609,9 +1707,10 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
 
     let integers = [1_i32, 0, 0, 1];
     let error = executor
-        .svd_vals(DenseRead::I32(
-            DenseView::new(&integers, &[2, 2], &[1, 2], 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::I32(DenseView::new(&integers, &[2, 2], &[1, 2], 0).unwrap()),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -1623,9 +1722,10 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
 
     let booleans = [true, false, false, true];
     let error = executor
-        .eigh_vals(DenseRead::Bool(
-            DenseView::new(&booleans, &[2, 2], &[1, 2], 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::Bool(DenseView::new(&booleans, &[2, 2], &[1, 2], 0).unwrap()),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -1635,22 +1735,13 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
         } if message.contains("does not support dtype Bool")
     ));
 }
-#[cfg(all(feature = "cpu-faer", not(feature = "provider-inject")))]
-#[test]
-fn default_executor_values_only_runs_explicit_faer_provider() {
-    assert_values_only_for_explicit_cpu_provider(CpuBackendKind::Faer);
-}
 #[cfg(all(
     not(feature = "provider-inject"),
-    any(
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl"
-    )
+    any(feature = "cpu-faer", feature = "cpu-blas-core")
 ))]
 #[test]
-fn default_executor_values_only_runs_explicit_blas_provider() {
-    assert_values_only_for_explicit_cpu_provider(CpuBackendKind::Blas);
+fn default_executor_values_only_runs_the_compiled_provider() {
+    assert_values_only_for_compiled_cpu_provider();
 }
 #[test]
 fn strided_batch_runs_partitions_same_shape_constant_stride_runs() {
@@ -1696,7 +1787,7 @@ fn strided_batch_runs_breaks_on_shape_and_stride_changes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_single_affine_run_is_one_strided_dispatch_for_two_and_four_jobs() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     for len in [2usize, 4] {
         let shapes = vec![(2, 3, 2); len];
         check_identity_batch::<f64>(&mut executor, &shapes, 0, (0, 0, 0), None, 1.25, -0.5, 1);
@@ -1726,7 +1817,7 @@ fn identity_single_affine_run_is_one_strided_dispatch_for_two_and_four_jobs() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_long_run_with_residual_jobs_is_one_grouped_dispatch() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     // 7 + singleton.
     let mut shapes = vec![(2, 2, 3); 7];
     shapes.push((3, 1, 1));
@@ -1766,7 +1857,7 @@ fn identity_long_run_with_residual_jobs_is_one_grouped_dispatch() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_heterogeneous_batch_with_gaps_and_base_offsets_is_one_dispatch() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     let shapes = [(2, 3, 1), (1, 1, 4), (3, 2, 2), (2, 2, 2), (1, 5, 1)];
     let jobs = identity_fixture::<f64>(&shapes, 2, (0, 0, 0), 0.0).jobs;
     assert_eq!(strided_batch_runs(&jobs), [1; 5]);
@@ -1786,7 +1877,7 @@ fn identity_heterogeneous_batch_with_gaps_and_base_offsets_is_one_dispatch() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_beta_zero_overwrites_sentinel_on_both_paths() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     let sentinel = c64(-99.0, 99.0);
     let alpha = c64(0.5, -1.25);
     for (shapes, gap) in [
@@ -1820,7 +1911,8 @@ fn identity_beta_zero_overwrites_sentinel_on_both_paths() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_without_writes() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
     // One affine run whose destination step (2) is below rows * cols (4): the
     // strided view would alias itself, so admission fails and the grouped
     // validator reports the overlap before writing anything.
@@ -1835,6 +1927,7 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[10], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &[8], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &[8], &strides, 0).unwrap()),
@@ -1845,7 +1938,7 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
         )
         .unwrap_err();
     assert!(
-        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlaps")),
+        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlap")),
         "{error:?}"
     );
     assert_eq!(executor.seam_dispatches(), 1);
@@ -1862,6 +1955,7 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::C64(DenseViewMut::new(&mut output, &[6], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&lhs, &[6], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&lhs, &[6], &strides, 0).unwrap()),
@@ -1872,7 +1966,7 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
         )
         .unwrap_err();
     assert!(
-        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlaps")),
+        matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("overlap")),
         "{error:?}"
     );
     assert_eq!(executor.seam_dispatches(), 1);
@@ -1881,12 +1975,14 @@ fn identity_overlapping_destinations_are_rejected_by_the_grouped_validator_witho
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_empty_and_zero_dimension_batches_on_both_paths() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
     let strides = [1];
     let mut output = [3.0, 4.0];
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[2], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&[1.0], &[1], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&[2.0], &[1], &strides, 0).unwrap()),
@@ -1927,7 +2023,7 @@ fn identity_empty_and_zero_dimension_batches_on_both_paths() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_executor_replays_strided_grouped_strided_across_shapes() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     let alpha = c64(1.0, 0.5);
     let beta = c64(0.25, 0.0);
     // strided (one affine run) -> grouped (heterogeneous) -> strided with a
@@ -2000,7 +2096,7 @@ fn identity_malformed_runs_route_grouped_over_all_jobs() {
     // short, long, or zero-entry partition can neither skip trailing jobs (a
     // short sum) nor over-index the job slice (a long sum). Every job runs,
     // grouped, in one submission.
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     let shapes = [(2, 2, 2); 3];
     for runs in [&[2usize][..], &[5], &[0, 3], &[1, 1, 1], &[]] {
         check_identity_batch::<f64>(
@@ -2028,7 +2124,8 @@ fn identity_malformed_runs_route_grouped_over_all_jobs() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_grouped_out_of_range_span_fails_before_any_write() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
     let strides = [1];
     let values = (0..8).map(|i| 1.0 + i as f64).collect::<Vec<_>>();
     // Heterogeneous batch: the second job's lhs span 6..10 exceeds the 8-element
@@ -2043,6 +2140,7 @@ fn identity_grouped_out_of_range_span_fails_before_any_write() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[8], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&values, &[8], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&values, &[8], &strides, 0).unwrap()),
@@ -2075,6 +2173,7 @@ fn identity_grouped_out_of_range_span_fails_before_any_write() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::C64(DenseViewMut::new(&mut output, &[3], &strides, 1).unwrap()),
             DenseRead::C64(DenseView::new(&complex, &[7], &strides, 1).unwrap()),
             DenseRead::C64(DenseView::new(&complex, &[7], &strides, 1).unwrap()),
@@ -2100,6 +2199,7 @@ fn identity_grouped_out_of_range_span_fails_before_any_write() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
+    let engine = &mut CpuEngine::serial();
     // `seam_dispatches()` is 1 on both routes for a two-job run, and the old
     // cutoff also produced one (grouped) dispatch there, so the route is pinned
     // through the bounds-check contract instead: an lhs span past the buffer
@@ -2115,7 +2215,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
         ]
     }
     let strides = [1];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
 
     // lhs holds 3 elements; the run's rank-3 lhs view needs index 3.
     let lhs_f64 = [1.0, 2.0, 3.0];
@@ -2126,6 +2226,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[8], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs_f64, &[3], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs_f64, &[4], &strides, 0).unwrap()),
@@ -2145,6 +2246,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[8], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs_f64, &[3], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs_f64, &[4], &strides, 0).unwrap()),
@@ -2174,6 +2276,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::C64(DenseViewMut::new(&mut output, &[8], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&lhs_c64, &[3], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&rhs_c64, &[4], &strides, 0).unwrap()),
@@ -2191,6 +2294,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::C64(DenseViewMut::new(&mut output, &[8], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&lhs_c64, &[3], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(&rhs_c64, &[4], &strides, 0).unwrap()),
@@ -2216,6 +2320,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_batch_with_malformed_single_run_falls_back_to_grouped() {
+    let engine = &mut CpuEngine::serial();
     // `runs == [2]` claims one run, but job 1 has a different row count, so the
     // two jobs are not one affine run (issue #1733). Job 1's destination step
     // (8) still clears job 0's block (2*4), which must not select the strided
@@ -2246,6 +2351,7 @@ fn identity_batch_with_malformed_single_run_falls_back_to_grouped() {
     let mut executor = DefaultDenseExecutor::new();
     executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[20], &[1], 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &[15], &[1], 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &[24], &[1], 0).unwrap()),
@@ -2278,6 +2384,7 @@ fn identity_batch_with_malformed_single_run_falls_back_to_grouped() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_single_job_batch_takes_the_strided_entry() {
+    let engine = &mut CpuEngine::serial();
     // One job is one GEMM. It is computed at its offsets with the caller's
     // alpha/beta, through the strided entry rather than the grouped one, whose
     // validator allocates on every call (#2184). The `runs` hint is ignored.
@@ -2299,6 +2406,7 @@ fn identity_single_job_batch_takes_the_strided_entry() {
         executor.reset_seam_dispatches();
         executor
             .matmul_batch_axpby_into(
+                engine,
                 DenseWrite::F64(DenseViewMut::new(&mut output, &[10], &[1], 0).unwrap()),
                 DenseRead::F64(DenseView::new(&lhs, &[8], &[1], 0).unwrap()),
                 DenseRead::F64(DenseView::new(&rhs, &[5], &[1], 0).unwrap()),
@@ -2326,43 +2434,61 @@ fn identity_single_job_batch_takes_the_strided_entry() {
 /// `*_into` / values-only trait defaults.
 struct DropsLastOutput(DefaultDenseExecutor);
 impl DenseExecutor for DropsLastOutput {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        let mut out = self.0.svd(input)?;
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut out = self.0.svd(engine, input)?;
         out.pop();
         Ok(out)
     }
 
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        let mut out = self.0.qr(input)?;
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut out = self.0.qr(engine, input)?;
         out.pop();
         Ok(out)
     }
 
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        let mut out = self.0.eigh(input)?;
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut out = self.0.eigh(engine, input)?;
         out.pop();
         Ok(out)
     }
 
-    fn eig(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        let mut out = self.0.eig(input)?;
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut out = self.0.eig(engine, input)?;
         out.pop();
         Ok(out)
     }
 
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
         config: &DenseDotConfig,
     ) -> Result<(), DenseError> {
-        self.0.dot_general_into(output, lhs, rhs, config)
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
 }
 
 #[test]
 fn default_decomposition_arity_disagreement_is_shape_mismatch() {
+    let engine = &mut CpuEngine::serial();
     let data = [2.0_f64, 1.0, 1.0, 3.0];
     let (shape, strides) = ([2, 2], [1, 2]);
     let read = || DenseRead::F64(DenseView::new(&data, &shape, &strides, 0).unwrap());
@@ -2376,19 +2502,34 @@ fn default_decomposition_arity_disagreement_is_shape_mismatch() {
     let cases: [(&str, usize, usize, Result<(), DenseError>); 6] = [
         ("svd_into", 3, 2, {
             let (a, b, c) = (write(o0), write(o1), write(o2));
-            executor.svd_into(read(), a, b, c)
+            executor.svd_into(engine, read(), a, b, c)
         }),
         ("qr_into", 2, 1, {
             let (a, b) = (write(o0), write(o1));
-            executor.qr_into(read(), a, b)
+            executor.qr_into(engine, read(), a, b)
         }),
         ("eigh_into", 2, 1, {
             let (a, b) = (write(o0), write(o1));
-            executor.eigh_into(read(), a, b)
+            executor.eigh_into(engine, read(), a, b)
         }),
-        ("svd_vals", 3, 2, executor.svd_vals(read()).map(drop)),
-        ("eigh_vals", 2, 1, executor.eigh_vals(read()).map(drop)),
-        ("eig_vals", 2, 1, executor.eig_vals(read()).map(drop)),
+        (
+            "svd_vals",
+            3,
+            2,
+            executor.svd_vals(engine, read()).map(drop),
+        ),
+        (
+            "eigh_vals",
+            2,
+            1,
+            executor.eigh_vals(engine, read()).map(drop),
+        ),
+        (
+            "eig_vals",
+            2,
+            1,
+            executor.eig_vals(engine, read()).map(drop),
+        ),
     ];
     for (op, expected, actual, result) in cases {
         assert_eq!(
@@ -2404,6 +2545,7 @@ fn default_decomposition_arity_disagreement_is_shape_mismatch() {
 
 #[test]
 fn default_copy_into_reports_dtype_and_shape_mismatch() {
+    let engine = &mut CpuEngine::serial();
     let data = [2.0_f64, 1.0, 1.0, 3.0];
     let (shape, strides) = ([2, 2], [1, 2]);
     let read = || DenseRead::F64(DenseView::new(&data, &shape, &strides, 0).unwrap());
@@ -2414,6 +2556,7 @@ fn default_copy_into_reports_dtype_and_shape_mismatch() {
     let mut r = [0.0_f64; 4];
     let error = executor
         .qr_into(
+            engine,
             read(),
             DenseWrite::I32(DenseViewMut::new(&mut qi, &shape, &strides, 0).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut r, &shape, &strides, 0).unwrap()),
@@ -2433,6 +2576,7 @@ fn default_copy_into_reports_dtype_and_shape_mismatch() {
     let mut qf = [0.0_f32; 4];
     let error = executor
         .qr_into(
+            engine,
             read(),
             DenseWrite::F32(DenseViewMut::new(&mut qf, &shape, &strides, 0).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut r, &shape, &strides, 0).unwrap()),
@@ -2451,6 +2595,7 @@ fn default_copy_into_reports_dtype_and_shape_mismatch() {
     let mut q = [0.0_f64; 2];
     let error = executor
         .qr_into(
+            engine,
             read(),
             DenseWrite::F64(DenseViewMut::new(&mut q, &[2, 1], &[1, 2], 0).unwrap()),
             DenseWrite::F64(DenseViewMut::new(&mut r, &shape, &strides, 0).unwrap()),
@@ -2465,6 +2610,7 @@ fn default_copy_into_reports_dtype_and_shape_mismatch() {
 
 #[test]
 fn batched_matmul_mismatch_and_ops_gap_are_typed() {
+    let engine = &mut CpuEngine::serial();
     let (a, b) = ([1.0_f64], [1.0_f32]);
     let mut out = [0.0_f64];
     let (shape, strides) = ([1, 1], [1, 1]);
@@ -2486,20 +2632,21 @@ fn batched_matmul_mismatch_and_ops_gap_are_typed() {
     let mut no_axpby = NoAxpby::default();
     let (o, l) = batch_args(&mut out, &a);
     let error = no_axpby
-        .matmul_batch_axpby_into(o, l, rhs_f32(), &[], &[], alpha, beta)
+        .matmul_batch_axpby_into(engine, o, l, rhs_f32(), &[], &[], alpha, beta)
         .unwrap_err();
     assert_eq!(error, expected);
 
     let mut default = DefaultDenseExecutor::new();
     let (o, l) = batch_args(&mut out, &a);
     let error = default
-        .matmul_batch_axpby_into(o, l, rhs_f32(), &[], &[], alpha, beta)
+        .matmul_batch_axpby_into(engine, o, l, rhs_f32(), &[], &[], alpha, beta)
         .unwrap_err();
     assert_eq!(error, expected);
 
     let (o, l) = batch_args(&mut out, &a);
     let error = no_axpby
         .matmul_batch_axpby_with_ops_into(
+            engine,
             o,
             l,
             DenseRead::F64(DenseView::new(&a, &shape, &strides, 0).unwrap()),
@@ -2539,6 +2686,7 @@ fn copy_into_storage_length_disagreement_is_shape_mismatch() {
 
 #[test]
 fn batched_matmul_with_ops_dtype_mismatch_and_integer_operands_are_typed() {
+    let engine = &mut CpuEngine::serial();
     let (a, b, i) = ([1.0_f64], [1.0_f32], [1_i32]);
     let mut out = [0.0_f64];
     let mut out_i = [0_i32];
@@ -2548,6 +2696,7 @@ fn batched_matmul_with_ops_dtype_mismatch_and_integer_operands_are_typed() {
     let mut default = DefaultDenseExecutor::new();
     let error = default
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut out, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&a, &shape, &strides, 0).unwrap()),
             DenseRead::F32(DenseView::new(&b, &shape, &strides, 0).unwrap()),
@@ -2571,6 +2720,7 @@ fn batched_matmul_with_ops_dtype_mismatch_and_integer_operands_are_typed() {
     // All operands agree on a dtype the batched route does not cover.
     let error = NoAxpby::default()
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::I32(DenseViewMut::new(&mut out_i, &shape, &strides, 0).unwrap()),
             DenseRead::I32(DenseView::new(&i, &shape, &strides, 0).unwrap()),
             DenseRead::I32(DenseView::new(&i, &shape, &strides, 0).unwrap()),

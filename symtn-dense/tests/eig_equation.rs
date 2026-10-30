@@ -9,7 +9,9 @@
 #![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
 
 use num_complex::Complex64;
-use symtn_dense::{DefaultDenseExecutor, DenseDType, DenseExecutor, DenseRead, DenseView};
+use symtn_dense::{
+    CpuEngine, DefaultDenseExecutor, DenseDType, DenseExecutor, DenseRead, DenseView,
+};
 
 use crate::numerics;
 
@@ -34,7 +36,8 @@ fn eigen_sides(a: &[Complex64], v: &[Complex64], w: &[Complex64]) -> [Vec<Comple
 }
 
 fn assert_eig(a: &[Complex64], read: DenseRead<'_>, spectrum: &[Complex64]) {
-    let outputs = DefaultDenseExecutor::new().eig(read).unwrap();
+    let engine = &mut CpuEngine::serial();
+    let outputs = DefaultDenseExecutor::new().eig(engine, read).unwrap();
     assert_eq!(outputs.len(), 2);
     assert_eq!(outputs[0].dtype(), DenseDType::C64);
     assert_eq!(outputs[1].dtype(), DenseDType::C64);

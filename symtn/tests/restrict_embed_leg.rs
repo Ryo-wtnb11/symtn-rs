@@ -14,6 +14,7 @@
 
 use crate::report;
 use report::Report;
+use symtn::typed::Engine;
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -238,7 +239,8 @@ fn dense_plan<S: PartialEq + TensorKitPosition, P: Clone + IntoIterator<Item = u
 
 #[test]
 fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     // Degeneracies asymmetric under c -> -c, so a label/dual mix-up cannot
     // survive by coincidence.
@@ -247,12 +249,12 @@ fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
         .unwrap();
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 3)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&other], 7).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 7).unwrap();
 
     // Selection in the dual leg's own labels: the caller never dualises.
     let selected = [(U1Irrep::new(-1), 1..2), (U1Irrep::new(1), 0..2)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
-    let restricted = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
 
     assert_eq!(restricted.codomain()[0], *selection.subspace());
     assert_eq!(restricted.codomain()[1], other);
@@ -273,35 +275,36 @@ fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
         |_| 1,
         &[],
     );
-    let dense = source.to_physical_dense().unwrap();
+    let dense = source.to_physical_dense(engine).unwrap();
     let maps = vec![
         axis_gather(&layout, &ranges),
         identity_gather(&other_layout),
         identity_gather(&other_layout),
     ];
     let (shape, expected) = gather(&dense.shape, &dense.data, &maps);
-    let actual = restricted.to_physical_dense().unwrap();
+    let actual = restricted.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, shape);
     numerics::assert_slices_close("physical entries", &actual.data, &expected, TERMS);
 }
 
 #[test]
 fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     // Three sectors so that dropping the middle one shifts the dense offsets
     // of the last, and j = 1/2, 1 carry nontrivial multiplet dimensions.
     let leg = su2(&provider, &[(0, 2), (1, 3), (2, 2)]);
     let other = su2(&provider, &[(0, 1), (1, 2)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&other, &other], 11).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&other, &other], 11).unwrap();
 
     let selected = [
         (SU2Irrep::from_twice_spin(0), 1..2),
         (SU2Irrep::from_twice_spin(2), 0..1),
     ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
-    let restricted = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert_eq!(restricted.codomain()[0].degeneracies(), &[1, 1]);
 
     let (layout, ranges) = dense_plan(
@@ -318,26 +321,28 @@ fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
         |sector| sector.twice_spin() + 1,
         &[],
     );
-    let dense = source.to_physical_dense().unwrap();
+    let dense = source.to_physical_dense(engine).unwrap();
     let maps = vec![
         axis_gather(&layout, &ranges),
         identity_gather(&other_layout),
         identity_gather(&other_layout),
     ];
     let (shape, expected) = gather(&dense.shape, &dense.data, &maps);
-    let actual = restricted.to_physical_dense().unwrap();
+    let actual = restricted.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, shape);
     numerics::assert_slices_close("physical entries", &actual.data, &expected, TERMS);
 }
 
 #[test]
 fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let spectator = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&spectator, &leg], [&leg, &spectator], 3).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&spectator, &leg], [&leg, &spectator], 3)
+            .unwrap();
 
     let selected = [(U1Irrep::new(-1), 0..1), (U1Irrep::new(0), 1..3)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
@@ -349,6 +354,7 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
     };
     // ι_σ : V <- W, a one on every selected degeneracy coordinate.
     let iota = TensorMap::<_, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&leg],
         [selection.subspace()],
@@ -363,6 +369,7 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
     .unwrap();
     // The adjoint isometry, hand-filled rather than taken from `adjoint()`.
     let iota_dagger = TensorMap::<_, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [selection.subspace()],
         [&leg],
@@ -376,12 +383,12 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
     )
     .unwrap();
     let spectator_id =
-        TensorMap::<_, f64>::isomorphism(&runtime, [&spectator], [&spectator]).unwrap();
+        TensorMap::<_, f64>::isomorphism(engine, &runtime, [&spectator], [&spectator]).unwrap();
 
     // Codomain leg 1: (id ⊗ ι†) ∘ t.
-    let projector = spectator_id.otimes(&iota_dagger).unwrap();
-    let expected = projector.compose(&source).unwrap();
-    let restricted = source.restrict_leg(&[(1, &selection)]).unwrap();
+    let projector = spectator_id.otimes(engine, &iota_dagger).unwrap();
+    let expected = projector.compose(engine, &source).unwrap();
+    let restricted = source.restrict_leg(engine, &[(1, &selection)]).unwrap();
     assert_eq!(restricted.codomain(), expected.codomain());
     assert_eq!(restricted.domain(), expected.domain());
     numerics::assert_slices_close(
@@ -392,9 +399,9 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
     );
 
     // Domain leg 2: t ∘ (ι ⊗ id).
-    let inserter = iota.otimes(&spectator_id).unwrap();
-    let expected = source.compose(&inserter).unwrap();
-    let restricted = source.restrict_leg(&[(2, &selection)]).unwrap();
+    let inserter = iota.otimes(engine, &spectator_id).unwrap();
+    let expected = source.compose(engine, &inserter).unwrap();
+    let restricted = source.restrict_leg(engine, &[(2, &selection)]).unwrap();
     assert_eq!(restricted.codomain(), expected.codomain());
     assert_eq!(restricted.domain(), expected.domain());
     numerics::assert_slices_close(
@@ -407,17 +414,19 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
 
 #[test]
 fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let leg = fz2(&provider, &[(false, 2), (true, 3)]).try_dual().unwrap();
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &spectator], [&spectator], 5).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &spectator], [&spectator], 5).unwrap();
 
     let selected = [(Z2Irrep::ODD, 1..3)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let start = |sector: &Z2Irrep| if *sector == Z2Irrep::ODD { 1 } else { 0 };
     let iota_dagger = TensorMap::<_, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [selection.subspace()],
         [&leg],
@@ -431,13 +440,13 @@ fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
     )
     .unwrap();
     let spectator_id =
-        TensorMap::<_, f64>::isomorphism(&runtime, [&spectator], [&spectator]).unwrap();
+        TensorMap::<_, f64>::isomorphism(engine, &runtime, [&spectator], [&spectator]).unwrap();
     let expected = iota_dagger
-        .otimes(&spectator_id)
+        .otimes(engine, &spectator_id)
         .unwrap()
-        .compose(&source)
+        .compose(engine, &source)
         .unwrap();
-    let restricted = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert_eq!(restricted.codomain(), expected.codomain());
     numerics::assert_slices_close(
         "entries",
@@ -449,19 +458,20 @@ fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
 
 #[test]
 fn restrict_reads_a_complex_lazy_adjoint_domain_leg_with_a_multi_sector_selection() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let rows = u1(&provider, &[(0, 2), (1, 3)]);
     let columns = u1(&provider, &[(0, 3), (1, 2)]);
     let parent: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&rows], [&columns], 13).unwrap();
-    let lazy = parent.adjoint().unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&rows], [&columns], 13).unwrap();
+    let lazy = parent.adjoint(engine).unwrap();
 
     // The lazy adjoint's domain leg 1 is the parent's codomain leg.
     let leg = lazy.domain()[0].clone();
     let selected = [(U1Irrep::new(0), 1..2), (U1Irrep::new(1), 0..2)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
-    let restricted = lazy.restrict_leg(&[(1, &selection)]).unwrap();
+    let restricted = lazy.restrict_leg(engine, &[(1, &selection)]).unwrap();
 
     // Oracle: the dense gather of the adjoint's own physical expansion, which
     // shares no code with the restriction kernel's storage remap and
@@ -480,40 +490,41 @@ fn restrict_reads_a_complex_lazy_adjoint_domain_leg_with_a_multi_sector_selectio
         |_| 1,
         &[],
     );
-    let dense = lazy.to_physical_dense().unwrap();
+    let dense = lazy.to_physical_dense(engine).unwrap();
     let maps = vec![identity_gather(&row_layout), axis_gather(&layout, &ranges)];
     let (shape, gathered) = gather(&dense.shape, &dense.data, &maps);
-    let actual = restricted.to_physical_dense().unwrap();
+    let actual = restricted.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, shape);
     numerics::assert_slices_close("physical entries", &actual.data, &gathered, TERMS);
 }
 
 #[test]
 fn restrict_commutes_with_adjoint_under_the_codomain_domain_axis_map() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let rows = u1(&provider, &[(0, 2), (1, 3)]);
     let columns = u1(&provider, &[(0, 3), (1, 2)]);
     let source: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&rows], [&columns], 17).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&rows], [&columns], 17).unwrap();
     let selection = LegSelection::try_new(&columns, [(U1Irrep::new(1), 0..1)]).unwrap();
 
     // Domain leg 1 of `t` is codomain leg 0 of `t†`.
     let left = source
-        .restrict_leg(&[(1, &selection)])
+        .restrict_leg(engine, &[(1, &selection)])
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
     let right = source
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .unwrap();
     assert_eq!(left.codomain(), right.codomain());
     assert_eq!(left.domain(), right.domain());
     numerics::assert_slices_close(
         "entries",
-        left.materialize().unwrap().dense_data().unwrap(),
+        left.materialize(engine).unwrap().dense_data().unwrap(),
         right.dense_data().unwrap(),
         TERMS,
     );
@@ -521,12 +532,13 @@ fn restrict_commutes_with_adjoint_under_the_codomain_domain_axis_map() {
 
 #[test]
 fn full_selection_is_the_identity_and_round_trips_are_exact() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 2), (1, 2), (2, 1)]);
     let other = su2(&provider, &[(0, 1), (1, 2)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&other], 23).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 23).unwrap();
 
     let full = LegSelection::try_new(
         &leg,
@@ -538,7 +550,7 @@ fn full_selection_is_the_identity_and_round_trips_are_exact() {
     )
     .unwrap();
     assert_eq!(full.subspace(), &leg);
-    let restricted = source.restrict_leg(&[(0, &full)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &full)]).unwrap();
     assert_eq!(restricted.codomain(), source.codomain());
     assert_eq!(
         restricted.dense_data().unwrap(),
@@ -547,12 +559,12 @@ fn full_selection_is_the_identity_and_round_trips_are_exact() {
 
     // restrict ∘ embed = id, bitwise.
     let partial = LegSelection::try_new(&leg, [(SU2Irrep::from_twice_spin(1), 1..2)]).unwrap();
-    let small = source.restrict_leg(&[(0, &partial)]).unwrap();
-    let embedded = small.embed_leg(0, &partial).unwrap();
+    let small = source.restrict_leg(engine, &[(0, &partial)]).unwrap();
+    let embedded = small.embed_leg(engine, 0, &partial).unwrap();
     assert_eq!(embedded.codomain()[0], leg);
     assert_eq!(
         embedded
-            .restrict_leg(&[(0, &partial)])
+            .restrict_leg(engine, &[(0, &partial)])
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -562,19 +574,20 @@ fn full_selection_is_the_identity_and_round_trips_are_exact() {
 
 #[test]
 fn embed_after_restrict_is_the_orthogonal_projector() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let other = u1(&provider, &[(0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&other, &other], 29).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&other, &other], 29).unwrap();
 
     let selected = [(U1Irrep::new(0), 1..3), (U1Irrep::new(1), 0..1)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let projected = source
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .unwrap()
-        .embed_leg(0, &selection)
+        .embed_leg(engine, 0, &selection)
         .unwrap();
     assert_eq!(projected.codomain()[0], leg);
 
@@ -592,42 +605,43 @@ fn embed_after_restrict_is_the_orthogonal_projector() {
         |_| 1,
         &[],
     );
-    let dense = source.to_physical_dense().unwrap();
+    let dense = source.to_physical_dense(engine).unwrap();
     let maps = vec![
         axis_gather(&layout, &ranges),
         identity_gather(&other_layout),
         identity_gather(&other_layout),
     ];
     let expected = masked(&dense.shape, &dense.data, &maps);
-    let actual = projected.to_physical_dense().unwrap();
+    let actual = projected.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, dense.shape);
     numerics::assert_slices_close("physical entries", &actual.data, &expected, TERMS);
 
     // Idempotent: projecting twice changes nothing.
     let twice = projected
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .unwrap()
-        .embed_leg(0, &selection)
+        .embed_leg(engine, 0, &selection)
         .unwrap();
     assert_eq!(twice.dense_data().unwrap(), projected.dense_data().unwrap());
 }
 
 #[test]
 fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     // A rank-(1,0) map with a nonzero charge has no admissible fusion tree.
     let charged = u1(&provider, &[(1, 3)]);
-    let source = TensorMap::<_, f64>::zeros(&runtime, [&charged], []).unwrap();
+    let source = TensorMap::<_, f64>::zeros(engine, &runtime, [&charged], []).unwrap();
     assert_eq!(source.subblock_count(), 0);
 
     let selection = LegSelection::try_new(&charged, [(U1Irrep::new(1), 1..2)]).unwrap();
-    let restricted = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert_eq!(restricted.subblock_count(), 0);
     assert!(restricted.dense_data().unwrap().is_empty());
     assert_eq!(restricted.codomain()[0].degeneracies(), &[1]);
 
-    let embedded = restricted.embed_leg(0, &selection).unwrap();
+    let embedded = restricted.embed_leg(engine, 0, &selection).unwrap();
     assert_eq!(embedded.codomain()[0], charged);
     assert!(embedded.dense_data().unwrap().is_empty());
 
@@ -642,7 +656,8 @@ fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
 
 #[test]
 fn selections_are_validated_against_their_parent_leg_before_anything_is_built() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(0, 2), (1, 3)]);
     let other = u1(&provider, &[(0, 2)]);
@@ -689,44 +704,45 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
     assert!(LegSelection::try_new(&dual, [(U1Irrep::new(-1), 0..1)]).is_ok());
 
     let selection = LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..1)]).unwrap();
-    let source = TensorMap::<_, f64>::zeros(&runtime, [&leg], [&other]).unwrap();
+    let source = TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&other]).unwrap();
     assert!(source
-        .restrict_leg(&[(2, &selection)])
+        .restrict_leg(engine, &[(2, &selection)])
         .err()
         .unwrap()
         .report()
         .contains("axis 2 is out of range"));
     assert!(source
-        .restrict_leg(&[(1, &selection)])
+        .restrict_leg(engine, &[(1, &selection)])
         .err()
         .unwrap()
         .report()
         .contains("axis 1 is not the leg"));
     // `embed_leg` wants the subspace, not the parent.
     assert!(source
-        .embed_leg(0, &selection)
+        .embed_leg(engine, 0, &selection)
         .err()
         .unwrap()
         .report()
         .contains("axis 0 is not the leg"));
-    let small = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let small = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert!(small
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .err()
         .unwrap()
         .report()
         .contains("axis 0 is not the leg"));
-    assert!(small.embed_leg(0, &selection).is_ok());
+    assert!(small.embed_leg(engine, 0, &selection).is_ok());
 }
 
 #[test]
 fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejected() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(0, 3), (1, 2)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 31).unwrap();
-    let diagonal = source.svd_compact(&[0], &[1]).unwrap().s;
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 31).unwrap();
+    let diagonal = source.svd_compact(engine, &[0], &[1]).unwrap().s;
     let bond = diagonal.domain()[0].clone();
     let selection = LegSelection::try_new(&bond, [(U1Irrep::new(0), 0..1)]).unwrap();
     let different = LegSelection::try_new(&bond, [(U1Irrep::new(0), 1..2)]).unwrap();
@@ -739,36 +755,44 @@ fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejec
         vec![(0, &selection), (1, &different)],
     ] {
         assert_eq!(
-            diagonal.restrict_leg(&set).err().unwrap(),
+            diagonal.restrict_leg(engine, &set).err().unwrap(),
             symtn::typed::Error::Unsupported {
                 operation: "restrict_leg",
                 alternative: symtn::typed::Alternative::Materialize,
             }
         );
-        assert!(diagonal.materialize().unwrap().restrict_leg(&set).is_ok());
+        assert!(diagonal
+            .materialize(engine)
+            .unwrap()
+            .restrict_leg(engine, &set)
+            .is_ok());
     }
     // Per-pair checks come first and keep their single-axis errors.
     assert_eq!(
         format!(
             "{:?}",
-            diagonal.restrict_leg(&[(2, &selection)]).err().unwrap()
+            diagonal
+                .restrict_leg(engine, &[(2, &selection)])
+                .err()
+                .unwrap()
         ),
         format!(
             "{:?}",
             diagonal
-                .materialize()
+                .materialize(engine)
                 .unwrap()
-                .restrict_leg(&[(2, &selection)])
+                .restrict_leg(engine, &[(2, &selection)])
                 .err()
                 .unwrap()
         )
     );
-    assert!(diagonal.embed_leg(1, &selection).is_err());
+    assert!(diagonal.embed_leg(engine, 1, &selection).is_err());
 }
 
 #[test]
 fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 4)])
         .try_dual()
@@ -781,13 +805,18 @@ fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
     // The parent already lives on the subspace, so the lazy adjoint itself is
     // the embed source: a dual leg, in the domain, complex, read through the
     // adjoint axis map, with a multi-sector table.
-    let parent: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [selection.subspace(), &spectator], [&columns], 53)
-            .unwrap();
-    let lazy = parent.adjoint().unwrap();
+    let parent: TensorMap<_, Complex64> = TensorMap::rand_with_seed(
+        engine,
+        &runtime,
+        [selection.subspace(), &spectator],
+        [&columns],
+        53,
+    )
+    .unwrap();
+    let lazy = parent.adjoint(engine).unwrap();
     assert_eq!(lazy.domain()[0], *selection.subspace());
 
-    let embedded = lazy.embed_leg(1, &selection).unwrap();
+    let embedded = lazy.embed_leg(engine, 1, &selection).unwrap();
     assert_eq!(embedded.domain()[0], leg);
     assert_eq!(embedded.domain()[1], spectator);
     assert_eq!(embedded.codomain()[0], columns);
@@ -818,25 +847,26 @@ fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
         axis_gather(&layout, &ranges),
         identity_gather(&spectator_layout),
     ];
-    let source = lazy.to_physical_dense().unwrap();
-    let actual = embedded.to_physical_dense().unwrap();
+    let source = lazy.to_physical_dense(engine).unwrap();
+    let actual = embedded.to_physical_dense(engine).unwrap();
     let expected = scattered(&actual.shape, &source.data, &maps, Complex64::new(0.0, 0.0));
     numerics::assert_slices_close("physical entries", &actual.data, &expected, TERMS);
 
     // And the restriction of that embedding is the original, bitwise.
     assert_eq!(
         embedded
-            .restrict_leg(&[(1, &selection)])
+            .restrict_leg(engine, &[(1, &selection)])
             .unwrap()
             .dense_data()
             .unwrap(),
-        lazy.materialize().unwrap().dense_data().unwrap()
+        lazy.materialize(engine).unwrap().dense_data().unwrap()
     );
 }
 
 #[test]
 fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -862,7 +892,7 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
     )
     .unwrap();
     let source: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&other], 59).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 59).unwrap();
 
     let selected = [(label(true, 1), 1..3), (label(false, 2), 0..1)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
@@ -872,11 +902,12 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
             .find(|(candidate, _)| candidate == sector)
             .map_or(0, |(_, range)| range.start)
     };
-    let restricted = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
 
     // The product rule has no physical-basis expansion, so the oracle here is
     // the inclusion isometry, applied with `compose` only.
     let iota_dagger = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         [selection.subspace()],
         [&leg],
@@ -890,6 +921,7 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
     )
     .unwrap();
     let iota = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         [&leg],
         [selection.subspace()],
@@ -903,12 +935,12 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
     )
     .unwrap();
     let spectator_id =
-        TensorMap::<_, Complex64>::isomorphism(&runtime, [&other], [&other]).unwrap();
+        TensorMap::<_, Complex64>::isomorphism(engine, &runtime, [&other], [&other]).unwrap();
 
     let expected = iota_dagger
-        .otimes(&spectator_id)
+        .otimes(engine, &spectator_id)
         .unwrap()
-        .compose(&source)
+        .compose(engine, &source)
         .unwrap();
     assert_eq!(restricted.codomain(), expected.codomain());
     numerics::assert_slices_close(
@@ -918,11 +950,11 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
         TERMS,
     );
 
-    let embedded = restricted.embed_leg(0, &selection).unwrap();
+    let embedded = restricted.embed_leg(engine, 0, &selection).unwrap();
     let expected = iota
-        .otimes(&spectator_id)
+        .otimes(engine, &spectator_id)
         .unwrap()
-        .compose(&restricted)
+        .compose(engine, &restricted)
         .unwrap();
     assert_eq!(embedded.codomain(), expected.codomain());
     numerics::assert_slices_close(
@@ -935,17 +967,24 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
 
 #[test]
 fn a_rank_five_restriction_still_gathers_one_axis_only() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2), (0, 2), (1, 3)]);
     let small = u1(&provider, &[(0, 1), (1, 2)]);
-    let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&small, &leg, &small], [&small, &small], 61).unwrap();
+    let source: TensorMap<_, f64> = TensorMap::rand_with_seed(
+        engine,
+        &runtime,
+        [&small, &leg, &small],
+        [&small, &small],
+        61,
+    )
+    .unwrap();
     assert_eq!(source.rank(), 5);
 
     let selected = [(U1Irrep::new(1), 1..3)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
-    let restricted = source.restrict_leg(&[(1, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(1, &selection)]).unwrap();
 
     let (layout, ranges) = dense_plan(
         &leg.sectors().unwrap(),
@@ -961,7 +1000,7 @@ fn a_rank_five_restriction_still_gathers_one_axis_only() {
         |_| 1,
         &[],
     );
-    let dense = source.to_physical_dense().unwrap();
+    let dense = source.to_physical_dense(engine).unwrap();
     let maps = vec![
         identity_gather(&small_layout),
         axis_gather(&layout, &ranges),
@@ -970,14 +1009,15 @@ fn a_rank_five_restriction_still_gathers_one_axis_only() {
         identity_gather(&small_layout),
     ];
     let (shape, expected) = gather(&dense.shape, &dense.data, &maps);
-    let actual = restricted.to_physical_dense().unwrap();
+    let actual = restricted.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, shape);
     numerics::assert_slices_close("physical entries", &actual.data, &expected, TERMS);
 }
 
 #[test]
 fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let two = Arc::new(ZNFusionRule::new(2).unwrap());
     let three = Arc::new(ZNFusionRule::new(3).unwrap());
     let leg =
@@ -987,42 +1027,43 @@ fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
         [(three.irrep(0), 2), (three.irrep(1), 2)],
     )
     .unwrap();
-    let source = TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg]).unwrap();
+    let source = TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
     let selection = LegSelection::try_new(&foreign, [(three.irrep(0), 0..1)]).unwrap();
-    let error = source.restrict_leg(&[(0, &selection)]).unwrap_err();
+    let error = source.restrict_leg(engine, &[(0, &selection)]).unwrap_err();
     assert!(
         matches!(error, symtn::typed::Error::RuleMismatch),
         "expected a rule mismatch, got {error:?}"
     );
     assert!(matches!(
-        source.embed_leg(0, &selection),
+        source.embed_leg(engine, 0, &selection),
         Err(symtn::typed::Error::RuleMismatch)
     ));
 }
 
 #[test]
 fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_leg() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let leg = fz2(&provider, &[(false, 2), (true, 3)]);
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
     let bond = fz2(&provider, &[(false, 1), (true, 2)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &spectator], [&bond], 67).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &spectator], [&bond], 67).unwrap();
     let partner: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&bond], [&spectator], 71).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&bond], [&spectator], 71).unwrap();
     let selection = LegSelection::try_new(&leg, [(Z2Irrep::ODD, 1..3)]).unwrap();
 
     // Swapping two codomain legs and restricting are independent.
     let restrict_then_permute = source
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .unwrap()
-        .permute(&[1, 0], &[2])
+        .permute(engine, &[1, 0], &[2])
         .unwrap();
     let permute_then_restrict = source
-        .permute(&[1, 0], &[2])
+        .permute(engine, &[1, 0], &[2])
         .unwrap()
-        .restrict_leg(&[(1, &selection)])
+        .restrict_leg(engine, &[(1, &selection)])
         .unwrap();
     assert_eq!(
         restrict_then_permute.codomain(),
@@ -1039,9 +1080,10 @@ fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_le
     // sides run the same `contract`, so the fermionic supertrace twist on the
     // dual contracted axis appears identically on each.
     let restrict_then_contract = source
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .unwrap()
         .contract(
+            engine,
             &partner,
             &ContractSpec {
                 lhs: &[2],
@@ -1053,6 +1095,7 @@ fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_le
         .unwrap();
     let contract_then_restrict = source
         .contract(
+            engine,
             &partner,
             &ContractSpec {
                 lhs: &[2],
@@ -1062,7 +1105,7 @@ fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_le
             },
         )
         .unwrap()
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(engine, &[(0, &selection)])
         .unwrap();
     assert_eq!(
         restrict_then_contract.codomain(),
@@ -1186,8 +1229,8 @@ impl Place {
 /// block oracle filled independently with `from_subblock_fn`: restriction is a
 /// pure copy, so every entry must match bit for bit.
 macro_rules! assert_exact_restrict_embed {
-    ($dtype:ty, [$($codomain:expr),+], [$($domain:expr),+], $axis:expr, $selected:expr) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),+], $axis:expr, $selected:expr) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let codomain = vec![$($codomain),+];
         let domain = vec![$($domain),+];
         let axis: usize = $axis;
@@ -1221,14 +1264,14 @@ macro_rules! assert_exact_restrict_embed {
         let sub_codomain = replaced(&codomain, 0);
         let sub_domain = replaced(&domain, rank);
 
-        let source = TensorMap::<_, $dtype>::from_subblock_fn(
+        let source = TensorMap::<_, $dtype>::from_subblock_fn($engine,
             &runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
             |trees, indices| <$dtype as ExactEntry>::entry(trees, indices),
         )
         .unwrap();
-        let expected = TensorMap::<_, $dtype>::from_subblock_fn(
+        let expected = TensorMap::<_, $dtype>::from_subblock_fn($engine,
             &runtime,
             &sub_codomain,
             &sub_domain,
@@ -1240,13 +1283,13 @@ macro_rules! assert_exact_restrict_embed {
             },
         )
         .unwrap();
-        let restricted = source.restrict_leg(&[(axis, &selection)]).unwrap();
+        let restricted = source.restrict_leg($engine, &[(axis, &selection)]).unwrap();
         assert_eq!(restricted.codomain(), expected.codomain());
         assert_eq!(restricted.domain(), expected.domain());
         assert_eq!(exact_bits(restricted.dense_data().unwrap()), exact_bits(expected.dense_data().unwrap()));
 
-        let embedded = restricted.embed_leg(axis, &selection).unwrap();
-        let projected = TensorMap::<_, $dtype>::from_subblock_fn(
+        let embedded = restricted.embed_leg($engine, axis, &selection).unwrap();
+        let projected = TensorMap::<_, $dtype>::from_subblock_fn($engine,
             &runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -1261,7 +1304,7 @@ macro_rules! assert_exact_restrict_embed {
         assert_eq!(embedded.codomain(), source.codomain());
         assert_eq!(exact_bits(embedded.dense_data().unwrap()), exact_bits(projected.dense_data().unwrap()));
         assert_eq!(
-            exact_bits(embedded.restrict_leg(&[(axis, &selection)]).unwrap().dense_data().unwrap()),
+            exact_bits(embedded.restrict_leg($engine, &[(axis, &selection)]).unwrap().dense_data().unwrap()),
             exact_bits(restricted.dense_data().unwrap())
         );
     }};
@@ -1269,6 +1312,7 @@ macro_rules! assert_exact_restrict_embed {
 
 #[test]
 fn restrict_and_embed_are_exact_block_copies_on_u1_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 3), (0, 4), (1, 5)]);
     let dual = leg.try_dual().unwrap();
@@ -1284,17 +1328,18 @@ fn restrict_and_embed_are_exact_block_copies_on_u1_legs() {
         Some(Place::Alternate),
     ];
     for selected in [ranges, single, gaps] {
-        assert_exact_restrict_embed!(f64, [&leg, &other], [&other], 0, selected);
-        assert_exact_restrict_embed!(Complex64, [&other, &dual], [&other], 1, selected);
-        assert_exact_restrict_embed!(f64, [&other], [&other, &dual], 2, selected);
-        assert_exact_restrict_embed!(Complex64, [&other], [&leg, &other], 1, selected);
+        assert_exact_restrict_embed!(engine, f64, [&leg, &other], [&other], 0, selected);
+        assert_exact_restrict_embed!(engine, Complex64, [&other, &dual], [&other], 1, selected);
+        assert_exact_restrict_embed!(engine, f64, [&other], [&other, &dual], 2, selected);
+        assert_exact_restrict_embed!(engine, Complex64, [&other], [&leg, &other], 1, selected);
         // Single precision, on the middle leg of a rank-four map.
-        assert_exact_restrict_embed!(f32, [&other, &leg, &other], [&other], 1, selected);
+        assert_exact_restrict_embed!(engine, f32, [&other, &leg, &other], [&other], 1, selected);
     }
 }
 
 #[test]
 fn restrict_and_embed_are_exact_block_copies_on_su2_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 3), (1, 4), (2, 3)]);
     let other = su2(&provider, &[(0, 1), (1, 2), (2, 1)]);
@@ -1307,15 +1352,16 @@ fn restrict_and_embed_are_exact_block_copies_on_su2_legs() {
         Some(Place::Alternate),
     ];
     for selected in [ranges, single, gaps] {
-        assert_exact_restrict_embed!(f64, [&leg, &other], [&other], 0, selected);
-        assert_exact_restrict_embed!(Complex64, [&other, &other], [&leg], 2, selected);
-        assert_exact_restrict_embed!(Complex64, [&other, &leg], [&other], 1, selected);
-        assert_exact_restrict_embed!(f64, [&other], [&other, &leg], 2, selected);
+        assert_exact_restrict_embed!(engine, f64, [&leg, &other], [&other], 0, selected);
+        assert_exact_restrict_embed!(engine, Complex64, [&other, &other], [&leg], 2, selected);
+        assert_exact_restrict_embed!(engine, Complex64, [&other, &leg], [&other], 1, selected);
+        assert_exact_restrict_embed!(engine, f64, [&other], [&other, &leg], 2, selected);
     }
 }
 
 #[test]
 fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -1354,10 +1400,10 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
         Some(Place::Alternate),
     ];
     for selected in [ranges, single, gaps] {
-        assert_exact_restrict_embed!(Complex64, [&dual, &other], [&other], 0, selected);
-        assert_exact_restrict_embed!(f64, [&other, &leg], [&other], 1, selected);
-        assert_exact_restrict_embed!(f64, [&other], [&other, &dual], 2, selected);
-        assert_exact_restrict_embed!(Complex64, [&other], [&leg, &other], 1, selected);
+        assert_exact_restrict_embed!(engine, Complex64, [&dual, &other], [&other], 0, selected);
+        assert_exact_restrict_embed!(engine, f64, [&other, &leg], [&other], 1, selected);
+        assert_exact_restrict_embed!(engine, f64, [&other], [&other, &dual], 2, selected);
+        assert_exact_restrict_embed!(engine, Complex64, [&other], [&leg, &other], 1, selected);
     }
 }
 
@@ -1366,8 +1412,8 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
 /// (#1561). Sequential one-axis restrictions, in the given order and
 /// reversed, must give the same bits.
 macro_rules! assert_exact_multi_restrict {
-    ($dtype:ty, [$($codomain:expr),+], [$($domain:expr),*], [$(($axis:expr, $places:expr)),+]) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),*], [$(($axis:expr, $places:expr)),+]) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let codomain = vec![$($codomain),+];
         let domain: Vec<&GradedSpace<_>> = vec![$($domain),*];
         let rank = codomain.len();
@@ -1404,14 +1450,14 @@ macro_rules! assert_exact_multi_restrict {
         };
         let sub_codomain = replaced(&codomain, 0);
         let sub_domain = replaced(&domain, rank);
-        let source = TensorMap::<_, $dtype>::from_subblock_fn(
+        let source = TensorMap::<_, $dtype>::from_subblock_fn($engine,
             &runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
             |trees, indices| <$dtype as ExactEntry>::entry(trees, indices),
         )
         .unwrap();
-        let expected = TensorMap::<_, $dtype>::from_subblock_fn(
+        let expected = TensorMap::<_, $dtype>::from_subblock_fn($engine,
             &runtime,
             &sub_codomain,
             &sub_domain,
@@ -1425,13 +1471,13 @@ macro_rules! assert_exact_multi_restrict {
             },
         )
         .unwrap();
-        let restricted = source.restrict_leg(&set).unwrap();
+        let restricted = source.restrict_leg($engine, &set).unwrap();
         assert_eq!(restricted.codomain(), expected.codomain());
         assert_eq!(restricted.domain(), expected.domain());
         assert_eq!(exact_bits(restricted.dense_data().unwrap()), exact_bits(expected.dense_data().unwrap()));
         for order in [set.clone(), set.iter().rev().copied().collect()] {
             let sequential = order.iter().fold(source.clone(), |tensor, &pair| {
-                tensor.restrict_leg(&[pair]).unwrap()
+                tensor.restrict_leg($engine, &[pair]).unwrap()
             });
             assert_eq!(exact_bits(sequential.dense_data().unwrap()), exact_bits(restricted.dense_data().unwrap()));
         }
@@ -1440,6 +1486,7 @@ macro_rules! assert_exact_multi_restrict {
 
 #[test]
 fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let ranges = [Some(Place::Start), Some(Place::Middle), Some(Place::End)];
     let other_ranges = [Some(Place::End), None, Some(Place::Middle)];
     let single = [None, Some(Place::Single), None];
@@ -1454,37 +1501,48 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
     let leg = u1(&provider, &[(-1, 3), (0, 4), (1, 5)]);
     let dual = leg.try_dual().unwrap();
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 3)]);
-    assert_exact_multi_restrict!(f64, [&leg, &dual], [&leg], [(0, ranges), (2, other_ranges)]);
     assert_exact_multi_restrict!(
+        engine,
+        f64,
+        [&leg, &dual],
+        [&leg],
+        [(0, ranges), (2, other_ranges)]
+    );
+    assert_exact_multi_restrict!(
+        engine,
         Complex64,
         [&leg, &dual],
         [&leg, &dual],
         [(1, gaps), (3, other_gaps), (0, ranges)]
     );
     assert_exact_multi_restrict!(
+        engine,
         Complex64,
         [&dual, &other],
         [&leg, &dual],
         [(3, single), (0, ranges), (2, other_ranges)]
     );
-    assert_exact_multi_restrict!(f64, [&leg], [&leg], [(1, ranges), (0, ranges)]);
+    assert_exact_multi_restrict!(engine, f64, [&leg], [&leg], [(1, ranges), (0, ranges)]);
 
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 3), (1, 4), (2, 3)]);
     let other = su2(&provider, &[(0, 1), (1, 2), (2, 1)]);
     assert_exact_multi_restrict!(
+        engine,
         Complex64,
         [&leg, &other],
         [&leg],
         [(2, single), (0, ranges)]
     );
     assert_exact_multi_restrict!(
+        engine,
         f64,
         [&leg, &leg],
         [&leg, &other],
         [(0, ranges), (1, other_ranges), (2, single)]
     );
     assert_exact_multi_restrict!(
+        engine,
         Complex64,
         [&other, &leg],
         [&leg],
@@ -1517,13 +1575,26 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
     )
     .unwrap();
     assert_exact_multi_restrict!(
+        engine,
         Complex64,
         [&dual, &other],
         [&leg],
         [(2, other_ranges), (0, ranges)]
     );
-    assert_exact_multi_restrict!(f64, [&leg], [&other, &dual], [(0, single), (2, ranges)]);
-    assert_exact_multi_restrict!(f64, [&other, &leg], [&dual], [(1, gaps), (2, other_gaps)]);
+    assert_exact_multi_restrict!(
+        engine,
+        f64,
+        [&leg],
+        [&other, &dual],
+        [(0, single), (2, ranges)]
+    );
+    assert_exact_multi_restrict!(
+        engine,
+        f64,
+        [&other, &leg],
+        [&dual],
+        [(1, gaps), (2, other_gaps)]
+    );
 }
 
 /// A compact diagonal restricted on both legs with one selection stays
@@ -1531,15 +1602,18 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
 /// the source diagonal, and its dense form equals the dense restriction of
 /// the materialized source, bit for bit.
 macro_rules! assert_compact_stays_compact {
-    ($dtype:ty, $leg:expr, $places:expr) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $dtype:ty, $leg:expr, $places:expr) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let leg = $leg;
-        let source =
-            TensorMap::<_, $dtype>::from_subblock_fn(&runtime, [&leg], [&leg], |trees, indices| {
-                <$dtype as ExactEntry>::entry(trees, indices)
-            })
-            .unwrap();
-        let s = source.svd_compact(&[0], &[1]).unwrap().s;
+        let source = TensorMap::<_, $dtype>::from_subblock_fn(
+            $engine,
+            &runtime,
+            [&leg],
+            [&leg],
+            |trees, indices| <$dtype as ExactEntry>::entry(trees, indices),
+        )
+        .unwrap();
+        let s = source.svd_compact($engine, &[0], &[1]).unwrap().s;
         let bond = s.domain()[0].clone();
         let kept: Vec<_> = bond
             .sectors()
@@ -1553,7 +1627,7 @@ macro_rules! assert_compact_stays_compact {
             .collect();
         let selection = LegSelection::try_new(&bond, kept.iter().cloned()).unwrap();
         let expected: Vec<_> = s
-            .diagview()
+            .diagview($engine)
             .unwrap()
             .into_iter()
             .filter_map(|entry| {
@@ -1569,8 +1643,8 @@ macro_rules! assert_compact_stays_compact {
             [(0, &selection), (1, &selection)],
             [(1, &selection), (0, &selection)],
         ] {
-            let restricted = s.restrict_leg(&set).unwrap();
-            let spectrum = symtn::expert::diagonal_spectrum(&restricted)
+            let restricted = s.restrict_leg($engine, &set).unwrap();
+            let spectrum = symtn::expert::diagonal_spectrum($engine, &restricted)
                 .unwrap()
                 .expect("a compact input restricted on both legs stays compact");
             let got: Vec<_> = spectrum
@@ -1582,12 +1656,24 @@ macro_rules! assert_compact_stays_compact {
                 assert_eq!(sector, want_sector);
                 assert_eq!(exact_bits(values), exact_bits(want));
             }
-            let dense = s.materialize().unwrap().restrict_leg(&set).unwrap();
-            assert!(symtn::expert::diagonal_spectrum(&dense).unwrap().is_none());
+            let dense = s
+                .materialize($engine)
+                .unwrap()
+                .restrict_leg($engine, &set)
+                .unwrap();
+            assert!(symtn::expert::diagonal_spectrum($engine, &dense)
+                .unwrap()
+                .is_none());
             assert_eq!(restricted.codomain(), dense.codomain());
             assert_eq!(restricted.domain(), dense.domain());
             assert_eq!(
-                exact_bits(restricted.materialize().unwrap().dense_data().unwrap()),
+                exact_bits(
+                    restricted
+                        .materialize($engine)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                ),
                 exact_bits(dense.dense_data().unwrap())
             );
         }
@@ -1596,19 +1682,25 @@ macro_rules! assert_compact_stays_compact {
 
 #[test]
 fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let places = [Some(Place::Start), Some(Place::Middle), None];
     let gaps = [Some(Place::Ends), Some(Place::Alternate), None];
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 3), (0, 4), (1, 5)]);
-    assert_compact_stays_compact!(f64, leg.clone(), places);
-    assert_compact_stays_compact!(f64, leg.clone(), gaps);
-    assert_compact_stays_compact!(Complex64, leg.try_dual().unwrap(), places);
+    assert_compact_stays_compact!(engine, f64, leg.clone(), places);
+    assert_compact_stays_compact!(engine, f64, leg.clone(), gaps);
+    assert_compact_stays_compact!(engine, Complex64, leg.try_dual().unwrap(), places);
 
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 3), (1, 4), (2, 3)]);
-    assert_compact_stays_compact!(Complex64, leg.clone(), places);
-    assert_compact_stays_compact!(Complex64, leg.clone(), gaps);
-    assert_compact_stays_compact!(f64, leg, [None, Some(Place::Single), Some(Place::End)]);
+    assert_compact_stays_compact!(engine, Complex64, leg.clone(), places);
+    assert_compact_stays_compact!(engine, Complex64, leg.clone(), gaps);
+    assert_compact_stays_compact!(
+        engine,
+        f64,
+        leg,
+        [None, Some(Place::Single), Some(Place::End)]
+    );
 
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -1629,9 +1721,9 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
         ],
     )
     .unwrap();
-    assert_compact_stays_compact!(f64, leg.try_dual().unwrap(), places);
-    assert_compact_stays_compact!(Complex64, leg.clone(), places);
-    assert_compact_stays_compact!(f64, leg, gaps);
+    assert_compact_stays_compact!(engine, f64, leg.try_dual().unwrap(), places);
+    assert_compact_stays_compact!(engine, Complex64, leg.clone(), places);
+    assert_compact_stays_compact!(engine, f64, leg, gaps);
 }
 
 /// #2095: non-contiguous kept positions on a middle SU(2) leg of a rank-four
@@ -1640,12 +1732,13 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
 /// recomputed), and `embed_leg` against the dense scatter into zeros.
 #[test]
 fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_adjoint() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 4), (1, 5), (2, 3)]);
     let other = su2(&provider, &[(0, 1), (1, 2)]);
     let source: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&other, &leg, &other], [&other], 23).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&other, &leg, &other], [&other], 23).unwrap();
     let selected = [
         (SU2Irrep::from_twice_spin(0), vec![0, 3]),
         (SU2Irrep::from_twice_spin(1), vec![1, 2, 4]),
@@ -1669,9 +1762,9 @@ fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_
         &[],
     );
     let zero = Complex64::new(0.0, 0.0);
-    let check = |tensor: &TensorMap<_, Complex64>, axis: usize| {
-        let restricted = tensor.restrict_leg(&[(axis, &selection)]).unwrap();
-        let dense = tensor.to_physical_dense().unwrap();
+    let check = |engine: &mut dyn Engine, tensor: &TensorMap<_, Complex64>, axis: usize| {
+        let restricted = tensor.restrict_leg(engine, &[(axis, &selection)]).unwrap();
+        let dense = tensor.to_physical_dense(engine).unwrap();
         let maps: Vec<Vec<usize>> = (0..dense.shape.len())
             .map(|candidate| {
                 if candidate == axis {
@@ -1682,19 +1775,19 @@ fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_
             })
             .collect();
         let (shape, expected) = gather(&dense.shape, &dense.data, &maps);
-        let actual = restricted.to_physical_dense().unwrap();
+        let actual = restricted.to_physical_dense(engine).unwrap();
         assert_eq!(actual.shape, shape);
         numerics::assert_slices_close("restricted entries", &actual.data, &expected, TERMS);
 
-        let embedded = restricted.embed_leg(axis, &selection).unwrap();
+        let embedded = restricted.embed_leg(engine, axis, &selection).unwrap();
         let expected = scattered(&dense.shape, &actual.data, &maps, zero);
-        let actual = embedded.to_physical_dense().unwrap();
+        let actual = embedded.to_physical_dense(engine).unwrap();
         assert_eq!(actual.shape, dense.shape);
         numerics::assert_slices_close("embedded entries", &actual.data, &expected, TERMS);
     };
-    check(&source, 1);
-    let lazy = source.adjoint().unwrap();
-    check(&lazy, lazy.codomain().len() + 1);
+    check(engine, &source, 1);
+    let lazy = source.adjoint(engine).unwrap();
+    check(engine, &lazy, lazy.codomain().len() + 1);
 }
 
 /// #2095: kept positions are a set. Any spelling of one set is the same
@@ -1703,7 +1796,8 @@ fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_
 /// TensorKit's `view(b, :, I)`, which would permute or duplicate columns).
 #[test]
 fn kept_positions_are_a_canonical_strictly_increasing_set() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(0, 5), (1, 3), (2, 2)]);
     let zero = U1Irrep::new(0);
@@ -1736,13 +1830,16 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
 
     // Equal sets spelled differently are one selection: a compact diagonal
     // restricted with both stays compact, which needs equal tables.
-    let source: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 5).unwrap();
-    let s = source.svd_compact(&[0], &[1]).unwrap().s;
+    let source: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 5).unwrap();
+    let s = source.svd_compact(engine, &[0], &[1]).unwrap().s;
     let bond = s.domain()[0].clone();
     let split = LegSelection::try_new(&bond, [(zero, vec![1, 2, 3])]).unwrap();
     let joined = LegSelection::try_new(&bond, [(zero, 1..4)]).unwrap();
-    let restricted = s.restrict_leg(&[(0, &split), (1, &joined)]).unwrap();
-    assert!(symtn::expert::diagonal_spectrum(&restricted)
+    let restricted = s
+        .restrict_leg(engine, &[(0, &split), (1, &joined)])
+        .unwrap();
+    assert!(symtn::expert::diagonal_spectrum(engine, &restricted)
         .unwrap()
         .is_some());
 

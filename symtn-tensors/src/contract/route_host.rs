@@ -21,6 +21,7 @@
 
 use std::ops::Neg;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use num_traits::{One, Zero};
 use symtn_core::{BlockStructure, Placement, TensorStorage};
@@ -89,6 +90,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn overwrite_members(
         &mut self,
+        engine: &mut dyn Engine,
         stage: Stage,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
@@ -107,8 +109,10 @@ where
     ) -> Result<StackedDirectReplay<C>, OperationError>;
 
     /// Replays a `B > 1` core over member-major stacks.
+    #[allow(clippy::too_many_arguments)]
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
+        engine: &mut dyn Engine,
         replay: &StackedDirectReplay<C>,
         gemm: &mut G,
         dst: &mut [D],
@@ -163,6 +167,7 @@ where
 
     fn overwrite_members(
         &mut self,
+        _engine: &mut dyn Engine,
         _: Stage,
         _: &TreeTransformStructure<C>,
         _: &Arc<BlockStructure>,
@@ -185,6 +190,7 @@ where
 
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
+        _: &mut dyn Engine,
         _: &StackedDirectReplay<C>,
         _: &mut G,
         _: &mut [D],
@@ -244,6 +250,7 @@ where
 
     fn overwrite_members(
         &mut self,
+        engine: &mut dyn Engine,
         stage: Stage,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
@@ -253,8 +260,10 @@ where
         members: usize,
         destination_scales: &[(usize, C)],
     ) -> Result<(), OperationError> {
-        let threads = self.backend.recoupling_threads().get();
+        // The engine's own cost rule decides the fan-out of the stacked replay.
+        let threads = symtn_operations::host_pool::copy_width(engine, dst.len())?;
         tree_transform_members_overwrite_raw(
+            engine,
             &mut crate::StridedHostKernelAdapter::default(),
             self.backend.dense_mut(),
             &mut self.workspaces[stage as usize],
@@ -279,6 +288,7 @@ where
 
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
+        engine: &mut dyn Engine,
         replay: &StackedDirectReplay<C>,
         gemm: &mut G,
         dst: &mut [D],
@@ -294,6 +304,7 @@ where
         let mut dst = WriteSlice(dst);
         let mut dst = StackedStorageViewMut::new::<D>(&mut dst, dst_len, members, dst_len)?;
         replay.execute_signed_host(
+            engine,
             &mut crate::StridedHostKernelAdapter::default(),
             gemm,
             &mut dst,
@@ -459,6 +470,7 @@ fn exact_len(actual: usize, expected: usize) -> Result<(), OperationError> {
 /// `b` scaled by `θ_b` from `destination_scales`.
 #[allow(clippy::too_many_arguments)]
 fn overwrite_stage<S, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     slot: Stage,
     structure: &TreeTransformStructure<C>,
@@ -476,6 +488,7 @@ where
 {
     if members != 1 {
         return stage.overwrite_members(
+            engine,
             slot,
             structure,
             dst_structure,
@@ -488,6 +501,7 @@ where
     }
     let (backend, workspace) = stage.ordinary(slot);
     backend.tree_transform_structure_overwrite_into_raw(
+        engine,
         workspace,
         structure,
         dst_structure,
@@ -615,6 +629,7 @@ impl<'r, C: DenseBlockScalar> RouteView<'r, C> {
 /// for CopyC, where it rides the output transform.
 #[allow(clippy::too_many_arguments)]
 fn execute_route_view<S, G, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     gemm: &mut G,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -782,6 +797,7 @@ where
 
     if let Some(source) = &route.lhs_source {
         overwrite_stage(
+            engine,
             stage,
             Stage::Lhs,
             source.transform,
@@ -795,6 +811,7 @@ where
     }
     if let Some(source) = &route.rhs_source {
         overwrite_stage(
+            engine,
             stage,
             Stage::Rhs,
             source.transform,
@@ -832,6 +849,7 @@ where
         let mut kernels = crate::StridedHostKernelAdapter::default();
         match core_init {
             ContractDestinationInit::Zeroed => plan.execute_raw_zeroed(
+                engine,
                 &mut kernels,
                 gemm,
                 fusion_block_workspace,
@@ -844,6 +862,7 @@ where
                 core_alpha,
             ),
             ContractDestinationInit::Axpby(beta) => plan.execute_raw(
+                engine,
                 &mut kernels,
                 gemm,
                 fusion_block_workspace,
@@ -862,6 +881,7 @@ where
             unreachable!("B > 1 installed its stacked replay");
         };
         stage.stacked_core(
+            engine,
             replay,
             gemm,
             core_out,
@@ -884,6 +904,7 @@ where
     }
     if members != 1 {
         return stage.overwrite_members(
+            engine,
             Stage::Output,
             transform,
             dst_structure,
@@ -898,6 +919,7 @@ where
     let source = core_dst.as_slice();
     match init {
         ContractDestinationInit::Zeroed => backend.tree_transform_structure_overwrite_into_raw(
+            engine,
             workspace,
             transform,
             dst_structure,
@@ -908,6 +930,7 @@ where
             &[],
         ),
         ContractDestinationInit::Axpby(beta) => backend.tree_transform_structure_into_raw(
+            engine,
             workspace,
             transform,
             dst_structure,
@@ -925,6 +948,7 @@ where
 /// the caller's payload in place.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_route_host<S, G, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     gemm: &mut G,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -944,6 +968,7 @@ where
     C: DenseBlockScalar,
 {
     execute_route_view(
+        engine,
         stage,
         gemm,
         fusion_block_workspace,
@@ -963,6 +988,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_dynamic_tree_route_host<S, G, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     gemm: &mut G,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -982,6 +1008,7 @@ where
     C: DenseBlockScalar,
 {
     execute_route_view(
+        engine,
         stage,
         gemm,
         fusion_block_workspace,
@@ -1078,6 +1105,7 @@ pub(super) enum MemberRoute<'r, C> {
 /// `Axpby(0)`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_members_host<E, EC, D, C>(
+    engine: &mut dyn Engine,
     tree_backend: &mut DenseTreeTransformOperations<E>,
     contract_backend: &mut DenseTreeTransformOperations<EC>,
     contract_workspace: &mut super::backend::TensorContractWorkspace<D>,
@@ -1114,6 +1142,7 @@ where
         MemberRoute::DynamicTree(artifact) => RouteView::dynamic_tree(artifact),
     };
     execute_route_view(
+        engine,
         &mut MemberTreeStage {
             backend: tree_backend,
             workspaces: transforms,
@@ -1143,6 +1172,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_dynamic_tree_execution_artifact_members_host<E, EC, D, C>(
+    engine: &mut dyn Engine,
     tree_backend: &mut DenseTreeTransformOperations<E>,
     contract_backend: &mut DenseTreeTransformOperations<EC>,
     contract_workspace: &mut super::backend::TensorContractWorkspace<D>,
@@ -1162,6 +1192,7 @@ where
     C: DenseBlockScalar + Neg<Output = C>,
 {
     execute_members_host(
+        engine,
         tree_backend,
         contract_backend,
         contract_workspace,

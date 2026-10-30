@@ -87,7 +87,3 @@ path = "tests/integration.rs"
 [[test]]
 name = "serial"
 path = "tests/serial.rs"
-
-[[test]]
-name = "runtime_owned_cpu_pool"
-path = "tests/runtime_owned_cpu_pool.rs"

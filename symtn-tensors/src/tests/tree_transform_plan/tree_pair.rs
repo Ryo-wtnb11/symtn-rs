@@ -541,7 +541,7 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
         let prepared = build_tree_pair_transform_group_plan_validated_with_threads(
             &proof,
             operation.clone(),
-            threads,
+            &mut symtn_operations::host_pool::test_engine(threads),
         )
         .unwrap();
 
@@ -575,6 +575,7 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
 
 #[test]
 fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: runtime-rank operation storage preserves the per-source tree,
     // coefficient, compiled-layout, and replay oracle above the old boundary.
     use crate::tree_transform::{
@@ -622,8 +623,12 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
 
     let tree_pair_operation_preparations_rec = probe::record();
     let tree_pair_lowering_calls_rec = probe::record();
-    let plan =
-        build_tree_pair_transform_group_plan_validated_with_threads(&proof, operation, 1).unwrap();
+    let plan = build_tree_pair_transform_group_plan_validated_with_threads(
+        &proof,
+        operation,
+        &mut symtn_operations::host_pool::test_engine(1),
+    )
+    .unwrap();
 
     assert_eq!(structure.fusion_tree_groups().len(), 3);
     assert_eq!(
@@ -687,6 +692,7 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -697,6 +703,7 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
     )
     .unwrap();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &oracle_compiled,
@@ -722,6 +729,7 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
 
 #[test]
 fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let source0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -823,6 +831,7 @@ fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
     let mut direct_workspace = TreeTransformWorkspace::default();
     let mut row_callback_workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut direct_backend,
         &mut direct_workspace,
         &direct_structure,
@@ -833,6 +842,7 @@ fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
     )
     .unwrap();
     replay_into(
+        engine,
         &mut row_callback_backend,
         &mut row_callback_workspace,
         &row_callback_structure,
@@ -860,7 +870,7 @@ fn product_tree_pair_plan_is_thread_count_invariant() {
 
     let (rule, src_space, dst_space, [c0, c1]) = fz2_u1_su2_tree_pair_fixture();
     let operation = TreeTransformOperation::permute([1, 0], [2]);
-    let build = |threads| {
+    let build = |threads: &mut dyn symtn_dense::Engine| {
         let proof = validate_multiplicity_free_tree_pair_preflight(
             &rule,
             &operation,
@@ -875,9 +885,9 @@ fn product_tree_pair_plan_is_thread_count_invariant() {
         .unwrap()
     };
 
-    let serial = build(1);
+    let serial = build(&mut symtn_operations::host_pool::test_engine(1));
     for threads in [2, 4] {
-        let threaded = build(threads);
+        let threaded = build(&mut symtn_operations::host_pool::test_engine(threads));
         // What: product-symmetry fermionic phases and plan order are identical
         // when scheduling the same fusion groups.
         assert_eq!(threaded, serial);
@@ -928,6 +938,7 @@ fn tree_pair_transform_public_helper_executes_product_fz2_u1_su2_blocks() {
 
 #[test]
 fn product_tree_transformers_are_shared_by_independent_resolutions() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     let operation = TreeTransformOperation::permute([1, 0], [2]);
     let src = TestTensor::<f64>::from_vec_with_fusion_space(vec![10.0, 20.0], src_space).unwrap();
@@ -944,6 +955,7 @@ fn product_tree_transformers_are_shared_by_independent_resolutions() {
     let mut context = TreeTransformExecutionContext::<f64, RuleIdentity>::default();
     let from_context = context
         .tree_structure(
+            engine,
             &rule,
             &operation,
             dst.structure(),
@@ -973,13 +985,27 @@ fn recoupling_threads_do_not_change_cached_tree_transform_result() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     mark_canonical([dst.structure().as_ref(), src.structure().as_ref()]);
     let mut planning = crate::tree_transform::TreeTransformPlanning::default();
-    planning.set_recoupling_threads(std::num::NonZeroUsize::new(1).unwrap());
+    let engine = &mut symtn_operations::host_pool::test_engine(1);
     let serial = planning
-        .resolve_tree_pair(&rule, &operation, dst.structure(), src.structure(), false)
+        .resolve_tree_pair(
+            engine,
+            &rule,
+            &operation,
+            dst.structure(),
+            src.structure(),
+            false,
+        )
         .unwrap();
-    planning.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
+    let engine = &mut symtn_operations::host_pool::test_engine(4);
     let cached = planning
-        .resolve_tree_pair(&rule, &operation, dst.structure(), src.structure(), false)
+        .resolve_tree_pair(
+            engine,
+            &rule,
+            &operation,
+            dst.structure(),
+            src.structure(),
+            false,
+        )
         .unwrap();
     // The thread count is not a key determinant: the second call hits.
     assert!(same_core(&serial, &cached));
@@ -988,7 +1014,7 @@ fn recoupling_threads_do_not_change_cached_tree_transform_result() {
     let expert_dst = expert_copy(dst.structure());
     let expert_src = expert_copy(src.structure());
     let eager = planning
-        .resolve_tree_pair(&rule, &operation, &expert_dst, &expert_src, false)
+        .resolve_tree_pair(engine, &rule, &operation, &expert_dst, &expert_src, false)
         .unwrap();
     assert!(!same_core(&eager, &cached));
     assert_eq!(eager.blocks(), cached.blocks());
@@ -1011,6 +1037,7 @@ fn recoupling_threads_do_not_change_cached_tree_transform_result() {
     let mut cached_workspace = TreeTransformWorkspace::default();
     let mut eager_workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut cached_backend,
         &mut cached_workspace,
         &cached,
@@ -1021,6 +1048,7 @@ fn recoupling_threads_do_not_change_cached_tree_transform_result() {
     )
     .unwrap();
     replay_into(
+        engine,
         &mut eager_backend,
         &mut eager_workspace,
         &eager,
@@ -1121,6 +1149,7 @@ fn tree_pair_transform_public_helper_executes_product_with_complex_data() {
 
 #[test]
 fn tree_transform_structure_replays_product_without_recompiling() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (rule, src_space, dst_space, [c0, c1]) = fz2_u1_su2_tree_pair_fixture();
     let operation = TreeTransformOperation::permute([1, 0], [2]);
     let mut src =
@@ -1147,6 +1176,7 @@ fn tree_transform_structure_replays_product_without_recompiling() {
         3.0,
     );
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -1177,6 +1207,7 @@ fn tree_transform_structure_replays_product_without_recompiling() {
         0.5,
     );
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -1196,6 +1227,7 @@ fn tree_transform_structure_replays_product_without_recompiling() {
 
 #[test]
 fn tree_transform_overwrite_context_ignores_destination_bits() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     type RuleKey = <FpU1Su2Rule as TreeTransformRuleCacheKey>::Key;
     let operation = TreeTransformOperation::permute([1, 0], [2]);
@@ -1235,6 +1267,7 @@ fn tree_transform_overwrite_context_ignores_destination_bits() {
         cached.data_mut().fill(f64::NAN);
         context
             .tree_transform_dyn_overwrite_into_ref(
+                engine,
                 &rule,
                 &operation,
                 &dst_structure,
@@ -1252,6 +1285,7 @@ fn tree_transform_overwrite_context_ignores_destination_bits() {
     cached.data_mut().fill(0.0);
     context
         .tree_transform_dyn_into_ref(
+            engine,
             &rule,
             &operation,
             &dst_structure,
@@ -1267,6 +1301,7 @@ fn tree_transform_overwrite_context_ignores_destination_bits() {
 
 #[test]
 fn product_resolution_compiles_distinct_degeneracy_shapes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     let operation = TreeTransformOperation::permute([1, 0], [2]);
     let src =
@@ -1317,6 +1352,7 @@ fn product_resolution_compiles_distinct_degeneracy_shapes() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -1533,6 +1569,7 @@ macro_rules! assert_rank5_compact_transpose_replays_like_per_pair {
             )
             .unwrap();
             replay_into(
+                &mut symtn_dense::CpuEngine::serial(),
                 &mut DenseTreeTransformOperations::default(),
                 &mut TreeTransformWorkspace::default(),
                 compiled,

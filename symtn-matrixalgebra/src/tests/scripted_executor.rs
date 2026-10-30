@@ -13,6 +13,7 @@
 #![allow(dead_code)]
 
 use std::ops::{Deref, DerefMut};
+use symtn_dense::Engine;
 
 use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
@@ -274,27 +275,44 @@ impl<O: Observer> DerefMut for ScriptedExecutor<O> {
 struct Defaulted<'a, O: Observer>(&'a mut ScriptedExecutor<O>);
 
 impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.svd(input)
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
     }
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.qr(input)
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
     }
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.eigh(input)
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
     }
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
         config: &DenseDotConfig,
     ) -> Result<(), DenseError> {
-        self.0.dot_general_into(output, lhs, rhs, config)
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
     // The one provided entry another default body calls (`eig_vals`).
-    fn eig(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.0.eig(input)
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eig(engine, input)
     }
 }
 
@@ -303,17 +321,30 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
 struct DefaultEig;
 
 impl DenseExecutor for DefaultEig {
-    fn svd(&mut self, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         unreachable!("the default eig calls no other entry")
     }
-    fn qr(&mut self, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn qr(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         unreachable!("the default eig calls no other entry")
     }
-    fn eigh(&mut self, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         unreachable!("the default eig calls no other entry")
     }
     fn dot_general_into(
         &mut self,
+        _engine: &mut dyn Engine,
         _: DenseWrite<'_>,
         _: DenseRead<'_>,
         _: DenseRead<'_>,
@@ -327,21 +358,19 @@ impl<O: Observer> ScriptedExecutor<O> {
     /// The owned-output entries: `svd`, `qr`, `eigh`, `eig`.
     fn owned(
         &mut self,
+        engine: &mut dyn Engine,
         op: Op,
         input: DenseRead<'_>,
-        forward: fn(
-            &mut DefaultDenseExecutor,
-            DenseRead<'_>,
-        ) -> Result<Vec<DenseTensor>, DenseError>,
-        default: fn(&mut Defaulted<'_, O>, DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError>,
+        forward: ForwardCall<Vec<DenseTensor>>,
+        default: DefaultCall<O, Vec<DenseTensor>>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
         let action = self.script.enter(op)?;
         if let Some(reply) = self.observer.call(Call::Read(op, &input)) {
             return reply;
         }
         let outputs = match action {
-            Action::Forward => forward(&mut self.script.inner, input),
-            _ => default(&mut Defaulted(self), input),
+            Action::Forward => forward(&mut self.script.inner, engine, input),
+            _ => default(&mut Defaulted(self), engine, input),
         }?;
         self.observer.outputs(op, &outputs);
         Ok(outputs)
@@ -350,10 +379,11 @@ impl<O: Observer> ScriptedExecutor<O> {
     /// The values-only entries.
     fn values(
         &mut self,
+        engine: &mut dyn Engine,
         op: Op,
         input: DenseRead<'_>,
-        forward: fn(&mut DefaultDenseExecutor, DenseRead<'_>) -> Result<DenseTensor, DenseError>,
-        default: fn(&mut Defaulted<'_, O>, DenseRead<'_>) -> Result<DenseTensor, DenseError>,
+        forward: ForwardCall<DenseTensor>,
+        default: DefaultCall<O, DenseTensor>,
     ) -> Result<DenseTensor, DenseError> {
         let action = self.script.enter(op)?;
         assert!(
@@ -361,68 +391,121 @@ impl<O: Observer> ScriptedExecutor<O> {
             "values-only entries take no observer reply"
         );
         match action {
-            Action::Forward => forward(&mut self.script.inner, input),
-            _ => default(&mut Defaulted(self), input),
+            Action::Forward => forward(&mut self.script.inner, engine, input),
+            _ => default(&mut Defaulted(self), engine, input),
         }
     }
 }
 
+/// A forwarded call to the wrapped executor.
+type ForwardCall<T> =
+    fn(&mut DefaultDenseExecutor, &mut dyn Engine, DenseRead<'_>) -> Result<T, DenseError>;
+/// A call answered by the trait default over the scripted executor.
+type DefaultCall<O, T> =
+    for<'a> fn(&mut Defaulted<'a, O>, &mut dyn Engine, DenseRead<'_>) -> Result<T, DenseError>;
+
 impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         self.owned(
+            engine,
             Op::Svd,
             input,
-            |e, i| e.svd(i),
-            |e, i| e.0.script.inner.svd(i),
+            |e, engine, i| e.svd(engine, i),
+            |e, engine, i| e.0.script.inner.svd(engine, i),
         )
     }
 
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.owned(Op::Qr, input, |e, i| e.qr(i), |e, i| e.0.script.inner.qr(i))
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.owned(
+            engine,
+            Op::Qr,
+            input,
+            |e, engine, i| e.qr(engine, i),
+            |e, engine, i| e.0.script.inner.qr(engine, i),
+        )
     }
 
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
         self.owned(
+            engine,
             Op::Eigh,
             input,
-            |e, i| e.eigh(i),
-            |e, i| e.0.script.inner.eigh(i),
+            |e, engine, i| e.eigh(engine, i),
+            |e, engine, i| e.0.script.inner.eigh(engine, i),
         )
     }
 
-    fn eig(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.owned(Op::Eig, input, |e, i| e.eig(i), |_, i| DefaultEig.eig(i))
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.owned(
+            engine,
+            Op::Eig,
+            input,
+            |e, engine, i| e.eig(engine, i),
+            |_, engine, i| DefaultEig.eig(engine, i),
+        )
     }
 
-    fn svd_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
+    fn svd_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
         self.values(
+            engine,
             Op::SvdVals,
             input,
-            |e, i| e.svd_vals(i),
-            |e, i| e.svd_vals(i),
+            |e, engine, i| e.svd_vals(engine, i),
+            |e, engine, i| e.svd_vals(engine, i),
         )
     }
 
-    fn eigh_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
+    fn eigh_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
         self.values(
+            engine,
             Op::EighVals,
             input,
-            |e, i| e.eigh_vals(i),
-            |e, i| e.eigh_vals(i),
+            |e, engine, i| e.eigh_vals(engine, i),
+            |e, engine, i| e.eigh_vals(engine, i),
         )
     }
 
-    fn eig_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
+    fn eig_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
         self.values(
+            engine,
             Op::EigVals,
             input,
-            |e, i| e.eig_vals(i),
-            |e, i| e.eig_vals(i),
+            |e, engine, i| e.eig_vals(engine, i),
+            |e, engine, i| e.eig_vals(engine, i),
         )
     }
 
     fn svd_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         u: DenseWrite<'_>,
         s: DenseWrite<'_>,
@@ -436,13 +519,14 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             return reply.map(drop);
         }
         match action {
-            Action::Forward => self.script.inner.svd_into(input, u, s, vt),
-            _ => Defaulted(self).svd_into(input, u, s, vt),
+            Action::Forward => self.script.inner.svd_into(engine, input, u, s, vt),
+            _ => Defaulted(self).svd_into(engine, input, u, s, vt),
         }
     }
 
     fn qr_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         q: DenseWrite<'_>,
         r: DenseWrite<'_>,
@@ -455,13 +539,14 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             return reply.map(drop);
         }
         match action {
-            Action::Forward => self.script.inner.qr_into(input, q, r),
-            _ => Defaulted(self).qr_into(input, q, r),
+            Action::Forward => self.script.inner.qr_into(engine, input, q, r),
+            _ => Defaulted(self).qr_into(engine, input, q, r),
         }
     }
 
     fn eigh_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         values: DenseWrite<'_>,
         vectors: DenseWrite<'_>,
@@ -474,13 +559,14 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             return reply.map(drop);
         }
         match action {
-            Action::Forward => self.script.inner.eigh_into(input, values, vectors),
-            _ => Defaulted(self).eigh_into(input, values, vectors),
+            Action::Forward => self.script.inner.eigh_into(engine, input, values, vectors),
+            _ => Defaulted(self).eigh_into(engine, input, values, vectors),
         }
     }
 
     fn solve_into(
         &mut self,
+        engine: &mut dyn Engine,
         a: DenseRead<'_>,
         b: DenseRead<'_>,
         x: DenseWrite<'_>,
@@ -494,13 +580,14 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             return reply.map(drop);
         }
         match action {
-            Action::Forward => self.script.inner.solve_into(a, b, x),
-            _ => Defaulted(self).solve_into(a, b, x),
+            Action::Forward => self.script.inner.solve_into(engine, a, b, x),
+            _ => Defaulted(self).solve_into(engine, a, b, x),
         }
     }
 
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -514,7 +601,9 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
         }) {
             return reply.map(drop);
         }
-        self.script.inner.dot_general_into(output, lhs, rhs, config)
+        self.script
+            .inner
+            .dot_general_into(engine, output, lhs, rhs, config)
     }
 
     fn supports_svd_full(&self) -> bool {
@@ -523,24 +612,26 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
 
     fn svd_full_owned(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseOwned,
         rows: usize,
         cols: usize,
     ) -> Result<Vec<DenseTensor>, DenseError> {
         match self.script.enter(Op::SvdFullOwned)? {
-            Action::Forward => self.script.inner.svd_full_owned(input, rows, cols),
-            _ => Defaulted(self).svd_full_owned(input, rows, cols),
+            Action::Forward => self.script.inner.svd_full_owned(engine, input, rows, cols),
+            _ => Defaulted(self).svd_full_owned(engine, input, rows, cols),
         }
     }
 
     fn factorize_batch(
         &mut self,
+        engine: &mut dyn Engine,
         op: DenseFactorization,
         inputs: &[DenseRead<'_>],
     ) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
         let mut outputs = match self.script.enter(Op::FactorizeBatch)? {
-            Action::Forward => self.script.inner.factorize_batch(op, inputs),
-            _ => Defaulted(self).factorize_batch(op, inputs),
+            Action::Forward => self.script.inner.factorize_batch(engine, op, inputs),
+            _ => Defaulted(self).factorize_batch(engine, op, inputs),
         }?;
         self.observer.batch_outputs(&mut outputs);
         Ok(outputs)

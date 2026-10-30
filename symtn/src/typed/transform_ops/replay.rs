@@ -1,6 +1,6 @@
 use super::*;
 
-/// The pooled tree-transform lane of payload `D` and coefficient `C`.
+/// The tree-transform lane of payload `D` and coefficient `C`.
 type TreeLane<D, C> = symtn_tensors::TreeTransformExecutionContext<
     D,
     symtn_core::RuleIdentity,
@@ -8,7 +8,7 @@ type TreeLane<D, C> = symtn_tensors::TreeTransformExecutionContext<
     symtn_tensors::DenseTreeTransformOperations,
 >;
 
-/// Which pooled lane a mode stages and replays its transforms and
+/// Which execution-context lane a mode stages and replays its transforms and
 /// contractions on.
 pub(in crate::typed) trait HostTreeLane<D, C>
 where
@@ -60,6 +60,7 @@ where
 }
 
 type OwnedReplay<D, C> = fn(
+    &mut dyn Engine,
     &mut crate::runtime::TensorExecutionContext,
     &symtn_tensors::TreeTransformStructure<C>,
     &Arc<BlockStructure>,
@@ -70,6 +71,7 @@ type OwnedReplay<D, C> = fn(
 ) -> Result<Vec<D>, TransformExecError>;
 
 type IntoReplay<D, C> = fn(
+    &mut dyn Engine,
     &mut crate::runtime::TensorExecutionContext,
     &symtn_tensors::TreeTransformStructure<C>,
     &Arc<BlockStructure>,
@@ -80,7 +82,9 @@ type IntoReplay<D, C> = fn(
     D,
 ) -> Result<(), TransformExecError>;
 
+#[allow(clippy::too_many_arguments)]
 fn host_owned_replay<L, D, C>(
+    engine: &mut dyn Engine,
     context: &mut crate::runtime::TensorExecutionContext,
     structure: &symtn_tensors::TreeTransformStructure<C>,
     destination: &Arc<BlockStructure>,
@@ -97,12 +101,13 @@ where
     C: symtn_tensors::DenseBlockScalar,
 {
     L::lane(context)?
-        .replay_tree_transform_dyn_owned(structure, destination, source, nout, data, alpha)
+        .replay_tree_transform_dyn_owned(engine, structure, destination, source, nout, data, alpha)
         .map_err(TransformExecError::Replay)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn host_into_replay<L, D, C>(
+    engine: &mut dyn Engine,
     context: &mut crate::runtime::TensorExecutionContext,
     structure: &symtn_tensors::TreeTransformStructure<C>,
     destination: &Arc<BlockStructure>,
@@ -121,6 +126,7 @@ where
 {
     L::lane(context)?
         .replay_tree_transform_dyn_into(
+            engine,
             structure,
             destination,
             source,
@@ -133,23 +139,18 @@ where
 }
 
 /// One staged tree-transform replay, handed to the storage kernel by value:
-/// the pooled context lease the transform was staged under, the completed
+/// the execution context the transform was staged in, the completed
 /// transformer, and the stored block structures it maps between.
 ///
-/// Host replays under that lease, so a Host transform still takes one lease;
-/// CUDA releases it before taking the device lease. The Host replay of the
+/// Host replays in that context, so a Host transform builds one context;
+/// CUDA drops it before taking the device lease. The Host replay of the
 /// staging mode's lane is bound here, where that lane's scalar bounds are
 /// proved.
 ///
 /// Internal and unstable despite being public for [`TransformExec`].
 #[doc(hidden)]
 pub struct TreeReplay<'a, D, C> {
-    #[cfg_attr(
-        not(feature = "cuda"),
-        allow(dead_code, reason = "the device kernel takes its device lease here")
-    )]
-    pub(in crate::typed) runtime: &'a Runtime,
-    pub(in crate::typed) lease: crate::runtime::ContextLease<'a>,
+    pub(in crate::typed) lease: crate::runtime::ContextLease,
     owned: OwnedReplay<D, C>,
     into: IntoReplay<D, C>,
     pub(in crate::typed) structure: &'a symtn_tensors::TreeTransformStructure<C>,
@@ -167,15 +168,13 @@ where
 {
     /// A replay of `structure` on lane `L`, `destination <- source`.
     pub(in crate::typed) fn new<L: HostTreeLane<D, C>>(
-        runtime: &'a Runtime,
-        lease: crate::runtime::ContextLease<'a>,
+        lease: crate::runtime::ContextLease,
         structure: &'a symtn_tensors::TreeTransformStructure<C>,
         destination: &'a Arc<BlockStructure>,
         source: &'a Arc<BlockStructure>,
         nout: usize,
     ) -> Self {
         Self {
-            runtime,
             lease,
             owned: host_owned_replay::<L, D, C>,
             into: host_into_replay::<L, D, C>,
@@ -188,12 +187,10 @@ where
 
     /// The replay of a staged transform on lane `L`.
     pub(in crate::typed) fn staged<L: HostTreeLane<D, C>, R, T>(
-        runtime: &'a Runtime,
-        lease: crate::runtime::ContextLease<'a>,
+        lease: crate::runtime::ContextLease,
         staged: &'a symtn_tensors::StagedTreeTransform<'_, R, T, C>,
     ) -> Self {
         Self::new::<L>(
-            runtime,
             lease,
             staged.structure(),
             staged.destination_structure(),
@@ -213,6 +210,12 @@ pub enum TransformExecError {
     Replay(OperationError),
     /// A storage, placement or capability error.
     Storage(Error),
+}
+
+impl From<OperationError> for TransformExecError {
+    fn from(error: OperationError) -> Self {
+        Self::Replay(error)
+    }
 }
 
 impl From<Error> for TransformExecError {
@@ -272,6 +275,7 @@ pub trait TransformExec<R, D>: TypedStorage<R, D> {
     /// `alpha · structure(t)` into a fresh payload of `replay`'s destination
     /// structure, for an owned `t` (Host densifies a compact diagonal).
     fn replay_owned<C: Copy>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: TreeReplay<'_, D, C>,
         t: &TensorMap<R, D, Self>,
@@ -283,6 +287,7 @@ pub trait TransformExec<R, D>: TypedStorage<R, D> {
     /// `destination = alpha · structure(source) + beta · destination` into a
     /// destination that passed every admission check.
     fn replay_into<C: Copy>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: TreeReplay<'_, D, C>,
         source: TransformIntoSource<'_, D, Self, C>,
@@ -296,6 +301,7 @@ pub trait TransformExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
     fn replay_owned<C: Copy>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: TreeReplay<'_, D, C>,
         t: &TensorMap<R, D>,
@@ -315,6 +321,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
             ..
         } = replay;
         owned(
+            engine,
             lease.context(),
             structure,
             destination,
@@ -326,6 +333,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
     }
 
     fn replay_into<C: Copy>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: TreeReplay<'_, D, C>,
         source: TransformIntoSource<'_, D, Self, C>,
@@ -353,6 +361,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
             }
         };
         into(
+            engine,
             lease.context(),
             structure,
             destination_structure,

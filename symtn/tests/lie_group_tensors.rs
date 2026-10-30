@@ -7,6 +7,7 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use fusion_symbols::lie::{GroupId, LieError};
 use num_complex::Complex64;
@@ -129,6 +130,7 @@ fn graded_space_preserves_typed_global_form_rejections() {
 }
 
 fn host_round_trips<D>(
+    engine: &mut dyn Engine,
     group: GroupId,
     label: &[i64],
     coupled: &[i64],
@@ -137,25 +139,30 @@ fn host_round_trips<D>(
 ) where
     D: TensorScalar + numerics::Numeric,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(LieGroupFusionRule::new(group).unwrap());
     let left = GradedSpace::try_new(Arc::clone(&provider), [(label.to_vec(), 2)]).unwrap();
     let right = GradedSpace::try_new(Arc::clone(&provider), [(label.to_vec(), 3)]).unwrap();
     let output = GradedSpace::try_new(provider, [(coupled.to_vec(), 2)]).unwrap();
-    let source: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&left, &right], [&output], |trees, indices| {
+    let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&left, &right],
+        [&output],
+        |trees, indices| {
             value(
                 1 + 100 * trees.codomain_vertices()[0].get()
                     + indices[0]
                     + 3 * indices[1]
                     + 11 * indices[2],
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert_eq!(source.subblock_count(), multiplicity);
     assert_eq!(source.dense_data().unwrap().len(), 12 * multiplicity);
-    let swapped = source.permute(&[1, 0], &[2]).unwrap();
-    let restored = swapped.permute(&[1, 0], &[2]).unwrap();
+    let swapped = source.permute(engine, &[1, 0], &[2]).unwrap();
+    let restored = swapped.permute(engine, &[1, 0], &[2]).unwrap();
     assert_eq!(restored.codomain(), source.codomain());
     assert_eq!(restored.domain(), source.domain());
     // Both operations are linear. Every output entry receives at most all
@@ -167,8 +174,8 @@ fn host_round_trips<D>(
         source.dense_data().unwrap(),
         terms,
     );
-    let bent = source.repartition(1).unwrap();
-    let restored = bent.repartition(2).unwrap();
+    let bent = source.repartition(engine, 1).unwrap();
+    let restored = bent.repartition(engine, 2).unwrap();
     assert_eq!(restored.codomain(), source.codomain());
     assert_eq!(restored.domain(), source.domain());
     numerics::assert_nonzero_slices_close(
@@ -181,6 +188,7 @@ fn host_round_trips<D>(
 
 #[test]
 fn host_real_and_complex_lie_tensors_preserve_fs_multiplicity_and_duality() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     for (group, label, coupled, multiplicity) in [
         // Quaternionic Sp fundamental: FS=-1, bosonic twist=+1.
         (GroupId::sp(4).unwrap(), vec![1, 0], vec![0, 0], 1),
@@ -189,10 +197,10 @@ fn host_real_and_complex_lie_tensors_preserve_fs_multiplicity_and_duality() {
         // D3 chiral 4 is non-self-dual, and 4x4 -> 6 is allowed.
         (GroupId::spin(6).unwrap(), vec![0, 0, 1], vec![1, 0, 0], 1),
     ] {
-        host_round_trips(group.clone(), &label, &coupled, multiplicity, |i| {
+        host_round_trips(engine, group.clone(), &label, &coupled, multiplicity, |i| {
             i as f64 / 8.0
         });
-        host_round_trips(group, &label, &coupled, multiplicity, |i| {
+        host_round_trips(engine, group, &label, &coupled, multiplicity, |i| {
             Complex64::new(i as f64 / 8.0, (i + 1) as f64 / 16.0)
         });
     }

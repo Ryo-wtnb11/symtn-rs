@@ -8,6 +8,7 @@ use super::*;
     reason = "the raw kernel boundary keeps adapter, workspace, replay structures, buffers, and alpha/beta explicit"
 )]
 pub fn tree_transform_structure_with_strided_kernel_raw<A, D, C>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     workspace: &mut TreeTransformWorkspace<D>,
     structure: &TreeTransformStructure<C>,
@@ -27,11 +28,13 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
     tree_transform_structure_with_strided_kernel_raw_mode(
+        exec,
         kernels,
         workspace,
         structure,
@@ -50,6 +53,7 @@ where
     reason = "the overwrite kernel boundary keeps adapter, workspace, replay structures, buffers, and alpha explicit"
 )]
 pub fn tree_transform_structure_overwrite_with_strided_kernel_raw<A, D, C>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     workspace: &mut TreeTransformWorkspace<D>,
     structure: &TreeTransformStructure<C>,
@@ -68,11 +72,13 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
     tree_transform_structure_with_strided_kernel_raw_mode(
+        exec,
         kernels,
         workspace,
         structure,
@@ -91,6 +97,7 @@ where
     reason = "the shared replay helper preserves the raw kernel inputs and destination update mode explicitly"
 )]
 fn tree_transform_structure_with_strided_kernel_raw_mode<A, D, C>(
+    mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     workspace: &mut TreeTransformWorkspace<D>,
     structure: &TreeTransformStructure<C>,
@@ -110,7 +117,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
@@ -119,7 +127,14 @@ where
     validate_replay_storage_len(src_structure, src_data.len())?;
     let task = structure.task_view()?;
     workspace.prepare_fused_indices(1, structure.layouts().max_fused_rank())?;
-    scale_inactive_destinations(kernels, &mut workspace.zero_strides, task, dst_data, mode)?;
+    scale_inactive_destinations(
+        exec.reborrow(),
+        kernels,
+        &mut workspace.zero_strides,
+        task,
+        dst_data,
+        mode,
+    )?;
     for (block_index, block) in structure.blocks().iter().enumerate() {
         match *block {
             TreeTransformBlock::Single {
@@ -127,6 +142,7 @@ where
                 src_layout,
                 coefficient,
             } => tree_transform_single_with_strided_kernel(
+                exec.reborrow(),
                 kernels,
                 &mut workspace.zero_strides,
                 Some(workspace.fused_indices.as_mut_slice()),
@@ -148,6 +164,7 @@ where
                 element_count,
                 ..
             } => tree_transform_multi_with_pack_gemm_scatter(
+                exec.reborrow(),
                 kernels,
                 workspace,
                 structure.layouts(),
@@ -178,6 +195,7 @@ where
 /// recoupling batches between their pack and scatter phases.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tree_transform_structure_with_structural_recoupling_raw<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -197,6 +215,7 @@ where
     C: Copy + Sync,
 {
     tree_transform_structure_with_structural_recoupling_raw_mode(
+        engine,
         kernels,
         dense,
         workspace,
@@ -218,6 +237,7 @@ where
 /// zero fills stay unscaled, as on the device.
 #[allow(clippy::too_many_arguments)]
 pub fn tree_transform_structure_overwrite_with_structural_recoupling_raw<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -237,6 +257,7 @@ where
     C: Copy + Sync,
 {
     tree_transform_structure_with_structural_recoupling_raw_mode(
+        engine,
         kernels,
         dense,
         workspace,
@@ -253,6 +274,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn tree_transform_structure_with_structural_recoupling_raw_mode<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -279,7 +301,7 @@ where
         src_data.len(),
     )?;
     let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(schedule, threads);
+    let threads = effective_tree_transform_threads(engine, schedule, threads);
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
     checked_fused_index_len(threads, requirements.fused_index_len_per_worker)?;
@@ -289,9 +311,19 @@ where
         // structure-identity check makes that call a no-work cache hit.
         ensure_recoupling_coefficients(workspace, task, structure.identity_marker())?;
     }
-    scale_inactive_destinations(kernels, &mut workspace.zero_strides, task, dst_data, mode)?;
+    crate::host_pool::with_exec(engine, |exec| {
+        scale_inactive_destinations(
+            exec,
+            kernels,
+            &mut workspace.zero_strides,
+            task,
+            dst_data,
+            mode,
+        )
+    })?;
     if threads > 1 {
         return tree_transform_blocks_with_batched_recoupling_parallel(
+            engine,
             kernels,
             dense,
             workspace,
@@ -307,6 +339,7 @@ where
         );
     }
     tree_transform_blocks_with_batched_recoupling(
+        engine,
         kernels,
         dense,
         workspace,
@@ -322,6 +355,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tree_transform_structure_with_structural_recoupling_raw_profiled<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -342,6 +376,7 @@ where
     C: Copy + Sync,
 {
     tree_transform_structure_with_structural_recoupling_raw_profiled_mode(
+        engine,
         kernels,
         dense,
         workspace,
@@ -364,6 +399,7 @@ pub(crate) fn tree_transform_structure_overwrite_with_structural_recoupling_raw_
     D,
     C,
 >(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -384,6 +420,7 @@ where
     C: Copy + Sync,
 {
     tree_transform_structure_with_structural_recoupling_raw_profiled_mode(
+        engine,
         kernels,
         dense,
         workspace,
@@ -401,6 +438,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn tree_transform_structure_with_structural_recoupling_raw_profiled_mode<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -432,7 +470,7 @@ where
     )?;
 
     let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(schedule, threads);
+    let threads = effective_tree_transform_threads(engine, schedule, threads);
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
     checked_fused_index_len(threads, requirements.fused_index_len_per_worker)?;
@@ -448,11 +486,21 @@ where
     }
 
     let start = std::time::Instant::now();
-    scale_inactive_destinations(kernels, &mut workspace.zero_strides, task, dst_data, mode)?;
+    crate::host_pool::with_exec(engine, |exec| {
+        scale_inactive_destinations(
+            exec,
+            kernels,
+            &mut workspace.zero_strides,
+            task,
+            dst_data,
+            mode,
+        )
+    })?;
     profile.strided_kernel += start.elapsed();
 
     if threads > 1 {
         tree_transform_blocks_with_batched_recoupling_parallel(
+            engine,
             kernels,
             dense,
             workspace,
@@ -468,6 +516,7 @@ where
         )?;
     } else {
         tree_transform_blocks_with_batched_recoupling(
+            engine,
             kernels,
             dense,
             workspace,

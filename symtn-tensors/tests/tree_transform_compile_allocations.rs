@@ -2,6 +2,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use symtn_dense::Engine;
 
 use symtn_core::{
     BlockKey, BlockStructure, BraidingStyleKind, DegeneracyStructure, FusionProductSpace,
@@ -36,6 +37,7 @@ fn bound_source<R: MultiplicityFreeFusionRule, const N: usize>(
 /// The eager staging of `operation` on `source`: destination derivation plus
 /// the completed-transformer resolution.
 fn stage<R>(
+    engine: &mut dyn Engine,
     context: &mut TreeTransformExecutionContext<f64, RuleIdentity>,
     source: &BoundDynamicFusionMapSpace<R>,
     operation: &TreeTransformOperation,
@@ -46,7 +48,7 @@ where
 {
     let src_len = source.space().required_len().unwrap();
     context
-        .stage_tree_transform_multiplicity_free_in(source, None, src_len, operation)
+        .stage_tree_transform_multiplicity_free_in(engine, source, None, src_len, operation)
         .unwrap()
         .structure()
         .clone()
@@ -224,6 +226,7 @@ fn rank_129_su2_vacuum_structure() -> BlockStructure {
 
 #[test]
 fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_work() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     symtn_core::clear_structure_caches();
 
@@ -242,12 +245,12 @@ fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_wo
     symtn_core::testing::mark_structure_canonical(source.space().structure());
     let operation = TreeTransformOperation::permute(0..129, []);
     let mut context = TreeTransformExecutionContext::<f64, RuleIdentity>::default();
-    let cold = stage(&mut context, &source, &operation);
+    let cold = stage(engine, &mut context, &source, &operation);
     assert!(calls.load(Ordering::Relaxed) > 0);
 
     calls.store(0, Ordering::Relaxed);
     counting_alloc::start();
-    let warm = stage(&mut context, &source, &operation);
+    let warm = stage(engine, &mut context, &source, &operation);
     let staged = counting_alloc::stop();
     let staged_calls = calls.swap(0, Ordering::Relaxed);
     counting_alloc::start();
@@ -327,6 +330,7 @@ fn rank_eight_su2_layout(half_legs: usize) -> BoundDynamicFusionMapSpace<SU2Fusi
 /// Cold allocation calls of the staging of `operation` on `source`, less
 /// those of its destination derivation alone, each from cleared caches.
 fn cold_resolution_allocations<R>(
+    engine: &mut dyn Engine,
     source: &BoundDynamicFusionMapSpace<R>,
     operation: &TreeTransformOperation,
 ) -> (u64, u64, u64)
@@ -341,7 +345,7 @@ where
     symtn_core::clear_structure_caches();
     let mut context = TreeTransformExecutionContext::<f64, RuleIdentity>::default();
     counting_alloc::start();
-    let structure = stage(&mut context, source, operation);
+    let structure = stage(engine, &mut context, source, operation);
     let staged = counting_alloc::stop();
     std::hint::black_box(structure);
     (
@@ -353,17 +357,18 @@ where
 
 #[test]
 fn cold_ordered_tree_pair_staging_stays_within_allocation_envelopes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
 
     // What: exact counts cover missing-position plan compilation after registry
     // capacity exists, independently of unrelated typed-cache test order.
     let operation = TreeTransformOperation::permute(0..8, []);
-    cold_resolution_allocations(&rank_eight_su2_layout(2), &operation);
+    cold_resolution_allocations(engine, &rank_eight_su2_layout(2), &operation);
 
     for half_legs in [2, 4, 6, 8] {
         let source = rank_eight_su2_layout(half_legs);
         let blocks = source.space().structure().block_count();
-        let (resolution, _, staged) = cold_resolution_allocations(&source, &operation);
+        let (resolution, _, staged) = cold_resolution_allocations(engine, &source, &operation);
         eprintln!("blocks={blocks}: staging {staged}, resolution {resolution}");
 
         // What: the staging's ordered whole-block resolution stays within the
@@ -381,6 +386,7 @@ fn cold_ordered_tree_pair_staging_stays_within_allocation_envelopes() {
 
 #[test]
 fn rank_nine_same_split_groups_stay_within_the_cold_resolution_allocation_budget() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let vacuum = SU2FusionRule.vacuum();
     let leg =
@@ -394,7 +400,7 @@ fn rank_nine_same_split_groups_stay_within_the_cold_resolution_allocation_budget
         rank_nine_same_split_su2_groups(),
     );
     let operation = TreeTransformOperation::braid([1, 0, 2, 3, 4, 5, 6, 7, 8], [], 0..9, []);
-    let (calls, bytes, staged) = cold_resolution_allocations(&source, &operation);
+    let (calls, bytes, staged) = cold_resolution_allocations(engine, &source, &operation);
     eprintln!("rank-9 groups: staging {staged}, resolution {calls} calls / {bytes} bytes");
 
     // What: three same-split groups do not regress beyond the prior compiled
@@ -765,6 +771,7 @@ fn rank_six_u1_layout() -> BoundDynamicFusionMapSpace<U1FusionRule> {
 
 #[test]
 fn unique_cache_three_misses_reuse_the_context_tree_pair_scratch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the Unique compile's tree-pair scratch (three trees of three
     // buffers) belongs to the execution context, so only a context's first
@@ -774,7 +781,7 @@ fn unique_cache_three_misses_reuse_the_context_tree_pair_scratch() {
     let adjoint = symtn_tensors::adjoint_bound_space_dyn(&parent).unwrap();
     let parent_len = parent.space().required_len().unwrap();
     let operation = TreeTransformOperation::permute([5, 4, 3], [2, 1, 0]);
-    let miss = |context: &mut TreeTransformExecutionContext<f64, RuleIdentity>, lazy: bool| {
+    let mut miss = |context: &mut TreeTransformExecutionContext<f64, RuleIdentity>, lazy: bool| {
         symtn_core::clear_structure_caches();
         let (logical, adjoint_of) = if lazy {
             (&adjoint, Some(&parent))
@@ -783,7 +790,9 @@ fn unique_cache_three_misses_reuse_the_context_tree_pair_scratch() {
         };
         counting_alloc::start();
         let staged = context
-            .stage_tree_transform_multiplicity_free_in(logical, adjoint_of, parent_len, &operation)
+            .stage_tree_transform_multiplicity_free_in(
+                engine, logical, adjoint_of, parent_len, &operation,
+            )
             .unwrap();
         let allocs = counting_alloc::stop();
         std::hint::black_box(staged);

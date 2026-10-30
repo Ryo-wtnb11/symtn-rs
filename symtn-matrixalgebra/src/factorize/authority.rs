@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 use symtn_core::PreparedBlockStructure;
 
@@ -93,6 +94,7 @@ pub trait FactorMode<R>: sealed::Sealed {
     // measured it and kept publication mode-specific (the multiplicity-free
     // one-sided pair is cheaper; checked has no direct-region plan, #1960).
     fn qr_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
@@ -101,6 +103,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn qr_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
@@ -109,6 +112,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn lq_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
@@ -117,6 +121,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn lq_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
@@ -127,6 +132,7 @@ pub trait FactorMode<R>: sealed::Sealed {
     /// LQ of the lazy adjoint of `parent`, whose own layout is
     /// `adjoint_space`, read in place (#2070).
     fn lq_compact_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -136,6 +142,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn lq_full_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -153,6 +160,7 @@ pub trait FactorMode<R>: sealed::Sealed {
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>;
 
     fn svd_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
@@ -161,6 +169,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn svd_compact_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
@@ -169,6 +178,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn svd_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
@@ -177,6 +187,7 @@ pub trait FactorMode<R>: sealed::Sealed {
         D: FactorScalar;
 
     fn svd_full_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
@@ -193,6 +204,7 @@ pub trait FactorMode<R>: sealed::Sealed {
     ) -> Result<EighFullDyn<R, D>, Self::Error>;
 
     fn eigh_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
         hermitian_tol: HermitianTol,
@@ -207,6 +219,7 @@ pub trait FactorMode<R>: sealed::Sealed {
     ) -> Result<EigFullDyn<R, D>, Self::Error>;
 
     fn eig_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<EigFullDyn<R, D>, Self::Error>
@@ -239,6 +252,7 @@ where
     }
 
     fn svd_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
@@ -246,10 +260,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_compact_factors_dyn(dense, input)
+        svd_compact_factors_dyn(engine, dense, input)
     }
 
     fn svd_compact_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
@@ -257,10 +272,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_compact_adjoint_factors_dyn(dense, parent)
+        svd_compact_adjoint_factors_dyn(engine, dense, parent)
     }
 
     fn svd_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
@@ -268,10 +284,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_full_factors_dyn(dense, input)
+        svd_full_factors_dyn(engine, dense, input)
     }
 
     fn svd_full_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
@@ -279,10 +296,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_full_adjoint_factors_dyn(dense, parent)
+        svd_full_adjoint_factors_dyn(engine, dense, parent)
     }
 
     fn qr_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
@@ -290,10 +308,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        qr_compact_dyn(dense, input)
+        qr_compact_dyn(engine, dense, input)
     }
 
     fn qr_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
@@ -301,10 +320,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        qr_full_dyn(dense, input)
+        qr_full_dyn(engine, dense, input)
     }
 
     fn lq_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
@@ -312,10 +332,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_compact_dyn(dense, input)
+        lq_compact_dyn(engine, dense, input)
     }
 
     fn lq_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
@@ -323,10 +344,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_full_dyn(dense, input)
+        lq_full_dyn(engine, dense, input)
     }
 
     fn lq_compact_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -335,10 +357,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_compact_adjoint_dyn(dense, parent, adjoint_space)
+        lq_compact_adjoint_dyn(engine, dense, parent, adjoint_space)
     }
 
     fn lq_full_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -347,7 +370,7 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_full_adjoint_dyn(dense, parent, adjoint_space)
+        lq_full_adjoint_dyn(engine, dense, parent, adjoint_space)
     }
 
     fn eigh_full_diagonal<D: FactorScalar>(
@@ -359,6 +382,7 @@ where
     }
 
     fn eigh_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
         hermitian_tol: HermitianTol,
@@ -367,7 +391,7 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        eigh_full_dyn(dense, input, hermitian_tol)
+        eigh_full_dyn(engine, dense, input, hermitian_tol)
     }
 
     fn eig_full_diagonal<D: FactorScalar>(
@@ -378,6 +402,7 @@ where
     }
 
     fn eig_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<EigFullDyn<R, D>, Self::Error>
@@ -385,7 +410,7 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        eig_full_dyn(dense, input)
+        eig_full_dyn(engine, dense, input)
     }
 }
 
@@ -410,6 +435,7 @@ where
     }
 
     fn svd_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
@@ -417,10 +443,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_compact_factors_with_spectrum_dyn_checked_generic(dense, input)
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, dense, input)
     }
 
     fn svd_compact_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
@@ -428,10 +455,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_compact_adjoint_factors_dyn_checked_generic(dense, parent)
+        svd_compact_adjoint_factors_dyn_checked_generic(engine, dense, parent)
     }
 
     fn svd_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
@@ -439,10 +467,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_full_factors_dyn_checked_generic(dense, input)
+        svd_full_factors_dyn_checked_generic(engine, dense, input)
     }
 
     fn svd_full_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
@@ -450,10 +479,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        svd_full_adjoint_factors_dyn_checked_generic(dense, parent)
+        svd_full_adjoint_factors_dyn_checked_generic(engine, dense, parent)
     }
 
     fn qr_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
@@ -461,10 +491,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        qr_compact_dyn_checked_generic(dense, input)
+        qr_compact_dyn_checked_generic(engine, dense, input)
     }
 
     fn qr_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
@@ -472,10 +503,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        qr_full_dyn_checked_generic(dense, input)
+        qr_full_dyn_checked_generic(engine, dense, input)
     }
 
     fn lq_compact_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
@@ -483,10 +515,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_compact_dyn_checked_generic(dense, input)
+        lq_compact_dyn_checked_generic(engine, dense, input)
     }
 
     fn lq_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
@@ -494,10 +527,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_full_dyn_checked_generic(dense, input)
+        lq_full_dyn_checked_generic(engine, dense, input)
     }
 
     fn lq_compact_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -506,10 +540,11 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_compact_adjoint_dyn_checked_generic(dense, parent, adjoint_space)
+        lq_compact_adjoint_dyn_checked_generic(engine, dense, parent, adjoint_space)
     }
 
     fn lq_full_adjoint_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -518,7 +553,7 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        lq_full_adjoint_dyn_checked_generic(dense, parent, adjoint_space)
+        lq_full_adjoint_dyn_checked_generic(engine, dense, parent, adjoint_space)
     }
 
     fn eigh_full_diagonal<D: FactorScalar>(
@@ -530,6 +565,7 @@ where
     }
 
     fn eigh_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
         hermitian_tol: HermitianTol,
@@ -538,7 +574,7 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        eigh_full_dyn_checked_generic(dense, input, hermitian_tol)
+        eigh_full_dyn_checked_generic(engine, dense, input, hermitian_tol)
     }
 
     fn eig_full_diagonal<D: FactorScalar>(
@@ -549,6 +585,7 @@ where
     }
 
     fn eig_full_dense<E, D>(
+        engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<EigFullDyn<R, D>, Self::Error>
@@ -556,7 +593,7 @@ where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
     {
-        eig_full_dyn_checked_generic(dense, input)
+        eig_full_dyn_checked_generic(engine, dense, input)
     }
 }
 

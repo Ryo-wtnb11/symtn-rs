@@ -50,15 +50,17 @@ where
 
 #[test]
 fn composition_resolves_to_the_unswapped_unit_core() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: on the fermionic `[v] <- [w']` · `[w'] <- [v]` geometry of
     // `signed_direct_can_leave_inactive_destination_blocks`, the composition
     // is the unit core while the contraction over the same legs is the
     // signed one: the kind, not the axes, decides the twist.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
-    let lhs = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 1).unwrap();
-    let rhs = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 2).unwrap();
+    let lhs = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 1).unwrap();
+    let rhs = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 2).unwrap();
     let plan = ComposePlan::new(
+        engine,
         &StackedTensorMap::pack(&[&lhs]).unwrap(),
         &StackedTensorMap::pack(&[&rhs]).unwrap(),
     )
@@ -77,11 +79,13 @@ fn composition_resolves_to_the_unswapped_unit_core() {
         .unwrap()
         .try_dual()
         .unwrap();
-    let lhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v], [&wd], |_, _| 1.0).unwrap();
-    let rhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&wd], [&v], |_, _| 1.0).unwrap();
+    let lhs =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&wd], |_, _| 1.0).unwrap();
+    let rhs =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&wd], [&v], |_, _| 1.0).unwrap();
     let left = StackedTensorMap::pack(&[&lhs]).unwrap();
     let right = StackedTensorMap::pack(&[&rhs]).unwrap();
-    let plan = ComposePlan::new(&left, &right).unwrap();
+    let plan = ComposePlan::new(engine, &left, &right).unwrap();
     assert_unit_unswapped_core("fZ2xU1 dual leg", &plan);
     assert!(!plan
         .0
@@ -95,7 +99,7 @@ fn composition_resolves_to_the_unswapped_unit_core() {
         codomain: &[0],
         domain: &[1],
     };
-    let contract = ContractPlan::new(&left, &right, &spec).unwrap();
+    let contract = ContractPlan::new(engine, &left, &right, &spec).unwrap();
     let (core, swapped) = contract.resolution.direct_core().unwrap();
     assert!(!swapped);
     core.require_identity_signed_direct_replay().unwrap();
@@ -104,18 +108,19 @@ fn composition_resolves_to_the_unswapped_unit_core() {
 
 #[test]
 fn corrupted_stack_errors_are_typed() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a stack whose payload disagrees with its structure (reachable
     // only through these private fields) is rejected with a typed error, and
     // a destination likewise.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 6).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
     let lhs = StackedTensorMap::pack(&[&a, &a]).unwrap();
     let rhs = StackedTensorMap::pack(&[&b, &b]).unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = plan.workspace().unwrap();
-    plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+    plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
     let mut dst = workspace.take_output().unwrap();
 
     // Length and structure shrunk together: only the executor sees it.
@@ -134,10 +139,12 @@ fn corrupted_stack_errors_are_typed() {
     short_dst.storage = vec![1.0; dst.storage.len() - 1];
 
     let observed = [
-        plan.execute(&consistent, &rhs, &mut workspace).map(|_| ()),
-        plan.execute(&short, &rhs, &mut workspace).map(|_| ()),
-        plan.execute_into(&short, &rhs, &mut dst, &mut workspace),
-        plan.execute_into(&lhs, &rhs, &mut short_dst, &mut workspace),
+        plan.execute(engine, &consistent, &rhs, &mut workspace)
+            .map(|_| ()),
+        plan.execute(engine, &short, &rhs, &mut workspace)
+            .map(|_| ()),
+        plan.execute_into(engine, &short, &rhs, &mut dst, &mut workspace),
+        plan.execute_into(engine, &lhs, &rhs, &mut short_dst, &mut workspace),
     ]
     .map(Result::err);
     assert!(short_dst.storage.iter().all(|&value| value == 1.0));
@@ -203,6 +210,7 @@ where
         + SectorCodec,
     D: TensorScalar,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     let coupled = |t: &TensorMap<R, D>, i: usize| {
         format!("{:?}", t.subblock_fusion_trees(i).unwrap().coupled())
     };
@@ -212,7 +220,7 @@ where
             .collect::<HashSet<_>>()
     };
     let active: HashSet<_> = sectors(a).intersection(&sectors(b)).cloned().collect();
-    let c = a.compose(b).unwrap();
+    let c = a.compose(cpu, b).unwrap();
     let member_len = c.dense_data().unwrap().len();
     let mut out = Vec::new();
     for i in (0..c.subblock_count()).filter(|&i| !active.contains(&coupled(&c, i))) {
@@ -291,15 +299,17 @@ fn regions_match_hand_derivation<R>(
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let a = TensorMap::<_, f64>::rand_with_seed(runtime, [&v, &v], [&w], 11).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(runtime, [&w], [&v], 12).unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let a = TensorMap::<_, f64>::rand_with_seed(cpu, runtime, [&v, &v], [&w], 11).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(cpu, runtime, [&w], [&v], 12).unwrap();
     let plan = ComposePlan::new(
+        cpu,
         &StackedTensorMap::pack(&[&a]).unwrap(),
         &StackedTensorMap::pack(&[&b]).unwrap(),
     )
     .unwrap();
     let resolution = &plan.0.resolution;
-    assert!(resolution.admit_cuda_members().unwrap() > 0, "{what}");
+    resolution.admit_cuda_members().unwrap();
     for members in [1, 2, 17] {
         let regions = symtn_operations::cuda_transform::CudaMemberZeroRegions::prepare(
             resolution.core_plan().inactive_destination_regions(),
@@ -316,7 +326,7 @@ fn regions_match_hand_derivation<R>(
 #[cfg(feature = "cuda")]
 #[test]
 fn cuda_zero_regions_match_the_hand_derivation() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     regions_match_hand_derivation(&runtime, "U1", u1_legs());
     regions_match_hand_derivation(&runtime, "SU2", su2_legs());
     let rule = Arc::new(

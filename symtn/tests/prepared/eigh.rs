@@ -151,9 +151,13 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     members::<R, f64>(runtime, codomain, codomain, count, salt)
         .into_iter()
-        .map(|x| x.axpby(1.0, &x.adjoint().unwrap(), 1.0).unwrap())
+        .map(|x| {
+            let adjoint = x.adjoint(engine).unwrap();
+            x.axpby(engine, 1.0, &adjoint, 1.0).unwrap()
+        })
         .collect()
 }
 
@@ -174,9 +178,10 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     (0..count)
         .map(|member| {
-            TensorMap::from_subblock_fn(runtime, [leg], [leg], |_, index| {
+            TensorMap::from_subblock_fn(engine, runtime, [leg], [leg], |_, index| {
                 entry(member, index[0], index[1])
             })
             .unwrap()

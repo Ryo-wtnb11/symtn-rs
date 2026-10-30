@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn tree_transform_structure_replay_applies_alpha_and_beta() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = vec![2, 2];
     let structure = BlockStructure::packed_column_major(2, [vec![2, 2]]).unwrap();
     let src = TestTensor::from_vec_with_structure(
@@ -21,6 +22,7 @@ fn tree_transform_structure_replay_applies_alpha_and_beta() {
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &transform,
@@ -36,6 +38,7 @@ fn tree_transform_structure_replay_applies_alpha_and_beta() {
 
 #[test]
 fn tree_transform_overwrite_replay_ignores_nan_destination_bits() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = vec![2, 2];
     let structure = BlockStructure::packed_column_major(2, [vec![2, 2]]).unwrap();
     let src = TestTensor::from_vec_with_structure(
@@ -55,6 +58,7 @@ fn tree_transform_overwrite_replay_ignores_nan_destination_bits() {
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_overwrite_into(
+        engine,
         &mut backend,
         &mut workspace,
         &transform,
@@ -387,7 +391,9 @@ fn tree_transform_multi_uses_tensorkit_recoupling_orientation_for_all_numeric_dt
 
 #[test]
 fn tree_transform_dense_backend_matches_tensorkit_recoupling_orientation_for_gemm_dtypes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_tree_multi_tensorkit_orientation_dense_dtype(
+        engine,
         vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0],
         vec![10.0, 100.0, 1000.0, 20.0, 200.0, 2000.0],
         2.0,
@@ -396,6 +402,7 @@ fn tree_transform_dense_backend_matches_tensorkit_recoupling_orientation_for_gem
         vec![10623.0, 12843.0, 21243.0, 25683.0],
     );
     assert_tree_multi_tensorkit_orientation_dense_dtype(
+        engine,
         vec![1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0],
         vec![10.0, 100.0, 1000.0, 20.0, 200.0, 2000.0],
         2.0,
@@ -404,6 +411,7 @@ fn tree_transform_dense_backend_matches_tensorkit_recoupling_orientation_for_gem
         vec![10623.0, 12843.0, 21243.0, 25683.0],
     );
     assert_tree_multi_tensorkit_orientation_dense_dtype(
+        engine,
         vec![
             Complex32::new(1.0, 0.0),
             Complex32::new(2.0, 0.0),
@@ -431,6 +439,7 @@ fn tree_transform_dense_backend_matches_tensorkit_recoupling_orientation_for_gem
         ],
     );
     assert_tree_multi_tensorkit_orientation_dense_dtype(
+        engine,
         vec![
             Complex64::new(1.0, 0.0),
             Complex64::new(2.0, 0.0),
@@ -461,6 +470,7 @@ fn tree_transform_dense_backend_matches_tensorkit_recoupling_orientation_for_gem
 
 #[test]
 fn tree_transform_dense_backend_routes_multi_tree_recoupling_through_one_gemm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_space = vec![6, 1];
     let dst_space = vec![4, 1];
     let src_structure =
@@ -488,6 +498,7 @@ fn tree_transform_dense_backend_routes_multi_tree_recoupling_through_one_gemm() 
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -507,6 +518,7 @@ fn tree_transform_dense_backend_routes_multi_tree_recoupling_through_one_gemm() 
 
 #[test]
 fn tree_transform_recoupling_replay_uses_sorted_plan_offsets() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_space = vec![8, 1];
     let dst_space = vec![8, 1];
     let structure = BlockStructure::packed_column_major(
@@ -543,6 +555,7 @@ fn tree_transform_recoupling_replay_uses_sorted_plan_offsets() {
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &transform,
@@ -562,10 +575,10 @@ fn tree_transform_recoupling_replay_uses_sorted_plan_offsets() {
     let mut backend = DenseTreeTransformOperations::default();
     // What: two jobs enter the first chunk and the distinct third coefficient
     // matrix enters a later chunk, pinning global coefficient offsets.
-    backend.set_recoupling_threads(std::num::NonZeroUsize::new(2).unwrap());
-    backend.set_transform_parallel_min_len(0);
+    let parallel_engine = &mut symtn_operations::host_pool::eager_test_engine(2);
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        parallel_engine,
         &mut backend,
         &mut workspace,
         &transform,

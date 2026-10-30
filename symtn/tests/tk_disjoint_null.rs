@@ -11,34 +11,39 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 #[test]
 fn direct_and_lazy_adjoint_disjoint_null_spaces_match_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let codomain = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)]).unwrap();
     let domain = GradedSpace::try_new(rule, [(U1Irrep::new(1), 3)]).unwrap();
-    let source: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&codomain], [&domain]).unwrap();
+    let source: TensorMap<_, f64> =
+        TensorMap::zeros(engine, &runtime, [&codomain], [&domain]).unwrap();
 
     assert!(source.dense_data().unwrap().is_empty());
-    for (tensor, left_dim, right_dim) in [(source.clone(), 2, 3), (source.adjoint().unwrap(), 3, 2)]
-    {
-        let left = tensor.left_null(&[0], &[1]).unwrap();
-        let right = tensor.right_null(&[0], &[1]).unwrap();
+    for (tensor, left_dim, right_dim) in [
+        (source.clone(), 2, 3),
+        (source.adjoint(engine).unwrap(), 3, 2),
+    ] {
+        let left = tensor.left_null(engine, &[0], &[1]).unwrap();
+        let right = tensor.right_null(engine, &[0], &[1]).unwrap();
 
         assert_eq!(left.dense_data().unwrap().len(), left_dim * left_dim);
         assert_eq!(right.dense_data().unwrap().len(), right_dim * right_dim);
-        assert!((left.norm(2.0).unwrap() - (left_dim as f64).sqrt()).abs() <= 1e-12);
-        assert!((right.norm(2.0).unwrap() - (right_dim as f64).sqrt()).abs() <= 1e-12);
-        assert!(is_isometric!(left, 1e-12));
-        assert!(is_isometric!(right.adjoint().unwrap(), 1e-12));
+        assert!((left.norm(engine, 2.0).unwrap() - (left_dim as f64).sqrt()).abs() <= 1e-12);
+        assert!((right.norm(engine, 2.0).unwrap() - (right_dim as f64).sqrt()).abs() <= 1e-12);
+        assert!(is_isometric!(engine, left, 1e-12));
+        assert!(is_isometric!(engine, right.adjoint(engine).unwrap(), 1e-12));
         assert!(left
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .compose(&tensor)
+            .compose(engine, &tensor)
             .unwrap()
             .dense_data()
             .unwrap()
             .is_empty());
+        let right_adjoint = &right.adjoint(engine).unwrap();
         assert!(tensor
-            .compose(&right.adjoint().unwrap())
+            .compose(engine, right_adjoint)
             .unwrap()
             .dense_data()
             .unwrap()

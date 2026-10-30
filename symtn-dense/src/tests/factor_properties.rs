@@ -173,6 +173,7 @@ fn assert_orthonormal_columns(x: &[Complex64], rows: usize, cols: usize, tol: f6
 
 #[test]
 fn host_qr_returns_orthonormal_q_and_upper_triangular_r_for_every_dtype_and_shape() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     for dtype in DTYPES {
         let tol = tolerance(dtype);
@@ -182,7 +183,7 @@ fn host_qr_returns_orthonormal_q_and_upper_triangular_r_for_every_dtype_and_shap
             let a = matrix(dtype, m, n, rank_deficient);
             let input = owned(dtype, &a);
             let (shape, strides) = ([m, n], [1, m]);
-            let outputs = executor.qr(read(&input, &shape, &strides)).unwrap();
+            let outputs = executor.qr(engine, read(&input, &shape, &strides)).unwrap();
             assert_eq!(outputs.len(), 2, "{what}");
             assert_eq!(outputs[0].shape(), [m, k], "{what}: Q shape");
             assert_eq!(outputs[1].shape(), [k, n], "{what}: R shape");
@@ -253,6 +254,7 @@ fn check_compact_svd(
 
 #[test]
 fn host_svd_returns_unitary_factors_and_ordered_spectrum_for_every_dtype_and_shape() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     for dtype in DTYPES {
         let tol = tolerance(dtype);
@@ -262,7 +264,9 @@ fn host_svd_returns_unitary_factors_and_ordered_spectrum_for_every_dtype_and_sha
             let a = matrix(dtype, m, n, rank_deficient);
             let input = owned(dtype, &a);
             let (shape, strides) = ([m, n], [1, m]);
-            let outputs = executor.svd(read(&input, &shape, &strides)).unwrap();
+            let outputs = executor
+                .svd(engine, read(&input, &shape, &strides))
+                .unwrap();
             assert_eq!(outputs.len(), 3, "{what}");
             assert_eq!(outputs[0].shape(), [m, k], "{what}: U shape");
             assert_eq!(outputs[1].shape(), [k], "{what}: S shape");
@@ -282,6 +286,7 @@ fn host_svd_returns_unitary_factors_and_ordered_spectrum_for_every_dtype_and_sha
 
 #[test]
 fn host_owned_full_svd_returns_square_unitary_factors_for_every_dtype_and_shape() {
+    let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
     for dtype in DTYPES {
         let tol = tolerance(dtype);
@@ -289,7 +294,9 @@ fn host_owned_full_svd_returns_square_unitary_factors_for_every_dtype_and_shape(
             let what = format!("{dtype:?} {m}x{n} rank_deficient={rank_deficient}");
             let k = m.min(n);
             let a = matrix(dtype, m, n, rank_deficient);
-            let outputs = executor.svd_full_owned(owned(dtype, &a), m, n).unwrap();
+            let outputs = executor
+                .svd_full_owned(engine, owned(dtype, &a), m, n)
+                .unwrap();
             assert_eq!(outputs.len(), 3, "{what}");
             assert_eq!(outputs[0].shape(), [m, m], "{what}: U shape");
             assert_eq!(outputs[1].shape(), [k], "{what}: S shape");

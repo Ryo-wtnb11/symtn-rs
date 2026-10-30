@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, SU2FusionRule, SU2Irrep,
@@ -59,8 +60,12 @@ fn assert_same<R>(
     );
 }
 
-fn ordinary_network_and_workspace_reuse<R>(runtime: &Runtime, space: &GradedSpace<R>, seed: u64)
-where
+fn ordinary_network_and_workspace_reuse<R>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+    space: &GradedSpace<R>,
+    seed: u64,
+) where
     R: TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = FusionAlgebraError,
@@ -70,11 +75,13 @@ where
         + SectorCodec
         + Send,
 {
-    let lhs = TensorMap::<R, f64>::rand_with_seed(runtime, [space], [space], seed).unwrap();
-    let rhs = TensorMap::<R, f64>::rand_with_seed(runtime, [space], [space], seed + 1).unwrap();
+    let lhs = TensorMap::<R, f64>::rand_with_seed(engine, runtime, [space], [space], seed).unwrap();
+    let rhs =
+        TensorMap::<R, f64>::rand_with_seed(engine, runtime, [space], [space], seed + 1).unwrap();
     let terms = space.dim().unwrap().ceil() as usize;
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -84,7 +91,7 @@ where
             },
         )
         .unwrap()
-        .permute(&[1], &[0])
+        .permute(engine, &[1], &[0])
         .unwrap();
     let network = Network::new(
         vec![vec!["i", "j"], vec!["j", "k"]],
@@ -97,8 +104,8 @@ where
     let tensors = [&lhs, &rhs];
     let planned = network.plan(&tensors, &GreedyDenseOptimizer).unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
-    let first = planned.execute(&tensors, &mut workspace).unwrap();
-    let second = planned.execute(&tensors, &mut workspace).unwrap();
+    let first = planned.execute(engine, &tensors, &mut workspace).unwrap();
+    let second = planned.execute(engine, &tensors, &mut workspace).unwrap();
     assert_same(&first, &expected, space.provider(), terms);
     assert_same(&second, &expected, space.provider(), terms);
 
@@ -106,10 +113,10 @@ where
     // no promise that output payload allocations themselves are reused.
     let cold = plan_cache_stats(runtime);
     let cached_first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["k"], &["i"])
-        .contract(&[&lhs, &rhs])
+        .contract(engine, &[&lhs, &rhs])
         .unwrap();
     let cached_second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["k"], &["i"])
-        .contract(&[&lhs, &rhs])
+        .contract(engine, &[&lhs, &rhs])
         .unwrap();
     assert_same(&cached_first, &expected, space.provider(), terms);
     assert_same(&cached_second, &expected, space.provider(), terms);
@@ -117,14 +124,15 @@ where
 }
 #[test]
 fn multiplicity_free_public_network_path_matches_typed_oracles() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
 
     let z2 = GradedSpace::try_new(
         Arc::new(Z2FusionRule),
         [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
     )
     .unwrap();
-    ordinary_network_and_workspace_reuse(&runtime, &z2, 1002);
+    ordinary_network_and_workspace_reuse(engine, &runtime, &z2, 1002);
 
     let z3_provider = Arc::new(ZNFusionRule::new(3).unwrap());
     let z3 = GradedSpace::try_new(
@@ -136,7 +144,7 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         ],
     )
     .unwrap();
-    ordinary_network_and_workspace_reuse(&runtime, &z3, 1010);
+    ordinary_network_and_workspace_reuse(engine, &runtime, &z3, 1010);
 
     // A charged CU(1) leg exercises the nontrivial pseudo-scalar provider,
     // rather than a vacuum-only dense block.
@@ -149,7 +157,7 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         ],
     )
     .unwrap();
-    ordinary_network_and_workspace_reuse(&runtime, &cu1, 1004);
+    ordinary_network_and_workspace_reuse(engine, &runtime, &cu1, 1004);
 
     let product_rule = Arc::new(
         symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -163,12 +171,12 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         ],
     )
     .unwrap();
-    ordinary_network_and_workspace_reuse(&runtime, &product, 1006);
+    ordinary_network_and_workspace_reuse(engine, &runtime, &product, 1006);
     // The odd fZ2 sector contributes with the supertrace sign even after the
     // U(1) factor is attached: (2 + 3) - 7 = -2.  This is intentionally a
     // hand oracle, not another call to `trace_pairs`.
     let product_diagonal =
-        TensorMap::from_subblock_fn(&runtime, [&product], [&product], |trees, i| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&product], [&product], |trees, i| {
             if i[0] != i[1] {
                 0.0
             } else if *trees.coupled() == product_sector(Z2Irrep::EVEN, U1Irrep::new(0)) {
@@ -180,9 +188,9 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         .unwrap();
     assert_eq!(
         product_diagonal
-            .trace_pairs(&[(0, 1)])
+            .trace_pairs(engine, &[(0, 1)])
             .unwrap()
-            .scalar()
+            .scalar(engine)
             .unwrap(),
         -2.0
     );
@@ -215,5 +223,5 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         ],
     )
     .unwrap();
-    ordinary_network_and_workspace_reuse(&runtime, &nested, 1008);
+    ordinary_network_and_workspace_reuse(engine, &runtime, &nested, 1008);
 }

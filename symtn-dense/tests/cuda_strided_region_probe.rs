@@ -12,7 +12,7 @@
 
 #![cfg(feature = "cuda")]
 
-use tenferro_gpu::cuda::{upload_tensor, CudaBackend, CudaDeviceId};
+use tenferro_gpu::cuda::{upload_tensor, CudaDeviceId, CudaEngine};
 use tenferro_tensor::{
     DotGeneralAccumulation, DotGeneralConfig, Tensor, TensorDot, TensorRead, TensorScalar,
     TensorWrite,
@@ -20,7 +20,7 @@ use tenferro_tensor::{
 
 use symtn_dense::CudaScalar;
 
-fn upload(backend: &CudaBackend, data: Vec<f64>) -> Tensor {
+fn upload(backend: &CudaEngine, data: Vec<f64>) -> Tensor {
     let len = data.len();
     let host = Tensor::from_vec_col_major(vec![len], data).expect("host tensor");
     upload_tensor(backend.runtime(), &host).expect("upload")
@@ -29,7 +29,7 @@ fn upload(backend: &CudaBackend, data: Vec<f64>) -> Tensor {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn rank_eight_strided_region_is_accepted_and_the_mode_limit_is_logged() {
-    let mut backend = CudaBackend::new(CudaDeviceId::from_ordinal(0))
+    let mut backend = CudaEngine::open(CudaDeviceId::from_ordinal(0))
         .expect("CUDA device 0 must be available for the device probe");
     let src = upload(&backend, (0..64).map(|index| index as f64).collect());
     let ones = upload(&backend, vec![1.0]);
@@ -59,10 +59,10 @@ fn rank_eight_strided_region_is_accepted_and_the_mode_limit_is_logged() {
             .expect("destination dtype")
             .backend_region_view_mut(view_dims, strides, 0);
         let config = DotGeneralConfig {
-            lhs_contracting_dims: vec![rank],
-            rhs_contracting_dims: vec![0],
-            lhs_batch_dims: Vec::new(),
-            rhs_batch_dims: Vec::new(),
+            lhs_contracting_dims: [rank].into_iter().collect(),
+            rhs_contracting_dims: [0].into_iter().collect(),
+            lhs_batch_dims: Default::default(),
+            rhs_batch_dims: Default::default(),
         };
         let accumulation = DotGeneralAccumulation {
             lhs_conj: false,

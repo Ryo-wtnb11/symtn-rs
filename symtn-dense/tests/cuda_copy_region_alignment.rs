@@ -240,8 +240,10 @@ fn offset_sweep<D: CopyScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn copy_region_is_a_bitwise_direct_copy_at_every_destination_offset() {
-    let mut ctx =
-        CudaDenseContext::new(0).expect("CUDA device 0 must be available for the device suite");
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine)
+        .expect("CUDA device 0 must be available for the device suite");
     offset_sweep::<f32>(&mut ctx);
     offset_sweep::<f64>(&mut ctx);
     offset_sweep::<Complex32>(&mut ctx);

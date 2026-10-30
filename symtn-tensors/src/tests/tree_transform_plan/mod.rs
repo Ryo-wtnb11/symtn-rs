@@ -42,7 +42,9 @@ where
         + Sync
         + 'static,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     crate::tree_transform::TreeTransformPlanning::default().resolve_tree_pair(
+        engine,
         rule,
         operation,
         dst,

@@ -1,6 +1,6 @@
 use super::*;
 
-fn assert_roundtrip<R>(source: TensorMap<R, f64>)
+fn assert_roundtrip<R>(cuda: &mut dyn symtn::typed::Engine, source: TensorMap<R, f64>)
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -15,10 +15,10 @@ where
     let structure = structural_snapshot(&source);
     let expected = source.dense_data().unwrap().to_vec();
 
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     assert_eq!(device.placement(), symtn::expert::Placement::Cuda(0));
     let device_clone = device.clone();
-    let restored = device_clone.to_host().unwrap();
+    let restored = device_clone.to_host(cuda).unwrap();
 
     assert!(std::ptr::eq(restored.provider(), provider));
     assert!(runtime.matches(restored.runtime()));
@@ -29,7 +29,9 @@ where
 #[test]
 #[ignore]
 fn builtin_and_simple_product_providers_round_trip_through_the_device() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
@@ -38,8 +40,11 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     )
     .unwrap();
     assert_roundtrip(
-        TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| indices[0] as f64 + 1.0)
-            .unwrap(),
+        cuda,
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, indices| {
+            indices[0] as f64 + 1.0
+        })
+        .unwrap(),
     );
 
     let fz2_rule = Arc::new(FermionParityFusionRule);
@@ -49,7 +54,8 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     )
     .unwrap();
     assert_roundtrip(
-        TensorMap::from_subblock_fn(&runtime, [&fz2], [&fz2], |_, indices| {
+        cuda,
+        TensorMap::from_subblock_fn(engine, &runtime, [&fz2], [&fz2], |_, indices| {
             indices[0] as f64 + 2.0
         })
         .unwrap(),
@@ -65,7 +71,8 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     )
     .unwrap();
     assert_roundtrip(
-        TensorMap::from_subblock_fn(&runtime, [&su2], [&su2], |_, indices| {
+        cuda,
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2], [&su2], |_, indices| {
             indices[0] as f64 + 3.0
         })
         .unwrap(),
@@ -84,14 +91,15 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     )
     .unwrap();
     assert_roundtrip(
-        TensorMap::from_subblock_fn(&runtime, [&product], [&product], |_, indices| {
+        cuda,
+        TensorMap::from_subblock_fn(engine, &runtime, [&product], [&product], |_, indices| {
             indices[0] as f64 + 4.0
         })
         .unwrap(),
     );
 }
 
-fn assert_c64_roundtrip<R>(source: TensorMap<R, Complex64>)
+fn assert_c64_roundtrip<R>(cuda: &mut dyn symtn::typed::Engine, source: TensorMap<R, Complex64>)
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -110,9 +118,9 @@ where
         "fixture must have nonzero imaginary parts"
     );
 
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     assert_eq!(device.placement(), symtn::expert::Placement::Cuda(0));
-    let restored = device.clone().to_host().unwrap();
+    let restored = device.clone().to_host(cuda).unwrap();
 
     assert!(std::ptr::eq(restored.provider(), provider));
     assert!(runtime.matches(restored.runtime()));
@@ -123,7 +131,9 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -131,9 +141,14 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     )
     .unwrap();
     assert_c64_roundtrip(
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-            complex_entry(indices, 1.0)
-        })
+        cuda,
+        TensorMap::<_, Complex64>::from_subblock_fn(
+            engine,
+            &runtime,
+            [&u1],
+            [&u1],
+            |_, indices| complex_entry(indices, 1.0),
+        )
         .unwrap(),
     );
 
@@ -143,9 +158,14 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     )
     .unwrap();
     assert_c64_roundtrip(
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&fz2], [&fz2], |_, indices| {
-            complex_entry(indices, 2.0)
-        })
+        cuda,
+        TensorMap::<_, Complex64>::from_subblock_fn(
+            engine,
+            &runtime,
+            [&fz2],
+            [&fz2],
+            |_, indices| complex_entry(indices, 2.0),
+        )
         .unwrap(),
     );
 
@@ -158,7 +178,9 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     )
     .unwrap();
     assert_c64_roundtrip(
+        cuda,
         TensorMap::<_, Complex64>::from_subblock_fn(
+            engine,
             &runtime,
             [&su2, &su2, &su2],
             [&su2, &su2],
@@ -182,7 +204,9 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     )
     .unwrap();
     assert_c64_roundtrip(
+        cuda,
         TensorMap::<_, Complex64>::from_subblock_fn(
+            engine,
             &runtime,
             [&product],
             [&product],

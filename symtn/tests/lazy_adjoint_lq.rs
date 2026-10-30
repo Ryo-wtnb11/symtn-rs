@@ -38,11 +38,14 @@ impl Distance for Complex64 {
 /// kernel whose rounding depends on buffer alignment; a different gauge
 /// (a phase on any bond column) would differ by O(1) and fail.
 macro_rules! assert_factor_close {
-    ($what:expr, $lazy:expr, $eager:expr) => {{
+    ($engine:ident, $what:expr, $lazy:expr, $eager:expr) => {{
         let (what, lazy, eager) = ($what, &$lazy, &$eager);
         assert_eq!(lazy.codomain(), eager.codomain(), "{what}: codomain");
         assert_eq!(lazy.domain(), eager.domain(), "{what}: domain");
-        let (lazy, eager) = (lazy.materialize().unwrap(), eager.materialize().unwrap());
+        let (lazy, eager) = (
+            lazy.materialize($engine).unwrap(),
+            eager.materialize($engine).unwrap(),
+        );
         let (lazy, eager) = (lazy.dense_data().unwrap(), eager.dense_data().unwrap());
         assert_eq!(lazy.len(), eager.len(), "{what}: payload length");
         for (&a, &b) in lazy.iter().zip(eager) {
@@ -54,42 +57,58 @@ macro_rules! assert_factor_close {
 /// Compact and full LQ of the lazy adjoint of `parent` against those of the
 /// materialized adjoint.
 macro_rules! assert_lazy_lq {
-    ($label:expr, $parent:expr) => {{
+    ($engine:ident, $label:expr, $parent:expr) => {{
         let label = $label;
-        let lazy = $parent.adjoint().unwrap();
-        let eager = lazy.materialize().unwrap();
+        let lazy = $parent.adjoint($engine).unwrap();
+        let eager = lazy.materialize($engine).unwrap();
         let rows: Vec<usize> = (0..lazy.codomain_rank()).collect();
         let cols: Vec<usize> =
             (lazy.codomain_rank()..lazy.codomain_rank() + lazy.domain_rank()).collect();
         let (r, c) = (rows.as_slice(), cols.as_slice());
         for (name, lazy_lq, eager_lq) in [
-            ("lq_compact", lazy.lq_compact(r, c), eager.lq_compact(r, c)),
-            ("lq_full", lazy.lq_full(r, c), eager.lq_full(r, c)),
+            (
+                "lq_compact",
+                lazy.lq_compact($engine, r, c),
+                eager.lq_compact($engine, r, c),
+            ),
+            (
+                "lq_full",
+                lazy.lq_full($engine, r, c),
+                eager.lq_full($engine, r, c),
+            ),
         ] {
             let (Lq { l, q }, Lq { l: el, q: eq }) = (lazy_lq.unwrap(), eager_lq.unwrap());
-            assert_factor_close!(format!("{label} {name} l"), l, el);
-            assert_factor_close!(format!("{label} {name} q"), q, eq);
+            assert_factor_close!($engine, format!("{label} {name} l"), l, el);
+            assert_factor_close!($engine, format!("{label} {name} q"), q, eq);
         }
     }};
 }
 
 /// Tall, wide and square-with-dual parents on legs `a`, `b`, both dtypes.
 macro_rules! assert_fixtures {
-    ($label:expr, $runtime:expr, $a:expr, $b:expr) => {{
+    ($engine:ident, $label:expr, $runtime:expr, $a:expr, $b:expr) => {{
+        let engine = &mut *$engine;
         let (runtime, a, b) = (&$runtime, &$a, &$b);
         let dual = a.try_dual().unwrap();
         macro_rules! for_dtype {
             ($d:ty, $seed:expr) => {{
                 let label = format!("{} {}", $label, stringify!($d));
-                let tall = TensorMap::<_, $d>::rand_with_seed(runtime, [a, b], [b], $seed).unwrap();
-                assert_lazy_lq!(format!("{label} tall"), tall);
+                let tall = TensorMap::<_, $d>::rand_with_seed(engine, runtime, [a, b], [b], $seed)
+                    .unwrap();
+                assert_lazy_lq!(engine, format!("{label} tall"), tall);
                 let wide =
-                    TensorMap::<_, $d>::rand_with_seed(runtime, [b], [a, b], $seed + 1).unwrap();
-                assert_lazy_lq!(format!("{label} wide"), wide);
-                let dual_legs =
-                    TensorMap::<_, $d>::rand_with_seed(runtime, [&dual, b], [b, &dual], $seed + 2)
+                    TensorMap::<_, $d>::rand_with_seed(engine, runtime, [b], [a, b], $seed + 1)
                         .unwrap();
-                assert_lazy_lq!(format!("{label} dual"), dual_legs);
+                assert_lazy_lq!(engine, format!("{label} wide"), wide);
+                let dual_legs = TensorMap::<_, $d>::rand_with_seed(
+                    engine,
+                    runtime,
+                    [&dual, b],
+                    [b, &dual],
+                    $seed + 2,
+                )
+                .unwrap();
+                assert_lazy_lq!(engine, format!("{label} dual"), dual_legs);
             }};
         }
         for_dtype!(f64, 2070);
@@ -99,7 +118,8 @@ macro_rules! assert_fixtures {
 
 #[test]
 fn u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -110,12 +130,13 @@ fn u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
     };
     let a = leg(&[(-1, 2), (0, 3), (1, 1)]);
     let b = leg(&[(0, 2), (1, 3), (2, 1)]);
-    assert_fixtures!("U(1)", runtime, a, b);
+    assert_fixtures!(engine, "U(1)", runtime, a, b);
 }
 
 #[test]
 fn su2_lazy_adjoint_lq_matches_the_materialized_adjoint() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = |pairs: &[(usize, usize)]| {
         GradedSpace::try_new(
@@ -128,12 +149,13 @@ fn su2_lazy_adjoint_lq_matches_the_materialized_adjoint() {
     };
     let a = leg(&[(0, 2), (1, 3), (2, 1)]);
     let b = leg(&[(0, 1), (1, 2)]);
-    assert_fixtures!("SU(2)", runtime, a, b);
+    assert_fixtures!(engine, "SU(2)", runtime, a, b);
 }
 
 #[test]
 fn fermionic_u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
@@ -157,7 +179,7 @@ fn fermionic_u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
     };
     let a = leg(&[(-1, 2), (0, 3), (1, 2)]);
     let b = leg(&[(0, 2), (1, 2)]);
-    assert_fixtures!("fZ2xU(1)", runtime, a, b);
+    assert_fixtures!(engine, "fZ2xU(1)", runtime, a, b);
 }
 
 /// Checked Generic: SU(3) with outer multiplicity (`8 ⊗ 8 ∋ 8` twice) and
@@ -165,18 +187,19 @@ fn fermionic_u1_lazy_adjoint_lq_matches_the_materialized_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_lazy_adjoint_lq_matches_the_materialized_adjoint() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint_irrep =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2), (vec![0, 0], 1)]).unwrap();
     let octet = GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2)]).unwrap();
-    assert_fixtures!("checked SU(3) 8", runtime, adjoint_irrep, octet);
+    assert_fixtures!(engine, "checked SU(3) 8", runtime, adjoint_irrep, octet);
     let three =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 0], 2), (vec![0, 0], 1)]).unwrap();
     let three_bar =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0i64, 1], 3), (vec![1, 0], 1)]).unwrap();
-    assert_fixtures!("checked SU(3) 3", runtime, three, three_bar);
+    assert_fixtures!(engine, "checked SU(3) 3", runtime, three, three_bar);
 }

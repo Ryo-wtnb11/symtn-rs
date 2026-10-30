@@ -64,7 +64,6 @@ pub use checked_block_layout::CheckedBlockLayout;
 #[cfg(feature = "cuda")]
 pub use cuda_transform::{
     CudaTreeTransformDestination, CudaTreeTransformExecutor, DEFAULT_COEFFICIENT_BUDGET_BYTES,
-    DEFAULT_PLAN_CACHE_BUDGET_BYTES,
 };
 pub use error::OperationError;
 pub use fusion_replay::{

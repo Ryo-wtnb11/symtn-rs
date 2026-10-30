@@ -25,6 +25,7 @@ fn canonical_structure() -> Arc<BlockStructure> {
 
 #[test]
 fn warm_owned_transform_allocates_only_the_output_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: after plan/region caches are warm, the uninitialized writer makes
     // one allocation for the returned Vec and no pre-zero scratch allocation.
@@ -39,6 +40,7 @@ fn warm_owned_transform_allocates_only_the_output_payload() {
     let mut dense = DefaultDenseExecutor::new();
     let mut workspace = TreeTransformWorkspace::default();
     let warm = try_tree_transform_structure_overwrite_owned_raw(
+        engine,
         &mut dense,
         &mut workspace,
         &transform,
@@ -54,6 +56,7 @@ fn warm_owned_transform_allocates_only_the_output_payload() {
     drop(warm);
     counting_alloc::start();
     let output = try_tree_transform_structure_overwrite_owned_raw(
+        engine,
         &mut dense,
         &mut workspace,
         &transform,

@@ -22,8 +22,10 @@ fn recompose(
     s: &TensorMap<symtn::sector::Z2FusionRule, f64>,
     vh: &TensorMap<symtn::sector::Z2FusionRule, f64>,
 ) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let us = u
         .contract(
+            engine,
             s,
             &ContractSpec {
                 lhs: &[2],
@@ -34,6 +36,7 @@ fn recompose(
         )
         .unwrap();
     us.contract(
+        engine,
         vh,
         &ContractSpec {
             lhs: &[2],
@@ -47,6 +50,7 @@ fn recompose(
 
 #[test]
 fn svd_compact_reconstructs_the_source_through_the_typed_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the factors really are a factorization in this facade's own
     // vocabulary. The composition runs through `contract`, which agrees with
@@ -54,7 +58,7 @@ fn svd_compact_reconstructs_the_source_through_the_typed_contract() {
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
-    let Svd { u, s, vh } = typed.svd_compact(&[0, 1], &[2]).unwrap();
+    let Svd { u, s, vh } = typed.svd_compact(engine, &[0, 1], &[2]).unwrap();
     let recon = recompose(&u, &s, &vh);
 
     assert_eq!(
@@ -76,6 +80,7 @@ fn svd_compact_reconstructs_the_source_through_the_typed_contract() {
 
 #[test]
 fn svd_compact_reconstructs_a_complex_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: c64 takes the complex factorization route. The imaginary part is
     // deliberately not proportional to the real one, so a stray conjugation
@@ -86,10 +91,11 @@ fn svd_compact_reconstructs_a_complex_payload() {
         u: tu,
         s: ts,
         vh: tvh,
-    } = typed.svd_compact(&[0, 1], &[2]).unwrap();
+    } = typed.svd_compact(engine, &[0, 1], &[2]).unwrap();
 
     let recon = tu
         .contract(
+            engine,
             &ts,
             &ContractSpec {
                 lhs: &[2],
@@ -100,6 +106,7 @@ fn svd_compact_reconstructs_a_complex_payload() {
         )
         .unwrap()
         .contract(
+            engine,
             &tvh,
             &ContractSpec {
                 lhs: &[2],
@@ -124,18 +131,19 @@ fn svd_compact_reconstructs_a_complex_payload() {
 
 #[test]
 fn svd_full_reconstructs_with_unitary_outer_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     for num_codomain in [2, 1] {
         let typed = z2_tensor_split(&runtime, num_codomain);
         let Svd { u, s, vh } = typed
-            .svd_full(&codomain_axes(&typed), &domain_axes(&typed))
+            .svd_full(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
 
-        let recon = u.compose(&s).unwrap().compose(&vh).unwrap();
+        let recon = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
         assert_data_close_f64(recon.dense_data().unwrap(), typed.dense_data().unwrap());
-        assert!(is_isometric!(u, 1e-12));
-        assert!(is_isometric!(vh.adjoint().unwrap(), 1e-12));
+        assert!(is_isometric!(engine, u, 1e-12));
+        assert!(is_isometric!(engine, vh.adjoint(engine).unwrap(), 1e-12));
         assert_same_legs(&u.codomain(), &typed.codomain());
         assert_same_legs(&vh.domain(), &typed.domain());
         assert_same_legs(&u.domain(), &s.codomain());
@@ -146,17 +154,17 @@ fn svd_full_reconstructs_with_unitary_outer_factors() {
 /// The truncated eigendecomposition `(d, v)` of `eigh_full` / `eig_full`
 /// output, composed the same way. Evaluates to `(d, v, error)`.
 macro_rules! truncated_eigen {
-    ($full:expr, $truncation:expr) => {{
+    ($engine:ident, $full:expr, $truncation:expr) => {{
         // `$full` is an `Eigh` or an `Eig`; both name their factors `d`, `v`.
         let full = $full.unwrap();
         let (d, v) = (full.d, full.v);
         let found = d.domain()[0]
-            .find_truncated(&d.diagview().unwrap(), &$truncation)
+            .find_truncated(&d.diagview($engine).unwrap(), &$truncation)
             .unwrap();
         (
-            d.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            d.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
                 .unwrap(),
-            v.restrict_leg(&[(v.codomain_rank(), &found.selection)])
+            v.restrict_leg($engine, &[(v.codomain_rank(), &found.selection)])
                 .unwrap(),
             found.error,
         )
@@ -165,12 +173,13 @@ macro_rules! truncated_eigen {
 
 #[test]
 fn truncated_svd_reconstructs_and_reports_the_discarded_weight() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
     let truncation = symtn::typed::Truncation::rank(2);
-    let (u, s, vh, error) = truncated_svd!(typed, truncation);
+    let (u, s, vh, error) = truncated_svd!(engine, typed, truncation);
 
     assert_same_legs(&u.codomain(), &typed.codomain());
     assert_same_legs(&vh.domain(), &typed.domain());
@@ -180,8 +189,8 @@ fn truncated_svd_reconstructs_and_reports_the_discarded_weight() {
     // The reported error is the 2-norm of everything the truncation dropped.
     // Z2 is a group, so every quantum dimension is one and the weighting is
     // the identity — the check is then a plain sum of squares.
-    let full = typed.svd_vals(&[0, 1], &[2]).unwrap();
-    let kept = typed_z2_spectrum(&s.diagview().unwrap());
+    let full = typed.svd_vals(engine, &[0, 1], &[2]).unwrap();
+    let kept = typed_z2_spectrum(&s.diagview(engine).unwrap());
     let mut discarded = 0.0;
     for entry in &full {
         let kept_here = kept
@@ -208,15 +217,15 @@ fn truncated_svd_reconstructs_and_reports_the_discarded_weight() {
 
     // A degenerate but well-formed policy is a policy, not an error: keeping
     // nothing succeeds and discards the whole spectrum.
-    let (_, empty_s, _, _) = truncated_svd!(typed, symtn::typed::Truncation::Rank(0));
+    let (_, empty_s, _, _) = truncated_svd!(engine, typed, symtn::typed::Truncation::Rank(0));
     assert!(empty_s
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .is_empty());
     assert!(empty_s
-        .diagview()
+        .diagview(engine)
         .unwrap()
         .iter()
         .all(|entry| entry.values.is_empty()));
@@ -224,6 +233,7 @@ fn truncated_svd_reconstructs_and_reports_the_discarded_weight() {
 
 #[test]
 fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a codec that cannot decode a coupled sector the engine produced
     // fails the call with the provider's own error instead of panicking inside
@@ -244,18 +254,19 @@ fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
     // `zeros` never decodes, so the tensor builds and the failure lands in the
     // spectrum decode.
     let tensor =
-        TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
+        TensorMap::<ExternalZ3Rule, f64>::zeros(engine, &runtime, [&leg, &leg], [&leg, &leg])
+            .unwrap();
 
     assert!(matches!(
-        tensor.svd_vals(&[0, 1], &[2, 3]).unwrap_err(),
+        tensor.svd_vals(engine, &[0, 1], &[2, 3]).unwrap_err(),
         symtn::typed::Error::FusionAlgebra(_)
     ));
     assert!(matches!(
         tensor
-            .svd_compact(&[0, 1], &[2, 3])
+            .svd_compact(engine, &[0, 1], &[2, 3])
             .unwrap()
             .s
-            .diagview()
+            .diagview(engine)
             .unwrap_err(),
         symtn::typed::Error::FusionAlgebra(_)
     ));
@@ -263,6 +274,7 @@ fn a_spectrum_decode_failure_comes_back_as_the_codec_error() {
 
 #[test]
 fn svd_vals_reports_exact_per_label_spectra() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = GradedSpace::try_new(
@@ -275,7 +287,7 @@ fn svd_vals_reports_exact_per_label_spectra() {
     .unwrap();
     // Each block is diagonal, so its singular values are the absolute diagonal
     // entries. Both sectors are deliberately signed and out of magnitude order.
-    let typed = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, indices| {
+    let typed = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
         if indices[0] != indices[1] {
             return 0.0;
         }
@@ -288,7 +300,7 @@ fn svd_vals_reports_exact_per_label_spectra() {
     })
     .unwrap();
 
-    let spectrum = typed.svd_vals(&[0], &[1]).unwrap();
+    let spectrum = typed.svd_vals(engine, &[0], &[1]).unwrap();
     assert_eq!(
         typed_z2_spectrum(&spectrum),
         [
@@ -302,6 +314,7 @@ fn svd_vals_reports_exact_per_label_spectra() {
 
 #[test]
 fn svd_vals_sorts_by_label_where_that_differs_from_the_id_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the O2' promise is *label* order, and the only way to see it is a
     // provider whose codec does not order its labels the way the engine orders
@@ -313,7 +326,7 @@ fn svd_vals_sorts_by_label_where_that_differs_from_the_id_order() {
     let tensor = z3_rank_four(&runtime, &provider);
 
     let labels: Vec<u8> = tensor
-        .svd_vals(&[0, 1], &[2, 3])
+        .svd_vals(engine, &[0, 1], &[2, 3])
         .unwrap()
         .iter()
         .map(|entry| entry.sector.0)
@@ -324,6 +337,7 @@ fn svd_vals_sorts_by_label_where_that_differs_from_the_id_order() {
 
 #[test]
 fn qr_and_lq_reconstruct_with_the_expected_isometries_and_spaces() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Both splits are exercised deliberately: `2 <- 1` is tall in every coupled
     // sector, where LQ-compact and LQ-full return the same factors and so
@@ -334,34 +348,34 @@ fn qr_and_lq_reconstruct_with_the_expected_isometries_and_spaces() {
         let typed = z2_tensor_split(&runtime, num_codomain);
 
         let qr_compact = typed
-            .qr_compact(&codomain_axes(&typed), &domain_axes(&typed))
+            .qr_compact(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
         let qr_full = typed
-            .qr_full(&codomain_axes(&typed), &domain_axes(&typed))
+            .qr_full(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
         for Qr { q, r } in [&qr_compact, &qr_full] {
             assert_data_close_f64(
-                q.compose(r).unwrap().dense_data().unwrap(),
+                q.compose(engine, r).unwrap().dense_data().unwrap(),
                 typed.dense_data().unwrap(),
             );
-            assert!(is_isometric!(q, 1e-12));
+            assert!(is_isometric!(engine, q, 1e-12));
             assert_same_legs(&q.codomain(), &typed.codomain());
             assert_same_legs(&r.domain(), &typed.domain());
             assert_same_legs(&q.domain(), &r.codomain());
         }
 
         let lq_compact = typed
-            .lq_compact(&codomain_axes(&typed), &domain_axes(&typed))
+            .lq_compact(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
         let lq_full = typed
-            .lq_full(&codomain_axes(&typed), &domain_axes(&typed))
+            .lq_full(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
         for Lq { l, q } in [&lq_compact, &lq_full] {
             assert_data_close_f64(
-                l.compose(q).unwrap().dense_data().unwrap(),
+                l.compose(engine, q).unwrap().dense_data().unwrap(),
                 typed.dense_data().unwrap(),
             );
-            assert!(is_isometric!(q.adjoint().unwrap(), 1e-12));
+            assert!(is_isometric!(engine, q.adjoint(engine).unwrap(), 1e-12));
             assert_same_legs(&l.codomain(), &typed.codomain());
             assert_same_legs(&q.domain(), &typed.domain());
             assert_same_legs(&l.domain(), &q.codomain());
@@ -385,32 +399,34 @@ fn qr_and_lq_reconstruct_with_the_expected_isometries_and_spaces() {
 
 #[test]
 fn left_and_right_null_spaces_annihilate_the_source() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     for num_codomain in [2, 1] {
         let typed = z2_tensor_split(&runtime, num_codomain);
         let left = typed
-            .left_null(&codomain_axes(&typed), &domain_axes(&typed))
+            .left_null(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
         let right = typed
-            .right_null(&codomain_axes(&typed), &domain_axes(&typed))
+            .right_null(engine, &codomain_axes(&typed), &domain_axes(&typed))
             .unwrap();
 
         assert_same_legs(&left.codomain(), &typed.codomain());
         assert_same_legs(&right.domain(), &typed.domain());
-        assert!(is_isometric!(left, 1e-12));
-        assert!(is_isometric!(right.adjoint().unwrap(), 1e-12));
+        assert!(is_isometric!(engine, left, 1e-12));
+        assert!(is_isometric!(engine, right.adjoint(engine).unwrap(), 1e-12));
         assert!(left
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .compose(&typed)
+            .compose(engine, &typed)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
             .all(|value| value.abs() < 1e-12));
+        let right_adjoint = right.adjoint(engine).unwrap();
         assert!(typed
-            .compose(&right.adjoint().unwrap())
+            .compose(engine, &right_adjoint)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -435,6 +451,7 @@ fn left_and_right_null_spaces_annihilate_the_source() {
 
 #[test]
 fn decompositions_carry_a_fermionic_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // The one provider this facade can host whose braiding is not symmetric.
     // Every quantum dimension is one for `FermionParity`, and the fusion-tree
@@ -444,7 +461,7 @@ fn decompositions_carry_a_fermionic_provider() {
     let runtime = runtime();
     let tensor = fermionic_rank_three(&runtime);
 
-    let spectrum = tensor.svd_vals(&[0, 1], &[2]).unwrap();
+    let spectrum = tensor.svd_vals(engine, &[0, 1], &[2]).unwrap();
     let from_spectrum: f64 = spectrum
         .iter()
         .flat_map(|entry| entry.values.iter())
@@ -459,13 +476,14 @@ fn decompositions_carry_a_fermionic_provider() {
     assert!((from_spectrum - from_data).abs() < 1e-12);
 
     // And the seam is reachable at all for this provider, in both directions.
-    let Qr { q, r } = tensor.qr_compact(&[0, 1], &[2]).unwrap();
+    let Qr { q, r } = tensor.qr_compact(engine, &[0, 1], &[2]).unwrap();
     assert_eq!(q.codomain().len(), 2);
     assert_eq!(r.domain().len(), 1);
 }
 
 #[test]
 fn decompositions_carry_an_external_provider_with_its_own_labels() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // A downstream provider drives the same surface, and its spectrum comes
     // back in its own labels rather than raw ids.
@@ -473,15 +491,15 @@ fn decompositions_carry_an_external_provider_with_its_own_labels() {
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    let spectrum = tensor.svd_vals(&[0, 1], &[2, 3]).unwrap();
+    let spectrum = tensor.svd_vals(engine, &[0, 1], &[2, 3]).unwrap();
     assert!(!spectrum.is_empty());
     assert!(spectrum.iter().all(|entry| entry.sector.0 < 3));
     assert!(spectrum.windows(2).all(|w| w[0].sector < w[1].sector));
 
-    let (_, s, _, error) = truncated_svd!(tensor, symtn::typed::Truncation::Full);
+    let (_, s, _, error) = truncated_svd!(engine, tensor, symtn::typed::Truncation::Full);
     assert_eq!(error, 0.0);
     assert_eq!(
-        s.diagview()
+        s.diagview(engine)
             .unwrap()
             .iter()
             .map(|entry| entry.sector)
@@ -500,12 +518,15 @@ fn decompositions_carry_an_external_provider_with_its_own_labels() {
 /// A typed Hermitian endomorphism: `p = t + t†`, so `eigh` is defined
 /// without projecting first.
 fn z2_hermitian(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let typed = z2_endomorphism(runtime);
-    typed.axpby(1.0, &typed.adjoint().unwrap(), 1.0).unwrap()
+    let typed_adjoint = typed.adjoint(engine).unwrap();
+    typed.axpby(engine, 1.0, &typed_adjoint, 1.0).unwrap()
 }
 
 #[test]
 fn eigh_full_reconstructs_the_source_through_compose() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `v * d * v†` is the source. The middle composition takes the
     // compact bond-scaling arm, so this exercises the storage as well as the
@@ -513,11 +534,14 @@ fn eigh_full_reconstructs_the_source_through_compose() {
     let runtime = runtime();
     let typed = z2_hermitian(&runtime);
 
-    let Eigh { d, v } = typed.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let Eigh { d, v } = typed
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
+    let v_adjoint = v.adjoint(engine).unwrap();
     let recon = v
-        .compose(&d)
+        .compose(engine, &d)
         .unwrap()
-        .compose(&v.adjoint().unwrap())
+        .compose(engine, &v_adjoint)
         .unwrap();
 
     assert_eq!(
@@ -539,11 +563,14 @@ fn eigh_full_reconstructs_the_source_through_compose() {
 
 #[test]
 fn eigh_vals_follow_the_provider_label_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: caller-facing spectra use provider labels in canonical order.
     let runtime = runtime();
     let typed = z2_hermitian(&runtime);
-    let spectrum = typed.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let spectrum = typed
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
 
     assert_eq!(
         spectrum
@@ -557,13 +584,14 @@ fn eigh_vals_follow_the_provider_label_order() {
 
 #[test]
 fn truncated_eigh_reports_the_discarded_eigenvalue_norm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_hermitian(&runtime);
     let truncation = Truncation::rank(3);
 
     let mut magnitudes: Vec<_> = typed
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap()
         .into_iter()
         .flat_map(|entry| entry.values)
@@ -576,12 +604,13 @@ fn truncated_eigh_reports_the_discarded_eigenvalue_norm() {
         .sum::<f64>()
         .sqrt();
     let (d, _, error) = truncated_eigen!(
-        typed.eigh_full(&[0], &[1], HermitianTol::DEFAULT),
+        engine,
+        typed.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT),
         truncation
     );
 
     assert_eq!(
-        d.diagview()
+        d.diagview(engine)
             .unwrap()
             .iter()
             .map(|entry| entry.values.len())
@@ -594,12 +623,12 @@ fn truncated_eigh_reports_the_discarded_eigenvalue_norm() {
     );
     assert!((error - expected_error).abs() < 1e-12 * expected_error.max(1.0));
     assert!(
-        d.materialize().unwrap().dense_data().unwrap().len()
+        d.materialize(engine).unwrap().dense_data().unwrap().len()
             < typed
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap()
                 .d
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -609,18 +638,19 @@ fn truncated_eigh_reports_the_discarded_eigenvalue_norm() {
 
 #[test]
 fn eigh_reports_a_non_hermitian_input_rather_than_a_wrong_answer() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
     assert!(typed
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
         .err()
         .unwrap()
         .report()
         .contains("eigh requires Hermitian coupled-sector blocks"));
     assert!(typed
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .err()
         .unwrap()
         .report()
@@ -634,6 +664,7 @@ fn eigh_reports_a_non_hermitian_input_rather_than_a_wrong_answer() {
 /// The typed c64 endomorphism `eig` needs: [`z2_complex_tensor`] is rank
 /// three, and `eig` is defined on square maps only.
 fn z2_complex_endo(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let complex = |value: f64| Complex64::new(value, 1.0 + value % 5.0);
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -643,7 +674,7 @@ fn z2_complex_endo(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, 
         ],
     )
     .unwrap();
-    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |trees, indices| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |trees, indices| {
         complex(typed_fill_value(trees, indices))
     })
     .unwrap()
@@ -651,35 +682,41 @@ fn z2_complex_endo(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, 
 
 #[test]
 fn eig_full_satisfies_the_eigen_equation_for_a_real_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a real input promotes to complex factors satisfying A V = V D.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
-    let Eig { d, v } = typed.eig_full(&[0], &[1]).unwrap();
-    let av = typed.convert::<Complex64>().compose(&v).unwrap();
-    let vd = v.compose(&d).unwrap();
+    let Eig { d, v } = typed.eig_full(engine, &[0], &[1]).unwrap();
+    let av = typed
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .compose(engine, &v)
+        .unwrap();
+    let vd = v.compose(engine, &d).unwrap();
 
     assert_data_close_c64(av.dense_data().unwrap(), vd.dense_data().unwrap());
 }
 
 #[test]
 fn complex_eig_satisfies_the_eigen_equation_and_conjugates_its_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the native complex route satisfies A V = V D, and the compact
     // spectrum's adjoint conjugates genuinely nonreal eigenvalues.
     let runtime = runtime();
     let typed = z2_complex_endo(&runtime);
 
-    let Eig { d, v } = typed.eig_full(&[0], &[1]).unwrap();
+    let Eig { d, v } = typed.eig_full(engine, &[0], &[1]).unwrap();
     assert_data_close_c64(
-        typed.compose(&v).unwrap().dense_data().unwrap(),
-        v.compose(&d).unwrap().dense_data().unwrap(),
+        typed.compose(engine, &v).unwrap().dense_data().unwrap(),
+        v.compose(engine, &d).unwrap().dense_data().unwrap(),
     );
 
     // Genuinely complex, so a missing conjugation is observable.
     assert!(
-        d.materialize()
+        d.materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -687,14 +724,14 @@ fn complex_eig_satisfies_the_eigen_equation_and_conjugates_its_spectrum() {
             .any(|value| value.im.abs() > 1e-6),
         "the eig spectrum must be off the real axis for this to test anything"
     );
-    let adjoint = d.adjoint().unwrap();
+    let adjoint = d.adjoint(engine).unwrap();
     for (conjugated, original) in adjoint
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(d.materialize().unwrap().dense_data().unwrap())
+        .zip(d.materialize(engine).unwrap().dense_data().unwrap())
     {
         assert_eq!(*conjugated, original.conj());
     }
@@ -702,10 +739,11 @@ fn complex_eig_satisfies_the_eigen_equation_and_conjugates_its_spectrum() {
 
 #[test]
 fn eig_vals_are_label_ordered_and_trunc_reports_the_discarded_norm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
-    let spectrum = typed.eig_vals(&[0], &[1]).unwrap();
+    let spectrum = typed.eig_vals(engine, &[0], &[1]).unwrap();
     assert_eq!(
         spectrum
             .iter()
@@ -726,10 +764,10 @@ fn eig_vals_are_label_ordered_and_trunc_reports_the_discarded_norm() {
         .map(|value| value * value)
         .sum::<f64>()
         .sqrt();
-    let (d, _, error) = truncated_eigen!(typed.eig_full(&[0], &[1]), truncation);
+    let (d, _, error) = truncated_eigen!(engine, typed.eig_full(engine, &[0], &[1]), truncation);
 
     assert_eq!(
-        d.diagview()
+        d.diagview(engine)
             .unwrap()
             .iter()
             .map(|entry| entry.values.len())
@@ -749,6 +787,7 @@ fn eig_vals_are_label_ordered_and_trunc_reports_the_discarded_norm() {
 
 #[test]
 fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the complementary projections reconstruct the source and their
     // adjoint symmetries agree with the typed predicate family.
@@ -756,11 +795,11 @@ fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
     let typed = z2_endomorphism(&runtime);
     let tol = 1e-10;
 
-    let hermitian = project_hermitian!(typed).unwrap();
-    let antihermitian = project_antihermitian!(typed).unwrap();
+    let hermitian = project_hermitian!(engine, typed).unwrap();
+    let antihermitian = project_antihermitian!(engine, typed).unwrap();
     assert_data_close_f64(
         hermitian
-            .axpby(1.0, &antihermitian, 1.0)
+            .axpby(engine, 1.0, &antihermitian, 1.0)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -768,9 +807,9 @@ fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
     );
     assert_data_close_f64(
         hermitian
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -778,20 +817,27 @@ fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
     );
     assert_data_close_f64(
         antihermitian
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
-        antihermitian.scale(-1.0).unwrap().dense_data().unwrap(),
+        antihermitian
+            .scale(engine, -1.0)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
     );
     assert_data_close_f64(
-        project_hermitian!(hermitian).unwrap().dense_data().unwrap(),
+        project_hermitian!(engine, hermitian)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         hermitian.dense_data().unwrap(),
     );
     assert_data_close_f64(
-        project_antihermitian!(antihermitian)
+        project_antihermitian!(engine, antihermitian)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -806,11 +852,11 @@ fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
     for (tensor, expected) in cases {
         assert_eq!(
             [
-                is_hermitian!(tensor, tol),
-                is_antihermitian!(tensor, tol),
-                is_isometric!(tensor, tol),
-                is_unitary!(tensor, tol),
-                is_posdef!(tensor, tol),
+                is_hermitian!(engine, tensor, tol),
+                is_antihermitian!(engine, tensor, tol),
+                is_isometric!(engine, tensor, tol),
+                is_unitary!(engine, tensor, tol),
+                is_posdef!(engine, tensor, tol),
             ],
             expected
         );
@@ -819,6 +865,7 @@ fn hermitian_projections_satisfy_their_identities_and_predicate_truth_table() {
 
 #[test]
 fn isometry_and_posdef_see_their_positive_cases() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the two members the fixture above only ever answers `false` for.
     // `u` from an SVD is isometric by construction, and `t† t` is positive
@@ -827,23 +874,23 @@ fn isometry_and_posdef_see_their_positive_cases() {
     let typed = z2_tensor(&runtime);
     let tol = 1e-9;
 
-    let tu = typed.svd_compact(&[0, 1], &[2]).unwrap().u;
-    assert!(is_isometric!(tu, tol));
+    let tu = typed.svd_compact(engine, &[0, 1], &[2]).unwrap().u;
+    assert!(is_isometric!(engine, tu, tol));
     // Isometric but not unitary: `u` is tall here.
-    assert!(!is_unitary!(tu, tol));
+    assert!(!is_unitary!(engine, tu, tol));
 
     // `2 * id` is Hermitian with every eigenvalue at 2: positive definite on
     // any provider, and the cheapest tensor that is.
-    let typed_positive = TensorMap::isomorphism(&runtime, &typed.domain(), &typed.domain())
+    let typed_positive = TensorMap::isomorphism(engine, &runtime, &typed.domain(), &typed.domain())
         .unwrap()
-        .scale(2.0)
+        .scale(engine, 2.0)
         .unwrap();
-    assert!(is_hermitian!(typed_positive, tol));
-    assert!(is_posdef!(typed_positive, tol));
+    assert!(is_hermitian!(engine, typed_positive, tol));
+    assert!(is_posdef!(engine, typed_positive, tol));
     // Hermitian but not positive definite: the same tensor negated.
-    let negated = typed_positive.scale(-1.0).unwrap();
-    assert!(is_hermitian!(negated, tol));
-    assert!(!is_posdef!(negated, tol));
+    let negated = typed_positive.scale(engine, -1.0).unwrap();
+    assert!(is_hermitian!(engine, negated, tol));
+    assert!(!is_posdef!(engine, negated, tol));
     // Positive *semi*definite is `false`, not `true`: TensorKit's `isposdef` is
     // Cholesky-based and strict, and this facade's rustdoc promises the same.
     // A real diagonal endomorphism with one entry at exactly zero is the case
@@ -858,6 +905,7 @@ fn isometry_and_posdef_see_their_positive_cases() {
     )
     .unwrap();
     let semidefinite = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&semidefinite_leg],
         [&semidefinite_leg],
@@ -871,41 +919,46 @@ fn isometry_and_posdef_see_their_positive_cases() {
         },
     )
     .unwrap();
-    assert!(is_hermitian!(semidefinite, 0.0));
+    assert!(is_hermitian!(engine, semidefinite, 0.0));
     assert!(semidefinite
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap()
         .iter()
         .any(|entry| entry.values.contains(&0.0)));
     assert!(
-        !is_posdef!(semidefinite, 0.0),
+        !is_posdef!(engine, semidefinite, 0.0),
         "a positive semidefinite tensor must not be reported positive definite"
     );
 
     // This rank-deficient fixture's Gram matrix is Hermitian but not strictly
     // positive definite.
-    let tgram = typed.adjoint().unwrap().compose(&typed).unwrap();
-    assert!(is_hermitian!(tgram, tol));
-    assert!(!is_posdef!(tgram, tol));
+    let tgram = typed
+        .adjoint(engine)
+        .unwrap()
+        .compose(engine, &typed)
+        .unwrap();
+    assert!(is_hermitian!(engine, tgram, tol));
+    assert!(!is_posdef!(engine, tgram, tol));
 }
 
 #[test]
 fn a_non_endomorphism_is_never_hermitian_and_never_errors() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: predicates are total and false; projections have no endomorphism to
     // return and therefore reject the input.
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
-    assert!(!is_hermitian!(typed, 1e-9));
-    assert!(!is_antihermitian!(typed, 1e-9));
-    assert!(!is_posdef!(typed, 1e-9));
-    assert!(project_hermitian!(typed)
+    assert!(!is_hermitian!(engine, typed, 1e-9));
+    assert!(!is_antihermitian!(engine, typed, 1e-9));
+    assert!(!is_posdef!(engine, typed, 1e-9));
+    assert!(project_hermitian!(engine, typed)
         .err()
         .unwrap()
         .report()
         .contains("tensors live on different spaces or block layouts"));
-    assert!(project_antihermitian!(typed)
+    assert!(project_antihermitian!(engine, typed)
         .err()
         .unwrap()
         .report()
@@ -914,6 +967,7 @@ fn a_non_endomorphism_is_never_hermitian_and_never_errors() {
 
 #[test]
 fn typed_polar_reconstructs_the_input_f64_u1_and_c64_fz2() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 1: `t = w ∘ p` (left) and `t = p ∘ w` (right) at factorization
     // tolerance, on both dtypes and on both a bosonic and a fermionic rule.
@@ -921,39 +975,40 @@ fn typed_polar_reconstructs_the_input_f64_u1_and_c64_fz2() {
 
     let leg = u1_typed_leg();
     let tall: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 3).unwrap();
-    let LeftPolar { w, p } = tall.left_polar(&[0, 1], &[2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 3).unwrap();
+    let LeftPolar { w, p } = tall.left_polar(engine, &[0, 1], &[2]).unwrap();
     assert_data_close_f64(
-        w.compose(&p).unwrap().dense_data().unwrap(),
+        w.compose(engine, &p).unwrap().dense_data().unwrap(),
         tall.dense_data().unwrap(),
     );
     let wide: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg, &leg], 5).unwrap();
-    let RightPolar { p, wh: w } = wide.right_polar(&[0], &[1, 2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg, &leg], 5).unwrap();
+    let RightPolar { p, wh: w } = wide.right_polar(engine, &[0], &[1, 2]).unwrap();
     assert_data_close_f64(
-        p.compose(&w).unwrap().dense_data().unwrap(),
+        p.compose(engine, &w).unwrap().dense_data().unwrap(),
         wide.dense_data().unwrap(),
     );
 
     let leg = fz2_typed_leg();
     let tall: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 7).unwrap();
-    let LeftPolar { w, p } = tall.left_polar(&[0, 1], &[2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7).unwrap();
+    let LeftPolar { w, p } = tall.left_polar(engine, &[0, 1], &[2]).unwrap();
     assert_data_close_c64(
-        w.compose(&p).unwrap().dense_data().unwrap(),
+        w.compose(engine, &p).unwrap().dense_data().unwrap(),
         tall.dense_data().unwrap(),
     );
     let wide: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg, &leg], 11).unwrap();
-    let RightPolar { p, wh: w } = wide.right_polar(&[0], &[1, 2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg, &leg], 11).unwrap();
+    let RightPolar { p, wh: w } = wide.right_polar(engine, &[0], &[1, 2]).unwrap();
     assert_data_close_c64(
-        p.compose(&w).unwrap().dense_data().unwrap(),
+        p.compose(engine, &w).unwrap().dense_data().unwrap(),
         wide.dense_data().unwrap(),
     );
 }
 
 #[test]
 fn typed_polar_factor_laws_hold() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 2: `w† ∘ w = id(domain)` for `left_polar` (resp. `w ∘ w† = id` on
     // the rows for `right_polar`); `p` Hermitian with non-negative spectrum,
@@ -963,46 +1018,51 @@ fn typed_polar_factor_laws_hold() {
     // c64 fermionic left arm: a stray conjugation or sign is visible here.
     let leg = fz2_typed_leg();
     let tall: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 13).unwrap();
-    let LeftPolar { w, p } = tall.left_polar(&[0, 1], &[2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 13).unwrap();
+    let LeftPolar { w, p } = tall.left_polar(engine, &[0, 1], &[2]).unwrap();
     let id: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::isomorphism(&runtime, [&leg], [&leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg], [&leg]).unwrap();
     assert_data_close_c64(
-        w.adjoint()
+        w.adjoint(engine)
             .unwrap()
-            .compose(&w)
+            .compose(engine, &w)
             .unwrap()
             .dense_data()
             .unwrap(),
         id.dense_data().unwrap(),
     );
-    assert!(is_hermitian!(p, 1e-12));
-    for entry in p.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap() {
+    assert!(is_hermitian!(engine, p, 1e-12));
+    for entry in p
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap()
+    {
         assert!(entry.values.iter().all(|&value| value >= -1e-12));
     }
 
     // f64 U(1) right arm.
     let leg = u1_typed_leg();
     let wide: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg, &leg], 17).unwrap();
-    let RightPolar { p, wh: w } = wide.right_polar(&[0], &[1, 2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg, &leg], 17).unwrap();
+    let RightPolar { p, wh: w } = wide.right_polar(engine, &[0], &[1, 2]).unwrap();
     let id: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&leg], [&leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg], [&leg]).unwrap();
+    let w_adjoint = w.adjoint(engine).unwrap();
     assert_data_close_f64(
-        w.compose(&w.adjoint().unwrap())
-            .unwrap()
-            .dense_data()
-            .unwrap(),
+        w.compose(engine, &w_adjoint).unwrap().dense_data().unwrap(),
         id.dense_data().unwrap(),
     );
-    assert!(is_hermitian!(p, 1e-12));
-    for entry in p.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap() {
+    assert!(is_hermitian!(engine, p, 1e-12));
+    for entry in p
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap()
+    {
         assert!(entry.values.iter().all(|&value| value >= -1e-12));
     }
 }
 
 #[test]
 fn typed_polar_factor_spaces_match_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 3: factor *spaces*, not just shapes — TK 0.17
     // `factorizations/matrixalgebrakit.jl:204-214`: left `W` lives on
@@ -1014,16 +1074,16 @@ fn typed_polar_factor_spaces_match_tensorkit() {
     let dual = leg.try_dual().unwrap();
 
     let tall: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &dual], [&dual], 19).unwrap();
-    let LeftPolar { w, p } = tall.left_polar(&[0, 1], &[2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &dual], [&dual], 19).unwrap();
+    let LeftPolar { w, p } = tall.left_polar(engine, &[0, 1], &[2]).unwrap();
     assert_same_legs(&w.codomain(), &tall.codomain());
     assert_same_legs(&w.domain(), &tall.domain());
     assert_same_legs(&p.codomain(), &tall.domain());
     assert_same_legs(&p.domain(), &tall.domain());
 
     let wide: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&dual], [&leg, &dual], 23).unwrap();
-    let RightPolar { p, wh: w } = wide.right_polar(&[0], &[1, 2]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&dual], [&leg, &dual], 23).unwrap();
+    let RightPolar { p, wh: w } = wide.right_polar(engine, &[0], &[1, 2]).unwrap();
     assert_same_legs(&p.codomain(), &wide.codomain());
     assert_same_legs(&p.domain(), &wide.codomain());
     assert_same_legs(&w.codomain(), &wide.codomain());
@@ -1032,6 +1092,7 @@ fn typed_polar_factor_spaces_match_tensorkit() {
 
 #[test]
 fn typed_polar_wrong_side_rectangular_reports_the_requested_direction() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 4: the split-2 fixture is tall in every coupled sector, the split-1
     // one wide — so `right_polar` on the former and `left_polar` on the latter
@@ -1040,7 +1101,7 @@ fn typed_polar_wrong_side_rectangular_reports_the_requested_direction() {
 
     let typed_tall = z2_tensor_split(&runtime, 2);
     assert!(matches!(
-        typed_tall.right_polar(&[0, 1], &[2]).unwrap_err(),
+        typed_tall.right_polar(engine, &[0, 1], &[2]).unwrap_err(),
         symtn::typed::Error::Operation(error)
             if matches!(
                 error.as_ref(),
@@ -1052,7 +1113,7 @@ fn typed_polar_wrong_side_rectangular_reports_the_requested_direction() {
 
     let typed_wide = z2_tensor_split(&runtime, 1);
     assert!(matches!(
-        typed_wide.left_polar(&[0], &[1, 2]).unwrap_err(),
+        typed_wide.left_polar(engine, &[0], &[1, 2]).unwrap_err(),
         symtn::typed::Error::Operation(error)
             if matches!(
                 error.as_ref(),
@@ -1065,6 +1126,7 @@ fn typed_polar_wrong_side_rectangular_reports_the_requested_direction() {
 
 #[test]
 fn typed_polar_carries_an_external_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 5: `ExternalZ3` is a downstream-style provider, so this is a
     // provider-generic law check —
@@ -1079,21 +1141,26 @@ fn typed_polar_carries_an_external_provider() {
     let wide = z3_leg(&provider, false);
     let narrow = z3_other_leg(&provider, false);
     let mut counter = 0.0;
-    let tensor: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&wide, &narrow], [&wide, &narrow], |_, _| {
+    let tensor: TensorMap<ExternalZ3Rule, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&wide, &narrow],
+        [&wide, &narrow],
+        |_, _| {
             counter += 1.0;
             counter
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
-    let LeftPolar { w, p } = tensor.left_polar(&[0, 1], &[2, 3]).unwrap();
+    let LeftPolar { w, p } = tensor.left_polar(engine, &[0, 1], &[2, 3]).unwrap();
     assert_data_close_f64(
-        w.compose(&p).unwrap().dense_data().unwrap(),
+        w.compose(engine, &p).unwrap().dense_data().unwrap(),
         tensor.dense_data().unwrap(),
     );
-    let gram = w.adjoint().unwrap().compose(&w).unwrap();
+    let gram = w.adjoint(engine).unwrap().compose(engine, &w).unwrap();
     let id: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::isomorphism(&runtime, [&wide, &narrow], [&wide, &narrow]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&wide, &narrow], [&wide, &narrow]).unwrap();
     assert_data_close_f64(gram.dense_data().unwrap(), id.dense_data().unwrap());
 }
 

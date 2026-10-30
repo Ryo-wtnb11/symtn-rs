@@ -95,13 +95,14 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let codomain = if generator == 1 { [1, 0, 2] } else { [0, 2, 1] };
     // Source axes are [tau_1, tau_2, tau_3 | total tau]. Increasing levels
     // define positive Artin generators; reversing them selects the inverse.
     // Why not `permute`: an anyonic swap without source levels loses the
     // over/under convention and is not this braid word.
     let levels = if inverse { [3, 2, 1, 0] } else { [0, 1, 2, 3] };
-    state.braid(&codomain, &[3], &levels).unwrap()
+    state.braid(engine, &codomain, &[3], &levels).unwrap()
 }
 
 /// The workflow on `leg ⊗ leg ⊗ leg ← leg`, whose two states are the inner
@@ -123,13 +124,15 @@ where
         + SectorCodec,
     <R as SectorCodec>::Sector: Copy,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let tau = GradedSpace::try_new(Arc::new(provider), [(leg, 1)]).unwrap();
     let dual_tau = tau.try_dual().unwrap();
 
     for (rank, expected) in [2, 3, 4].into_iter().zip(counts) {
         let legs = vec![&tau; rank];
-        let space: TensorMap<_, Complex64> = TensorMap::zeros(&runtime, legs, [&tau]).unwrap();
+        let space: TensorMap<_, Complex64> =
+            TensorMap::zeros(engine, &runtime, legs, [&tau]).unwrap();
         assert_eq!(
             space.dense_data().unwrap().len(),
             expected,
@@ -138,13 +141,14 @@ where
     }
 
     let basis: [TensorMap<_, Complex64>; 2] = channels.map(|channel| {
-        TensorMap::from_subblock_fn(&runtime, [&tau, &tau, &tau], [&tau], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&tau, &tau, &tau], [&tau], |trees, _| {
             Complex64::new((trees.codomain_innerlines() == [channel]) as u8 as f64, 0.0)
         })
         .unwrap()
     });
     let ordinary = basis[0]
         .contract(
+            engine,
             &basis[0],
             &ContractSpec {
                 lhs: &[3],
@@ -161,6 +165,7 @@ where
     ));
     let dual_basis: [TensorMap<_, Complex64>; 2] = channels.map(|channel| {
         TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             [&dual_tau, &dual_tau, &dual_tau],
             [&dual_tau],
@@ -173,9 +178,9 @@ where
     // reconstruct F; applying the same planar move again is its inverse.
     let f = std::array::from_fn(|row| {
         std::array::from_fn(|column| {
-            let transformed = basis[column].transpose(&[3], &[2, 1, 0]).unwrap();
+            let transformed = basis[column].transpose(engine, &[3], &[2, 1, 0]).unwrap();
             assert_eq!(transformed.dense_data().unwrap().len(), 2);
-            let roundtrip = transformed.transpose(&[3, 2, 1], &[0]).unwrap();
+            let roundtrip = transformed.transpose(engine, &[3, 2, 1], &[0]).unwrap();
             for (slot, value) in coordinates(&roundtrip, channels).into_iter().enumerate() {
                 let expected = Complex64::new((slot == column) as u8 as f64, 0.0);
                 assert!((value - expected).norm() <= PLANAR_BOUND);
@@ -185,7 +190,7 @@ where
             // values intentionally differ, so each workflow stays bound to
             // its own provider allocation.
             transformed
-                .compose(&dual_basis[row])
+                .compose(engine, &dual_basis[row])
                 .unwrap()
                 .dense_data()
                 .unwrap()[0]
@@ -418,14 +423,15 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
 /// TensorKit 0.17.1).
 #[test]
 fn semion_unique_fusion_uses_its_associator() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn_sectors::{FusionRule, FusionStyleKind};
     let rule = TableRule::by_uuid("37fa4d16-97c6-11f1-9c13-c70bad3f9e94").unwrap();
     assert_eq!(rule.fusion_style(), FusionStyleKind::Unique);
     let runtime = Runtime::builder().build().unwrap();
     let s = GradedSpace::try_new(Arc::new(rule), [(TableSector::new(2), 1)]).unwrap();
     let dual_s = s.try_dual().unwrap();
-    let ones = |leg: &GradedSpace<TableRule>| -> TensorMap<TableRule, Complex64> {
-        TensorMap::from_subblock_fn(&runtime, [leg, leg, leg], [leg], |_, _| {
+    let mut ones = |leg: &GradedSpace<TableRule>| -> TensorMap<TableRule, Complex64> {
+        TensorMap::from_subblock_fn(engine, &runtime, [leg, leg, leg], [leg], |_, _| {
             Complex64::new(1.0, 0.0)
         })
         .unwrap()
@@ -454,9 +460,9 @@ fn semion_unique_fusion_uses_its_associator() {
         );
     }
     let f = state
-        .transpose(&[3], &[2, 1, 0])
+        .transpose(engine, &[3], &[2, 1, 0])
         .unwrap()
-        .compose(&dual_state)
+        .compose(engine, &dual_state)
         .unwrap();
     close("semion_f", value(&f), Complex64::new(1.0, 0.0));
 }

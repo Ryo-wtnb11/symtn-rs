@@ -55,20 +55,22 @@ impl Payload for Complex64 {
 /// is the Host answer exactly: every admitted factor is `±1`, so a device
 /// result that differs in a single bit differs semantically.
 macro_rules! device_matches_host {
-    ($what:expr, $host:expr, |$t:ident| $body:expr) => {{
+    ($engine:ident, $cuda:ident, $what:expr, $host:expr, |$e:ident, $t:ident| $body:expr) => {{
         let host_source = &$host;
-        let device_source = host_source.to_cuda().unwrap();
+        let device_source = host_source.to_cuda($cuda).unwrap();
         let expected = {
+            let $e: &mut dyn symtn::typed::Engine = &mut *$engine;
             let $t = host_source;
             $body
         }
         .unwrap();
         let actual = {
+            let $e: &mut dyn symtn::typed::Engine = &mut *$cuda;
             let $t = &device_source;
             $body
         }
         .unwrap()
-        .to_host()
+        .to_host($cuda)
         .unwrap();
         let what: &str = $what;
         assert_eq!(
@@ -109,7 +111,7 @@ fn assert_signs_only<D: Payload>(source: &[D], twisted: &[D], what: &str) {
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder().cuda(0).build().unwrap()
+    Runtime::builder().build().unwrap()
 }
 
 fn real_fill(_trees: &symtn::typed::BlockFusionTrees<impl std::fmt::Debug>, idx: &[usize]) -> f64 {
@@ -156,21 +158,29 @@ fn u1_leg() -> GradedSpace<U1FusionRule> {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_matches_the_host_on_fermion_parity() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
     let leg = fz2_leg(false);
     let dual = fz2_leg(true);
     // A dual leg in the codomain and a plain one in the domain, so the leg
     // indices below reach both sides and both dualities.
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &dual], [&leg, &leg], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &dual], [&leg, &leg], real_fill)
+            .unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &dual], [&leg, &leg], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &dual], [&leg, &leg], complex_fill)
+            .unwrap();
     assert!(real.subblock_count() >= 2, "multi-block fixture");
 
     // Single codomain leg, single dual codomain leg, single domain leg.
     for legs in [&[0usize][..], &[1][..], &[3][..]] {
         let what = format!("fZ2/f64 twist {legs:?}");
-        let twisted = device_matches_host!(&what, real, |t| t.twist(legs, Direction::Forward));
+        let twisted = device_matches_host!(engine, cuda, &what, real, |e, t| t.twist(
+            e,
+            legs,
+            Direction::Forward
+        ));
         assert_signs_only(
             real.dense_data().unwrap(),
             twisted.dense_data().unwrap(),
@@ -180,7 +190,11 @@ fn device_twist_matches_the_host_on_fermion_parity() {
     // Multi-axis, across the split and repeating both sides.
     for legs in [&[0usize, 3][..], &[1, 2, 3][..], &[0, 1, 1, 3][..]] {
         let what = format!("fZ2/f64 twist {legs:?}");
-        let twisted = device_matches_host!(&what, real, |t| t.twist(legs, Direction::Forward));
+        let twisted = device_matches_host!(engine, cuda, &what, real, |e, t| t.twist(
+            e,
+            legs,
+            Direction::Forward
+        ));
         assert_signs_only(
             real.dense_data().unwrap(),
             twisted.dense_data().unwrap(),
@@ -188,7 +202,11 @@ fn device_twist_matches_the_host_on_fermion_parity() {
         );
     }
     let what = "fZ2/c64 twist [1, 2]";
-    let twisted = device_matches_host!(what, complex, |t| t.twist(&[1, 2], Direction::Forward));
+    let twisted = device_matches_host!(engine, cuda, what, complex, |e, t| t.twist(
+        e,
+        &[1, 2],
+        Direction::Forward
+    ));
     assert_signs_only(
         complex.dense_data().unwrap(),
         twisted.dense_data().unwrap(),
@@ -198,7 +216,11 @@ fn device_twist_matches_the_host_on_fermion_parity() {
     // the inverse `twist` is the conjugate factor, which is the same `±1` here —
     // gated against the Host rather than assumed.
     let what = "fZ2/f64 inverse twist [0, 3]";
-    let inverted = device_matches_host!(what, real, |t| t.twist(&[0, 3], Direction::Inverse));
+    let inverted = device_matches_host!(engine, cuda, what, real, |e, t| t.twist(
+        e,
+        &[0, 3],
+        Direction::Inverse
+    ));
     assert_signs_only(
         real.dense_data().unwrap(),
         inverted.dense_data().unwrap(),
@@ -209,6 +231,8 @@ fn device_twist_matches_the_host_on_fermion_parity() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_matches_the_host_for_product_providers() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
 
     // fZ2 x U(1): fermionic signs on top of a charge grading.
@@ -226,10 +250,15 @@ fn device_twist_matches_the_host_for_product_providers() {
     )
     .unwrap();
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], real_fill)
+            .unwrap();
     for legs in [&[1usize][..], &[2][..], &[0, 2][..]] {
         let what = format!("fZ2xU1 twist {legs:?}");
-        let twisted = device_matches_host!(&what, host, |t| t.twist(legs, Direction::Forward));
+        let twisted = device_matches_host!(engine, cuda, &what, host, |e, t| t.twist(
+            e,
+            legs,
+            Direction::Forward
+        ));
         assert_signs_only(
             host.dense_data().unwrap(),
             twisted.dense_data().unwrap(),
@@ -261,10 +290,15 @@ fn device_twist_matches_the_host_for_product_providers() {
     )
     .unwrap();
     let host: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], complex_fill)
+            .unwrap();
     for legs in [&[0usize][..], &[3][..], &[1, 3][..]] {
         let what = format!("fZ2xSU2 twist {legs:?}");
-        let twisted = device_matches_host!(&what, host, |t| t.twist(legs, Direction::Forward));
+        let twisted = device_matches_host!(engine, cuda, &what, host, |e, t| t.twist(
+            e,
+            legs,
+            Direction::Forward
+        ));
         assert_signs_only(
             host.dense_data().unwrap(),
             twisted.dense_data().unwrap(),
@@ -272,7 +306,11 @@ fn device_twist_matches_the_host_for_product_providers() {
         );
     }
     let what = "fZ2xSU2 inverse twist [1, 3]";
-    let inverted = device_matches_host!(what, host, |t| t.twist(&[1, 3], Direction::Inverse));
+    let inverted = device_matches_host!(engine, cuda, what, host, |e, t| t.twist(
+        e,
+        &[1, 3],
+        Direction::Inverse
+    ));
     assert_signs_only(
         host.dense_data().unwrap(),
         inverted.dense_data().unwrap(),
@@ -283,19 +321,22 @@ fn device_twist_matches_the_host_for_product_providers() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_round_trips_bitwise_and_short_circuits() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let runtime = runtime();
     let leg = fz2_leg(false);
     let host: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], complex_fill).unwrap();
-    let device = host.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], complex_fill)
+            .unwrap();
+    let device = host.to_cuda(cuda).unwrap();
 
     // twist ∘ inverse twist == id, bitwise: both factors are exactly ±1.
     let round_trip = device
-        .twist(&[0, 2, 3], Direction::Forward)
+        .twist(cuda, &[0, 2, 3], Direction::Forward)
         .unwrap()
-        .twist(&[0, 2, 3], Direction::Inverse)
+        .twist(cuda, &[0, 2, 3], Direction::Inverse)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_eq!(
         round_trip.dense_data().unwrap(),
@@ -303,9 +344,9 @@ fn device_twist_round_trips_bitwise_and_short_circuits() {
         "twist round trip is exact"
     );
     let twisted = device
-        .twist(&[0, 2, 3], Direction::Forward)
+        .twist(cuda, &[0, 2, 3], Direction::Forward)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_signs_only(
         host.dense_data().unwrap(),
@@ -315,9 +356,9 @@ fn device_twist_round_trips_bitwise_and_short_circuits() {
 
     // An empty leg list is a clone on both sides.
     let empty = device
-        .twist(&[], Direction::Forward)
+        .twist(cuda, &[], Direction::Forward)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_eq!(
         empty.dense_data().unwrap(),
@@ -328,14 +369,14 @@ fn device_twist_round_trips_bitwise_and_short_circuits() {
     // A bosonic provider twists by 1 on every block: a clone, never a scale.
     let u1 = u1_leg();
     let bosonic: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
-    let bosonic_device = bosonic.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
+    let bosonic_device = bosonic.to_cuda(cuda).unwrap();
     for legs in [&[0usize][..], &[1, 3][..]] {
         assert_eq!(
             bosonic_device
-                .twist(legs, Direction::Forward)
+                .twist(cuda, legs, Direction::Forward)
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -344,9 +385,9 @@ fn device_twist_round_trips_bitwise_and_short_circuits() {
         );
         assert_eq!(
             bosonic_device
-                .twist(legs, Direction::Inverse)
+                .twist(cuda, legs, Direction::Inverse)
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -359,29 +400,31 @@ fn device_twist_round_trips_bitwise_and_short_circuits() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_on_a_lazy_adjoint_matches_the_host() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let runtime = runtime();
     let leg = fz2_leg(false);
     let dual = fz2_leg(true);
     let host: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &dual], [&leg], complex_fill).unwrap();
-    let device = host.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &dual], [&leg], complex_fill).unwrap();
+    let device = host.to_cuda(cuda).unwrap();
 
     for legs in [&[0usize][..], &[2][..], &[0, 1, 2][..]] {
         let expected = host
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .twist(legs, Direction::Forward)
+            .twist(engine, legs, Direction::Forward)
             .unwrap();
         let actual = device
-            .adjoint()
+            .adjoint(cuda)
             .unwrap()
-            .twist(legs, Direction::Forward)
+            .twist(cuda, legs, Direction::Forward)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
         assert_eq!(
-            actual.materialize().unwrap().dense_data().unwrap(),
-            expected.materialize().unwrap().dense_data().unwrap(),
+            actual.materialize(engine).unwrap().dense_data().unwrap(),
+            expected.materialize(engine).unwrap().dense_data().unwrap(),
             "adjoint twist {legs:?}"
         );
         assert_eq!(
@@ -390,21 +433,25 @@ fn device_twist_on_a_lazy_adjoint_matches_the_host() {
             "adjoint twist {legs:?} rank"
         );
         let inverse_expected = host
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .twist(legs, Direction::Inverse)
+            .twist(engine, legs, Direction::Inverse)
             .unwrap();
         let inverse_actual = device
-            .adjoint()
+            .adjoint(cuda)
             .unwrap()
-            .twist(legs, Direction::Inverse)
+            .twist(cuda, legs, Direction::Inverse)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
         assert_eq!(
-            inverse_actual.materialize().unwrap().dense_data().unwrap(),
+            inverse_actual
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap(),
             inverse_expected
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -416,6 +463,8 @@ fn device_twist_on_a_lazy_adjoint_matches_the_host() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_twist_handles_a_space_with_no_coupled_sector_and_rejects_a_leg_past_the_rank() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let runtime = runtime();
     // No coupled sector: zero blocks, zero elements. With no block the
     // identity detection is vacuously true, so this short-circuits to a clone
@@ -425,13 +474,13 @@ fn device_twist_handles_a_space_with_no_coupled_sector_and_rejects_a_leg_past_th
         GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::EVEN, 2)]).unwrap();
     let odd = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 1)]).unwrap();
     let empty: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&even], [&odd], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&even], [&odd], real_fill).unwrap();
     assert!(empty.dense_data().unwrap().is_empty(), "empty fixture");
-    let device = empty.to_cuda().unwrap();
+    let device = empty.to_cuda(cuda).unwrap();
     assert!(device
-        .twist(&[0, 1], Direction::Forward)
+        .twist(cuda, &[0, 1], Direction::Forward)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -440,23 +489,23 @@ fn device_twist_handles_a_space_with_no_coupled_sector_and_rejects_a_leg_past_th
     // The range check precedes everything, on both sides, with the Host text.
     let leg = fz2_leg(false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], real_fill).unwrap();
-    let device = host.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], real_fill).unwrap();
+    let device = host.to_cuda(cuda).unwrap();
     assert_eq!(
         device
-            .twist(&[2], Direction::Forward)
+            .twist(cuda, &[2], Direction::Forward)
             .unwrap_err()
             .to_string(),
-        host.twist(&[2], Direction::Forward)
+        host.twist(engine, &[2], Direction::Forward)
             .unwrap_err()
             .to_string(),
     );
     assert_eq!(
         device
-            .twist(&[7], Direction::Inverse)
+            .twist(cuda, &[7], Direction::Inverse)
             .unwrap_err()
             .to_string(),
-        host.twist(&[7], Direction::Inverse)
+        host.twist(engine, &[7], Direction::Inverse)
             .unwrap_err()
             .to_string(),
     );

@@ -27,6 +27,7 @@ mod stacked_fixtures;
 #[macro_use]
 #[path = "support/table_fixture.rs"]
 mod table_fixture;
+mod engine_ownership;
 #[path = "../../tests/support/toy_rules.rs"]
 mod toy_rules;
 mod trace_cases;
@@ -35,7 +36,6 @@ mod truncation_oracle;
 
 mod axis_error_matrix;
 mod axpby_dense_oracle;
-mod backend_selection;
 mod batched_failure_contract;
 mod beta_destinations;
 mod c64_compose_contract_identity;
@@ -51,8 +51,7 @@ mod contract_into_reordered_overwrite;
 mod contract_spec_split;
 mod contraction_output_init;
 mod coupled_blocks;
-mod cuda_multi_runtime_publication;
-mod cuda_overwrite_publication;
+mod cuda_engine_ownership;
 mod cuda_warm_up;
 mod current_public_api_smoke;
 mod destination_on_failure;
@@ -73,7 +72,6 @@ mod lazy_adjoint_non_self_dual_contract;
 mod lazy_adjoint_shared_owner;
 mod lazy_axpby_both_modes;
 mod lie_group_tensors;
-mod linalg_backend;
 mod mf_linalg_conformance;
 mod mf_structural_conformance;
 mod named_factorization_reconstruction;

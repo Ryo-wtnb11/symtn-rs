@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 mod test_tensor;
 pub(crate) use test_tensor::TestTensor;
@@ -61,6 +62,7 @@ pub(crate) fn fixture_space<T>(
 /// dst` of fixtures through `context`'s dynamic entry.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn context_contract_into<BT, BC, R, D>(
+    engine: &mut dyn Engine,
     context: &mut TensorContractFusionExecutionContext<D, R::Key, BT, BC, R::Scalar>,
     rule: &R,
     dst: &mut TestTensor<D>,
@@ -82,6 +84,7 @@ where
     let lhs_space = fixture_space(lhs)?;
     let rhs_space = fixture_space(rhs)?;
     context.tensorcontract_fusion_dyn_into_raw(
+        engine,
         rule,
         &dst_space,
         dst.data_mut(),
@@ -113,7 +116,9 @@ where
     R::Scalar: DenseBlockScalar,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<R::Scalar>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     context.plan_tensorcontract_fusion_dyn_raw(
+        engine,
         rule,
         &fixture_space(dst)?,
         &fixture_space(lhs)?,
@@ -141,8 +146,10 @@ where
     C: DenseBlockScalar,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dst_structure = std::sync::Arc::clone(dst.structure());
     context.execute_contract_resolution_host(
+        engine,
         resolution,
         (&dst_structure, dst.data_mut()),
         (lhs.structure(), lhs.data()),
@@ -154,7 +161,9 @@ where
 
 /// [`context_contract_into`] on a fresh default context, for fixtures that
 /// need no context reuse.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fusion_contract_into<R, D>(
+    engine: &mut dyn Engine,
     rule: &R,
     dst: &mut TestTensor<D>,
     lhs: &TestTensor<D>,
@@ -170,6 +179,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<R::Scalar>,
 {
     context_contract_into(
+        engine,
         &mut TensorContractFusionExecutionContext::<
             D,
             R::Key,
@@ -223,7 +233,9 @@ where
     R::Scalar: DenseBlockScalar,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<R::Scalar>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     crate::contract::tensorcontract_fusion_dynamic_plan_into_with(
+        engine,
         &mut DenseTreeTransformOperations::default_executor(),
         &mut TreeTransformWorkspace::default(),
         &mut DenseTreeTransformOperations::default_executor(),
@@ -287,8 +299,10 @@ where
     D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     C: Copy + num_traits::One,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dst_structure = std::sync::Arc::clone(dst.structure());
     backend.tensorcontract_structure_into_raw(
+        engine,
         workspace,
         structure,
         &dst_structure,
@@ -304,7 +318,9 @@ where
 
 /// Replays a compiled tree transform on fixtures through the
 /// backend's raw (rank-free) entry.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn replay_into<B, D, C>(
+    engine: &mut dyn Engine,
     backend: &mut B,
     workspace: &mut B::Workspace,
     structure: &TreeTransformStructure<C>,
@@ -320,6 +336,7 @@ where
 {
     let dst_structure = std::sync::Arc::clone(dst.structure());
     backend.tree_transform_structure_into_raw(
+        engine,
         workspace,
         structure,
         &dst_structure,
@@ -333,6 +350,7 @@ where
 
 /// Overwrite form of [`replay_into`].
 pub(crate) fn replay_overwrite_into<B, D, C>(
+    engine: &mut dyn Engine,
     backend: &mut B,
     workspace: &mut B::Workspace,
     structure: &TreeTransformStructure<C>,
@@ -347,6 +365,7 @@ where
 {
     let dst_structure = std::sync::Arc::clone(dst.structure());
     backend.tree_transform_structure_overwrite_into_raw(
+        engine,
         workspace,
         structure,
         &dst_structure,
@@ -423,8 +442,10 @@ where
         + Sync,
     D: TreeTransformScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dst_structure = std::sync::Arc::clone(dst.structure());
     context.tree_transform_dyn_into(
+        engine,
         rule,
         operation,
         &dst_structure,
@@ -458,8 +479,10 @@ where
         + Sync,
     D: TreeTransformScalar + RecouplingCoefficientAction<R::Scalar>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dst_structure = std::sync::Arc::clone(dst.structure());
     context.tree_transform_dyn_overwrite_into_ref(
+        engine,
         rule,
         &operation,
         &dst_structure,
@@ -538,10 +561,12 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let (dst_space, src_space) = dynamic_trace_spaces(dst, src)?;
     crate::tensortrace::tensortrace_fusion_dyn_into_raw(
+        strided_kernel::Exec::serial(),
         rule,
         &dst_space,
         dst.data_mut(),
@@ -591,9 +616,11 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     tensortrace_fusion_structure_into_host(
+        strided_kernel::Exec::serial(),
         structure,
         dst.data_mut(),
         src.structure(),
@@ -1367,13 +1394,15 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<C>,
     C: Copy,
 {
     let dst_structure = std::sync::Arc::clone(dst.structure());
     let src_structure = std::sync::Arc::clone(src.structure());
     symtn_operations::tree_transform_structure_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut symtn_operations::StridedHostKernelAdapter::default(),
         workspace,
         structure,
@@ -1403,7 +1432,8 @@ fn assert_tree_single_dtype<T>(
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let space = vec![2, 2];
@@ -1433,7 +1463,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let space = vec![4, 2];
@@ -1556,7 +1587,8 @@ fn assert_tree_multi_tensorkit_orientation_dtype<T>(
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let src_space = vec![6, 1];
@@ -1588,6 +1620,7 @@ fn assert_tree_multi_tensorkit_orientation_dtype<T>(
 }
 
 fn assert_tree_multi_tensorkit_orientation_dense_dtype<T>(
+    engine: &mut dyn Engine,
     src_values: Vec<T>,
     recoupling_coefficients_dst_src: Vec<T>,
     alpha: T,
@@ -1620,6 +1653,7 @@ fn assert_tree_multi_tensorkit_orientation_dense_dtype<T>(
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -1649,7 +1683,8 @@ fn assert_tree_multi_keyed_dtype<T>(
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync
+        + Send
+        + Sync
         + RecouplingCoefficientAction<T>,
 {
     let key10 = BlockKey::opaque([10]);
@@ -1771,20 +1806,33 @@ struct CountingDenseExecutor {
 }
 
 impl DenseExecutor for CountingDenseExecutor {
-    fn svd(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tree transform does not call svd")
     }
 
-    fn qr(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn qr(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tree transform does not call qr")
     }
 
-    fn eigh(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tree transform does not call eigh")
     }
 
     fn dot_general_into(
         &mut self,
+        _engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -1835,20 +1883,33 @@ struct ContractLayoutCheckingDenseExecutor {
 }
 
 impl DenseExecutor for ContractLayoutCheckingDenseExecutor {
-    fn svd(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tensor contraction does not call svd")
     }
 
-    fn qr(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn qr(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tensor contraction does not call qr")
     }
 
-    fn eigh(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tensor contraction does not call eigh")
     }
 
     fn dot_general_into(
         &mut self,
+        _engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -1900,20 +1961,33 @@ impl DenseExecutor for ContractLayoutCheckingDenseExecutor {
 struct PanicDenseExecutor;
 
 impl DenseExecutor for PanicDenseExecutor {
-    fn svd(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tensor contraction does not call svd")
     }
 
-    fn qr(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn qr(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tensor contraction does not call qr")
     }
 
-    fn eigh(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("tensor contraction does not call eigh")
     }
 
     fn dot_general_into(
         &mut self,
+        _engine: &mut dyn Engine,
         _output: DenseWrite<'_>,
         _lhs: DenseRead<'_>,
         _rhs: DenseRead<'_>,

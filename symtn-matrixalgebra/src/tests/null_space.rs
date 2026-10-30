@@ -7,10 +7,11 @@ fn checked_spy_null(
     dense: &mut impl DenseExecutor,
     input: &BoundDynamicTensorRef<'_, LateGenericSpy, f64>,
 ) -> Result<BoundDynFactor<LateGenericSpy, f64>, CheckedGenericFactorPlanError<LateGenericError>> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if left {
-        left_null_dyn_checked_generic(dense, input)
+        left_null_dyn_checked_generic(engine, dense, input)
     } else {
-        right_null_dyn_checked_generic(dense, input)
+        right_null_dyn_checked_generic(engine, dense, input)
     }
 }
 
@@ -137,6 +138,7 @@ fn checked_generic_null_dense_failure_never_reaches_output_admission() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_disjoint_null_is_identity_without_dense_calls() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: disjoint support returns complete identity bases for both sides
     // and never enters dense work.
     let x = SectorId::new(1);
@@ -159,12 +161,18 @@ fn checked_generic_disjoint_null_is_identity_without_dense_calls() {
     let checked = bind_to_spy(&source, &provider);
     let data = vec![0.0; checked.space().required_len().unwrap()];
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let left =
-        left_null_dyn_checked_generic(&mut ScriptedExecutor::new(RejectExecutorCalls), &input)
-            .unwrap();
-    let right =
-        right_null_dyn_checked_generic(&mut ScriptedExecutor::new(RejectExecutorCalls), &input)
-            .unwrap();
+    let left = left_null_dyn_checked_generic(
+        engine,
+        &mut ScriptedExecutor::new(RejectExecutorCalls),
+        &input,
+    )
+    .unwrap();
+    let right = right_null_dyn_checked_generic(
+        engine,
+        &mut ScriptedExecutor::new(RejectExecutorCalls),
+        &input,
+    )
+    .unwrap();
     assert_eq!(left.data(), &[1.0, 0.0, 0.0, 1.0]);
     assert_eq!(right.data().len(), 9);
     for column in 0..3 {
@@ -178,6 +186,7 @@ fn checked_generic_disjoint_null_is_identity_without_dense_calls() {
 
 #[test]
 fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let degeneracy = 2usize;
@@ -197,6 +206,7 @@ fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
     .unwrap();
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let null = left_null(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tall),
     )
@@ -238,6 +248,7 @@ fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
     )
     .unwrap();
     let null = right_null(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &wide),
     )
@@ -279,6 +290,7 @@ fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
 
 #[test]
 fn square_null_spaces_are_empty_whatever_the_rank() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the default null dimension is `(rows - cols)+` from the space
     // alone (MatrixAlgebraKit `qr_null!`/`lq_null!`), so square sectors,
     // including zero and rank-one ones, have no null directions and run no
@@ -291,8 +303,8 @@ fn square_null_spaces_are_empty_whatever_the_rank() {
         one_sector_matrix(vec![1.0, 0.0, 0.0, 1.0e-300]),
     ] {
         let input = bound_tensor(Arc::new(rule), &matrix);
-        let left = left_null(&mut dense, &input.as_ref()).unwrap();
-        let right = right_null(&mut dense, &input.as_ref()).unwrap();
+        let left = left_null(engine, &mut dense, &input.as_ref()).unwrap();
+        let right = right_null(engine, &mut dense, &input.as_ref()).unwrap();
         assert_eq!(left.structure().block_count(), 0);
         assert!(left.data().is_empty());
         assert_eq!(right.structure().block_count(), 0);
@@ -308,11 +320,12 @@ fn assert_rectangular_null_spaces_ignore_rank<D: FactorScalar>(
     wide: Vec<D>,
     tol: f64,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     let tall = one_sector_rectangular_matrix(tall, 3, 2);
     let input = bound_tensor(Arc::new(rule), &tall);
-    let n = left_null(&mut dense, &input.as_ref()).unwrap();
+    let n = left_null(engine, &mut dense, &input.as_ref()).unwrap();
     assert_eq!(n.structure().block(0).unwrap().shape(), &[3, 1]);
     let norm: f64 = n.data().iter().map(|v| v.widen_complex().norm_sqr()).sum();
     assert!((norm - 1.0).abs() < tol);
@@ -325,7 +338,7 @@ fn assert_rectangular_null_spaces_ignore_rank<D: FactorScalar>(
         assert!(dot.norm() < tol, "left null failed: {dot}");
     }
     assert_eq!(
-        right_null(&mut dense, &input.as_ref())
+        right_null(engine, &mut dense, &input.as_ref())
             .unwrap()
             .structure()
             .block_count(),
@@ -334,7 +347,7 @@ fn assert_rectangular_null_spaces_ignore_rank<D: FactorScalar>(
 
     let wide = one_sector_rectangular_matrix(wide, 2, 3);
     let input = bound_tensor(Arc::new(rule), &wide);
-    let n = right_null(&mut dense, &input.as_ref()).unwrap();
+    let n = right_null(engine, &mut dense, &input.as_ref()).unwrap();
     assert_eq!(n.structure().block(0).unwrap().shape(), &[1, 3]);
     let norm: f64 = n.data().iter().map(|v| v.widen_complex().norm_sqr()).sum();
     assert!((norm - 1.0).abs() < tol);
@@ -348,7 +361,7 @@ fn assert_rectangular_null_spaces_ignore_rank<D: FactorScalar>(
         assert!(dot.norm() < tol, "right null failed: {dot}");
     }
     assert_eq!(
-        left_null(&mut dense, &input.as_ref())
+        left_null(engine, &mut dense, &input.as_ref())
             .unwrap()
             .structure()
             .block_count(),
@@ -409,6 +422,7 @@ fn rectangular_null_spaces_keep_the_shape_deficit_only() {
 }
 
 fn assert_disjoint_null_spaces_keep_structural_directions<D: FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let assert_identity = |data: &[D], order: usize| {
         for col in 0..order {
             for row in 0..order {
@@ -424,6 +438,7 @@ fn assert_disjoint_null_spaces_keep_structural_directions<D: FactorScalar>() {
 
     let buffer_builds_rec = crate::probe::record();
     let left = left_null(
+        engine,
         &mut ScriptedExecutor::new(RejectExecutorCalls),
         &input.as_ref(),
     )
@@ -437,6 +452,7 @@ fn assert_disjoint_null_spaces_keep_structural_directions<D: FactorScalar>() {
 
     let buffer_builds_rec = crate::probe::record();
     let right = right_null(
+        engine,
         &mut ScriptedExecutor::new(RejectExecutorCalls),
         &input.as_ref(),
     )
@@ -459,12 +475,13 @@ fn disjoint_null_spaces_keep_all_structural_directions_without_dense_work() {
 
 #[test]
 fn null_zero_only_input_normalizes_to_empty_without_dense_work() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(0, 0);
     let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
 
-    let left = left_null(&mut dense, &input.as_ref()).unwrap();
-    let right = right_null(&mut dense, &input.as_ref()).unwrap();
+    let left = left_null(engine, &mut dense, &input.as_ref()).unwrap();
+    let right = right_null(engine, &mut dense, &input.as_ref()).unwrap();
 
     assert_eq!(left.structure().block_count(), 0);
     assert!(left.data().is_empty());
@@ -474,6 +491,7 @@ fn null_zero_only_input_normalizes_to_empty_without_dense_work() {
 
 #[test]
 fn unmatched_null_sectors_coexist_with_a_full_rank_matched_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a matched square sector has no null directions and runs no
     // dense work, while side-only sectors survive as identity bases.
     let provider = Arc::new(U1FusionRule);
@@ -481,18 +499,19 @@ fn unmatched_null_sectors_coexist_with_a_full_rank_matched_sector() {
     let input = bound_tensor(Arc::clone(&provider), &tensor);
 
     let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
-    let left = left_null(&mut dense, &input.as_ref()).unwrap();
+    let left = left_null(engine, &mut dense, &input.as_ref()).unwrap();
     assert_eq!(left.structure().block_count(), 1);
     assert_eq!(left.structure().block(0).unwrap().shape(), &[2, 2]);
 
     let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
-    let right = right_null(&mut dense, &input.as_ref()).unwrap();
+    let right = right_null(engine, &mut dense, &input.as_ref()).unwrap();
     assert_eq!(right.structure().block_count(), 1);
     assert_eq!(right.structure().block(0).unwrap().shape(), &[3, 3]);
 }
 
 #[test]
 fn null_space_second_sector_failure_builds_no_factor() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: all dense work finishes before the one requested factor is built.
     let provider = Arc::new(U1FusionRule);
     let tall = u1_cross_space_map::<f64>(&[(0, 3), (1, 3)], &[(0, 2), (1, 2)]);
@@ -503,9 +522,9 @@ fn null_space_second_sector_failure_builds_no_factor() {
         let buffer_builds_rec = crate::probe::record();
         let mut dense = ScriptedExecutor::<FailSecondNullQr>::default();
         let result = if left {
-            left_null(&mut dense, &input.as_ref())
+            left_null(engine, &mut dense, &input.as_ref())
         } else {
-            right_null(&mut dense, &input.as_ref())
+            right_null(engine, &mut dense, &input.as_ref())
         };
         assert!(matches!(result, Err(OperationError::Dense(_))));
         assert_eq!(dense.counts().qr_into, 2);
@@ -578,28 +597,41 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let mut bits = Vec::new();
     let mut bytes = Vec::new();
     for input in [general, tall] {
-        let Qr { q, r } = measured_into(&mut bytes, || qr_full_dyn(&mut dense, input).unwrap());
+        let Qr { q, r } = measured_into(&mut bytes, || {
+            qr_full_dyn(engine, &mut dense, input).unwrap()
+        });
         bits.extend([scalar_bits(q.data()), scalar_bits(r.data())]);
-        let Lq { l, q } = measured_into(&mut bytes, || lq_full_dyn(&mut dense, input).unwrap());
+        let Lq { l, q } = measured_into(&mut bytes, || {
+            lq_full_dyn(engine, &mut dense, input).unwrap()
+        });
         bits.extend([scalar_bits(l.data()), scalar_bits(q.data())]);
         bits.push(scalar_bits(
-            measured_into(&mut bytes, || left_null_dyn(&mut dense, input).unwrap()).data(),
+            measured_into(&mut bytes, || {
+                left_null_dyn(engine, &mut dense, input).unwrap()
+            })
+            .data(),
         ));
         bits.push(scalar_bits(
-            measured_into(&mut bytes, || right_null_dyn(&mut dense, input).unwrap()).data(),
+            measured_into(&mut bytes, || {
+                right_null_dyn(engine, &mut dense, input).unwrap()
+            })
+            .data(),
         ));
     }
-    let eig = measured_into(&mut bytes, || eig_full_dyn(&mut dense, general).unwrap());
+    let eig = measured_into(&mut bytes, || {
+        eig_full_dyn(engine, &mut dense, general).unwrap()
+    });
     bits.extend([
         scalar_bits(eig.v().data()),
         spectrum_bits(eig.eigenvalues()),
     ]);
     let eigh = measured_into(&mut bytes, || {
-        eigh_full_dyn(&mut dense, hermitian, HermitianTol::DEFAULT).unwrap()
+        eigh_full_dyn(engine, &mut dense, hermitian, HermitianTol::DEFAULT).unwrap()
     });
     bits.extend([
         scalar_bits(eigh.v().data()),
@@ -660,6 +692,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + Clone,
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(rule.clone());
     let general = scalar_copy::<D>(&tsvd_test_tensor(&rule, sectors), false);
     let tall = scalar_copy::<D>(&multiplicity_free_tall_test_tensor(&rule, sectors), false);
@@ -728,20 +761,22 @@ where
     let (mis_stacked, mis_stacked_hermitian) =
         (mis_stacked.dynamic(), mis_stacked_hermitian.dynamic());
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let factor_bits = |dense: &mut symtn_dense::DefaultDenseExecutor| {
-        let Qr { q, r } = qr_full_dyn(dense, &mis_stacked).unwrap();
-        let Lq { l, q: lq } = lq_full_dyn(dense, &mis_stacked).unwrap();
-        let left = left_null_dyn(dense, &mis_stacked).unwrap();
-        let right = right_null_dyn(dense, &mis_stacked).unwrap();
+    let mut factor_bits = |dense: &mut symtn_dense::DefaultDenseExecutor| {
+        let Qr { q, r } = qr_full_dyn(engine, dense, &mis_stacked).unwrap();
+        let Lq { l, q: lq } = lq_full_dyn(engine, dense, &mis_stacked).unwrap();
+        let left = left_null_dyn(engine, dense, &mis_stacked).unwrap();
+        let right = right_null_dyn(engine, dense, &mis_stacked).unwrap();
         let refusal = |error: Option<OperationError>| -> Result<(), OperationError> {
             Err(error.expect("mis-stacked eigen input must be refused"))
         };
         assert_stacking_refusal(
-            refusal(eig_full_dyn(dense, &mis_stacked).err()),
+            refusal(eig_full_dyn(engine, dense, &mis_stacked).err()),
             "eig_full ",
         );
         assert_stacking_refusal(
-            refusal(eigh_full_dyn(dense, &mis_stacked_hermitian, HermitianTol::DEFAULT).err()),
+            refusal(
+                eigh_full_dyn(engine, dense, &mis_stacked_hermitian, HermitianTol::DEFAULT).err(),
+            ),
             "eigh_full ",
         );
         [
@@ -790,35 +825,36 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let mut bits = Vec::new();
     let mut bytes = Vec::new();
     for input in [general, tall] {
         let Qr { q, r } = measured_into(&mut bytes, || {
-            qr_full_dyn_checked_generic(&mut dense, input).unwrap()
+            qr_full_dyn_checked_generic(engine, &mut dense, input).unwrap()
         });
         bits.extend([scalar_bits(q.data()), scalar_bits(r.data())]);
         let Lq { l, q } = measured_into(&mut bytes, || {
-            lq_full_dyn_checked_generic(&mut dense, input).unwrap()
+            lq_full_dyn_checked_generic(engine, &mut dense, input).unwrap()
         });
         bits.extend([scalar_bits(l.data()), scalar_bits(q.data())]);
         let left = measured_into(&mut bytes, || {
-            left_null_dyn_checked_generic(&mut dense, input).unwrap()
+            left_null_dyn_checked_generic(engine, &mut dense, input).unwrap()
         });
         let right = measured_into(&mut bytes, || {
-            right_null_dyn_checked_generic(&mut dense, input).unwrap()
+            right_null_dyn_checked_generic(engine, &mut dense, input).unwrap()
         });
         bits.extend([scalar_bits(left.data()), scalar_bits(right.data())]);
     }
     let eig = measured_into(&mut bytes, || {
-        eig_full_dyn_checked_generic(&mut dense, general).unwrap()
+        eig_full_dyn_checked_generic(engine, &mut dense, general).unwrap()
     });
     bits.extend([
         scalar_bits(eig.v().data()),
         spectrum_bits(eig.eigenvalues()),
     ]);
     let eigh = measured_into(&mut bytes, || {
-        eigh_full_dyn_checked_generic(&mut dense, hermitian, HermitianTol::DEFAULT).unwrap()
+        eigh_full_dyn_checked_generic(engine, &mut dense, hermitian, HermitianTol::DEFAULT).unwrap()
     });
     bits.extend([
         scalar_bits(eigh.v().data()),
@@ -1010,6 +1046,7 @@ fn checked_generic_full_null_eigen_ops_borrow_canonical_multiplicity_input() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_full_null_ops_keep_packing_padded_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a padded tiling is not admitted, so it still packs.
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (expert_space, expert_data) =
@@ -1026,10 +1063,10 @@ fn checked_generic_full_null_ops_keep_packing_padded_input() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let packed_len = canonical_data.len() * std::mem::size_of::<f64>();
     let input_pack_bytes_rec = crate::probe::record();
-    qr_full_dyn_checked_generic(&mut dense, &expert).unwrap();
-    lq_full_dyn_checked_generic(&mut dense, &expert).unwrap();
-    left_null_dyn_checked_generic(&mut dense, &expert).unwrap();
-    right_null_dyn_checked_generic(&mut dense, &expert).unwrap();
+    qr_full_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
+    lq_full_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
+    left_null_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
+    right_null_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
     assert_eq!(
         input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
         4 * packed_len
@@ -1038,6 +1075,7 @@ fn checked_generic_full_null_ops_keep_packing_padded_input() {
 
 #[test]
 fn mf_null_factor_space_is_staged_once_per_side_and_cached() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the multiplicity-free authority stages each null factor's space
     // exactly once, and a repeated call reuses the cached layout (the same
     // structure `Arc`).
@@ -1049,11 +1087,11 @@ fn mf_null_factor_space_is_staged_once_per_side_and_cached() {
     let stage_rec = crate::probe::record();
     let stages = || stage_rec.get(crate::probe::Event::MfFactorSpaceStage);
     for left in [true, false] {
-        let null = |dense: &mut symtn_dense::DefaultDenseExecutor| {
+        let mut null = |dense: &mut symtn_dense::DefaultDenseExecutor| {
             if left {
-                left_null_dyn(dense, &input).unwrap()
+                left_null_dyn(engine, dense, &input).unwrap()
             } else {
-                right_null_dyn(dense, &input).unwrap()
+                right_null_dyn(engine, dense, &input).unwrap()
             }
         };
         let before = stages();

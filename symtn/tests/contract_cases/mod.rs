@@ -22,6 +22,7 @@
 #![allow(dead_code)]
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
@@ -190,12 +191,13 @@ where
         }
     }
 
-    pub fn host(&self) -> TensorMap<R, D> {
-        self.lhs.contract(&self.rhs, &self.spec()).unwrap()
+    pub fn host(&self, engine: &mut dyn Engine) -> TensorMap<R, D> {
+        self.lhs.contract(engine, &self.rhs, &self.spec()).unwrap()
     }
 }
 
 fn tensor<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     codomain: &[&GradedSpace<R>],
     domain: &[&GradedSpace<R>],
@@ -212,6 +214,7 @@ where
     D: Payload,
 {
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         codomain.iter().copied(),
         domain.iter().copied(),
@@ -223,12 +226,15 @@ where
 /// Rank 5 against rank 4: a codomain leg against a domain leg and a domain
 /// leg against a codomain leg, contracted out of order, output permuted
 /// across both sources.
-pub fn u1_rank_five<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
+pub fn u1_rank_five<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> Case<U1FusionRule, D> {
     let v = u1(&[(-1, 2), (0, 1), (1, 2)]);
     Case {
         name: "U(1) rank 5 x 4, mixed sides",
-        lhs: tensor(runtime, &[&v, &v, &v], &[&v, &v], 1),
-        rhs: tensor(runtime, &[&v, &v], &[&v, &v], 2),
+        lhs: tensor(engine, runtime, &[&v, &v, &v], &[&v, &v], 1),
+        rhs: tensor(engine, runtime, &[&v, &v], &[&v, &v], 2),
         lhs_axes: vec![3, 1],
         rhs_axes: vec![0, 3],
         output_axes: vec![2, 0, 4, 1, 3],
@@ -239,13 +245,16 @@ pub fn u1_rank_five<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
 /// Whole domain against whole codomain in reversed order, codomain output
 /// permuted; `v` carries charge 2 that `w` lacks, so a coupled sector of the
 /// result has no contributing GEMM.
-pub fn u1_reordered<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
+pub fn u1_reordered<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> Case<U1FusionRule, D> {
     let v = u1(&[(0, 1), (1, 2), (2, 1)]);
     let w = u1(&[(-1, 1), (0, 2), (1, 2)]);
     Case {
         name: "U(1) reordered whole-side",
-        lhs: tensor(runtime, &[&v, &v], &[&w, &w], 3),
-        rhs: tensor(runtime, &[&w, &w], &[&v], 4),
+        lhs: tensor(engine, runtime, &[&v, &v], &[&w, &w], 3),
+        rhs: tensor(engine, runtime, &[&w, &w], &[&v], 4),
         lhs_axes: vec![3, 2],
         rhs_axes: vec![0, 1],
         output_axes: vec![1, 0, 2],
@@ -254,12 +263,15 @@ pub fn u1_reordered<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
 }
 
 /// SU(2) recoupling of the reordered whole-side contraction.
-pub fn su2_reordered<D: Payload>(runtime: &Runtime) -> Case<SU2FusionRule, D> {
+pub fn su2_reordered<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> Case<SU2FusionRule, D> {
     let s = su2();
     Case {
         name: "SU(2) reordered whole-side",
-        lhs: tensor(runtime, &[&s, &s], &[&s, &s], 5),
-        rhs: tensor(runtime, &[&s, &s], &[&s], 6),
+        lhs: tensor(engine, runtime, &[&s, &s], &[&s, &s], 5),
+        rhs: tensor(engine, runtime, &[&s, &s], &[&s], 6),
         lhs_axes: vec![3, 2],
         rhs_axes: vec![0, 1],
         output_axes: vec![1, 0, 2],
@@ -268,12 +280,12 @@ pub fn su2_reordered<D: Payload>(runtime: &Runtime) -> Case<SU2FusionRule, D> {
 }
 
 /// SU(2): a codomain leg of A against a domain leg of B.
-pub fn su2_bent<D: Payload>(runtime: &Runtime) -> Case<SU2FusionRule, D> {
+pub fn su2_bent<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) -> Case<SU2FusionRule, D> {
     let s = su2();
     Case {
         name: "SU(2) codomain against domain",
-        lhs: tensor(runtime, &[&s, &s], &[&s], 7),
-        rhs: tensor(runtime, &[&s], &[&s, &s], 8),
+        lhs: tensor(engine, runtime, &[&s, &s], &[&s], 7),
+        rhs: tensor(engine, runtime, &[&s], &[&s, &s], 8),
         lhs_axes: vec![0],
         rhs_axes: vec![2],
         output_axes: vec![3, 0, 2, 1],
@@ -282,12 +294,12 @@ pub fn su2_bent<D: Payload>(runtime: &Runtime) -> Case<SU2FusionRule, D> {
 }
 
 /// Bosonic product provider, two pairs across sides.
-pub fn product_general<D: Payload>(runtime: &Runtime) -> Case<U1Su2, D> {
+pub fn product_general<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) -> Case<U1Su2, D> {
     let p = u1_su2();
     Case {
         name: "U(1) x SU(2) mixed sides",
-        lhs: tensor(runtime, &[&p, &p], &[&p], 9),
-        rhs: tensor(runtime, &[&p, &p], &[&p], 10),
+        lhs: tensor(engine, runtime, &[&p, &p], &[&p], 9),
+        rhs: tensor(engine, runtime, &[&p, &p], &[&p], 10),
         lhs_axes: vec![2, 1],
         rhs_axes: vec![0, 2],
         output_axes: vec![1, 0],
@@ -297,13 +309,16 @@ pub fn product_general<D: Payload>(runtime: &Runtime) -> Case<U1Su2, D> {
 
 /// A already `(open; contracted)`: its source transform is the identity and
 /// it can be read in place; B needs one.
-pub fn u1_lhs_identity<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
+pub fn u1_lhs_identity<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> Case<U1FusionRule, D> {
     let v = u1(&[(-1, 2), (0, 1), (1, 2)]);
     let w = u1(&[(0, 2), (1, 1)]);
     Case {
         name: "U(1) identity lhs transform",
-        lhs: tensor(runtime, &[&v, &v], &[&w], 11),
-        rhs: tensor(runtime, &[&v, &w], &[&v], 12),
+        lhs: tensor(engine, runtime, &[&v, &v], &[&w], 11),
+        rhs: tensor(engine, runtime, &[&v, &w], &[&v], 12),
         lhs_axes: vec![2],
         rhs_axes: vec![1],
         output_axes: vec![0, 1, 2, 3],
@@ -312,14 +327,17 @@ pub fn u1_lhs_identity<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
 }
 
 /// B already `(contracted; open)`: its source transform is the identity.
-pub fn u1_rhs_identity<D: Payload>(runtime: &Runtime) -> Case<U1FusionRule, D> {
+pub fn u1_rhs_identity<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> Case<U1FusionRule, D> {
     let v = u1(&[(-1, 2), (0, 1), (1, 2)]);
     let w = u1(&[(0, 2), (1, 1)]);
     let w_dual = w.try_dual().unwrap();
     Case {
         name: "U(1) identity rhs transform",
-        lhs: tensor(runtime, &[&v, &w], &[&v], 13),
-        rhs: tensor(runtime, &[&w_dual], &[&v, &v], 14),
+        lhs: tensor(engine, runtime, &[&v, &w], &[&v], 13),
+        rhs: tensor(engine, runtime, &[&w_dual], &[&v, &v], 14),
         lhs_axes: vec![1],
         rhs_axes: vec![0],
         output_axes: vec![0, 1, 2, 3],
@@ -342,6 +360,7 @@ pub fn u1_non_self_dual() -> GradedSpace<U1FusionRule> {
 /// - L4 `P'[2,3]·B[0,1]` (literal control), L3 `P'[3,2]·B[1,0]`,
 ///   L5 `A[0,1]·P'[2,3] → [2,3,0,1]`, L7 `A[3,2]·P'[1,0]`.
 pub fn candidate_core_probes<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
 ) -> Vec<(Case<R, D>, &'static str)>
@@ -355,10 +374,10 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let a: TensorMap<R, D> = tensor(runtime, &[v, v], &[v, v], 61);
-    let b: TensorMap<R, D> = tensor(runtime, &[v, v], &[v, v], 62);
-    let lazy = tensor::<R, D>(runtime, &[v, v], &[v, v], 63)
-        .adjoint()
+    let a: TensorMap<R, D> = tensor(engine, runtime, &[v, v], &[v, v], 61);
+    let b: TensorMap<R, D> = tensor(engine, runtime, &[v, v], &[v, v], 62);
+    let lazy = tensor::<R, D>(engine, runtime, &[v, v], &[v, v], 63)
+        .adjoint(engine)
         .unwrap();
     let case = |name,
                 lhs: &TensorMap<R, D>,
@@ -400,7 +419,11 @@ where
 /// - `L7p` `A[3,2]·P'[1,0] → [0,1,3,2]` (sort, lazy rhs);
 /// - `C1p` `A[3,2]·B[1,0] → [1,0,3,2]`, `C2p` `A[0,1]·B[2,3] → [3,2,1,0]`
 ///   (owned sort and swap).
-pub fn copy_c_probes<R, D>(runtime: &Runtime, v: &GradedSpace<R>) -> Vec<(Case<R, D>, bool)>
+pub fn copy_c_probes<R, D>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+    v: &GradedSpace<R>,
+) -> Vec<(Case<R, D>, bool)>
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -411,8 +434,8 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let tensor = |salt| tensor::<R, D>(runtime, &[v, v], &[v, v], salt);
-    let (a, b, lazy) = (tensor(81), tensor(82), tensor(83).adjoint().unwrap());
+    let mut tensor = |salt| tensor::<R, D>(engine, runtime, &[v, v], &[v, v], salt);
+    let (a, b, lazy) = (tensor(81), tensor(82), tensor(83).adjoint(engine).unwrap());
     let case = |name,
                 lhs: &TensorMap<R, D>,
                 rhs: &TensorMap<R, D>,
@@ -438,7 +461,7 @@ where
 
 /// A destination of `case`'s result space holding NaN everywhere: a retained
 /// buffer `contract_into` must rewrite element by element.
-pub fn poisoned_destination<R, D>(case: &Case<R, D>) -> TensorMap<R, D>
+pub fn poisoned_destination<R, D>(engine: &mut dyn Engine, case: &Case<R, D>) -> TensorMap<R, D>
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -449,7 +472,9 @@ where
         + SectorCodec,
     D: Payload,
 {
-    case.host().scale(D::entry(f64::NAN, f64::NAN)).unwrap()
+    case.host(engine)
+        .scale(engine, D::entry(f64::NAN, f64::NAN))
+        .unwrap()
 }
 
 /// Destinations with a block no GEMM writes (`v` carries charge 2 that `w`
@@ -458,14 +483,17 @@ where
 /// output transform over the same inactive core block. The resolution of
 /// each geometry is pinned in
 /// `symtn-tensors/src/contract/storage_contract_tests.rs::overwrite_cases`.
-pub fn u1_inactive_cases<D: Payload>(runtime: &Runtime) -> [Case<U1FusionRule, D>; 3] {
+pub fn u1_inactive_cases<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> [Case<U1FusionRule, D>; 3] {
     let v = u1(&[(0, 1), (1, 2), (2, 1)]);
     let w = u1(&[(0, 2), (1, 1)]);
     [
         Case {
             name: "U(1) core route, inactive block",
-            lhs: tensor(runtime, &[&v, &v], &[&w], 51),
-            rhs: tensor(runtime, &[&w], &[&v], 52),
+            lhs: tensor(engine, runtime, &[&v, &v], &[&w], 51),
+            rhs: tensor(engine, runtime, &[&w], &[&v], 52),
             lhs_axes: vec![2],
             rhs_axes: vec![0],
             output_axes: vec![0, 1, 2],
@@ -473,8 +501,8 @@ pub fn u1_inactive_cases<D: Payload>(runtime: &Runtime) -> [Case<U1FusionRule, D
         },
         Case {
             name: "U(1) transformed lhs, identity output, inactive block",
-            lhs: tensor(runtime, &[&v], &[&w, &v], 53),
-            rhs: tensor(runtime, &[&w], &[&v], 54),
+            lhs: tensor(engine, runtime, &[&v], &[&w, &v], 53),
+            rhs: tensor(engine, runtime, &[&w], &[&v], 54),
             lhs_axes: vec![1],
             rhs_axes: vec![0],
             output_axes: vec![0, 1, 2],
@@ -482,8 +510,8 @@ pub fn u1_inactive_cases<D: Payload>(runtime: &Runtime) -> [Case<U1FusionRule, D
         },
         Case {
             name: "U(1) output transform over an inactive core block",
-            lhs: tensor(runtime, &[&v, &v], &[&w], 55),
-            rhs: tensor(runtime, &[&w], &[&v], 56),
+            lhs: tensor(engine, runtime, &[&v, &v], &[&w], 55),
+            rhs: tensor(engine, runtime, &[&w], &[&v], 56),
             lhs_axes: vec![2],
             rhs_axes: vec![0],
             output_axes: vec![1, 0, 2],
@@ -496,7 +524,11 @@ pub fn u1_inactive_cases<D: Payload>(runtime: &Runtime) -> [Case<U1FusionRule, D
 /// non-canonical order. Every leg of `L^H` is the dual of the matching leg
 /// of `L`, so the pairing is valid for any provider; `L^H` stays a lazy
 /// adjoint over `L`'s payload.
-pub fn lazy_cases<R, D>(lhs: &TensorMap<R, D>, name: &'static str) -> [Case<R, D>; 2]
+pub fn lazy_cases<R, D>(
+    engine: &mut dyn Engine,
+    lhs: &TensorMap<R, D>,
+    name: &'static str,
+) -> [Case<R, D>; 2]
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -515,7 +547,7 @@ where
     let adjoint_axes = vec![nin + 1, 0];
     let direct_axes = vec![1, nout];
     let output: Vec<usize> = (0..lhs.rank() * 2 - 4).rev().collect();
-    let adjoint = lhs.adjoint().unwrap();
+    let adjoint = lhs.adjoint(engine).unwrap();
     [
         Case {
             name,
@@ -546,6 +578,7 @@ where
 /// candidate selection) `a`'s domain against `r: [V, V] <- []`'s codomain in
 /// reverse order. Returns each case with whether its lazy operand is the lhs.
 pub fn identity_adjoint_cases<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
 ) -> [(Case<R, D>, bool); 3]
@@ -559,18 +592,18 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let t: TensorMap<R, D> = tensor(runtime, &[v, v], &[v], 61);
-    let a = t.adjoint().unwrap();
-    let u = tensor::<R, D>(runtime, &[v, v], &[v], 62)
-        .permute(&[0], &[1, 2])
+    let t: TensorMap<R, D> = tensor(engine, runtime, &[v, v], &[v], 61);
+    let a = t.adjoint(engine).unwrap();
+    let u = tensor::<R, D>(engine, runtime, &[v, v], &[v], 62)
+        .permute(engine, &[0], &[1, 2])
         .unwrap();
-    let w = tensor::<R, D>(runtime, &[v, v], &[v], 63)
-        .permute(&[2, 0], &[1])
+    let w = tensor::<R, D>(engine, runtime, &[v, v], &[v], 63)
+        .permute(engine, &[2, 0], &[1])
         .unwrap();
     // #2159: `a`'s domain against `r`'s codomain in reverse order. Keeping
     // `a`'s order permutes only `r` (|r| < |t|), keeping `r`'s permutes `a`:
     // TensorKit `contract_memcost` takes the former.
-    let r = tensor::<R, D>(runtime, &[v, v], &[], 64);
+    let r = tensor::<R, D>(engine, runtime, &[v, v], &[], 64);
     [
         (
             Case {
@@ -619,15 +652,18 @@ where
 /// Without the `copyC` predicate the context's prelowered entry resolves this
 /// geometry to its dense `Structure` route (pinned in
 /// `symtn-tensors/src/contract/storage_contract_tests.rs`).
-pub fn su2_core_form_lazy_cases<D: Payload>(runtime: &Runtime) -> [Case<SU2FusionRule, D>; 2] {
+pub fn su2_core_form_lazy_cases<D: Payload>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> [Case<SU2FusionRule, D>; 2] {
     let s = su2();
-    let x: TensorMap<_, D> = tensor(runtime, &[&s, &s], &[&s, &s], 15);
-    let y: TensorMap<_, D> = tensor(runtime, &[&s], &[&s, &s], 17);
+    let x: TensorMap<_, D> = tensor(engine, runtime, &[&s, &s], &[&s, &s], 15);
+    let y: TensorMap<_, D> = tensor(engine, runtime, &[&s], &[&s, &s], 17);
     [
         Case {
             name: "SU(2) core-form lazy lhs (copyC)",
-            lhs: x.adjoint().unwrap(),
-            rhs: tensor(runtime, &[&s, &s], &[&s], 16),
+            lhs: x.adjoint(engine).unwrap(),
+            rhs: tensor(engine, runtime, &[&s, &s], &[&s], 16),
             lhs_axes: vec![2, 3],
             rhs_axes: vec![0, 1],
             output_axes: vec![2, 0, 1],
@@ -635,8 +671,8 @@ pub fn su2_core_form_lazy_cases<D: Payload>(runtime: &Runtime) -> [Case<SU2Fusio
         },
         Case {
             name: "SU(2) core-form lazy rhs (copyC)",
-            lhs: tensor(runtime, &[&s], &[&s, &s], 18),
-            rhs: y.adjoint().unwrap(),
+            lhs: tensor(engine, runtime, &[&s], &[&s, &s], 18),
+            rhs: y.adjoint(engine).unwrap(),
             lhs_axes: vec![1, 2],
             rhs_axes: vec![0, 1],
             output_axes: vec![1, 0],
@@ -653,6 +689,7 @@ pub fn su2_core_form_lazy_cases<D: Payload>(runtime: &Runtime) -> [Case<SU2Fusio
 /// (uniform per coupled sector); with `u_dual` only `v*` is twisted, so
 /// the row trees of one coupled sector carry both signs.
 pub fn fermionic_general<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
     u_dual: bool,
@@ -673,8 +710,8 @@ where
     let u = if u_dual { v_dual.clone() } else { v.clone() };
     Case {
         name,
-        lhs: tensor(runtime, &[v, &u], &[v, v], salt),
-        rhs: tensor(runtime, &[v, &v_dual], &[v, &u], salt + 1),
+        lhs: tensor(engine, runtime, &[v, &u], &[v, v], salt),
+        rhs: tensor(engine, runtime, &[v, &v_dual], &[v, &u], salt + 1),
         lhs_axes: vec![1, 0],
         rhs_axes: vec![3, 1],
         output_axes: vec![2, 0, 3, 1],
@@ -687,6 +724,7 @@ where
 /// leg is twisted, so θ varies within one coupled-sector matrix and no
 /// per-job GEMM alpha expresses it.
 pub fn fermionic_canonical_nonuniform<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
     name: &'static str,
@@ -705,8 +743,8 @@ where
     let v_dual = v.try_dual().unwrap();
     Case {
         name,
-        lhs: tensor(runtime, &[v, v], &[v, &v_dual], salt),
-        rhs: tensor(runtime, &[v, &v_dual], &[v], salt + 1),
+        lhs: tensor(engine, runtime, &[v, v], &[v, &v_dual], salt),
+        rhs: tensor(engine, runtime, &[v, &v_dual], &[v], salt + 1),
         lhs_axes: vec![2, 3],
         rhs_axes: vec![0, 1],
         output_axes: vec![0, 1, 2],
@@ -720,6 +758,7 @@ where
 /// and the core carries it as per-job GEMM alpha (#1858), where TensorKit's
 /// `blas_contract!` copies an operand to twist it.
 pub fn fermionic_canonical_uniform<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
     name: &'static str,
@@ -738,8 +777,8 @@ where
     let v_dual = v.try_dual().unwrap();
     Case {
         name,
-        lhs: tensor(runtime, &[v, v], &[&v_dual, &v_dual], salt),
-        rhs: tensor(runtime, &[&v_dual, &v_dual], &[v], salt + 1),
+        lhs: tensor(engine, runtime, &[v, v], &[&v_dual, &v_dual], salt),
+        rhs: tensor(engine, runtime, &[&v_dual, &v_dual], &[v], salt + 1),
         lhs_axes: vec![2, 3],
         rhs_axes: vec![0, 1],
         output_axes: vec![0, 1, 2],
@@ -760,6 +799,7 @@ where
 ///
 /// Returned in that order under `names`.
 pub fn fermionic_twist_roles<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
     names: [&'static str; 4],
@@ -779,8 +819,8 @@ where
     [
         Case {
             name: names[0],
-            lhs: tensor(runtime, &[v, v], &[v], salt),
-            rhs: tensor(runtime, &[&v_dual], &[v, v], salt + 1),
+            lhs: tensor(engine, runtime, &[v, v], &[v], salt),
+            rhs: tensor(engine, runtime, &[&v_dual], &[v, v], salt + 1),
             lhs_axes: vec![1],
             rhs_axes: vec![0],
             output_axes: vec![0, 1, 2, 3],
@@ -788,8 +828,8 @@ where
         },
         Case {
             name: names[1],
-            lhs: tensor(runtime, &[v], &[v, &v_dual], salt + 2),
-            rhs: tensor(runtime, &[v, &v_dual], &[v, v], salt + 3),
+            lhs: tensor(engine, runtime, &[v], &[v, &v_dual], salt + 2),
+            rhs: tensor(engine, runtime, &[v, &v_dual], &[v, v], salt + 3),
             lhs_axes: vec![1, 2],
             rhs_axes: vec![0, 1],
             output_axes: vec![0, 1, 2],
@@ -797,8 +837,8 @@ where
         },
         Case {
             name: names[2],
-            lhs: tensor(runtime, &[v, v], &[&v_dual], salt + 4),
-            rhs: tensor(runtime, &[v], &[v, v], salt + 5),
+            lhs: tensor(engine, runtime, &[v, v], &[&v_dual], salt + 4),
+            rhs: tensor(engine, runtime, &[v], &[v, v], salt + 5),
             lhs_axes: vec![2],
             rhs_axes: vec![1],
             output_axes: vec![0, 1, 2, 3],
@@ -806,8 +846,8 @@ where
         },
         Case {
             name: names[3],
-            lhs: tensor(runtime, &[v, v], &[v], salt + 6),
-            rhs: tensor(runtime, &[v, &v_dual], &[v, v], salt + 7),
+            lhs: tensor(engine, runtime, &[v, v], &[v], salt + 6),
+            rhs: tensor(engine, runtime, &[v, &v_dual], &[v, v], salt + 7),
             lhs_axes: vec![1, 0],
             rhs_axes: vec![3, 1],
             output_axes: vec![0, 1, 2],
@@ -836,9 +876,10 @@ pub enum TwistRole {
 /// `twist` is the typed `TensorMap::twist`, passed in because its dispatch
 /// bound is per provider mode.
 pub fn fermionic_blas_contract_oracle<R, D>(
+    engine: &mut dyn Engine,
     case: &Case<R, D>,
     role: TwistRole,
-    twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D>,
+    twist: impl Fn(&mut dyn Engine, &TensorMap<R, D>, &[usize]) -> TensorMap<R, D>,
 ) -> TensorMap<R, D>
 where
     R: symtn::sector::TypedSectorAdmission<
@@ -851,14 +892,15 @@ where
     D: Payload,
 {
     let split = case.lhs.rank() - case.lhs_axes.len();
-    fermionic_blas_contract_oracle_partitioned(case, role, split, twist)
+    fermionic_blas_contract_oracle_partitioned(engine, case, role, split, twist)
 }
 
 pub fn fermionic_blas_contract_oracle_partitioned<R, D>(
+    engine: &mut dyn Engine,
     case: &Case<R, D>,
     role: TwistRole,
     split: usize,
-    twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D>,
+    twist: impl Fn(&mut dyn Engine, &TensorMap<R, D>, &[usize]) -> TensorMap<R, D>,
 ) -> TensorMap<R, D>
 where
     R: symtn::sector::TypedSectorAdmission<
@@ -877,8 +919,8 @@ where
     };
     let lhs_open = open(case.lhs.rank(), &case.lhs_axes);
     let rhs_open = open(case.rhs.rank(), &case.rhs_axes);
-    let mut a = case.lhs.permute(&lhs_open, &case.lhs_axes).unwrap();
-    let mut b = case.rhs.permute(&case.rhs_axes, &rhs_open).unwrap();
+    let mut a = case.lhs.permute(engine, &lhs_open, &case.lhs_axes).unwrap();
+    let mut b = case.rhs.permute(engine, &case.rhs_axes, &rhs_open).unwrap();
     match role {
         TwistRole::None => {}
         TwistRole::A => {
@@ -890,7 +932,7 @@ where
                 .filter(|(_, leg)| leg.is_dual())
                 .map(|(j, _)| nout + j)
                 .collect();
-            a = twist(&a, &legs);
+            a = twist(engine, &a, &legs);
         }
         TwistRole::B => {
             let legs: Vec<usize> = b
@@ -900,16 +942,20 @@ where
                 .filter(|(_, leg)| leg.is_dual())
                 .map(|(i, _)| i)
                 .collect();
-            b = twist(&b, &legs);
+            b = twist(engine, &b, &legs);
         }
     }
-    let c = a.compose(&b).unwrap();
-    c.permute(&case.output_axes[..split], &case.output_axes[split..])
-        .unwrap()
+    let c = a.compose(engine, &b).unwrap();
+    c.permute(
+        engine,
+        &case.output_axes[..split],
+        &case.output_axes[split..],
+    )
+    .unwrap()
 }
 
 /// TensorKit `blas_contract!` on Host typed operations.
-pub fn blas_contract_oracle<R, D>(case: &Case<R, D>) -> TensorMap<R, D>
+pub fn blas_contract_oracle<R, D>(engine: &mut dyn Engine, case: &Case<R, D>) -> TensorMap<R, D>
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -927,12 +973,16 @@ where
     };
     let lhs_open = open(case.lhs.rank(), &case.lhs_axes);
     let rhs_open = open(case.rhs.rank(), &case.rhs_axes);
-    let a = case.lhs.permute(&lhs_open, &case.lhs_axes).unwrap();
-    let b = case.rhs.permute(&case.rhs_axes, &rhs_open).unwrap();
-    let c = a.compose(&b).unwrap();
+    let a = case.lhs.permute(engine, &lhs_open, &case.lhs_axes).unwrap();
+    let b = case.rhs.permute(engine, &case.rhs_axes, &rhs_open).unwrap();
+    let c = a.compose(engine, &b).unwrap();
     let split = lhs_open.len();
-    c.permute(&case.output_axes[..split], &case.output_axes[split..])
-        .unwrap()
+    c.permute(
+        engine,
+        &case.output_axes[..split],
+        &case.output_axes[split..],
+    )
+    .unwrap()
 }
 
 fn column_major_strides(shape: &[usize]) -> Vec<usize> {
@@ -962,7 +1012,7 @@ fn for_each_index(shape: &[usize], mut visit: impl FnMut(&[usize])) {
 
 /// Physical-basis contraction: `C[out] = sum_k A[.., k, ..] B[.., k, ..]`,
 /// output axes permuted by `output_axes`, all arrays column-major.
-pub fn dense_oracle<R, D>(case: &Case<R, D>) -> (Vec<usize>, Vec<D>)
+pub fn dense_oracle<R, D>(engine: &mut dyn Engine, case: &Case<R, D>) -> (Vec<usize>, Vec<D>)
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
@@ -970,8 +1020,8 @@ where
         + PhysicalFusionBasis<Scalar = f64>,
     D: Payload,
 {
-    let a = case.lhs.to_physical_dense().unwrap();
-    let b = case.rhs.to_physical_dense().unwrap();
+    let a = case.lhs.to_physical_dense(engine).unwrap();
+    let b = case.rhs.to_physical_dense(engine).unwrap();
     let a_strides = column_major_strides(&a.shape);
     let b_strides = column_major_strides(&b.shape);
     let a_open: Vec<usize> = (0..a.shape.len())
@@ -1022,13 +1072,18 @@ where
 /// Degeneracy-1 FZ2 map `V <- V` with `even`/`odd` block values: the tensor
 /// `build(f)` produces in the TensorKit reference (values checked against
 /// TensorKit 0.17.1 in `symtn-network/tests/tk_fermionic_correspondence.rs`).
-pub fn fz2_map(runtime: &Runtime, even: f64, odd: f64) -> TensorMap<FermionParityFusionRule, f64> {
+pub fn fz2_map(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+    even: f64,
+    odd: f64,
+) -> TensorMap<FermionParityFusionRule, f64> {
     let v = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule),
         [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
     )
     .unwrap();
-    TensorMap::from_subblock_fn(runtime, [&v], [&v], move |trees, _| {
+    TensorMap::from_subblock_fn(engine, runtime, [&v], [&v], move |trees, _| {
         if *trees.coupled() == Z2Irrep::EVEN {
             even
         } else {
@@ -1046,122 +1101,159 @@ pub fn fz2_map(runtime: &Runtime, even: f64, odd: f64) -> TensorMap<FermionParit
 /// `diag(3, 2)` the reference's SVD produces. Returns `(name, value,
 /// TensorKit value)`.
 pub fn fz2_tensorkit_loops<T>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     lift: impl Fn(TensorMap<FermionParityFusionRule, f64>) -> T,
-    contract: impl Fn(&T, &T, &ContractSpec<'_>) -> T,
-    scalar: impl Fn(T) -> f64,
+    contract: impl Fn(&mut dyn Engine, &T, &T, &ContractSpec<'_>) -> T,
+    scalar: impl Fn(&mut dyn Engine, T) -> f64,
 ) -> Vec<(&'static str, f64, f64)> {
-    let a = lift(fz2_map(runtime, 1.0, 4.0));
-    let b = lift(fz2_map(runtime, 2.0, 1.5));
-    let c = lift(fz2_map(runtime, 0.5, 2.5));
-    let s = lift(fz2_map(runtime, 3.0, 2.0));
+    let a = lift(fz2_map(engine, runtime, 1.0, 4.0));
+    let b = lift(fz2_map(engine, runtime, 2.0, 1.5));
+    let c = lift(fz2_map(engine, runtime, 0.5, 2.5));
+    let s = lift(fz2_map(engine, runtime, 3.0, 2.0));
     // `x[i; j] y[j; i]`: x's domain against y's codomain, x's codomain
     // against y's domain.
-    let close = |x: &T, y: &T| {
+    let close = |engine: &mut dyn Engine, x: &T, y: &T| {
         let spec = ContractSpec {
             lhs: &[1, 0],
             rhs: &[0, 1],
             codomain: &[],
             domain: &[],
         };
-        scalar(contract(x, y, &spec))
+        let closed = contract(engine, x, y, &spec);
+        scalar(engine, closed)
     };
-    let chain = |x: &T, y: &T| {
+    let chain = |engine: &mut dyn Engine, x: &T, y: &T| {
         let spec = ContractSpec {
             lhs: &[1],
             rhs: &[0],
             codomain: &[0],
             domain: &[1],
         };
-        contract(x, y, &spec)
+        contract(engine, x, y, &spec)
     };
+    let (ab, as_, sa) = (
+        chain(engine, &a, &b),
+        chain(engine, &a, &s),
+        chain(engine, &s, &a),
+    );
     vec![
-        ("tr(A B)", close(&a, &b), -4.0),
-        ("tr(A B C)", close(&chain(&a, &b), &c), -14.0),
-        ("tr(A S B)", close(&chain(&a, &s), &b), -6.0),
-        ("tr(S A B)", close(&chain(&s, &a), &b), -6.0),
+        ("tr(A B)", close(engine, &a, &b), -4.0),
+        ("tr(A B C)", close(engine, &ab, &c), -14.0),
+        ("tr(A S B)", close(engine, &as_, &b), -6.0),
+        ("tr(S A B)", close(engine, &sa, &b), -6.0),
     ]
 }
 
-/// Every fermionic fixture (#1347), handed to `check` with the
-/// provider's typed twist; shared by the Host pin and the device gate. A
+/// Every fermionic fixture (#1347), handed to `check` with the engine, any
+/// `extra` engines (the device gate's CUDA engine) and the provider's typed
+/// twist; shared by the Host pin and the device gate. A
 /// macro because each provider's twist has its own dispatch bound.
 macro_rules! for_each_fermionic_fixture {
-    ($runtime:expr, $payload:ty, $check:ident) => {{
+    ($engine:ident, $runtime:expr, $payload:ty, $check:ident $(, $extra:ident)*) => {{
         let runtime = $runtime;
         let fu1 = $crate::contract_cases::fermion_u1();
         let fsu2 = $crate::contract_cases::fermion_su2();
         let twist_u1 =
-            |t: &symtn::typed::TensorMap<$crate::contract_cases::FermionU1, $payload>,
-             legs: &[usize]| t.twist(legs, symtn::typed::Direction::Forward).unwrap();
+            |engine: &mut dyn symtn::typed::Engine,
+             t: &symtn::typed::TensorMap<$crate::contract_cases::FermionU1, $payload>,
+             legs: &[usize]| {
+                t.twist(engine, legs, symtn::typed::Direction::Forward)
+                    .unwrap()
+            };
         let twist_su2 =
-            |t: &symtn::typed::TensorMap<$crate::contract_cases::FermionSu2, $payload>,
-             legs: &[usize]| t.twist(legs, symtn::typed::Direction::Forward).unwrap();
-        $check(
-            $crate::contract_cases::fermionic_general(
+            |engine: &mut dyn symtn::typed::Engine,
+             t: &symtn::typed::TensorMap<$crate::contract_cases::FermionSu2, $payload>,
+             legs: &[usize]| {
+                t.twist(engine, legs, symtn::typed::Direction::Forward)
+                    .unwrap()
+            };
+        {
+            let case = $crate::contract_cases::fermionic_general(
+                $engine,
                 runtime,
                 &fu1,
                 false,
                 "fZ2xU1 both sides",
                 31,
-            ),
-            twist_u1,
-        );
-        $check(
-            $crate::contract_cases::fermionic_general(runtime, &fu1, true, "fZ2xU1 mixed θ", 33),
-            twist_u1,
-        );
-        $check(
-            $crate::contract_cases::fermionic_general(
+            );
+            $check($engine, $($extra,)* case, twist_u1);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_general(
+                $engine,
+                runtime,
+                &fu1,
+                true,
+                "fZ2xU1 mixed θ",
+                33,
+            );
+            $check($engine, $($extra,)* case, twist_u1);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_general(
+                $engine,
                 runtime,
                 &fsu2,
                 false,
                 "fZ2xSU2 both sides",
                 35,
-            ),
-            twist_su2,
-        );
-        $check(
-            $crate::contract_cases::fermionic_general(runtime, &fsu2, true, "fZ2xSU2 mixed θ", 37),
-            twist_su2,
-        );
-        $check(
-            $crate::contract_cases::fermionic_canonical_nonuniform(
+            );
+            $check($engine, $($extra,)* case, twist_su2);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_general(
+                $engine,
+                runtime,
+                &fsu2,
+                true,
+                "fZ2xSU2 mixed θ",
+                37,
+            );
+            $check($engine, $($extra,)* case, twist_su2);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_canonical_nonuniform(
+                $engine,
                 runtime,
                 &fu1,
                 "fZ2xU1 canonical nonuniform",
                 39,
-            ),
-            twist_u1,
-        );
-        $check(
-            $crate::contract_cases::fermionic_canonical_nonuniform(
+            );
+            $check($engine, $($extra,)* case, twist_u1);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_canonical_nonuniform(
+                $engine,
                 runtime,
                 &fsu2,
                 "fZ2xSU2 canonical nonuniform",
                 41,
-            ),
-            twist_su2,
-        );
-        $check(
-            $crate::contract_cases::fermionic_canonical_uniform(
+            );
+            $check($engine, $($extra,)* case, twist_su2);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_canonical_uniform(
+                $engine,
                 runtime,
                 &fu1,
                 "fZ2xU1 canonical uniform",
                 43,
-            ),
-            twist_u1,
-        );
-        $check(
-            $crate::contract_cases::fermionic_canonical_uniform(
+            );
+            $check($engine, $($extra,)* case, twist_u1);
+        }
+        {
+            let case = $crate::contract_cases::fermionic_canonical_uniform(
+                $engine,
                 runtime,
                 &fsu2,
                 "fZ2xSU2 canonical uniform",
                 45,
-            ),
-            twist_su2,
-        );
+            );
+            $check($engine, $($extra,)* case, twist_su2);
+        }
         for case in $crate::contract_cases::fermionic_twist_roles(
+            $engine,
             runtime,
             &fu1,
             [
@@ -1172,9 +1264,10 @@ macro_rules! for_each_fermionic_fixture {
             ],
             47,
         ) {
-            $check(case, twist_u1);
+            $check($engine, $($extra,)* case, twist_u1);
         }
         for case in $crate::contract_cases::fermionic_twist_roles(
+            $engine,
             runtime,
             &fsu2,
             [
@@ -1185,19 +1278,19 @@ macro_rules! for_each_fermionic_fixture {
             ],
             55,
         ) {
-            $check(case, twist_su2);
+            $check($engine, $($extra,)* case, twist_su2);
         }
         // `u` not dual: both lazy orderings then contract a leg that reaches
         // B's codomain dual, so each one is twisted.
         let lazy_u1: symtn::typed::TensorMap<$crate::contract_cases::FermionU1, $payload> =
-            $crate::contract_cases::fermionic_general(runtime, &fu1, false, "", 43).lhs;
-        for case in $crate::contract_cases::lazy_cases(&lazy_u1, "fZ2xU1 lazy") {
-            $check(case, twist_u1);
+            $crate::contract_cases::fermionic_general($engine, runtime, &fu1, false, "", 43).lhs;
+        for case in $crate::contract_cases::lazy_cases($engine, &lazy_u1, "fZ2xU1 lazy") {
+            $check($engine, $($extra,)* case, twist_u1);
         }
         let lazy_su2: symtn::typed::TensorMap<$crate::contract_cases::FermionSu2, $payload> =
-            $crate::contract_cases::fermionic_general(runtime, &fsu2, false, "", 45).lhs;
-        for case in $crate::contract_cases::lazy_cases(&lazy_su2, "fZ2xSU2 lazy") {
-            $check(case, twist_su2);
+            $crate::contract_cases::fermionic_general($engine, runtime, &fsu2, false, "", 45).lhs;
+        for case in $crate::contract_cases::lazy_cases($engine, &lazy_su2, "fZ2xSU2 lazy") {
+            $check($engine, $($extra,)* case, twist_su2);
         }
     }};
 }

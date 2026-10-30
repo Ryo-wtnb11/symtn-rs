@@ -7,6 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, Z2Irrep,
@@ -17,7 +18,7 @@ use symtn::sector::{
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, TensorScalar};
-use symtn::typed::{GradedSpace, Runtime, TensorMap};
+use symtn::typed::{CpuEngine, GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     LabelOrderDenseOptimizer, Network, NetworkExecutionWorkspace, PlannedNetwork, TensorId,
 };
@@ -275,7 +276,12 @@ where
     planned
 }
 
-fn fixture<R, D>(runtime: &Runtime, space: &GradedSpace<R>, seed: u64) -> [TensorMap<R, D>; 3]
+fn fixture<R, D>(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+    space: &GradedSpace<R>,
+    seed: u64,
+) -> [TensorMap<R, D>; 3]
 where
     R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
         + MultiplicityFreeRigidSymbols<Scalar = f64>
@@ -284,7 +290,7 @@ where
     D: BenchScalar,
 {
     let tensors = std::array::from_fn(|index| {
-        TensorMap::rand_with_seed(runtime, [space], [space], seed + index as u64).unwrap()
+        TensorMap::rand_with_seed(engine, runtime, [space], [space], seed + index as u64).unwrap()
     });
     if D::COMPLEX {
         assert!(
@@ -367,6 +373,7 @@ where
 }
 
 fn execute_once<R, D>(
+    engine: &mut dyn Engine,
     planned: &PlannedNetwork,
     tensors: &[TensorMap<R, D>; 3],
     workspace: Option<&mut NetworkExecutionWorkspace<R, D>>,
@@ -380,12 +387,15 @@ where
 {
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
     match workspace {
-        Some(workspace) => planned.execute(&refs, workspace).unwrap(),
-        None => planned.execute(&refs, &mut Default::default()).unwrap(),
+        Some(workspace) => planned.execute(engine, &refs, workspace).unwrap(),
+        None => planned
+            .execute(engine, &refs, &mut Default::default())
+            .unwrap(),
     }
 }
 
 fn run_batch<R, D>(
+    engine: &mut dyn Engine,
     planned: &PlannedNetwork,
     fixtures: &[[TensorMap<R, D>; 3]],
     mut workspace: Option<&mut NetworkExecutionWorkspace<R, D>>,
@@ -402,6 +412,7 @@ where
     for iteration in 0..iterations {
         let tensors = &fixtures[iteration % fixtures.len()];
         output = Some(black_box(execute_once(
+            engine,
             planned,
             tensors,
             workspace.as_deref_mut(),
@@ -411,6 +422,7 @@ where
 }
 
 fn assert_fixtures<R, D>(
+    engine: &mut dyn Engine,
     planned: &PlannedNetwork,
     fixtures: &[[TensorMap<R, D>; 3]],
     workspace_mode: &str,
@@ -425,15 +437,16 @@ fn assert_fixtures<R, D>(
     let mut workspace = NetworkExecutionWorkspace::default();
     for tensors in fixtures {
         let actual = if workspace_mode == "reuse" {
-            execute_once(planned, tensors, Some(&mut workspace))
+            execute_once(engine, planned, tensors, Some(&mut workspace))
         } else {
-            execute_once(planned, tensors, None)
+            execute_once(engine, planned, tensors, None)
         };
         assert_indexed_chain(tensors, &actual);
     }
 }
 
 fn run_case<R, D>(
+    engine: &mut dyn Engine,
     case: &str,
     provider: Arc<R>,
     patterns: Vec<Vec<(<R as TypedSectorAdmission>::Sector, usize)>>,
@@ -447,7 +460,7 @@ fn run_case<R, D>(
     <R as TypedSectorAdmission>::Sector: Clone + Eq,
     D: BenchScalar,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let cold_pattern = patterns[0].clone();
     let mut cold_workspace = NetworkExecutionWorkspace::default();
     let cold = measure(
@@ -458,12 +471,12 @@ fn run_case<R, D>(
         1,
         || {
             let space = GradedSpace::try_new(Arc::clone(&provider), cold_pattern).unwrap();
-            let tensors = fixture::<R, D>(&runtime, &space, 11_000);
+            let tensors = fixture::<R, D>(engine, &runtime, &space, 11_000);
             let planned = chain_plan(&tensors);
             if workspace_mode == "reuse" {
-                execute_once(&planned, &tensors, Some(&mut cold_workspace))
+                execute_once(engine, &planned, &tensors, Some(&mut cold_workspace))
             } else {
-                execute_once(&planned, &tensors, None)
+                execute_once(engine, &planned, &tensors, None)
             }
         },
     );
@@ -473,14 +486,15 @@ fn run_case<R, D>(
 
     let space = GradedSpace::try_new(Arc::clone(&provider), patterns[0].clone()).unwrap();
     let steady = (0..4)
-        .map(|index| fixture::<R, D>(&runtime, &space, 12_000 + 10 * index))
+        .map(|index| fixture::<R, D>(engine, &runtime, &space, 12_000 + 10 * index))
         .collect::<Vec<_>>();
     let planned = chain_plan(&steady[0]);
-    assert_fixtures(&planned, &steady, workspace_mode);
+    assert_fixtures(engine, &planned, &steady, workspace_mode);
     let reuse = workspace_mode == "reuse";
     let mut steady_workspace = NetworkExecutionWorkspace::default();
     for _ in 0..2 {
         drop(run_batch(
+            engine,
             &planned,
             &steady,
             reuse.then_some(&mut steady_workspace),
@@ -495,6 +509,7 @@ fn run_case<R, D>(
         12,
         || {
             run_batch(
+                engine,
                 &planned,
                 &steady,
                 reuse.then_some(&mut steady_workspace),
@@ -514,15 +529,16 @@ fn run_case<R, D>(
             .flat_map(|(index, pattern)| {
                 let space = GradedSpace::try_new(Arc::clone(&provider), pattern).unwrap();
                 [
-                    fixture::<R, D>(&runtime, &space, 13_000 + 20 * index as u64),
-                    fixture::<R, D>(&runtime, &space, 13_010 + 20 * index as u64),
+                    fixture::<R, D>(engine, &runtime, &space, 13_000 + 20 * index as u64),
+                    fixture::<R, D>(engine, &runtime, &space, 13_010 + 20 * index as u64),
                 ]
             })
             .collect::<Vec<_>>();
-        assert_fixtures(&planned, &changing, workspace_mode);
+        assert_fixtures(engine, &planned, &changing, workspace_mode);
         let mut changing_workspace = NetworkExecutionWorkspace::default();
         for _ in 0..2 {
             drop(run_batch(
+                engine,
                 &planned,
                 &changing,
                 reuse.then_some(&mut changing_workspace),
@@ -537,6 +553,7 @@ fn run_case<R, D>(
             changing.len() * 3,
             || {
                 run_batch(
+                    engine,
                     &planned,
                     &changing,
                     reuse.then_some(&mut changing_workspace),
@@ -602,9 +619,10 @@ fn fermion_u1_patterns() -> Vec<Vec<(symtn::sector::ProductSector<Z2Irrep, U1Irr
     ]
 }
 
-fn run_child(case: &str, workspace_mode: &str) {
+fn run_child(engine: &mut dyn Engine, case: &str, workspace_mode: &str) {
     match case {
         "dense_equivalent_f64" => run_case::<U1FusionRule, f64>(
+            engine,
             case,
             Arc::new(U1FusionRule),
             [24, 40, 12, 32, 16, 24]
@@ -614,6 +632,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "dense_equivalent_c64" => run_case::<U1FusionRule, Complex64>(
+            engine,
             case,
             Arc::new(U1FusionRule),
             [24, 40, 12, 32, 16, 24]
@@ -623,6 +642,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "u1_few_large_f64" => run_case::<U1FusionRule, f64>(
+            engine,
             case,
             Arc::new(U1FusionRule),
             u1_redistribution(),
@@ -630,6 +650,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "u1_few_large_c64" => run_case::<U1FusionRule, Complex64>(
+            engine,
             case,
             Arc::new(U1FusionRule),
             u1_redistribution(),
@@ -637,6 +658,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "u1_many_small_f64" => run_case::<U1FusionRule, f64>(
+            engine,
             case,
             Arc::new(U1FusionRule),
             vec![u1_many_small()],
@@ -644,6 +666,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "u1_many_small_c64" => run_case::<U1FusionRule, Complex64>(
+            engine,
             case,
             Arc::new(U1FusionRule),
             vec![u1_many_small()],
@@ -651,6 +674,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "fz2xu1_f64" => run_case::<FermionU1, f64>(
+            engine,
             case,
             Arc::new(
                 symtn_core::ProductFusionRule::<_, _>::try_new(
@@ -664,6 +688,7 @@ fn run_child(case: &str, workspace_mode: &str) {
             workspace_mode,
         ),
         "fz2xu1_c64" => run_case::<FermionU1, Complex64>(
+            engine,
             case,
             Arc::new(
                 symtn_core::ProductFusionRule::<_, _>::try_new(
@@ -694,7 +719,8 @@ const CASES: [&str; 8] = [
 fn main() {
     if let Ok(case) = std::env::var("SYMTN_CPU_SHAPE_CHILD") {
         let workspace = std::env::var("SYMTN_CPU_SHAPE_WORKSPACE").unwrap();
-        run_child(&case, &workspace);
+        // Serial: this bench measures single-thread shape reuse.
+        run_child(&mut CpuEngine::serial(), &case, &workspace);
         return;
     }
 

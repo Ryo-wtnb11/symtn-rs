@@ -41,7 +41,16 @@ fn strided_row_cat_allocates_only_the_output_payload() {
             false,
         ),
     ];
-    let run = || try_cat_owned_raw(len, OwnedCatSide::Domain, &copies, [&lhs, &rhs]).unwrap();
+    let run = || {
+        try_cat_owned_raw(
+            strided_kernel::Exec::serial(),
+            len,
+            OwnedCatSide::Domain,
+            &copies,
+            [&lhs, &rhs],
+        )
+        .unwrap()
+    };
     let warm = run();
     counting_alloc::start();
     let output = black_box(run());

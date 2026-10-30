@@ -131,6 +131,7 @@ pub(crate) enum CatOperandData<'a, D> {
 impl CatCopyPlan {
     pub(crate) fn execute<D: ScalarOps>(
         &self,
+        engine: &mut dyn Engine,
         sources: [CatOperandData<'_, D>; 2],
     ) -> Result<Vec<D>, Error> {
         let side = match self.side {
@@ -138,12 +139,19 @@ impl CatCopyPlan {
             Side::Codomain => OwnedCatSide::Codomain,
         };
         if let [CatOperandData::Dense(lhs), CatOperandData::Dense(rhs)] = sources {
-            return symtn_tensors::try_cat_owned_raw(
-                self.required_len,
-                side,
-                &self.copies,
-                [lhs, rhs],
-            )
+            return symtn_operations::host_pool::region(
+                engine,
+                symtn_operations::host_pool::HostPoolSite::Strided,
+                |exec| {
+                    symtn_tensors::try_cat_owned_raw(
+                        exec,
+                        self.required_len,
+                        side,
+                        &self.copies,
+                        [lhs, rhs],
+                    )
+                },
+            )?
             .ok_or_else(|| {
                 internal_layout_error(
                     "cat copy plan declined by the fast-path prover; no known geometry reaches \
@@ -233,14 +241,21 @@ impl CatCopyPlan {
                 }
             }
         }
-        symtn_operations::try_cat_owned_mixed_raw(
-            self.required_len,
-            side,
-            &self.copies,
-            dense_sources,
-            source_lengths,
-            &compact_entries,
-        )
+        symtn_operations::host_pool::region(
+            engine,
+            symtn_operations::host_pool::HostPoolSite::Strided,
+            |exec| {
+                symtn_operations::try_cat_owned_mixed_raw(
+                    exec,
+                    self.required_len,
+                    side,
+                    &self.copies,
+                    dense_sources,
+                    source_lengths,
+                    &compact_entries,
+                )
+            },
+        )?
         .ok_or_else(|| internal_layout_error("cat copy plan declined by the fast-path prover"))
     }
 }
@@ -614,6 +629,7 @@ mod cat_plan_tests {
 
     #[test]
     fn declined_plan_is_an_internal_layout_error() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let plan = CatCopyPlan {
             required_len: 10,
             copies: vec![
@@ -625,10 +641,13 @@ mod cat_plan_tests {
             side: Side::Domain,
         };
         let error = plan
-            .execute([
-                CatOperandData::Dense(&[1.0, 2.0, 3.0, 4.0]),
-                CatOperandData::Dense(&[5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
-            ])
+            .execute(
+                engine,
+                [
+                    CatOperandData::Dense(&[1.0, 2.0, 3.0, 4.0]),
+                    CatOperandData::Dense(&[5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+                ],
+            )
             .unwrap_err();
         assert!(matches!(
             error,

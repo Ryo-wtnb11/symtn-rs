@@ -1,25 +1,5 @@
 use super::*;
 
-/// A snapshot of the backend's cuTENSOR contraction plan cache.
-///
-/// Mirrors Tenferro's own cache statistics, plus this context's plan-entry
-/// reservation ledger; it exists so symtn callers never name a tenferro type.
-/// Observability only.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct CudaPlanCacheStats {
-    pub entries: usize,
-    pub retained_bytes: usize,
-    pub hits: u64,
-    pub misses: u64,
-    pub evictions: u64,
-    /// Plan entries currently reserved through
-    /// [`CudaDenseContext::reserve_plan_entries`], over every consumer.
-    pub reserved_entries: usize,
-    /// Entries requested but not granted because the reservation budget was
-    /// exhausted, summed over the context's lifetime.
-    pub reservation_shortfall: u64,
-}
 /// The device operands a region call needs but never varies: the ones
 /// template, whose first element is the 1x1 coefficient of an unscaled move
 /// and whose packed prefix a trace contracts its diagonal against, and the
@@ -53,117 +33,126 @@ pub(super) struct ScalarOperands {
 }
 /// One [`ScalarOperands`] slot per admitted payload dtype.
 pub(super) const SCALAR_OPERAND_SLOTS: usize = 4;
-/// Owns the tenferro CUDA backend for one device ordinal.
-pub struct CudaDenseContext {
-    pub(super) backend: CudaBackend,
-    pub(super) device: usize,
-    identity: u64,
-    operands: [ScalarOperands; SCALAR_OPERAND_SLOTS],
-    plan_ledger: PlanEntryLedger,
+/// The scalar operand templates of one engine allocation domain, held by a
+/// prepared workspace between calls and lent to each call's
+/// [`CudaDenseContext`] through [`CudaDenseContext::swap_scalar_operands`].
+///
+/// A context is per call, so templates it creates alone are re-uploaded by
+/// every call; a workspace that keeps them makes its warm replays
+/// upload-free. They are bound to the engine whose context created them: lent
+/// to a context on another engine, they are dropped rather than submitted.
+#[doc(hidden)]
+#[derive(Default)]
+pub struct CudaScalarOperands {
+    /// [`CudaDenseContext::identity`] of the engine the buffers below belong
+    /// to; `None` while they hold none.
+    identity: Option<u64>,
+    slots: [ScalarOperands; SCALAR_OPERAND_SLOTS],
 }
-/// Process-wide context counter. A monotonic ticket rather than the context's
-/// address, so a cache keyed by context identity can never mistake a freshly
-/// allocated context for a dropped one that happened to reuse its address.
-static NEXT_CONTEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
-/// Puts every CubeCL command and every Tenferro vendor call of this process
-/// on one CUDA stream per device, or reports why it cannot (#1391).
+impl CudaScalarOperands {
+    /// Keeps the templates only if they belong to the engine `identity`.
+    fn bind(&mut self, identity: u64) {
+        if self.identity != Some(identity) {
+            *self = Self {
+                identity: Some(identity),
+                ..Self::default()
+            };
+        }
+    }
+}
+/// One CUDA operation's view of the caller's engine: the borrowed engine every
+/// device kernel is submitted through, its runtime handle for explicit
+/// transfers, and the invocation-local scalar operands.
 ///
-/// Why: CubeCL decides whether a stream must wait for a buffer's origin
-/// stream from a cursor it records only when the buffer is bound, not when a
-/// later command writes it (tensor4all/cubecl#16). Once a stream has synced
-/// past a buffer's bind, it reads a later write to that buffer, or overwrites
-/// a buffer another stream still reads, without waiting. With one stream all
-/// work runs in enqueue order, so that cursor is never consulted for
-/// correctness. Tenferro sizes its vendor-stream slots from the same setting,
-/// so cuBLAS, cuSOLVER and cuTENSOR share the stream too, and its cross-slot
-/// host sync disappears.
-///
-/// Enqueue order follows happens-before between threads because CubeCL's
-/// server queue is FIFO and a vendor call first drains it: raw sessions
-/// (cuSOLVER), memsets and scalar downloads call `flush_cubecl`; cuTENSOR and
-/// cuBLAS rely on the blocking `get_resource` in Tenferro's `typed_device_ptr`.
-/// Residual (tensor4all/tenferro-rs#1868, independent of the stream count and
-/// present within one thread too): `typed_device_ptr` skips `get_resource`
-/// for a buffer created on the calling thread whose address it has cached, so
-/// a CubeCL kernel still queued unflushed into that buffer can reach the
-/// stream after a later vendor call on it. In symtn only the empty-contraction
-/// scale or fill of an owned destination can queue such a kernel.
-///
-/// Why not a symtn-side sync per overwrite: it covers only destinations symtn
-/// knows it rewrote, not scratch, workspaces or pooled intermediates read in
-/// flight by another thread, and costs a host sync per call.
-///
-/// The configuration is process-wide and fixed at CubeCL's first read of it,
-/// so this sets it only if nothing has read it yet: from the same
-/// `cubecl.toml` and environment CubeCL would read, with `max_streams = 1`
-/// (a file value is overridden). If something else loaded it first with
-/// another count, the device cannot be opened safely and this fails.
-fn single_cubecl_stream() -> Result<(), DenseError> {
-    use cubecl_runtime::config::{CubeClRuntimeConfig, RuntimeConfig};
-
-    let mut slot = CubeClRuntimeConfig::storage().lock();
-    let max_streams = match slot.as_ref() {
-        Some(config) => config.streaming.max_streams,
+/// The caller owns the engine; this context only borrows it for the
+/// operation, so nothing in symtn stores an engine. Every operand is checked
+/// against the engine's allocation domain before any submission: a buffer of
+/// another engine, even one on the same device ordinal, is refused.
+pub struct CudaDenseContext<'e> {
+    pub(super) backend: &'e mut dyn Engine,
+    pub(super) runtime: CudaRuntime,
+    pub(super) device: CudaPlacement,
+    identity: u64,
+    operands: CudaScalarOperands,
+}
+/// The process-unique `u64` of an engine allocation domain, so state keyed by
+/// [`CudaDenseContext::identity`] is shared by every operation on one engine
+/// and never by two engines (a domain id is never reused).
+// ponytail: one entry per engine domain this process has run symtn work on,
+// scanned linearly; a map if processes ever open many engines.
+fn domain_identity(domain: AllocationDomainId) -> u64 {
+    static DOMAINS: std::sync::Mutex<Vec<AllocationDomainId>> = std::sync::Mutex::new(Vec::new());
+    let mut domains = DOMAINS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let index = match domains.iter().position(|known| *known == domain) {
+        Some(index) => index,
         None => {
-            let mut config = CubeClRuntimeConfig::from_current_dir().override_from_env();
-            config.streaming.max_streams = 1;
-            *slot = Some(std::sync::Arc::new(config));
-            1
+            domains.push(domain);
+            domains.len() - 1
         }
     };
-    if max_streams != 1 {
-        return Err(DenseError::Unsupported {
-            op: "cuda_context",
-            message: format!(
-                "CubeCL was configured with streaming.max_streams = {max_streams} before \
-                 the first CUDA context opened; symtn needs 1 so that a buffer written \
-                 after its bind is never read early (tensor4all/cubecl#16)"
-            ),
-        });
-    }
-    Ok(())
+    index as u64 + 1
 }
-impl CudaDenseContext {
-    /// Opens `device`. The first call in the process also fixes CubeCL to one
-    /// stream per device (see `single_cubecl_stream`), and every call fails with
-    /// [`DenseError::Unsupported`] if CubeCL was already configured otherwise.
-    pub fn new(device: usize) -> Result<Self, DenseError> {
-        single_cubecl_stream()?;
-        let ordinal = u32::try_from(device)
-            .map_err(|_| cuda_error("cuda_context", "device ordinal exceeds u32"))?;
-        let backend = CudaBackend::new(CudaDeviceId::from_ordinal(ordinal))
-            .map_err(|err| cuda_error("cuda_context", err))?;
-        let base = backend
-            .cutensor_plan_cache_max_entries()
-            .map_err(|err| cuda_error("cuda_plan_cache", err))?
-            .get();
+impl<'e> CudaDenseContext<'e> {
+    /// Borrows the caller's engine for one CUDA operation.
+    ///
+    /// # Errors
+    ///
+    /// [`DenseError::Unsupported`] when `engine` is not a CUDA engine; nothing
+    /// is uploaded or submitted.
+    pub fn new(engine: &'e mut dyn Engine) -> Result<Self, DenseError> {
+        let runtime = with_cuda_engine(engine, |cuda| cuda.runtime().clone()).ok_or_else(|| {
+            DenseError::Unsupported {
+                op: "cuda_context",
+                message: "device storage needs the caller's CUDA engine".to_string(),
+            }
+        })?;
+        let device = CudaPlacement {
+            ordinal: runtime.device_ordinal(),
+            domain: runtime.allocation_domain_id(),
+        };
+        let identity = domain_identity(device.domain);
         Ok(Self {
-            backend,
+            backend: engine,
+            runtime,
             device,
-            identity: NEXT_CONTEXT_IDENTITY.fetch_add(1, Ordering::Relaxed),
-            operands: std::array::from_fn(|_| ScalarOperands::default()),
-            plan_ledger: PlanEntryLedger::new(
-                base,
-                plan_cache_entries_for(usize::MAX, DEFAULT_PLAN_CACHE_BUDGET_BYTES),
-            ),
+            identity,
+            operands: CudaScalarOperands {
+                identity: Some(identity),
+                ..CudaScalarOperands::default()
+            },
         })
     }
 
-    /// Process-unique identity of this context, never reused while it lives.
+    /// Process-unique identity of the borrowed engine's allocation domain:
+    /// equal for every context on one engine, distinct for any two engines
+    /// (also on one device ordinal), never reused.
     ///
-    /// Device state cached against a context — an uploaded coefficient vector,
-    /// a prepared plan — belongs to exactly one context, and this is the key
-    /// that says so.
+    /// Device state cached against an engine — an uploaded coefficient
+    /// vector, a prepared workspace — is usable only by that engine, and this
+    /// is the key that says so.
     pub fn identity(&self) -> u64 {
         self.identity
     }
 
+    /// Exchanges this context's scalar operand templates with `held`: lent
+    /// before a prepared replay, so the replay finds the templates an earlier
+    /// call left there, and swapped back after it, so `held` keeps what the
+    /// replay grew. Templates `held` keeps for another engine are dropped
+    /// first, never submitted here.
+    #[doc(hidden)]
+    pub fn swap_scalar_operands(&mut self, held: &mut CudaScalarOperands) {
+        held.bind(self.identity);
+        std::mem::swap(&mut self.operands, held);
+    }
+
     fn operands<D: CudaScalar>(&self) -> &ScalarOperands {
-        &self.operands[D::OPERAND_SLOT]
+        &self.operands.slots[D::OPERAND_SLOT]
     }
 
     fn operands_mut<D: CudaScalar>(&mut self) -> &mut ScalarOperands {
-        &mut self.operands[D::OPERAND_SLOT]
+        &mut self.operands.slots[D::OPERAND_SLOT]
     }
 
     /// Uploads this dtype's ones template unless a resident one already holds
@@ -217,7 +206,7 @@ impl CudaDenseContext {
         let Self {
             backend, operands, ..
         } = self;
-        let slot = &mut operands[D::OPERAND_SLOT];
+        let slot = &mut operands.slots[D::OPERAND_SLOT];
         let (Some(ones), Some(scaled)) = (slot.ones.as_ref(), slot.scaled.as_mut()) else {
             return Err(cuda_error(
                 "cuda_scaled_template",
@@ -225,7 +214,7 @@ impl CudaDenseContext {
             ));
         };
         submit_region_axpby::<D>(
-            backend,
+            &mut **backend,
             "cuda_scaled_template",
             ones,
             &region,
@@ -322,6 +311,7 @@ impl CudaDenseContext {
     /// budget; nothing here reads it back.
     pub fn scalar_operand_bytes(&self) -> usize {
         self.operands
+            .slots
             .iter()
             .map(|operands| {
                 let elements = operands.ones.as_ref().map_or(0, CudaDenseStorage::len)
@@ -336,7 +326,10 @@ impl CudaDenseContext {
     /// needs one re-creates it, so this is a memory decision, never a
     /// correctness one.
     pub fn release_scalar_operands(&mut self) {
-        self.operands = std::array::from_fn(|_| ScalarOperands::default());
+        self.operands = CudaScalarOperands {
+            identity: Some(self.identity),
+            ..CudaScalarOperands::default()
+        };
     }
 
     /// Hands out the backend and this dtype's scalar operands at once.
@@ -345,114 +338,33 @@ impl CudaDenseContext {
     /// context-owned operand needs `&mut` on the backend and `&` on the
     /// operand simultaneously, which is only sound because they are disjoint
     /// fields.
-    pub(super) fn split_operands<D: CudaScalar>(&mut self) -> (&mut CudaBackend, &ScalarOperands) {
-        (&mut self.backend, &self.operands[D::OPERAND_SLOT])
+    pub(super) fn split_operands<D: CudaScalar>(&mut self) -> (&mut dyn Engine, &ScalarOperands) {
+        (&mut *self.backend, &self.operands.slots[D::OPERAND_SLOT])
     }
 
+    /// The CUDA device ordinal of the borrowed engine.
     pub fn device(&self) -> usize {
-        self.device
-    }
-
-    /// cuTENSOR contraction plan cache observation for this context's backend.
-    ///
-    /// Every region move and every GEMM submitted here builds or reuses one
-    /// cuTENSOR plan per distinct operand signature, so `evictions` growing
-    /// during a replay is the observable form of plan-cache thrash.
-    pub fn plan_cache_stats(&self) -> Result<CudaPlanCacheStats, DenseError> {
-        let stats = self
-            .backend
-            .cutensor_plan_cache_stats()
-            .map_err(|err| cuda_error("cuda_plan_cache", err))?;
-        Ok(CudaPlanCacheStats {
-            entries: stats.entries,
-            retained_bytes: stats.retained_bytes,
-            hits: stats.hits,
-            misses: stats.misses,
-            evictions: stats.evictions,
-            reserved_entries: self.plan_ledger.reserved(),
-            reservation_shortfall: self.plan_ledger.shortfall(),
-        })
-    }
-
-    /// The cuTENSOR contraction plan entry bound (Tenferro's default is 64).
-    pub fn plan_cache_max_entries(&self) -> Result<usize, DenseError> {
-        self.backend
-            .cutensor_plan_cache_max_entries()
-            .map(NonZeroUsize::get)
-            .map_err(|err| cuda_error("cuda_plan_cache", err))
-    }
-
-    /// Reserves `delta` more plan entries for one consumer and returns how
-    /// many were granted.
-    ///
-    /// A consumer that knows how many distinct operand signatures it will
-    /// submit again — a compiled transform structure knows exactly — reserves
-    /// them so a replay larger than the default bound does not evict the plan
-    /// it needs on the next block. Reservations of independent consumers add:
-    /// the cap becomes at least the bound found at construction plus every
-    /// live reservation. The total is bounded by
-    /// [`DEFAULT_PLAN_CACHE_BUDGET_BYTES`]; a request beyond it is truncated,
-    /// and the truncation is reported by
-    /// [`CudaPlanCacheStats::reservation_shortfall`]. The consumer owns what
-    /// it was granted and returns it through [`Self::release_plan_entries`].
-    pub fn reserve_plan_entries(&mut self, delta: usize) -> Result<usize, DenseError> {
-        let granted = self.plan_ledger.grant(delta);
-        self.raise_plan_cache_max_entries(self.plan_ledger.cap_with(granted))?;
-        self.plan_ledger.commit(delta, granted);
-        Ok(granted)
-    }
-
-    /// Returns `entries` a consumer reserved. The cap is not lowered: the
-    /// plans stay cached, and the next reservation reuses the headroom rather
-    /// than raising the cap again. Infallible so a `Drop` can call it.
-    pub fn release_plan_entries(&mut self, entries: usize) {
-        self.plan_ledger.release(entries);
-    }
-
-    /// Plan entries currently reserved over every consumer.
-    pub fn reserved_plan_entries(&self) -> usize {
-        self.plan_ledger.reserved()
-    }
-
-    /// Raises the cuTENSOR contraction plan entry bound to `entries`, never
-    /// lowering it. Private: a consumer raising to its own absolute need would
-    /// silently absorb another consumer's reservation.
-    fn raise_plan_cache_max_entries(&self, entries: usize) -> Result<(), DenseError> {
-        let Some(entries) = NonZeroUsize::new(entries) else {
-            return Ok(());
-        };
-        let current = self
-            .backend
-            .cutensor_plan_cache_max_entries()
-            .map_err(|err| cuda_error("cuda_plan_cache", err))?;
-        if entries <= current {
-            return Ok(());
-        }
-        self.backend
-            .set_cutensor_plan_cache_max_entries(entries)
-            .map_err(|err| cuda_error("cuda_plan_cache", err))
+        self.device.ordinal
     }
 
     /// Runs the smallest real operation against each backend library this
     /// context can reach, so their one-time initialization is paid here
     /// rather than by the first user operation.
     ///
-    /// Why: Tenferro (0.5.0, and 0.6.0 exposes no warm-up entry point either)
-    /// loads cuTENSOR (`dlopen` + `cutensorCreate`) and the cuSOLVER/cuBLAS
-    /// handles lazily, per `CudaBackend` instance, on the first submission
+    /// Why: Tenferro loads cuTENSOR (`dlopen` + `cutensorCreate`) and the
+    /// cuSOLVER/cuBLAS handles lazily, per engine, on the first submission
     /// that needs them.
     /// The measured cost is 185-657 ms
     /// (`benchmarks/history/cuda-baseline-2026-09-20.md`), independent of the
-    /// operation, provider, dtype and size that happens to pay it. The cost is
-    /// unavoidable; attributing it to context construction is the honest
-    /// placement, and it is not a cache: nothing is memoized on the symtn side
-    /// and no result changes.
+    /// operation, provider, dtype and size that happens to pay it. A caller
+    /// that wants it outside its first measured operation calls this once on
+    /// a fresh engine; nothing is memoized on the symtn side and no result
+    /// changes.
     ///
     /// Because both libraries are touched here, a caller that only contracts
     /// still needs cuSOLVER and cuBLAS to be loadable, not just cuTENSOR: a
     /// missing library is the same typed [`DenseError::Backend`] as before,
-    /// surfaced by whoever calls this (`RuntimeBuilder::build`) instead of by
-    /// the first factorization. Tenferro resolves the three through
+    /// surfaced by this call instead of by the first factorization. Tenferro resolves the three through
     /// `TENFERRO_CUTENSOR_PATH`, `TENFERRO_CUSOLVER_PATH` and
     /// `TENFERRO_CUBLAS_PATH`.
     ///
@@ -463,10 +375,8 @@ impl CudaDenseContext {
     /// through CubeCL's own `cubecl.toml` (`[compilation] cache`) and is off by
     /// default. The cuTENSOR plan cache is also per contraction shape, so a
     /// user contraction still builds its own plan. The region primitive's
-    /// scalar operands are not warmed either: they are created on first use
-    /// of their dtype, which keeps this warm-up's fixed cost, its counter
-    /// deltas, and "every device buffer created here is dropped" true as
-    /// written.
+    /// scalar operands are not warmed either: they belong to one context and
+    /// are created on first use of their dtype.
     ///
     /// Tenferro's runtime-owned
     /// blas1 cuBLAS handle (tenferro-gpu `cubecl/runtime.rs:688`) is also not
@@ -483,13 +393,12 @@ impl CudaDenseContext {
     /// Single precision changes none of this. The warm-up submits `f64` work
     /// only, so a caller that never touches `f32`/[`Complex32`] pays exactly
     /// what it paid before: the libraries this loads (cuTENSOR, cuSOLVER,
-    /// cuBLAS) are per backend instance, not per dtype, and the probe measured
+    /// cuBLAS) are per engine, not per dtype, and the probe measured
     /// no notable per-dtype NVRTC stall
     /// (`benchmarks/history/cuda-single-precision-probe-2026-09-20.md`,
     /// finding 6). What a single-precision caller still pays on its own first
     /// use is the CubeCL kernel JIT for its dtype and the context's `f32`/
-    /// `Complex32` scalar operands, both of which are lazy per dtype for the
-    /// same reason the `f64` ones are.
+    /// `Complex32` scalar operands, both of which are lazy per dtype.
     ///
     /// Every device buffer created here is dropped before returning.
     pub fn warm_up(&mut self) -> Result<(), DenseError> {
@@ -506,5 +415,41 @@ impl CudaDenseContext {
         let (values, _vectors) = cuda_eigh_region::<f64>(self, &lhs, 0, 1)?;
         cuda_download_spectra::<f64>(self, &[values])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What: templates a workspace kept for one engine are discarded when
+    /// lent to a context on another engine, and kept for the same engine.
+    /// The slot metadata stands in for the device buffers, which need a GPU.
+    #[test]
+    fn held_templates_of_another_engine_are_discarded_not_lent() {
+        let held = |identity| {
+            let mut operands = CudaScalarOperands {
+                identity: Some(identity),
+                ..CudaScalarOperands::default()
+            };
+            operands.slots[0].element_bytes = 8;
+            operands.slots[0].scaled_prefix = Some((1.0_f64.contraction_scalar(), 4));
+            operands
+        };
+
+        let mut same = held(1);
+        same.bind(1);
+        assert_eq!(same.identity, Some(1));
+        assert_eq!(same.slots[0].element_bytes, 8, "same engine keeps them");
+
+        let mut other = held(1);
+        other.bind(2);
+        assert_eq!(other.identity, Some(2));
+        assert_eq!(other.slots[0].element_bytes, 0, "another engine drops them");
+        assert!(other.slots[0].scaled_prefix.is_none());
+        assert!(other
+            .slots
+            .iter()
+            .all(|slot| slot.ones.is_none() && slot.zeros.is_none() && slot.scaled.is_none()));
     }
 }

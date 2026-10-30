@@ -262,6 +262,7 @@ fn every_key_determinant_splits_entries() {
 
 #[test]
 fn only_canonical_keys_publish_and_hits_rebind_the_callers_structures() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -271,10 +272,10 @@ fn only_canonical_keys_publish_and_hits_rebind_the_callers_structures() {
     let mut planning = TreeTransformPlanning::default();
     take_completed_transformer_activity();
     let cold = planning
-        .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
         .unwrap();
     let warm = planning
-        .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
         .unwrap();
     let activity = take_completed_transformer_activity();
     assert_eq!(
@@ -312,7 +313,14 @@ fn only_canonical_keys_publish_and_hits_rebind_the_callers_structures() {
     assert!(!expert_dst.is_canonical() && !expert_src.is_canonical());
     for _ in 0..2 {
         let expert = planning
-            .resolve_tree_pair(&U1FusionRule, &operation, &expert_dst, &expert_src, false)
+            .resolve_tree_pair(
+                engine,
+                &U1FusionRule,
+                &operation,
+                &expert_dst,
+                &expert_src,
+                false,
+            )
             .unwrap();
         assert_eq!(expert, cold);
     }
@@ -409,6 +417,7 @@ fn coefficient_types_are_separate_entries() {
 
 #[test]
 fn a_build_straddling_a_clear_or_failing_is_not_published() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Clears every structure cache: serialize with the other clearing tests.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -418,12 +427,12 @@ fn a_build_straddling_a_clear_or_failing_is_not_published() {
     take_completed_transformer_activity();
     crate::probe::set_before_publish_hook(Box::new(symtn_core::clear_structure_caches));
     let straddling = planning
-        .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
         .unwrap();
     // What: the build that a clear straddled is returned but not resident,
     // so the next call builds again (and publishes).
     let rebuilt = planning
-        .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
         .unwrap();
     assert!(!same_core(&straddling, &rebuilt));
     assert_eq!(straddling, rebuilt);
@@ -433,7 +442,7 @@ fn a_build_straddling_a_clear_or_failing_is_not_published() {
         (2, 2, 0)
     );
     let warm = planning
-        .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
         .unwrap();
     assert!(same_core(&rebuilt, &warm));
 
@@ -442,9 +451,11 @@ fn a_build_straddling_a_clear_or_failing_is_not_published() {
     // finds no destination block for a transformed tree.
     let (_, other_src, _) = fixture(5);
     let wrong = TreeTransformOperation::permute([0], [1, 2]);
-    let error = planning.resolve_tree_pair(&U1FusionRule, &wrong, &other_src, &other_src, false);
+    let error =
+        planning.resolve_tree_pair(engine, &U1FusionRule, &wrong, &other_src, &other_src, false);
     assert!(error.is_err());
-    let again = planning.resolve_tree_pair(&U1FusionRule, &wrong, &other_src, &other_src, false);
+    let again =
+        planning.resolve_tree_pair(engine, &U1FusionRule, &wrong, &other_src, &other_src, false);
     assert!(again.is_err());
     // The warm hit above, then two builds that failed and published nothing.
     let activity = take_completed_transformer_activity();
@@ -456,6 +467,7 @@ fn a_build_straddling_a_clear_or_failing_is_not_published() {
 
 #[test]
 fn a_zero_degeneracy_budget_admits_no_completed_transformer() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_support::run_isolated_or_return(
         "SYMTN_TENSORS_ZERO_DEGENERACY_BUDGET_ISOLATED",
         "tree_transform::cache::owner_tests::a_zero_degeneracy_budget_admits_no_completed_transformer",
@@ -476,7 +488,7 @@ fn a_zero_degeneracy_budget_admits_no_completed_transformer() {
     let mut planning = TreeTransformPlanning::default();
     for _ in 0..2 {
         planning
-            .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+            .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
             .unwrap();
     }
     let after = completed();
@@ -487,6 +499,7 @@ fn a_zero_degeneracy_budget_admits_no_completed_transformer() {
 
 #[test]
 fn concurrent_cold_misses_build_without_waiting_and_admit_once() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -501,10 +514,10 @@ fn concurrent_cold_misses_build_without_waiting_and_admit_once() {
                 let (dst, src, operation) = (&dst, &src, &operation);
                 scope.spawn(move || {
                     let mut planning = TreeTransformPlanning::default();
-                    planning.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
+                    let engine = &mut symtn_operations::host_pool::test_engine(4);
                     barrier.wait();
                     let built = planning
-                        .resolve_tree_pair(&U1FusionRule, operation, dst, src, false)
+                        .resolve_tree_pair(engine, &U1FusionRule, operation, dst, src, false)
                         .unwrap();
                     (built, take_completed_transformer_activity())
                 })
@@ -518,7 +531,7 @@ fn concurrent_cold_misses_build_without_waiting_and_admit_once() {
     // thread finishes, all results are equal, and they converge on one
     // resident core (the first admission wins; later offers get it).
     let resident = TreeTransformPlanning::default()
-        .resolve_tree_pair(&U1FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &U1FusionRule, &operation, &dst, &src, false)
         .unwrap();
     for (built, activity) in &results {
         assert_eq!(built, &resident);

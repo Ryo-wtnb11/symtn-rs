@@ -3,18 +3,18 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
     let solver_calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(fail_second_svd(&solver_calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(fail_second_svd(&solver_calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let real: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -31,7 +31,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
     .unwrap();
     let densified = probe::record();
     assert_eq!(
-        real.svd_vals(&[0], &[1]).unwrap(),
+        real.svd_vals(engine, &[0], &[1]).unwrap(),
         vec![
             SectorSpectrum {
                 sector: vec![0, 0],
@@ -48,8 +48,9 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
 
     // A spectrum that does not cover the bond is misuse: a typed error.
     let stored = real.spectrum().unwrap();
-    let values_of = |spectrum| {
+    let mut values_of = |spectrum| {
         symtn_matrixalgebra::seam::svd_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+            engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
             symtn_matrixalgebra::seam::FactorSource::Diagonal {
                 space: &owned(&real).space,
@@ -74,6 +75,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
     );
 
     let complex: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -93,7 +95,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
     )
     .unwrap();
     let densified = probe::record();
-    let got = complex.svd_vals(&[0], &[1]).unwrap();
+    let got = complex.svd_vals(engine, &[0], &[1]).unwrap();
     assert_eq!(got[0].sector, vec![0, 0]);
     assert_eq!(got[0].values, [4.0, 0.0]);
     assert_eq!(got[1].sector, vec![1, 0]);
@@ -109,6 +111,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
         .unwrap();
     let dual_sector = dual_leg.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &dual_leg,
         [SectorSpectrum {
@@ -119,7 +122,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
     .unwrap();
     let densified = probe::record();
     assert_eq!(
-        dual.svd_vals(&[0], &[1]).unwrap(),
+        dual.svd_vals(engine, &[0], &[1]).unwrap(),
         vec![SectorSpectrum {
             sector: dual_sector,
             values: vec![2.0, 0.0]
@@ -135,12 +138,11 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(polar_spy(&Arc::default())))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(polar_spy(&Arc::default())));
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 3), (vec![0, 0], 2)])
@@ -150,6 +152,7 @@ fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
     let sectors = leg.sectors().unwrap();
     assert!(!sectors.contains(&vec![1, 0]));
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         sectors.into_iter().map(|sector| {
@@ -163,17 +166,17 @@ fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
     for operation in 0..4 {
         let densified = probe::record();
         let (left, right) = match operation {
-            0 => input.qr_compact(&[0], &[1]).unwrap().pair(),
-            1 => input.qr_full(&[0], &[1]).unwrap().pair(),
-            2 => input.lq_compact(&[0], &[1]).unwrap().pair(),
-            _ => input.lq_full(&[0], &[1]).unwrap().pair(),
+            0 => input.qr_compact(engine, &[0], &[1]).unwrap().pair(),
+            1 => input.qr_full(engine, &[0], &[1]).unwrap().pair(),
+            2 => input.lq_compact(engine, &[0], &[1]).unwrap().pair(),
+            _ => input.lq_full(engine, &[0], &[1]).unwrap().pair(),
         };
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
         for factor in [&left, &right] {
             assert_eq!(factor.codomain(), input.codomain());
             assert_eq!(factor.domain(), input.domain());
             assert!(factor.codomain()[0].is_dual());
-            assert!(factor.diagview().is_ok());
+            assert!(factor.diagview(engine).is_ok());
             assert!(factor.dense_data().is_err());
         }
     }
@@ -182,18 +185,18 @@ fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
     let svd_calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(polar_spy(&svd_calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(polar_spy(&svd_calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, num_complex::Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -216,7 +219,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
     )
     .unwrap();
     let densified = probe::record();
-    let Svd { u, s, vh } = input.svd_compact(&[0], &[1]).unwrap();
+    let Svd { u, s, vh } = input.svd_compact(engine, &[0], &[1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(svd_calls.of(POLAR_SVD), 0);
     assert!(std::ptr::eq(u.provider(), provider.as_ref()));
@@ -228,7 +231,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
 
     let densified = probe::record();
     svd_calls.reset();
-    let Svd { u, s, vh } = input.svd_full(&[0], &[1]).unwrap();
+    let Svd { u, s, vh } = input.svd_full(engine, &[0], &[1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(svd_calls.of(POLAR_SVD), 0);
     assert!(std::ptr::eq(u.provider(), provider.as_ref()));
@@ -238,7 +241,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
     assert!(s.dense_data().is_err());
     assert!(vh.dense_data().is_ok());
     assert_eq!(
-        s.diagview().unwrap(),
+        s.diagview(engine).unwrap(),
         vec![
             SectorSpectrum {
                 sector: vec![0, 0],
@@ -258,6 +261,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
         ]
     );
     let expected_u: TensorMap<_, num_complex::Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         u.codomain().iter(),
         u.domain().iter(),
@@ -272,6 +276,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
     )
     .unwrap();
     let expected_vh: TensorMap<_, num_complex::Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         vh.codomain().iter(),
         vh.domain().iter(),
@@ -311,22 +316,26 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
             .zip(expected.dense_data().unwrap())
             .all(|(actual, expected)| (*actual - *expected).norm() <= 1e-12));
     }
-    let rebuilt = u.compose(&s).unwrap().compose(&vh).unwrap();
+    let rebuilt = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
     assert!(rebuilt
         .dense_data()
         .unwrap()
         .iter()
-        .zip(input.materialize().unwrap().dense_data().unwrap())
+        .zip(input.materialize(engine).unwrap().dense_data().unwrap())
         .all(|(actual, expected)| (*actual - *expected).norm() <= 1e-12));
 
-    let changed = input.svd_full(&[1], &[0]).unwrap();
+    let changed = input.svd_full(engine, &[1], &[0]).unwrap();
     let rebuilt = changed
         .u
-        .compose(&changed.s)
+        .compose(engine, &changed.s)
         .unwrap()
-        .compose(&changed.vh)
+        .compose(engine, &changed.vh)
         .unwrap();
-    let expected = input.permute(&[1], &[0]).unwrap().materialize().unwrap();
+    let expected = input
+        .permute(engine, &[1], &[0])
+        .unwrap()
+        .materialize(engine)
+        .unwrap();
     assert!(rebuilt
         .dense_data()
         .unwrap()
@@ -368,7 +377,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
                 _,
                 _,
                 _,
-            >(&mut dense, diagonal(malformed))
+            >(engine, &mut dense, diagonal(malformed))
             .err()
             .unwrap()
         ));
@@ -378,19 +387,19 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(polar_spy(&svd_calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(polar_spy(&svd_calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -409,24 +418,24 @@ fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work
         ],
     )
     .unwrap();
-    let dense_oracle = input.materialize().unwrap();
+    let dense_oracle = input.materialize(engine).unwrap();
 
     for left in [true, false] {
         let (dense_w, dense_p) = if left {
-            let LeftPolar { w, p } = dense_oracle.left_polar(&[0], &[1]).unwrap();
+            let LeftPolar { w, p } = dense_oracle.left_polar(engine, &[0], &[1]).unwrap();
             (w, p)
         } else {
-            let RightPolar { p, wh } = dense_oracle.right_polar(&[0], &[1]).unwrap();
+            let RightPolar { p, wh } = dense_oracle.right_polar(engine, &[0], &[1]).unwrap();
             (wh, p)
         };
         let densified = probe::record();
         svd_calls.reset();
         gemm_calls.reset();
         let (w, p) = if left {
-            let LeftPolar { w, p } = input.left_polar(&[0], &[1]).unwrap();
+            let LeftPolar { w, p } = input.left_polar(engine, &[0], &[1]).unwrap();
             (w, p)
         } else {
-            let RightPolar { p, wh } = input.right_polar(&[0], &[1]).unwrap();
+            let RightPolar { p, wh } = input.right_polar(engine, &[0], &[1]).unwrap();
             (wh, p)
         };
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -465,9 +474,14 @@ fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work
                 assert!((got_magnitude - Complex64::new(expected_magnitude, 0.0)).norm() <= 1e-12);
             }
         }
-        let rebuilt = if left { w.compose(&p) } else { p.compose(&w) }.unwrap();
+        let rebuilt = if left {
+            w.compose(engine, &p)
+        } else {
+            p.compose(engine, &w)
+        }
+        .unwrap();
         assert!(rebuilt
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -480,6 +494,7 @@ fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // What: an SU(3) checked compact diagonal is square in every sector, so
     // both shape-based null spaces are empty whatever its zeros, read with
     // no materialization or dense kernel, keep the provider, and agree with
@@ -487,12 +502,10 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     use symtn_core::LieGroupFusionRule;
 
     macro_rules! check {
-        ($dtype:ty) => {{
+        ($engine:ident, $dtype:ty) => {{
             let calls = Arc::new(SpyCounts::default());
-            let runtime = Runtime::builder()
-                .with_dense_executor(Box::new(polar_spy(&calls)))
-                .build()
-                .unwrap();
+            let _dense = probe::inject_dense(Box::new(polar_spy(&calls)));
+            let runtime = Runtime::builder().build().unwrap();
             let provider = Arc::new(
                 LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
             );
@@ -500,6 +513,7 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
                 GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)])
                     .unwrap();
             let input: TensorMap<_, $dtype> = TensorMap::diagonal(
+                $engine,
                 &runtime,
                 &bond,
                 [
@@ -518,16 +532,16 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
                 ],
             )
             .unwrap();
-            let dense_input = input.materialize().unwrap();
+            let dense_input = input.materialize($engine).unwrap();
             let densified = probe::record();
-            let left = input.left_null(&[0], &[1]).unwrap();
-            let right = input.right_null(&[0], &[1]).unwrap();
+            let left = input.left_null($engine, &[0], &[1]).unwrap();
+            let right = input.right_null($engine, &[0], &[1]).unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
             assert_eq!(calls.of(POLAR_SVD), 0);
             assert!(std::ptr::eq(left.provider(), provider.as_ref()));
             assert!(std::ptr::eq(right.provider(), provider.as_ref()));
-            let dense_left = dense_input.left_null(&[0], &[1]).unwrap();
-            let dense_right = dense_input.right_null(&[0], &[1]).unwrap();
+            let dense_left = dense_input.left_null($engine, &[0], &[1]).unwrap();
+            let dense_right = dense_input.right_null($engine, &[0], &[1]).unwrap();
             for factor in [&left, &right, &dense_left, &dense_right] {
                 assert!(factor.dense_data().unwrap().is_empty());
             }
@@ -538,22 +552,24 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
         }};
     }
 
-    check!(f32);
-    check!(f64);
-    check!(num_complex::Complex32);
-    check!(Complex64);
+    check!(engine, f32);
+    check!(engine, f64);
+    check!(engine, num_complex::Complex32);
+    check!(engine, Complex64);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![1, 0], 2)]).unwrap();
     let real: TensorMap<_, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -564,12 +580,13 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
     .unwrap();
     let densified = probe::record();
     assert_eq!(
-        real.svd_vals(&[0], &[1]).unwrap()[0].values,
+        real.svd_vals(engine, &[0], &[1]).unwrap()[0].values,
         [1.000_000_1_f32 as f64, 0.0]
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
     let complex: TensorMap<_, num_complex::Complex32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -583,7 +600,7 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
     .unwrap();
     let densified = probe::record();
     assert_eq!(
-        complex.svd_vals(&[0], &[1]).unwrap()[0].values,
+        complex.svd_vals(engine, &[0], &[1]).unwrap()[0].values,
         [5.0, (2.0_f64.sqrt() as f32) as f64]
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -594,6 +611,7 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
         num_complex::Complex32::new(f32::MAX * 0.75, f32::MAX * 0.75),
     ] {
         let input: TensorMap<_, num_complex::Complex32> = TensorMap::diagonal(
+            engine,
             &runtime,
             &leg,
             [SectorSpectrum {
@@ -606,7 +624,7 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
         // finite one is MAK `svd_vals!(::DiagonalAlgorithm)`, `abs` then a
         // descending sort: `|0.75 MAX (1 + i)| = 1.06 MAX` overflows f32 to Inf.
         let densified = probe::record();
-        let result = input.svd_vals(&[0], &[1]);
+        let result = input.svd_vals(engine, &[0], &[1]);
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
         if value.re.is_finite() {
             let values = result.unwrap().remove(0).values;
@@ -621,14 +639,16 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -644,10 +664,10 @@ fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
     )
     .unwrap();
     let densified = probe::record();
-    let output = input.pinv(&[0], &[1], 0.25).unwrap();
+    let output = input.pinv(engine, &[0], &[1], 0.25).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert!(output.dense_data().is_err());
-    assert_eq!(output.diagview().unwrap()[0].values, [0.125, -0.25]);
+    assert_eq!(output.diagview(engine).unwrap()[0].values, [0.125, -0.25]);
 
     let TypedData::Diagonal(spectrum) = owned(&input).data.as_ref() else {
         panic!("diagonal constructor must keep compact storage");
@@ -685,10 +705,11 @@ fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use num_complex::Complex64;
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let bond =
@@ -701,7 +722,7 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
             let tensor = $tensor;
             assert!(tensor.dense_data().is_err(), "result must stay compact");
             tensor
-                .diagview()
+                .diagview(engine)
                 .unwrap()
                 .into_iter()
                 .map(|entry| entry.values)
@@ -710,6 +731,7 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
     }
 
     let real: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -725,11 +747,11 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
     )
     .unwrap();
     let densified = probe::record();
-    let inverse = real.inv(&[0], &[1]).unwrap();
-    let exponential = real.exp(&[0], &[1]).unwrap();
-    let compact_solve = real.solve(&[0], &[1], &real, &[0], &[1]).unwrap();
-    let rhs = TensorMap::<_, f64>::rand_with_seed(&runtime, [&bond], [&column], 7).unwrap();
-    let dense_solve = real.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap();
+    let inverse = real.inv(engine, &[0], &[1]).unwrap();
+    let exponential = real.exp(engine, &[0], &[1]).unwrap();
+    let compact_solve = real.solve(engine, &[0], &[1], &real, &[0], &[1]).unwrap();
+    let rhs = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&bond], [&column], 7).unwrap();
+    let dense_solve = real.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(
         compact_values!(&inverse),
@@ -749,9 +771,9 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
         [vec![1.0, 1.0], vec![1.0, 1.0, 1.0]]
     );
     let lu = real
-        .materialize()
+        .materialize(engine)
         .unwrap()
-        .solve(&[0], &[1], &rhs, &[0], &[1])
+        .solve(engine, &[0], &[1], &rhs, &[0], &[1])
         .unwrap();
     assert_eq!(dense_solve.codomain(), lu.codomain());
     assert_eq!(dense_solve.domain(), lu.domain());
@@ -777,15 +799,19 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
             values: vec![0.5, 1.0, -0.25],
         },
     ];
-    let dual_real: TensorMap<_, f64> = TensorMap::diagonal(&runtime, &dual, dual_spectrum).unwrap();
-    let dual_rhs = TensorMap::<_, f64>::rand_with_seed(&runtime, [&dual], [&column], 11).unwrap();
+    let dual_real: TensorMap<_, f64> =
+        TensorMap::diagonal(engine, &runtime, &dual, dual_spectrum).unwrap();
+    let dual_rhs =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&dual], [&column], 11).unwrap();
     let densified = probe::record();
-    let dual_solve = dual_real.solve(&[0], &[1], &dual_rhs, &[0], &[1]).unwrap();
+    let dual_solve = dual_real
+        .solve(engine, &[0], &[1], &dual_rhs, &[0], &[1])
+        .unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     let lu = dual_real
-        .materialize()
+        .materialize(engine)
         .unwrap()
-        .solve(&[0], &[1], &dual_rhs, &[0], &[1])
+        .solve(engine, &[0], &[1], &dual_rhs, &[0], &[1])
         .unwrap();
     for (g, w) in dual_solve
         .dense_data()
@@ -798,6 +824,7 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
 
     let z = |re, im| Complex64::new(re, im);
     let complex: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -814,10 +841,11 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
     .unwrap();
     let source = compact_values!(&complex);
     let densified = probe::record();
-    let inverse = complex.inv(&[0], &[1]).unwrap();
-    let exponential = complex.exp(&[0], &[1]).unwrap();
-    let rhs = TensorMap::<_, Complex64>::rand_with_seed(&runtime, [&bond], [&column], 9).unwrap();
-    let dense_solve = complex.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap();
+    let inverse = complex.inv(engine, &[0], &[1]).unwrap();
+    let exponential = complex.exp(engine, &[0], &[1]).unwrap();
+    let rhs =
+        TensorMap::<_, Complex64>::rand_with_seed(engine, &runtime, [&bond], [&column], 9).unwrap();
+    let dense_solve = complex.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     for ((inv, exp), values) in compact_values!(&inverse)
         .iter()
@@ -830,9 +858,9 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
         }
     }
     let lu = complex
-        .materialize()
+        .materialize(engine)
         .unwrap()
-        .solve(&[0], &[1], &rhs, &[0], &[1])
+        .solve(engine, &[0], &[1], &rhs, &[0], &[1])
         .unwrap();
     for (g, w) in dense_solve
         .dense_data()
@@ -849,9 +877,10 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let su3 = GradedSpace::try_new(
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         [(vec![0, 0], 2), (vec![1, 0], 3)],
@@ -877,6 +906,7 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
     };
     for [first, second] in cases {
         let checked: TensorMap<_, f64> = TensorMap::diagonal(
+            engine,
             &runtime,
             &su3,
             [
@@ -892,6 +922,7 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
         )
         .unwrap();
         let free: TensorMap<_, f64> = TensorMap::diagonal(
+            engine,
             &runtime,
             &u1,
             [
@@ -912,7 +943,7 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
                     .map(|tensor| {
                         assert!(tensor.dense_data().is_err());
                         tensor
-                            .diagview()
+                            .diagview(engine)
                             .unwrap()
                             .into_iter()
                             .map(|entry| entry.values)
@@ -923,15 +954,15 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
         }
         let densified = probe::record();
         let checked_results = [
-            spectrum_of!(checked.inv(&[0], &[1])),
-            spectrum_of!(checked.exp(&[0], &[1])),
-            spectrum_of!(checked.solve(&[0], &[1], &checked, &[0], &[1])),
+            spectrum_of!(checked.inv(engine, &[0], &[1])),
+            spectrum_of!(checked.exp(engine, &[0], &[1])),
+            spectrum_of!(checked.solve(engine, &[0], &[1], &checked, &[0], &[1])),
         ];
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
         let free_results = [
-            spectrum_of!(free.inv(&[0], &[1])),
-            spectrum_of!(free.exp(&[0], &[1])),
-            spectrum_of!(free.solve(&[0], &[1], &free, &[0], &[1])),
+            spectrum_of!(free.inv(engine, &[0], &[1])),
+            spectrum_of!(free.exp(engine, &[0], &[1])),
+            spectrum_of!(free.solve(engine, &[0], &[1], &free, &[0], &[1])),
         ];
         for (checked, free) in checked_results.into_iter().zip(free_results) {
             assert_eq!(bits(checked), bits(free));

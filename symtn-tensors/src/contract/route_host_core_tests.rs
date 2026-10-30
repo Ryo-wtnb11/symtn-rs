@@ -53,8 +53,10 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     context
         .tensorcontract_prelowered_into(
+            engine,
             &case.dst(),
             &mut out,
             FusionOperand::direct(case.lhs.space()),
@@ -309,8 +311,10 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     Context::<f64>::default()
         .plan_contract::<crate::DirectCoreExecutor, _>(
+            engine,
             &case.dst(),
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -359,7 +363,9 @@ fn run_route_members_with<R>(
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     crate::contract::route_host::execute_members_host(
+        engine,
         &mut DenseTreeTransformOperations::default(),
         &mut DenseTreeTransformOperations::default(),
         &mut crate::contract::backend::TensorContractWorkspace::default(),

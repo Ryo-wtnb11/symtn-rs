@@ -103,9 +103,11 @@ pub use slice::{
 pub use tree::ContractionTree;
 
 /// Contracts a network written in index notation, like TensorOperations'
-/// `@tensor`: `contract!([i; k] := a[i; j] * b[j; k])?`.
+/// `@tensor`: `contract!(&mut engine, [i; k] := a[i; j] * b[j; k])?`.
 ///
-/// It is [`Network::new`] plus [`Network::contract`], nothing more: each call
+/// The first argument is the caller's engine (any expression that
+/// reborrows as `&mut dyn Engine`), evaluated once; the contraction runs on
+/// it. It is [`Network::new`] plus [`Network::contract`], nothing more: each call
 /// site builds its `Network` once (in a `static`), and every call contracts
 /// the operands through the Runtime's plan cache, on Host and CUDA operands
 /// alike. Call [`Network::plan`] to choose the optimizer.
@@ -115,7 +117,7 @@ pub use tree::ContractionTree;
 /// | `[i; k] := …` | a new tensor, codomain `i`, domain `k` (the output's `;` position) |
 /// | `[i, k] := …`, `[i k] := …` | a new tensor with every leg in the codomain |
 /// | `[] := …` | a rank-0 tensor |
-/// | no left-hand side | every label contracted; returns the scalar `D` through [`symtn::typed::TensorMap::scalar`], so it needs a Host tensor over multiplicity-free sectors (as does `[] :=` followed by `.scalar()`); checked-generic operands (e.g. SU(N)) and CUDA operands write `[] :=` and keep the rank-0 tensor |
+/// | no left-hand side | every label contracted; returns the scalar `D` through [`symtn::typed::TensorMap::scalar`] on the same engine, so it needs a Host tensor over multiplicity-free sectors (as does `[] :=` followed by `.scalar(engine)`); checked-generic operands (e.g. SU(N)) and CUDA operands write `[] :=` and keep the rank-0 tensor |
 /// | `a[i, j; k]` | operand `a`, labels in its leg order; the `;` must sit at its codomain rank, checked at run time |
 /// | `a[i, j]` (no `;`) | every leg of `a` in the codomain: `a` must have domain rank 0 |
 /// | `conj(a)[i; j]` | the adjoint of `a`, labels in `a`'s own leg order (the [`Network::new`] `conj` convention) |
@@ -130,7 +132,7 @@ pub use tree::ContractionTree;
 /// hyperedge), a sum (`+`, `-`), a scalar factor, `=` and `+=` (a `Network`
 /// has no destination API), an unpaired or unknown label, an indexed
 /// operand such as `w[0][i; j]` (write `(w[0])[i; j]`), and a named output
-/// `c[i; k] := …` (write `let c = contract!([i; k] := …)?`).
+/// `c[i; k] := …` (write `let c = contract!(&mut engine, [i; k] := …)?`).
 ///
 /// The result is `Result<T, T::Error>` of [`Network::contract`] (or
 /// `Result<D, T::Error>` without a left-hand side): an operand whose tensor
@@ -143,22 +145,23 @@ pub use tree::ContractionTree;
 /// ```
 /// use std::sync::Arc;
 /// use symtn::sector::{U1FusionRule, U1Irrep};
-/// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
+/// use symtn::typed::{CpuEngine, Error, GradedSpace, Runtime, TensorMap};
 /// use symtn_network::contract;
 ///
 /// # fn main() -> Result<(), Error> {
+/// let mut engine = CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
 /// let v = GradedSpace::try_new(
 ///     Arc::new(U1FusionRule),
 ///     [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
 /// )?;
-/// let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 1)?;
-/// let b = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&v], [&v], 2)?;
-/// let c = contract!([i; k] := a[i; j] * b[j; k])?;
+/// let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(&mut engine, &runtime, [&v], [&v], 1)?;
+/// let b = TensorMap::<U1FusionRule, f64>::rand_with_seed(&mut engine, &runtime, [&v], [&v], 2)?;
+/// let c = contract!(&mut engine, [i; k] := a[i; j] * b[j; k])?;
 /// assert_eq!((c.codomain_rank(), c.domain_rank()), (1, 1));
-/// let trace: f64 = contract!(a[i; j] * b[j; i])?;
-/// let rank0 = contract!([] := a[i; j] * b[j; i])?;
-/// assert!((trace - rank0.scalar()?).abs() <= 1e-12 * trace.abs().max(1.0));
+/// let trace: f64 = contract!(&mut engine, a[i; j] * b[j; i])?;
+/// let rank0 = contract!(&mut engine, [] := a[i; j] * b[j; i])?;
+/// assert!((trace - rank0.scalar(&mut engine)?).abs() <= 1e-12 * trace.abs().max(1.0));
 /// # Ok(())
 /// # }
 /// ```

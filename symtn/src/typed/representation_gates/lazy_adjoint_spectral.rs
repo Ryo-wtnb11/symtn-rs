@@ -10,28 +10,40 @@ fn solve_spy(counts: &Arc<SpyCounts>, failure: Option<&'static str>) -> SpyExecu
     }
 }
 
-fn assert_eigh_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
+fn assert_eigh_uses_a_cold_logical_copy(
+    engine: &mut dyn Engine,
+    source: &TensorMap<U1FusionRule, f64>,
+) {
     let eager = eager_adjoint_oracle(source);
-    let expected_vals = eager.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
-    let expected_full = eager.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let expected_vals = eager
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
+    let expected_full = eager
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     let parent_body = Arc::clone(owned(source));
     let parent_data = Arc::clone(&parent_body.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     for _ in 0..2 {
         assert_eq!(
             lazy.clone()
-                .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+                .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap(),
             expected_vals
         );
         let full = lazy
             .clone()
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap();
         assert_eq!(
-            full.d.materialize().unwrap().dense_data().unwrap(),
-            expected_full.d.materialize().unwrap().dense_data().unwrap()
+            full.d.materialize(engine).unwrap().dense_data().unwrap(),
+            expected_full
+                .d
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
         );
         assert_eq!(
             full.v.dense_data().unwrap(),
@@ -50,11 +62,21 @@ fn assert_eigh_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
         .map(|_| {
             let clone = lazy.clone();
             std::thread::spawn(move || {
-                let vals = clone.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
-                let full = clone.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+                let engine = &mut symtn_dense::CpuEngine::serial();
+                let vals = clone
+                    .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+                    .unwrap();
+                let full = clone
+                    .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+                    .unwrap();
                 (
                     vals,
-                    full.d.materialize().unwrap().dense_data().unwrap().to_vec(),
+                    full.d
+                        .materialize(engine)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                        .to_vec(),
                 )
             })
         })
@@ -64,7 +86,12 @@ fn assert_eigh_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
         assert_eq!(vals, expected_vals);
         assert_eq!(
             diagonal,
-            expected_full.d.materialize().unwrap().dense_data().unwrap()
+            expected_full
+                .d
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
         );
     }
     assert!(Arc::ptr_eq(owned(source), &parent_body));
@@ -76,37 +103,42 @@ fn assert_eigh_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
 
 #[test]
 fn eigh_dense_lazy_near_hermitian_uses_logical_triangle_and_stays_cold() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        match (indices[0], indices[1]) {
-            (0, 0) | (1, 1) => 1.0,
-            (0, 1) => 4.0e-15,
-            _ => 0.0,
-        }
-    })
-    .unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
+            match (indices[0], indices[1]) {
+                (0, 0) | (1, 1) => 1.0,
+                (0, 1) => 4.0e-15,
+                _ => 0.0,
+            }
+        })
+        .unwrap();
     let logical = eager_adjoint_oracle(&source);
     let logical_vals = logical
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap();
-    let parent_vals = source.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let parent_vals = source
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     assert!(logical_vals[0]
         .values
         .iter()
         .zip(&parent_vals[0].values)
         .any(|(logical, parent)| (logical - parent).abs() > 1.0e-15));
 
-    assert_eigh_uses_a_cold_logical_copy(&source);
+    assert_eigh_uses_a_cold_logical_copy(engine, &source);
 }
 
 #[test]
 fn eigh_dense_lazy_complex_orientation_and_failures_match_logical_oracles() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let hermitian = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let hermitian = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         match (indices[0], indices[1]) {
             (0, 0) => num_complex::Complex64::new(2.0, 0.0),
             (1, 1) => num_complex::Complex64::new(3.0, 0.0),
@@ -117,58 +149,69 @@ fn eigh_dense_lazy_complex_orientation_and_failures_match_logical_oracles() {
     })
     .unwrap();
     let eager = eager_adjoint_oracle(&hermitian);
-    let expected = eager.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
-    let lazy = hermitian.adjoint().unwrap();
-    let actual = lazy.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let expected = eager
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
+    let lazy = hermitian.adjoint(engine).unwrap();
+    let actual = lazy
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     assert_eq!(
-        actual.d.materialize().unwrap().dense_data().unwrap(),
-        expected.d.materialize().unwrap().dense_data().unwrap()
+        actual.d.materialize(engine).unwrap().dense_data().unwrap(),
+        expected
+            .d
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
     );
     assert_eq!(
         actual.v.dense_data().unwrap(),
         expected.v.dense_data().unwrap()
     );
+    let actual_v = &actual.v.adjoint(engine).unwrap();
     let reconstructed = actual
         .v
-        .compose(&actual.d)
+        .compose(engine, &actual.d)
         .unwrap()
-        .compose(&actual.v.adjoint().unwrap())
+        .compose(engine, actual_v)
         .unwrap();
-    assert_typed_map_close(&reconstructed, &eager, 1.0e-12);
+    assert_typed_map_close(engine, &reconstructed, &eager, 1.0e-12);
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
         unreachable!()
     };
 
-    let nonhermitian = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        match (indices[0], indices[1]) {
-            (0, 0) => 1.0,
-            (1, 1) => 2.0,
-            (0, 1) => 1.0,
-            _ => 0.0,
-        }
-    })
-    .unwrap();
+    let nonhermitian =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
+            match (indices[0], indices[1]) {
+                (0, 0) => 1.0,
+                (1, 1) => 2.0,
+                (0, 1) => 1.0,
+                _ => 0.0,
+            }
+        })
+        .unwrap();
     let eager = eager_adjoint_oracle(&nonhermitian);
     let expected = [
         eager
-            .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap_err()
             .to_string(),
         eager
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap_err()
             .to_string(),
     ];
-    let lazy = nonhermitian.adjoint().unwrap();
+    let lazy = nonhermitian.adjoint(engine).unwrap();
     for _ in 0..2 {
         assert_eq!(
-            lazy.eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            lazy.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap_err()
                 .to_string(),
             expected[0]
         );
         assert_eq!(
-            lazy.eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            lazy.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap_err()
                 .to_string(),
             expected[1]
@@ -179,20 +222,31 @@ fn eigh_dense_lazy_complex_orientation_and_failures_match_logical_oracles() {
     };
 }
 
-fn assert_eig_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
+fn assert_eig_uses_a_cold_logical_copy(
+    engine: &mut dyn Engine,
+    source: &TensorMap<U1FusionRule, f64>,
+) {
     let eager = eager_adjoint_oracle(source);
-    let expected_vals = eager.eig_vals(&[0], &[1]).unwrap();
-    let expected_full = eager.eig_full(&[0], &[1]).unwrap();
+    let expected_vals = eager.eig_vals(engine, &[0], &[1]).unwrap();
+    let expected_full = eager.eig_full(engine, &[0], &[1]).unwrap();
     let parent_body = Arc::clone(owned(source));
     let parent_data = Arc::clone(&parent_body.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     for _ in 0..2 {
-        assert_eq!(lazy.clone().eig_vals(&[0], &[1]).unwrap(), expected_vals);
-        let full = lazy.clone().eig_full(&[0], &[1]).unwrap();
         assert_eq!(
-            full.d.materialize().unwrap().dense_data().unwrap(),
-            expected_full.d.materialize().unwrap().dense_data().unwrap()
+            lazy.clone().eig_vals(engine, &[0], &[1]).unwrap(),
+            expected_vals
+        );
+        let full = lazy.clone().eig_full(engine, &[0], &[1]).unwrap();
+        assert_eq!(
+            full.d.materialize(engine).unwrap().dense_data().unwrap(),
+            expected_full
+                .d
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
         );
         assert_eq!(
             full.v.dense_data().unwrap(),
@@ -211,11 +265,17 @@ fn assert_eig_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
         .map(|_| {
             let clone = lazy.clone();
             std::thread::spawn(move || {
-                let vals = clone.eig_vals(&[0], &[1]).unwrap();
-                let full = clone.eig_full(&[0], &[1]).unwrap();
+                let engine = &mut symtn_dense::CpuEngine::serial();
+                let vals = clone.eig_vals(engine, &[0], &[1]).unwrap();
+                let full = clone.eig_full(engine, &[0], &[1]).unwrap();
                 (
                     vals,
-                    full.d.materialize().unwrap().dense_data().unwrap().to_vec(),
+                    full.d
+                        .materialize(engine)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                        .to_vec(),
                 )
             })
         })
@@ -225,7 +285,12 @@ fn assert_eig_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
         assert_eq!(vals, expected_vals);
         assert_eq!(
             diagonal,
-            expected_full.d.materialize().unwrap().dense_data().unwrap()
+            expected_full
+                .d
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
         );
     }
     assert!(Arc::ptr_eq(owned(source), &parent_body));
@@ -235,63 +300,76 @@ fn assert_eig_uses_a_cold_logical_copy(source: &TensorMap<U1FusionRule, f64>) {
     };
 
     // Positive control: the probe sees an implicit materialization.
-    let _ = lazy.materialized_tensor_uncached().unwrap();
+    let _ = lazy.materialized_tensor_uncached(engine).unwrap();
 }
 
 #[test]
 fn eig_dense_lazy_nonnormal_is_logical_owned_repeatable_and_cold() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        match (indices[0], indices[1]) {
-            (0, 0) => 1.0_f64,
-            (1, 1) => 2.0,
-            (0, 1) => 1.0,
-            _ => 0.0,
-        }
-    })
-    .unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
+            match (indices[0], indices[1]) {
+                (0, 0) => 1.0_f64,
+                (1, 1) => 2.0,
+                (0, 1) => 1.0,
+                _ => 0.0,
+            }
+        })
+        .unwrap();
     let logical = eager_adjoint_oracle(&source);
-    let Eig { d, v } = source.adjoint().unwrap().eig_full(&[0], &[1]).unwrap();
-    let lhs = logical.convert::<Complex64>().compose(&v).unwrap();
-    let rhs = v.compose(&d).unwrap();
-    assert_typed_map_close(&lhs, &rhs, 1.0e-12);
+    let Eig { d, v } = source
+        .adjoint(engine)
+        .unwrap()
+        .eig_full(engine, &[0], &[1])
+        .unwrap();
+    let lhs = logical
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .compose(engine, &v)
+        .unwrap();
+    let rhs = v.compose(engine, &d).unwrap();
+    assert_typed_map_close(engine, &lhs, &rhs, 1.0e-12);
 
-    assert_eig_uses_a_cold_logical_copy(&source);
+    assert_eig_uses_a_cold_logical_copy(engine, &source);
 }
 
 #[test]
 fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracles() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let scalar_leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 1)]).unwrap();
     let negative =
-        TensorMap::from_subblock_fn(&runtime, [&scalar_leg], [&scalar_leg], |_, _| -2.0).unwrap();
-    let lazy = negative.adjoint().unwrap();
-    let value = lazy.eig_vals(&[0], &[1]).unwrap()[0].values[0];
+        TensorMap::from_subblock_fn(engine, &runtime, [&scalar_leg], [&scalar_leg], |_, _| -2.0)
+            .unwrap();
+    let lazy = negative.adjoint(engine).unwrap();
+    let value = lazy.eig_vals(engine, &[0], &[1]).unwrap()[0].values[0];
     assert_eq!(value, num_complex::Complex64::new(-2.0, 0.0));
     assert_eq!(value.im.to_bits(), 0.0f64.to_bits());
 
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let rotation = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        match (indices[0], indices[1]) {
-            (0, 1) => -1.0,
-            (1, 0) => 1.0,
-            _ => 0.0,
-        }
-    })
-    .unwrap();
+    let rotation =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
+            match (indices[0], indices[1]) {
+                (0, 1) => -1.0,
+                (1, 0) => 1.0,
+                _ => 0.0,
+            }
+        })
+        .unwrap();
     let eager = eager_adjoint_oracle(&rotation);
-    let expected = eager.eig_vals(&[0], &[1]).unwrap();
-    let lazy = rotation.adjoint().unwrap();
-    assert_eq!(lazy.eig_vals(&[0], &[1]).unwrap(), expected);
+    let expected = eager.eig_vals(engine, &[0], &[1]).unwrap();
+    let lazy = rotation.adjoint(engine).unwrap();
+    assert_eq!(lazy.eig_vals(engine, &[0], &[1]).unwrap(), expected);
     // Lexicographic (re, im): the conjugate pair's `-i` precedes `+i`.
     assert_eq!(expected[0].values[0].im, -1.0);
     assert_eq!(expected[0].values[1].im, 1.0);
 
     for epsilon in [0.0, 1.0e-12] {
-        let jordan = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        let jordan = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             match (indices[0], indices[1]) {
                 (0, 0) | (1, 1) => 1.0,
                 (0, 1) => 1.0,
@@ -301,16 +379,21 @@ fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracl
         })
         .unwrap();
         let eager = eager_adjoint_oracle(&jordan);
-        let lazy = jordan.adjoint().unwrap();
+        let lazy = jordan.adjoint(engine).unwrap();
         assert_eq!(
-            lazy.eig_vals(&[0], &[1]).unwrap(),
-            eager.eig_vals(&[0], &[1]).unwrap()
+            lazy.eig_vals(engine, &[0], &[1]).unwrap(),
+            eager.eig_vals(engine, &[0], &[1]).unwrap()
         );
-        let actual = lazy.eig_full(&[0], &[1]).unwrap();
-        let expected = eager.eig_full(&[0], &[1]).unwrap();
+        let actual = lazy.eig_full(engine, &[0], &[1]).unwrap();
+        let expected = eager.eig_full(engine, &[0], &[1]).unwrap();
         assert_eq!(
-            actual.d.materialize().unwrap().dense_data().unwrap(),
-            expected.d.materialize().unwrap().dense_data().unwrap()
+            actual.d.materialize(engine).unwrap().dense_data().unwrap(),
+            expected
+                .d
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
         );
         assert_eq!(
             actual.v.dense_data().unwrap(),
@@ -321,27 +404,28 @@ fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracl
 
 #[test]
 fn eig_dense_lazy_failures_match_logical_oracle_and_stay_cold() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
     let right = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&left], [&right], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&left], [&right], |_, indices| {
         (indices[0] + indices[1]) as f64
     })
     .unwrap();
     let eager = eager_adjoint_oracle(&source);
     let expected = [
-        eager.eig_vals(&[0], &[1]).unwrap_err().to_string(),
-        eager.eig_full(&[0], &[1]).unwrap_err().to_string(),
+        eager.eig_vals(engine, &[0], &[1]).unwrap_err().to_string(),
+        eager.eig_full(engine, &[0], &[1]).unwrap_err().to_string(),
     ];
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     for _ in 0..2 {
         assert_eq!(
-            lazy.eig_vals(&[0], &[1]).unwrap_err().to_string(),
+            lazy.eig_vals(engine, &[0], &[1]).unwrap_err().to_string(),
             expected[0]
         );
         assert_eq!(
-            lazy.eig_full(&[0], &[1]).unwrap_err().to_string(),
+            lazy.eig_full(engine, &[0], &[1]).unwrap_err().to_string(),
             expected[1]
         );
     }
@@ -352,35 +436,37 @@ fn eig_dense_lazy_failures_match_logical_oracle_and_stay_cold() {
 
 #[test]
 fn exp_of_a_near_hermitian_adjoint_uses_the_logical_orientation_and_stays_cold() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the fixed approximate-Hermitian dispatch must see logical A^H,
     // whose lower triangle is the conjugated parent upper triangle. A
     // parent-exp redirect feeds EIGH the other triangle and changes values.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
     let delta = 4.0e-15;
-    let parent = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        match (indices[0], indices[1]) {
-            (0, 0) => num_complex::Complex64::new(0.25, 0.0),
-            (1, 1) => num_complex::Complex64::new(-0.5, 0.0),
-            (0, 1) => num_complex::Complex64::new(delta, 0.0),
-            _ => num_complex::Complex64::new(0.0, 0.0),
-        }
-    })
-    .unwrap();
-    let eager = eager_adjoint_oracle(&parent);
-    let expected = eager.exp(&[0], &[1]).unwrap();
-    let parent_redirect = parent
-        .exp(&[0], &[1])
-        .unwrap()
-        .adjoint()
-        .unwrap()
-        .materialized_tensor_uncached()
+    let parent =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
+            match (indices[0], indices[1]) {
+                (0, 0) => num_complex::Complex64::new(0.25, 0.0),
+                (1, 1) => num_complex::Complex64::new(-0.5, 0.0),
+                (0, 1) => num_complex::Complex64::new(delta, 0.0),
+                _ => num_complex::Complex64::new(0.0, 0.0),
+            }
+        })
         .unwrap();
-    let lazy = parent.adjoint().unwrap();
-    let actual = lazy.exp(&[0], &[1]).unwrap();
+    let eager = eager_adjoint_oracle(&parent);
+    let expected = eager.exp(engine, &[0], &[1]).unwrap();
+    let parent_redirect = parent
+        .exp(engine, &[0], &[1])
+        .unwrap()
+        .adjoint(engine)
+        .unwrap()
+        .materialized_tensor_uncached(engine)
+        .unwrap();
+    let lazy = parent.adjoint(engine).unwrap();
+    let actual = lazy.exp(engine, &[0], &[1]).unwrap();
 
-    assert_typed_map_close(&actual, &expected, 1.0e-20);
+    assert_typed_map_close(engine, &actual, &expected, 1.0e-20);
     assert!(parent_redirect
         .dense_data()
         .unwrap()
@@ -394,7 +480,7 @@ fn exp_of_a_near_hermitian_adjoint_uses_the_logical_orientation_and_stays_cold()
     };
 }
 
-fn assert_exp_uses_a_cold_logical_copy<R, D>(source: &TensorMap<R, D>)
+fn assert_exp_uses_a_cold_logical_copy<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -410,18 +496,18 @@ where
 {
     let eager = eager_adjoint_oracle(source);
     let expected = eager
-        .exp(&codomain_axes(&eager), &domain_axes(&eager))
+        .exp(engine, &codomain_axes(&eager), &domain_axes(&eager))
         .unwrap();
     let parent_body = Arc::clone(owned(source));
     let parent_data = Arc::clone(&parent_body.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     for _ in 0..2 {
         let actual = lazy
             .clone()
-            .exp(&codomain_axes(&lazy), &domain_axes(&lazy))
+            .exp(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
             .unwrap();
-        assert_typed_map_close(&actual, &expected, 1.0e-9);
+        assert_typed_map_close(engine, &actual, &expected, 1.0e-9);
         assert!(actual.owned_body().is_some());
         assert!(Arc::ptr_eq(
             actual.logical_space().provider_arc(),
@@ -434,14 +520,15 @@ where
         .map(|_| {
             let clone = lazy.clone();
             std::thread::spawn(move || {
+                let engine = &mut symtn_dense::CpuEngine::serial();
                 clone
-                    .exp(&codomain_axes(&clone), &domain_axes(&clone))
+                    .exp(engine, &codomain_axes(&clone), &domain_axes(&clone))
                     .unwrap()
             })
         })
         .collect::<Vec<_>>();
     for call in calls {
-        assert_typed_map_close(&call.join().unwrap(), &expected, 1.0e-9);
+        assert_typed_map_close(engine, &call.join().unwrap(), &expected, 1.0e-9);
     }
     assert!(Arc::ptr_eq(owned(source), &parent_body));
     assert!(Arc::ptr_eq(&owned(source).data, &parent_data));
@@ -452,9 +539,10 @@ where
 
 #[test]
 fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: real/complex non-self-dual U(1) and a genuine SU(2) multitree
     // remain deterministic across repeats, clones, and concurrent calls.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -465,7 +553,7 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
         ],
     )
     .unwrap();
-    let u1 = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let u1 = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         if indices[0] == indices[1] {
             0.25 + indices[0] as f64 / 10.0
         } else {
@@ -473,12 +561,13 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
         }
     })
     .unwrap();
-    assert_exp_uses_a_cold_logical_copy(&u1);
-    assert_exp_uses_a_cold_logical_copy(&genuinely_complex(&u1));
+    assert_exp_uses_a_cold_logical_copy(engine, &u1);
+    assert_exp_uses_a_cold_logical_copy(engine, &genuinely_complex(&u1));
 
     let provider = Arc::new(SU2FusionRule);
     let half = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
     let su2 = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&half, &half, &half],
         [&half, &half, &half],
@@ -486,15 +575,16 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
     )
     .unwrap();
     assert!(su2.logical_space().space().structure().block_count() > 1);
-    assert_exp_uses_a_cold_logical_copy(&genuinely_complex(&su2));
+    assert_exp_uses_a_cold_logical_copy(engine, &genuinely_complex(&su2));
 }
 
 #[test]
 fn exp_failure_leaves_the_lazy_receiver_and_parent_untouched() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         if indices == [0, 1] {
             num_complex::Complex64::new(f64::NAN, 0.0)
         } else {
@@ -505,9 +595,12 @@ fn exp_failure_leaves_the_lazy_receiver_and_parent_untouched() {
     let before = source.dense_data().unwrap().to_vec();
     let parent = Arc::clone(owned(&source));
     let data = Arc::clone(&parent.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
-    assert!(matches!(lazy.exp(&[0], &[1]), Err(Error::Operation(_))));
+    assert!(matches!(
+        lazy.exp(engine, &[0], &[1]),
+        Err(Error::Operation(_))
+    ));
     assert!(source
         .dense_data()
         .unwrap()
@@ -524,7 +617,7 @@ fn exp_failure_leaves_the_lazy_receiver_and_parent_untouched() {
     };
 }
 
-fn assert_inverse_redirect<R, D>(source: &TensorMap<R, D>)
+fn assert_inverse_redirect<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -540,30 +633,30 @@ where
 {
     let eager = eager_adjoint_oracle(source);
     let expected = eager
-        .inv(&codomain_axes(&eager), &domain_axes(&eager))
+        .inv(engine, &codomain_axes(&eager), &domain_axes(&eager))
         .unwrap();
     let parent_body = Arc::clone(owned(source));
     let parent_data = Arc::clone(&parent_body.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     for _ in 0..2 {
         let actual = lazy
             .clone()
-            .inv(&codomain_axes(&lazy), &domain_axes(&lazy))
+            .inv(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
             .unwrap();
-        assert_typed_map_close(&actual, &expected, 1e-10);
+        assert_typed_map_close(engine, &actual, &expected, 1e-10);
         let codomain = eager.codomain();
         let domain = eager.domain();
-        assert_typed_map_close(
-            &eager.compose(&actual).unwrap(),
-            &TensorMap::isomorphism(source.runtime(), codomain.iter(), codomain.iter()).unwrap(),
-            1e-9,
-        );
-        assert_typed_map_close(
-            &actual.compose(&eager).unwrap(),
-            &TensorMap::isomorphism(source.runtime(), domain.iter(), domain.iter()).unwrap(),
-            1e-9,
-        );
+        let eager_compose = &eager.compose(engine, &actual).unwrap();
+        let operand =
+            &TensorMap::isomorphism(engine, source.runtime(), codomain.iter(), codomain.iter())
+                .unwrap();
+        assert_typed_map_close(engine, eager_compose, operand, 1e-9);
+        let actual_compose = &actual.compose(engine, &eager).unwrap();
+        let operand =
+            &TensorMap::isomorphism(engine, source.runtime(), domain.iter(), domain.iter())
+                .unwrap();
+        assert_typed_map_close(engine, actual_compose, operand, 1e-9);
         assert!(actual.owned_body().is_some());
         assert!(Arc::ptr_eq(
             actual.logical_space().provider_arc(),
@@ -577,14 +670,15 @@ where
         .map(|_| {
             let clone = lazy.clone();
             std::thread::spawn(move || {
+                let engine = &mut symtn_dense::CpuEngine::serial();
                 clone
-                    .inv(&codomain_axes(&clone), &domain_axes(&clone))
+                    .inv(engine, &codomain_axes(&clone), &domain_axes(&clone))
                     .unwrap()
             })
         })
         .collect::<Vec<_>>();
     for call in calls {
-        assert_typed_map_close(&call.join().unwrap(), &expected, 1e-10);
+        assert_typed_map_close(engine, &call.join().unwrap(), &expected, 1e-10);
     }
 
     assert!(Arc::ptr_eq(owned(source), &parent_body));
@@ -596,10 +690,11 @@ where
 
 #[test]
 fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: U(1) complex blocks and a genuine SU(2) multitree use the
     // inverse identity without materializing the lazy receiver, including
     // cloned and concurrent calls, and return detached provider-native data.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -610,7 +705,7 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
         ],
     )
     .unwrap();
-    let u1 = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let u1 = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         let re = if indices[0] == indices[1] {
             20.0 + indices[0] as f64
         } else {
@@ -620,35 +715,43 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
     })
     .unwrap();
     let identity =
-        TensorMap::<_, num_complex::Complex64>::isomorphism(&runtime, [&leg], [&leg]).unwrap();
+        TensorMap::<_, num_complex::Complex64>::isomorphism(engine, &runtime, [&leg], [&leg])
+            .unwrap();
     let u1 = u1
         .axpby(
+            engine,
             num_complex::Complex64::new(1.0, 0.0),
             &identity,
             num_complex::Complex64::new(100.0, 0.0),
         )
         .unwrap();
-    assert_inverse_redirect(&u1);
+    assert_inverse_redirect(engine, &u1);
 
     let provider = Arc::new(U1FusionRule);
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 4)]).unwrap();
     let narrow = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let unequal =
-        TensorMap::from_subblock_fn(&runtime, [&wide], [&narrow, &narrow], |_, indices| {
+    let unequal = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&wide],
+        [&narrow, &narrow],
+        |_, indices| {
             let column = 2 * indices[1] + indices[2];
             if indices[0] == column {
                 10.0 + indices[0] as f64
             } else {
                 (indices[0] + column + 1) as f64 / 100.0
             }
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert_ne!(unequal.codomain_rank(), unequal.domain_rank());
-    assert_inverse_redirect(&unequal);
+    assert_inverse_redirect(engine, &unequal);
 
     let provider = Arc::new(SU2FusionRule);
     let half = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
     let su2 = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&half, &half, &half],
         [&half, &half, &half],
@@ -661,22 +764,27 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
         },
     )
     .unwrap();
-    let identity =
-        TensorMap::<_, f64>::isomorphism(&runtime, [&half, &half, &half], [&half, &half, &half])
-            .unwrap();
-    let su2 = su2.axpby(1.0, &identity, 100.0).unwrap();
+    let identity = TensorMap::<_, f64>::isomorphism(
+        engine,
+        &runtime,
+        [&half, &half, &half],
+        [&half, &half, &half],
+    )
+    .unwrap();
+    let su2 = su2.axpby(engine, 1.0, &identity, 100.0).unwrap();
     assert!(su2.logical_space().space().structure().block_count() > 1);
-    assert_inverse_redirect(&su2);
+    assert_inverse_redirect(engine, &su2);
 }
 
 #[test]
 fn inverse_redirect_failure_leaves_the_receiver_cold() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a singular solve changes neither parent Arc/bytes nor the lazy
     // receiver.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         if indices[0] == indices[1] {
             4.0 + indices[0] as f64
         } else {
@@ -684,12 +792,15 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
         }
     })
     .unwrap();
-    let singular = source.scale(0.0).unwrap();
+    let singular = source.scale(engine, 0.0).unwrap();
     let before = singular.dense_data().unwrap().to_vec();
     let body = Arc::clone(owned(&singular));
     let data = Arc::clone(&body.data);
-    let cold = singular.adjoint().unwrap();
-    assert!(matches!(cold.inv(&[0], &[1]), Err(Error::Operation(_))));
+    let cold = singular.adjoint(engine).unwrap();
+    assert!(matches!(
+        cold.inv(engine, &[0], &[1]),
+        Err(Error::Operation(_))
+    ));
     assert_eq!(singular.dense_data().unwrap(), before);
     assert!(Arc::ptr_eq(owned(&singular), &body));
     assert!(Arc::ptr_eq(&owned(&singular).data, &data));
@@ -701,7 +812,7 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
     // fails, pinning atomicity after partial backend progress.
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)]).unwrap();
-    let late = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, indices| {
+    let late = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
         if trees.codomain_uncoupled[0] == U1Irrep::new(0) && indices[0] == indices[1] {
             2.0
         } else {
@@ -711,8 +822,11 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
     .unwrap();
     let before = late.dense_data().unwrap().to_vec();
     let data = Arc::clone(&owned(&late).data);
-    let cold = late.adjoint().unwrap();
-    assert!(matches!(cold.inv(&[0], &[1]), Err(Error::Operation(_))));
+    let cold = late.adjoint(engine).unwrap();
+    assert!(matches!(
+        cold.inv(engine, &[0], &[1]),
+        Err(Error::Operation(_))
+    ));
     assert_eq!(late.dense_data().unwrap(), before);
     assert!(Arc::ptr_eq(&owned(&late).data, &data));
     let TypedTensorRepr::Adjoint(_) = &cold.repr else {
@@ -722,8 +836,9 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
 
 #[test]
 fn solve_is_transactional_provider_native_and_cache_cold() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let lhs_provider = Arc::new(U1FusionRule);
     let rhs_provider = Arc::new(U1FusionRule);
     let lhs_leg = GradedSpace::try_new(
@@ -738,88 +853,98 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
     .unwrap();
     let rhs_domain =
         GradedSpace::try_new(rhs_provider, [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)]).unwrap();
-    let divisor = TensorMap::from_subblock_fn(&runtime, [&lhs_leg], [&lhs_leg], |_, indices| {
-        if indices[0] == indices[1] {
-            4.0 + indices[0] as f64
-        } else {
-            0.25
-        }
-    })
-    .unwrap();
-    let rhs =
-        TensorMap::from_subblock_fn(&runtime, [&rhs_codomain], [&rhs_domain], |_, indices| {
-            (indices[0] + 2 * indices[1] + 1) as f64
+    let divisor =
+        TensorMap::from_subblock_fn(engine, &runtime, [&lhs_leg], [&lhs_leg], |_, indices| {
+            if indices[0] == indices[1] {
+                4.0 + indices[0] as f64
+            } else {
+                0.25
+            }
         })
         .unwrap();
+    let rhs = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&rhs_codomain],
+        [&rhs_domain],
+        |_, indices| (indices[0] + 2 * indices[1] + 1) as f64,
+    )
+    .unwrap();
 
-    let solution = divisor.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap();
-    assert_typed_map_close(&divisor.compose(&solution).unwrap(), &rhs, 1e-11);
+    let solution = divisor.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
+    let divisor_compose = &divisor.compose(engine, &solution).unwrap();
+    assert_typed_map_close(engine, divisor_compose, &rhs, 1e-11);
     assert!(Arc::ptr_eq(
         solution.logical_space().provider_arc(),
         &lhs_provider
     ));
 
-    let complex_divisor = divisor.convert::<Complex64>();
+    let complex_divisor = divisor.convert::<Complex64>(engine).unwrap();
     let complex_rhs = rhs
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 0.25))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 0.25))
         .unwrap();
     let complex_solution = complex_divisor
-        .solve(&[0], &[1], &complex_rhs, &[0], &[1])
+        .solve(engine, &[0], &[1], &complex_rhs, &[0], &[1])
         .unwrap();
-    assert_typed_map_close(
-        &complex_divisor.compose(&complex_solution).unwrap(),
-        &complex_rhs,
-        1e-11,
-    );
+    let complex_divisor_compose = &complex_divisor.compose(engine, &complex_solution).unwrap();
+    assert_typed_map_close(engine, complex_divisor_compose, &complex_rhs, 1e-11);
     assert!(Arc::ptr_eq(
         complex_solution.logical_space().provider_arc(),
         &lhs_provider
     ));
 
-    let lazy = divisor.adjoint().unwrap();
+    let lazy = divisor.adjoint(engine).unwrap();
     let expected = eager_adjoint_oracle(&divisor)
-        .solve(&[0], &[1], &rhs, &[0], &[1])
+        .solve(engine, &[0], &[1], &rhs, &[0], &[1])
         .unwrap();
-    assert_typed_map_close(
-        &lazy.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap(),
-        &expected,
-        1e-11,
-    );
+    let lazy_solve = &lazy.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
+    assert_typed_map_close(engine, lazy_solve, &expected, 1e-11);
 
-    let square_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&rhs_codomain], [&rhs_codomain], |_, indices| {
-            (2 * indices[0] + indices[1] + 1) as f64
-        })
-        .unwrap();
-    let lazy_rhs = square_rhs.adjoint().unwrap();
+    let square_rhs = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&rhs_codomain],
+        [&rhs_codomain],
+        |_, indices| (2 * indices[0] + indices[1] + 1) as f64,
+    )
+    .unwrap();
+    let lazy_rhs = square_rhs.adjoint(engine).unwrap();
     let expected = divisor
-        .solve(&[0], &[1], &eager_adjoint_oracle(&square_rhs), &[0], &[1])
+        .solve(
+            engine,
+            &[0],
+            &[1],
+            &eager_adjoint_oracle(&square_rhs),
+            &[0],
+            &[1],
+        )
         .unwrap();
-    assert_typed_map_close(
-        &divisor.solve(&[0], &[1], &lazy_rhs, &[0], &[1]).unwrap(),
-        &expected,
-        1e-11,
-    );
+    let divisor_solve = &divisor
+        .solve(engine, &[0], &[1], &lazy_rhs, &[0], &[1])
+        .unwrap();
+    assert_typed_map_close(engine, divisor_solve, &expected, 1e-11);
 
     let bad_leg = GradedSpace::try_new(Arc::clone(&lhs_provider), [(U1Irrep::new(7), 1)]).unwrap();
-    let bad = TensorMap::from_subblock_fn(&runtime, [&bad_leg], [&bad_leg], |_, _| 1.0)
+    let bad = TensorMap::from_subblock_fn(engine, &runtime, [&bad_leg], [&bad_leg], |_, _| 1.0)
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
     assert!(matches!(
-        lazy.solve(&[0], &[1], &bad, &[0], &[1]),
+        lazy.solve(engine, &[0], &[1], &bad, &[0], &[1]),
         Err(Error::Operation(error))
             if matches!(*error, symtn_tensors::OperationError::SpaceMismatch { .. })
     ));
 
-    let singular_dense = divisor.scale(0.0).unwrap().adjoint().unwrap();
+    let singular_dense = divisor.scale(engine, 0.0).unwrap().adjoint(engine).unwrap();
     assert!(matches!(
-        singular_dense.solve(&[0], &[1], &lazy_rhs, &[0], &[1]),
+        singular_dense.solve(engine, &[0], &[1], &lazy_rhs, &[0], &[1]),
         Err(Error::Operation(_))
     ));
 
     let compact_rhs = TensorMap::diagonal(
+        engine,
         &runtime,
         &lhs_leg,
         [
@@ -834,12 +959,15 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
         ],
     )
     .unwrap();
-    let compact_solution = divisor.solve(&[0], &[1], &compact_rhs, &[0], &[1]).unwrap();
+    let compact_solution = divisor
+        .solve(engine, &[0], &[1], &compact_rhs, &[0], &[1])
+        .unwrap();
     // A dense divisor densifies the compact RHS into its solve buffer once.
     assert_eq!(densified.get(Event::DiagonalMaterialization), 1);
     let densified = probe::record();
 
     let compact_divisor = TensorMap::diagonal(
+        engine,
         &runtime,
         &lhs_leg,
         [
@@ -855,20 +983,20 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
     )
     .unwrap();
     let compact_compact = compact_divisor
-        .solve(&[0], &[1], &compact_rhs, &[0], &[1])
+        .solve(engine, &[0], &[1], &compact_rhs, &[0], &[1])
         .unwrap();
     assert!(compact_compact.spectrum().is_some());
     assert_eq!(compact_compact.spectrum().unwrap()[0].values, [1.0, 0.75]);
     assert_eq!(compact_compact.spectrum().unwrap()[1].values, [0.625]);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    assert_typed_map_close(
-        &divisor.compose(&compact_solution).unwrap(),
-        &compact_rhs,
-        1e-11,
-    );
+    let divisor_compose = &divisor.compose(engine, &compact_solution).unwrap();
+    assert_typed_map_close(engine, divisor_compose, &compact_rhs, 1e-11);
 
-    let scaled = compact_divisor.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap();
-    assert_typed_map_close(&compact_divisor.compose(&scaled).unwrap(), &rhs, 1e-11);
+    let scaled = compact_divisor
+        .solve(engine, &[0], &[1], &rhs, &[0], &[1])
+        .unwrap();
+    let compact_divisor_compose = &compact_divisor.compose(engine, &scaled).unwrap();
+    assert_typed_map_close(engine, compact_divisor_compose, &rhs, 1e-11);
     assert!(Arc::ptr_eq(
         scaled.logical_space().provider_arc(),
         compact_divisor.logical_space().provider_arc()
@@ -876,6 +1004,7 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
     let singular = TensorMap::diagonal(
+        engine,
         &runtime,
         &lhs_leg,
         [
@@ -891,7 +1020,7 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
     )
     .unwrap();
     assert!(matches!(
-        singular.solve(&[0], &[1], &rhs, &[0], &[1]),
+        singular.solve(engine, &[0], &[1], &rhs, &[0], &[1]),
         Err(Error::Operation(error))
             if matches!(*error, symtn_tensors::OperationError::Dense(
                 symtn_dense::DenseError::NumericalFailure { op: "solve_into", .. }
@@ -901,22 +1030,20 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
 }
 
 #[cfg(feature = "cgc-gen")]
-fn assert_checked_generic_solve_acceptance<D>()
+fn assert_checked_generic_solve_acceptance<D>(engine: &mut dyn Engine)
 where
     D: AdvancedLinalgScalar + core::fmt::Debug,
 {
     use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(solve_spy(&calls, None)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(solve_spy(&calls, None)));
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
     let divisor: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
             let row = ij[0] + 2 * ij[1];
             let col = ij[2] + 2 * ij[3];
             D::from_real(if row == col {
@@ -927,7 +1054,7 @@ where
         })
         .unwrap();
     let rhs: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
             D::from_real(
                 (1 + ij.iter().sum::<usize>() + 3 * trees.domain_vertices()[0].get()) as f64,
             )
@@ -944,12 +1071,12 @@ where
 
     for (lazy_lhs, lazy_rhs) in [(false, false), (true, false), (false, true), (true, true)] {
         let lhs = if lazy_lhs {
-            divisor.adjoint().unwrap()
+            divisor.adjoint(engine).unwrap()
         } else {
             divisor.clone()
         };
         let right = if lazy_rhs {
-            rhs.adjoint().unwrap()
+            rhs.adjoint(engine).unwrap()
         } else {
             rhs.clone()
         };
@@ -957,7 +1084,7 @@ where
         let rhs_before = rhs.dense_data().unwrap().to_vec();
         calls.reset();
         let solution = lhs
-            .solve(&[0, 1], &[2, 3], &right, &[0, 1], &[2, 3])
+            .solve(engine, &[0, 1], &[2, 3], &right, &[0, 1], &[2, 3])
             .unwrap();
         assert!(matches!(solution.repr, TypedTensorRepr::Owned(_)));
         assert_eq!(
@@ -965,9 +1092,9 @@ where
             5,
             "the SU(3) μ=2 fixture has five nonempty coupled-sector solve routes"
         );
-        let lhs_oracle = lhs.materialized_tensor_uncached().unwrap();
-        let rhs_oracle = right.materialized_tensor_uncached().unwrap();
-        let reconstructed = lhs_oracle.compose(&solution).unwrap();
+        let lhs_oracle = lhs.materialized_tensor_uncached(engine).unwrap();
+        let rhs_oracle = right.materialized_tensor_uncached(engine).unwrap();
+        let reconstructed = lhs_oracle.compose(engine, &solution).unwrap();
         assert!(reconstructed
             .dense_data()
             .unwrap()
@@ -990,36 +1117,38 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_solves_are_owned_uncached_and_one_call_per_route() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // What: the solve keeps all four lazy input pairs cold on
     // nondegenerate real and complex cross-multiplicity matrices.
-    assert_checked_generic_solve_acceptance::<f64>();
-    assert_checked_generic_solve_acceptance::<num_complex::Complex64>();
+    assert_checked_generic_solve_acceptance::<f64>(engine);
+    assert_checked_generic_solve_acceptance::<num_complex::Complex64>(engine);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_left_solve_preserves_injected_backend_provenance() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(solve_spy(
-            &calls,
-            Some("injected checked solve failure"),
-        )))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(solve_spy(
+        &calls,
+        Some("injected checked solve failure"),
+    )));
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| f64::from(ij[0] == ij[1]))
-            .unwrap();
-    let rhs = lhs.scale(2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
+            f64::from(ij[0] == ij[1])
+        })
+        .unwrap();
+    let rhs = lhs.scale(engine, 2.0).unwrap();
     let before_lhs = lhs.dense_data().unwrap().to_vec();
     let before_rhs = rhs.dense_data().unwrap().to_vec();
     assert!(matches!(
-        lhs.solve(&[0], &[1], &rhs, &[0], &[1]),
+        lhs.solve(engine, &[0], &[1], &rhs, &[0], &[1]),
         Err(GenericTensorError::Facade(Error::Operation(error)))
             if matches!(*error, symtn_tensors::OperationError::Dense(
                 DenseError::Backend { op: "solve_into", ref message, .. }
@@ -1030,8 +1159,12 @@ fn checked_generic_left_solve_preserves_injected_backend_provenance() {
     assert_eq!(rhs.dense_data().unwrap(), before_rhs.as_slice());
 }
 
-fn assert_pinv_redirect<R, D>(source: &TensorMap<R, D>, rcond: f64, exact_original: bool)
-where
+fn assert_pinv_redirect<R, D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<R, D>,
+    rcond: f64,
+    exact_original: bool,
+) where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
             Error = FusionAlgebraError,
@@ -1046,25 +1179,41 @@ where
 {
     let eager = eager_adjoint_oracle(source);
     let expected = eager
-        .pinv(&codomain_axes(&eager), &domain_axes(&eager), rcond)
+        .pinv(engine, &codomain_axes(&eager), &domain_axes(&eager), rcond)
         .unwrap();
     let parent_body = Arc::clone(owned(source));
     let parent_data = Arc::clone(&parent_body.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     for _ in 0..2 {
         let actual = lazy
             .clone()
-            .pinv(&codomain_axes(&lazy), &domain_axes(&lazy), rcond)
+            .pinv(engine, &codomain_axes(&lazy), &domain_axes(&lazy), rcond)
             .unwrap();
-        assert_typed_map_close(&actual, &expected, 1e-9);
-        let pap = actual.compose(&eager).unwrap().compose(&actual).unwrap();
-        assert_typed_map_close(&pap, &actual, 1e-8);
-        assert!(is_hermitian!(eager.compose(&actual).unwrap(), 1e-9));
-        assert!(is_hermitian!(actual.compose(&eager).unwrap(), 1e-9));
+        assert_typed_map_close(engine, &actual, &expected, 1e-9);
+        let pap = actual
+            .compose(engine, &eager)
+            .unwrap()
+            .compose(engine, &actual)
+            .unwrap();
+        assert_typed_map_close(engine, &pap, &actual, 1e-8);
+        assert!(is_hermitian!(
+            engine,
+            eager.compose(engine, &actual).unwrap(),
+            1e-9
+        ));
+        assert!(is_hermitian!(
+            engine,
+            actual.compose(engine, &eager).unwrap(),
+            1e-9
+        ));
         if exact_original {
-            let apa = eager.compose(&actual).unwrap().compose(&eager).unwrap();
-            assert_typed_map_close(&apa, &eager, 1e-8);
+            let apa = eager
+                .compose(engine, &actual)
+                .unwrap()
+                .compose(engine, &eager)
+                .unwrap();
+            assert_typed_map_close(engine, &apa, &eager, 1e-8);
         }
         assert!(actual.owned_body().is_some());
         assert!(Arc::ptr_eq(
@@ -1079,14 +1228,15 @@ where
         .map(|_| {
             let clone = lazy.clone();
             std::thread::spawn(move || {
+                let engine = &mut symtn_dense::CpuEngine::serial();
                 clone
-                    .pinv(&codomain_axes(&clone), &domain_axes(&clone), rcond)
+                    .pinv(engine, &codomain_axes(&clone), &domain_axes(&clone), rcond)
                     .unwrap()
             })
         })
         .collect::<Vec<_>>();
     for call in calls {
-        assert_typed_map_close(&call.join().unwrap(), &expected, 1e-9);
+        assert_typed_map_close(engine, &call.join().unwrap(), &expected, 1e-9);
     }
     assert!(Arc::ptr_eq(owned(source), &parent_body));
     assert!(Arc::ptr_eq(&owned(source).data, &parent_data));
@@ -1097,14 +1247,15 @@ where
 
 #[test]
 fn pinv_redirect_preserves_semantics_ownership_and_cold_concurrency() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: full-rank, rectangular/rank-deficient, non-self-dual U(1),
     // complex data, empty support, and a genuine SU(2) multitree all use
     // the parent-factor seam and return detached provider-native outputs.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg =
         GradedSpace::try_new(provider, [(U1Irrep::new(-1), 2), (U1Irrep::new(0), 3)]).unwrap();
-    let full = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let full = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         let re = if indices[0] == indices[1] {
             30.0 + indices[0] as f64
         } else {
@@ -1113,38 +1264,35 @@ fn pinv_redirect_preserves_semantics_ownership_and_cold_concurrency() {
         num_complex::Complex64::new(re, (indices[0] + 2 * indices[1] + 1) as f64 / 200.0)
     })
     .unwrap();
-    assert_pinv_redirect(&full, 1e-12, true);
+    assert_pinv_redirect(engine, &full, 1e-12, true);
+    let operand = &genuinely_complex(&u1_matrix_fixture(engine, [(0, 3), (1, 2)], [(0, 2)]));
 
-    assert_pinv_redirect(
-        &genuinely_complex(&u1_matrix_fixture([(0, 3), (1, 2)], [(0, 2)])),
-        1e-10,
-        false,
-    );
-    assert_pinv_redirect(&u1_matrix_fixture([(1, 2)], [(0, 3)]), 1e-10, false);
-    let su2 = genuinely_complex(&su2_lazy_fixture());
+    assert_pinv_redirect(engine, operand, 1e-10, false);
+    let operand = &u1_matrix_fixture(engine, [(1, 2)], [(0, 3)]);
+    assert_pinv_redirect(engine, operand, 1e-10, false);
+    let su2 = genuinely_complex(&su2_lazy_fixture(engine));
     assert!(su2.logical_space().space().structure().block_count() > 1);
-    assert_pinv_redirect(&su2, 1e-10, false);
+    assert_pinv_redirect(engine, &su2, 1e-10, false);
 }
 
 #[test]
 fn pinv_redirect_late_svd_failure_keeps_parent_and_receiver_cold() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a successful first-sector SVD cannot publish factors, mutate
     // parent bytes, or initialize the lazy receiver when sector two fails.
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(fail_second_svd(&Arc::default())))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(fail_second_svd(&Arc::default())));
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })
     .unwrap();
     let before = source.dense_data().unwrap().to_vec();
     let data = Arc::clone(&owned(&source).data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     assert!(matches!(
-        lazy.pinv(&[0], &[1], 0.0),
+        lazy.pinv(engine, &[0], &[1], 0.0),
         Err(Error::Operation(_))
     ));
     assert_eq!(source.dense_data().unwrap(), before);

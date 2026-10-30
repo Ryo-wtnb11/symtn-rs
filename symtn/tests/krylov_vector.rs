@@ -75,7 +75,7 @@ impl Sample for Complex64 {
 }
 
 macro_rules! filled {
-    ($rt:expr, $codomain:expr, $domain:expr, $d:ty, $salt:expr) => {{
+    ($engine:ident, $rt:expr, $codomain:expr, $domain:expr, $d:ty, $salt:expr) => {{
         let mut k = 0usize;
         TensorMap::<_, $d>::from_subblock_fn($rt, $codomain, $domain, |_, _| {
             k += 1;
@@ -135,11 +135,11 @@ fn wide<D: Numeric>(v: &[D]) -> Vec<Complex64> {
 /// The five vector operations on `x`, `y` (one space `[v, w] <- [v]`)
 /// against their physical dense expansions.
 macro_rules! vector_contract {
-    ($what:expr, $rt:expr, $legs:expr, $d:ty, $a:expr, $b:expr) => {{
+    ($engine:ident, $what:expr, $rt:expr, $legs:expr, $d:ty, $a:expr, $b:expr) => {{
         let (v, w) = $legs;
         let what = $what;
-        let x = filled!($rt, [&v, &w], [&v], $d, 1);
-        let y = filled!($rt, [&v, &w], [&v], $d, 2);
+        let x = filled!($engine, $rt, [&v, &w], [&v], $d, 1);
+        let y = filled!($engine, $rt, [&v, &w], [&v], $d, 2);
         let xd = wide(&x.to_physical_dense().unwrap().data);
         let yd = wide(&y.to_physical_dense().unwrap().data);
         let n = xd.len();
@@ -196,7 +196,7 @@ macro_rules! vector_contract {
         slices_close::<$d>(&format!("{what} axpby"), &got, &want, 2);
 
         // A tensor on another space is refused before any write.
-        let other = filled!($rt, [&v], [&v], $d, 3);
+        let other = filled!($engine, $rt, [&v], [&v], $d, 3);
         let mut e = other.similar().unwrap();
         let err = Vector::axpby(&mut e, a, &x, b).unwrap_err();
         assert!(is_space_mismatch(&err), "{what}: {err:?}");
@@ -209,15 +209,15 @@ fn vector_operations_match_the_dense_expansion() {
     let rt = Runtime::builder().build().unwrap();
     let (a, b) = (0.75, -2.5);
     let (ca, cb) = (Complex64::new(0.5, -2.0), Complex64::new(-1.5, 0.25));
-    vector_contract!("u1 f64", &rt, u1_legs(), f64, a, b);
-    vector_contract!("u1 c64", &rt, u1_legs(), Complex64, ca, cb);
-    vector_contract!("su2 f64", &rt, su2_legs(), f64, a, b);
-    vector_contract!("su2 c64", &rt, su2_legs(), Complex64, ca, cb);
+    vector_contract!(engine, "u1 f64", &rt, u1_legs(), f64, a, b);
+    vector_contract!(engine, "u1 c64", &rt, u1_legs(), Complex64, ca, cb);
+    vector_contract!(engine, "su2 f64", &rt, su2_legs(), f64, a, b);
+    vector_contract!(engine, "su2 c64", &rt, su2_legs(), Complex64, ca, cb);
     let (a32, b32) = (0.75f32, -2.5f32);
     let (ca32, cb32) = (Complex32::new(0.5, -2.0), Complex32::new(-1.5, 0.25));
-    vector_contract!("u1 f32", &rt, u1_legs(), f32, a32, b32);
-    vector_contract!("su2 f32", &rt, su2_legs(), f32, a32, b32);
-    vector_contract!("su2 c32", &rt, su2_legs(), Complex32, ca32, cb32);
+    vector_contract!(engine, "u1 f32", &rt, u1_legs(), f32, a32, b32);
+    vector_contract!(engine, "su2 f32", &rt, su2_legs(), f32, a32, b32);
+    vector_contract!(engine, "su2 c32", &rt, su2_legs(), Complex32, ca32, cb32);
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     let (v, _) = su2_legs();
-    let x = filled!(&rt, [&v], [&v], Complex64, 4);
+    let x = filled!(engine, &rt, [&v], [&v], Complex64, 4);
     let lazy = x.adjoint().unwrap();
     let names_materialize = |e: &Error| {
         *e == Error::Unsupported {
@@ -266,8 +266,8 @@ fn krylov_reports_operation_errors_as_vector_errors() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
-    let b = filled!(&rt, [&v, &w], [&v], f64, 5);
-    let x0 = filled!(&rt, [&v], [&v], f64, 6);
+    let b = filled!(engine, &rt, [&v, &w], [&v], f64, 5);
+    let x0 = filled!(engine, &rt, [&v], [&v], f64, 6);
     let mut ws = Workspace::with_capacity(&b, 5).unwrap();
     let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
         x.axpby_into(y, 2.0, 0.0)
@@ -411,10 +411,10 @@ fn eigsolve_in_single_precision() {
     let want = heisenberg_eigenvalues(2);
     let alg = || Lanczos::new(10, 100, 1e-5);
     let h = su2_heisenberg::<f32>(&rt, &v, 2);
-    let x0 = filled!(&rt, [&v, &v], [&w], f32, 7);
+    let x0 = filled!(engine, &rt, [&v, &v], [&w], f32, 7);
     eigsolve_case!("su2 2s=2 f32", &rt, h, x0, want.clone(), alg(), 1e-5);
     let h = su2_heisenberg::<Complex32>(&rt, &v, 2);
-    let x0 = filled!(&rt, [&v, &v], [&w], Complex32, 7);
+    let x0 = filled!(engine, &rt, [&v, &v], [&w], Complex32, 7);
     eigsolve_case!("su2 2s=2 c32", &rt, h, x0, want, alg(), 1e-5);
 }
 
@@ -436,7 +436,7 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
         )
         .unwrap();
         let h = su2_heisenberg::<f64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], f64, 7);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], f64, 7);
         eigsolve_case!(
             format!("su2 2s={twice} f64"),
             &rt,
@@ -447,7 +447,7 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
             1e-10
         );
         let h = su2_heisenberg::<Complex64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], Complex64, 7);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], Complex64, 7);
         eigsolve_case!(
             format!("su2 2s={twice} c64"),
             &rt,
@@ -470,7 +470,7 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
         )
         .unwrap();
         let h = u1_heisenberg::<f64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], f64, 8);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], f64, 8);
         eigsolve_case!(
             format!("u1 2s={twice} f64"),
             &rt,
@@ -481,7 +481,7 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
             1e-10
         );
         let h = u1_heisenberg::<Complex64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], Complex64, 8);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], Complex64, 8);
         eigsolve_case!(
             format!("u1 2s={twice} c64"),
             &rt,
@@ -573,10 +573,10 @@ fn exponentiate_matches_the_block_exponential() {
         )
         .unwrap();
         let h = su2_heisenberg::<f64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], f64, 9);
+        let x = filled!(engine, &rt, [&v, &v], [&w], f64, 9);
         exponentiate_case!(format!("su2 2s={twice} f64"), h, x, -0.7, lambda.clone());
         let h = su2_heisenberg::<Complex64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], Complex64, 9);
+        let x = filled!(engine, &rt, [&v, &v], [&w], Complex64, 9);
         exponentiate_case!(
             format!("su2 2s={twice} c64"),
             h,
@@ -596,10 +596,10 @@ fn exponentiate_matches_the_block_exponential() {
         )
         .unwrap();
         let h = u1_heisenberg::<f64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], f64, 10);
+        let x = filled!(engine, &rt, [&v, &v], [&w], f64, 10);
         exponentiate_case!(format!("u1 2s={twice} f64"), h, x, -0.7, lambda.clone());
         let h = u1_heisenberg::<Complex64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], Complex64, 10);
+        let x = filled!(engine, &rt, [&v, &v], [&w], Complex64, 10);
         exponentiate_case!(
             format!("u1 2s={twice} c64"),
             h,
@@ -618,8 +618,8 @@ fn fibonacci_vectors_carry_the_golden_ratio_weight() {
     let (one, tau) = (TableSector::new(1), TableSector::new(2));
     let t = GradedSpace::try_new(Arc::clone(&rule), [(tau, 1)]).unwrap();
     let w = GradedSpace::try_new(Arc::clone(&rule), [(one, 2), (tau, 3)]).unwrap();
-    let x = filled!(&rt, [&t, &t], [&w], Complex64, 11);
-    let y = filled!(&rt, [&t, &t], [&w], Complex64, 12);
+    let x = filled!(engine, &rt, [&t, &t], [&w], Complex64, 11);
+    let y = filled!(engine, &rt, [&t, &t], [&w], Complex64, 12);
     let phi = (1.0 + 5f64.sqrt()) / 2.0;
     let weighted = |a: &TensorMap<TableRule, Complex64>, b: &TensorMap<TableRule, Complex64>| {
         let mut sum = Complex64::new(0.0, 0.0);
@@ -672,7 +672,7 @@ fn warm_eigsolve_allocates_only_its_results() {
     let _serial = crate::counting_alloc::serial();
     // A random Hermitian H with many distinct eigenvalues, so Lanczos
     // restarts; the map writes in place (`contract_into`).
-    let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    let rt = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(-1, 4), (0, 3), (1, 4)].map(|(q, n)| (U1Irrep::new(q), n)),
@@ -685,7 +685,7 @@ fn warm_eigsolve_allocates_only_its_results() {
     .unwrap();
     let a = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &v], [&v, &v], 3).unwrap();
     let h = a.axpby(1.0, &a.adjoint().unwrap(), 1.0).unwrap();
-    let x0 = filled!(&rt, [&v, &v], [&w], f64, 13);
+    let x0 = filled!(engine, &rt, [&v, &v], [&w], f64, 13);
     let payload = std::mem::size_of_val(x0.dense_data().unwrap());
     let howmany = 2;
     let alg = Lanczos::new(12, 20, 1e-12);

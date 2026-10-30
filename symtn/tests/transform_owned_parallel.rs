@@ -1,6 +1,6 @@
-//! Owned transforms on a multi-threaded recoupling backend (#1217): the
-//! uninitialised owned writer runs under the parallel schedule, so the result
-//! is bit-identical to the serial owned result and the caller thread makes the
+//! Owned transforms on a multi-threaded engine (#1217): the uninitialised
+//! owned writer runs under the parallel schedule, so the result is
+//! bit-identical to the serial owned result and the caller thread makes the
 //! same allocations as the serial path, with no allocator-zeroed payload (no
 //! `vec![zero; P]` fallback).
 
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::Runtime;
+use symtn::typed::{CpuEngine, Pool, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
 use crate::counting_alloc;
@@ -66,25 +66,10 @@ fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize, usize) {
 
 const THREADS: usize = 3;
 
-/// The caller's pool. The parallel runtime replays on its own pool, pinned
-/// to `THREADS` workers in [`runtimes`], so the effective worker count does not
-/// depend on the host's core count or Rayon's global pool.
-fn pool() -> rayon::ThreadPool {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(THREADS)
-        .build()
-        .unwrap()
-}
-
-fn runtimes() -> (Runtime, Runtime) {
-    (
-        Runtime::builder().recoupling_threads(1).build().unwrap(),
-        Runtime::builder()
-            .dense_threads(THREADS)
-            .recoupling_threads(THREADS)
-            .build()
-            .unwrap(),
-    )
+/// The parallel engine: `THREADS` workers, independent of the host's core
+/// count.
+fn parallel_engine() -> CpuEngine {
+    CpuEngine::new(Pool::builder().threads(THREADS).build().unwrap())
 }
 
 type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
@@ -130,13 +115,22 @@ fn u1_space(provider: &Arc<U1FusionRule>) -> GradedSpace<U1FusionRule> {
 }
 
 macro_rules! transforms {
-    ($source:expr) => {
+    ($engine:ident, $source:expr) => {
         vec![
-            ("permute", $source.permute(&[1], &[2, 0]).unwrap()),
-            ("braid", $source.braid(&[1, 0], &[2], &[0, 2, 1]).unwrap()),
-            ("repartition", $source.repartition(1).unwrap()),
-            ("full transpose", $source.transpose(&[2], &[1, 0]).unwrap()),
-            ("transpose", $source.transpose(&[1, 2], &[0]).unwrap()),
+            ("permute", $source.permute($engine, &[1], &[2, 0]).unwrap()),
+            (
+                "braid",
+                $source.braid($engine, &[1, 0], &[2], &[0, 2, 1]).unwrap(),
+            ),
+            ("repartition", $source.repartition($engine, 1).unwrap()),
+            (
+                "full transpose",
+                $source.transpose($engine, &[2], &[1, 0]).unwrap(),
+            ),
+            (
+                "transpose",
+                $source.transpose($engine, &[1, 2], &[0]).unwrap(),
+            ),
         ]
     };
 }
@@ -160,67 +154,68 @@ macro_rules! assert_bit_identical {
 
 #[test]
 fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let (serial, parallel) = runtimes();
+    let runtime = Runtime::builder().build().unwrap();
+    let (serial, parallel) = (&runtime, &runtime);
+    let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
     );
     let space = u1_su2_space(&provider);
     let real_serial: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1217).unwrap();
+        TensorMap::rand_with_seed(engine, serial, [&space, &space], [&space], 1217).unwrap();
     let real_parallel: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&parallel, [&space, &space], [&space], 1217).unwrap();
+        TensorMap::rand_with_seed(engine, parallel, [&space, &space], [&space], 1217).unwrap();
     assert!(real_serial.dense_data().unwrap() == real_parallel.dense_data().unwrap());
-    assert!(
-        real_serial.dense_data().unwrap().len() > 1 << 15,
-        "fixture must exceed the backend's parallel size gate: {}",
-        real_serial.dense_data().unwrap().len()
-    );
     let complex_serial: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1218).unwrap();
+        TensorMap::rand_with_seed(engine, serial, [&space, &space], [&space], 1218).unwrap();
     let complex_parallel: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&parallel, [&space, &space], [&space], 1218).unwrap();
+        TensorMap::rand_with_seed(engine, parallel, [&space, &space], [&space], 1218).unwrap();
     assert!(complex_serial.dense_data().unwrap() == complex_parallel.dense_data().unwrap());
 
-    let expected_real = transforms!(real_serial);
-    let expected_complex = transforms!(complex_serial);
-    let (actual_real, actual_complex) =
-        pool().install(|| (transforms!(real_parallel), transforms!(complex_parallel)));
+    let expected_real = transforms!(engine, real_serial);
+    let expected_complex = transforms!(engine, complex_serial);
+    let (actual_real, actual_complex) = (
+        transforms!(parallel_engine, real_parallel),
+        transforms!(parallel_engine, complex_parallel),
+    );
     assert_bit_identical!(expected_real, actual_real);
     assert_bit_identical!(expected_complex, actual_complex);
 }
 
 #[test]
 fn u1_owned_transforms_are_bit_identical_across_thread_counts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let (serial, parallel) = runtimes();
+    let runtime = Runtime::builder().build().unwrap();
+    let (serial, parallel) = (&runtime, &runtime);
+    let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(U1FusionRule);
     let space = u1_space(&provider);
     let real_serial: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1219).unwrap();
+        TensorMap::rand_with_seed(engine, serial, [&space, &space], [&space], 1219).unwrap();
     let real_parallel: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&parallel, [&space, &space], [&space], 1219).unwrap();
+        TensorMap::rand_with_seed(engine, parallel, [&space, &space], [&space], 1219).unwrap();
     assert!(real_serial.dense_data().unwrap() == real_parallel.dense_data().unwrap());
-    assert!(
-        real_serial.dense_data().unwrap().len() > 1 << 15,
-        "fixture must exceed the backend's parallel size gate: {}",
-        real_serial.dense_data().unwrap().len()
-    );
     let complex_serial: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1220).unwrap();
+        TensorMap::rand_with_seed(engine, serial, [&space, &space], [&space], 1220).unwrap();
     let complex_parallel: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&parallel, [&space, &space], [&space], 1220).unwrap();
+        TensorMap::rand_with_seed(engine, parallel, [&space, &space], [&space], 1220).unwrap();
 
-    let expected_real = transforms!(real_serial);
-    let expected_complex = transforms!(complex_serial);
-    let (actual_real, actual_complex) =
-        pool().install(|| (transforms!(real_parallel), transforms!(complex_parallel)));
+    let expected_real = transforms!(engine, real_serial);
+    let expected_complex = transforms!(engine, complex_serial);
+    let (actual_real, actual_complex) = (
+        transforms!(parallel_engine, real_parallel),
+        transforms!(parallel_engine, complex_parallel),
+    );
     assert_bit_identical!(expected_real, actual_real);
     assert_bit_identical!(expected_complex, actual_complex);
 }
 
 #[test]
 fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
         "SYMTN_PARALLEL_OWNED_PERMUTE_ALLOCATES_LIKE_SERIAL_ISOLATED",
@@ -228,51 +223,48 @@ fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
     ) {
         return;
     }
-    // What: with `recoupling_threads > 1` a warmed owned permute makes the
+    // What: on a multi-threaded engine a warmed owned permute makes the
     // same caller-thread allocations as the serial owned path and none of them
     // is allocator-zeroed: the multi-threaded backend writes the owned output
     // directly, with no `vec![0.0; P]` fallback and destination-reading
     // replay (#1217).
-    let (serial, parallel) = runtimes();
+    let runtime = Runtime::builder().build().unwrap();
+    let (serial, parallel) = (&runtime, &runtime);
+    let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
     );
     let space = u1_su2_space(&provider);
     let source_serial: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&serial, [&space, &space], [&space], 1221).unwrap();
+        TensorMap::rand_with_seed(engine, serial, [&space, &space], [&space], 1221).unwrap();
     let source_parallel: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&parallel, [&space, &space], [&space], 1221).unwrap();
+        TensorMap::rand_with_seed(engine, parallel, [&space, &space], [&space], 1221).unwrap();
     let payload_bytes = size_of_val(source_serial.dense_data().unwrap());
-    assert!(
-        source_serial.dense_data().unwrap().len() > 1 << 15,
-        "fixture must exceed the backend's parallel size gate: {}",
-        source_serial.dense_data().unwrap().len()
-    );
 
-    let warm_serial = source_serial.permute(&[1], &[2, 0]).unwrap();
+    let warm_serial = source_serial.permute(engine, &[1], &[2, 0]).unwrap();
     let (result_serial, serial_allocations, serial_bytes, serial_zeroed) =
-        measure(|| source_serial.permute(&[1], &[2, 0]).unwrap());
+        measure(|| source_serial.permute(engine, &[1], &[2, 0]).unwrap());
     black_box(result_serial.dense_data().unwrap());
 
-    let pool = pool();
-    let warm_parallel = pool.install(|| source_parallel.permute(&[1], &[2, 0]).unwrap());
+    let warm_parallel = source_parallel
+        .permute(parallel_engine, &[1], &[2, 0])
+        .unwrap();
     assert!(warm_serial.dense_data().unwrap() == warm_parallel.dense_data().unwrap());
-    // This worker waits in a cross-pool install into the runtime's pool. Under
-    // load a wait can be the first to box a lazily created OS lock (macOS std
-    // allocates each Mutex/Condvar on first use, once per process) inside the
-    // window (#1964): this thread's own sleep mutex and condvar, and, through
-    // Rayon's wake of the runtime pool, each of its `THREADS` workers' sleep
-    // mutexes. With at most `THREADS + 2` such allocations, `THREADS + 3`
-    // windows on the same worker include a clean one, and the cleanest is the
-    // steady-state count; a per-call allocation would appear in all of them.
-    // Why not more warm-up: nothing in Rayon's public API forces a sleep.
-    let (result_parallel, parallel_allocations, parallel_bytes, parallel_zeroed) =
-        pool.install(|| {
-            (0..THREADS + 3)
-                .map(|_| measure(|| source_parallel.permute(&[1], &[2, 0]).unwrap()))
-                .min_by_key(|&(_, calls, bytes, _)| (calls, bytes))
-                .unwrap()
-        });
+    // The caller thread may box a lazily created OS lock (macOS std allocates
+    // each Mutex/Condvar on first use, once per process) inside the window the
+    // first time it waits for the engine's workers (#1964); the cleanest of a
+    // few windows is the steady-state count, and a per-call allocation would
+    // appear in all of them.
+    let (result_parallel, parallel_allocations, parallel_bytes, parallel_zeroed) = (0..THREADS + 3)
+        .map(|_| {
+            measure(|| {
+                source_parallel
+                    .permute(parallel_engine, &[1], &[2, 0])
+                    .unwrap()
+            })
+        })
+        .min_by_key(|&(_, calls, bytes, _)| (calls, bytes))
+        .unwrap();
     black_box(result_parallel.dense_data().unwrap());
 
     assert!(result_serial.dense_data().unwrap() == result_parallel.dense_data().unwrap());

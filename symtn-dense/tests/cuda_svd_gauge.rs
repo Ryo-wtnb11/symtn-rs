@@ -17,7 +17,9 @@ use symtn_dense::{
 /// `rows x k` matrix `u`, read off the diagonal of `right_selector`
 /// (`diag(phase)`), and the `gauge_ops` the phases alone cost.
 fn device_phases<D: CudaScalar + Copy>(u: Vec<D>, rows: usize, k: usize) -> (Vec<D>, u64) {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let storage = CudaDenseStorage::upload_members(&ctx, u, rows, k).unwrap();
     // More weights than rows: the prefix-view path of a shorter route.
     let weights = CudaSvdGaugeWeights::upload(&ctx, rows + 3).unwrap();

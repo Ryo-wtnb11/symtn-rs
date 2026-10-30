@@ -9,6 +9,7 @@ pub trait Rank2Gemm<D> {
     #[allow(clippy::too_many_arguments)]
     fn matmul_rank2(
         &mut self,
+        engine: &mut dyn Engine,
         dst: &mut [D],
         lhs: &[D],
         rhs: &[D],
@@ -34,6 +35,7 @@ pub trait Rank2Gemm<D> {
     )]
     fn matmul_rank2_batch(
         &mut self,
+        engine: &mut dyn Engine,
         dst: &mut [D],
         lhs: &[D],
         rhs: &[D],
@@ -51,6 +53,7 @@ pub trait Rank2Gemm<D> {
             let rhs_slice = direct_slice(rhs, job.rhs_offset, job.contracted, job.cols)?;
             let dst_slice = direct_slice_mut(dst, job.dst_offset, job.rows, job.cols)?;
             self.matmul_rank2(
+                engine,
                 dst_slice,
                 lhs_slice,
                 rhs_slice,
@@ -67,6 +70,7 @@ pub trait Rank2Gemm<D> {
     #[allow(clippy::too_many_arguments)]
     fn matmul_rank2_batch_with_ops(
         &mut self,
+        engine: &mut dyn Engine,
         dst: &mut [D],
         lhs: &[D],
         rhs: &[D],
@@ -81,7 +85,7 @@ pub trait Rank2Gemm<D> {
         D: Copy,
     {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
-            return self.matmul_rank2_batch(dst, lhs, rhs, jobs, runs, alpha, beta);
+            return self.matmul_rank2_batch(engine, dst, lhs, rhs, jobs, runs, alpha, beta);
         }
         Err(OperationError::UnsupportedTensorContractScope {
             message: "rank-2 GEMM backend does not implement transpose/adjoint batches",
@@ -101,7 +105,10 @@ pub type Rank2GemmBatchJob = DenseGemmBatchJob;
 /// rhs[rhs_offset..][contracted x cols]` as column-major matrices, with no
 /// host-slice contract in the trait. The host implementation wraps a
 /// a rank-2 GEMM backend; device implementations submit kernels against
-/// device storage handles.
+/// device storage handles. No method takes an engine: an implementation
+/// carries the engine it submits through (a device implementation holds the
+/// CUDA context that borrows the caller's engine), so a replay never needs a
+/// second borrow of it.
 pub trait StorageGemm<D, DDst, DLhs, DRhs> {
     /// Reports whether the generalized entry point accepts these operand views.
     /// Replay checks this once before any unit-coefficient job can mutate `dst`.

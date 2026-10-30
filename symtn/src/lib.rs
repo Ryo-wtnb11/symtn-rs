@@ -17,36 +17,24 @@
 //! its admission satisfies the operation's capability bounds; those bounds,
 //! the sealed provider traits generic code names, are in [`sector`].
 //!
-//! A [`typed::Runtime`] owns the shared execution state: the per-rule
-//! contraction/tree-transform contexts, the dense backend (selectable per
-//! [`typed::LinalgBackend`]), and the
-//! contraction-plan cache `symtn-network` keys by network topology.
+//! **Execution.** Every numerical operation takes the caller's engine as its
+//! first argument, `engine: &mut dyn Engine` ([`typed::Engine`]): a
+//! [`typed::CpuEngine`] (serial, or over a [`typed::Pool`] of threads) for
+//! Host tensors. The caller owns the engine; symtn stores none, and the
+//! dense provider (faer or a linked BLAS/LAPACK) is the one compiled in by
+//! cargo feature. A [`typed::Runtime`] holds prepared structural state only:
+//! the per-rule contraction/tree-transform contexts, reusable scratch, and
+//! the contraction-plan cache `symtn-network` keys by network topology.
 //!
-//! **Parallelism.** A `Runtime` is cheap to clone across threads. Standalone
-//! operations normally lease independent per-rule contexts and, for
-//! factorizations, dense executors instead of holding the Runtime's coarse state
-//! mutex for the full operation. Cached network contraction uses plan-local workspace
-//! pools. Pool checkout and return, plan-cache and structural-store access, and
-//! dense providers may still synchronize; an injected non-mintable executor
-//! serializes factorization through the Runtime state lock. Device operations
-//! take only a process-wide lock per CUDA device and the runtime's own CUDA
-//! context (and the device backend's own handle and plan locks), never the
-//! state mutex, so Host work is not blocked by device work; device operations
-//! of every Runtime on one device serialize their enqueue on that device lock,
-//! which is what lets one Runtime safely read a fresh device output returned
-//! by another. A host sync under a lease (`to_host`, scalar and
-//! spectrum downloads) therefore stalls
-//! every Runtime on that device. Opening a device also pins CubeCL to one
-//! stream per device for the whole process, so every device write,
-//! including `*_into` destinations and reused scratch, is ordered
-//! before every later read or write from any thread; building a device
-//! Runtime fails if CubeCL was already configured with more streams. GPU work
-//! of different threads therefore never overlaps. The setting is
-//! process-wide: it overrides a `cubecl.toml` value without notice, stays
-//! fixed even if opening the device then fails, also gives every other CubeCL
-//! client in the process (wgpu included) one stream, and makes a later
-//! `CubeClRuntimeConfig::set` panic. Consequently no
-//! general lock-free, overlap, or outer-thread scaling guarantee is made. See
+//! **Parallelism.** One engine runs one operation at a time; to run
+//! operations concurrently, hold one engine per thread and share the
+//! tensors and the `Runtime`. Pool checkout and return and plan-cache and
+//! structural-store access still synchronize briefly. A device operation
+//! borrows the caller's CUDA engine, which owns its stream and allocation
+//! domain; symtn takes no device lock and sets no process-wide CubeCL
+//! configuration, and an operand of another engine is refused before any
+//! work. No general lock-free, overlap, or outer-thread scaling guarantee is
+//! made. See
 //! `docs/backend_policy.md` for the ownership and synchronization model.
 //!
 //! # Modules

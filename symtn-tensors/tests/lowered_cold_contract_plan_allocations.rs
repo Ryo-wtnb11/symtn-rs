@@ -12,6 +12,7 @@
 //!    behavior.
 
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
 use symtn_tensors::{
@@ -168,18 +169,19 @@ struct RouteRun {
     warm_hits: usize,
 }
 
-fn run_route() -> RouteRun {
+fn run_route(engine: &mut dyn Engine) -> RouteRun {
     reset_all_caches();
     let fixture = contract_fixture();
     let axes = || TensorContractSpec::new(&[0], &[2], OutputAxisOrder::from_axes(&[2, 0, 3, 1]));
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let mut output = vec![0.0; fixture.dst.space().required_len().unwrap()];
     // The plain entry is the production route and the one this guard pins.
-    let run =
+    let mut run =
         |output: &mut [f64],
          context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>| {
             context
                 .tensorcontract_planned_into(
+                    engine,
                     &fixture.dst,
                     output,
                     (
@@ -224,14 +226,15 @@ fn run_route() -> RouteRun {
 
 #[test]
 fn cold_contract_plan_build_stays_cached_after_first_run() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
 
     // Discard one run: the first contraction in the process pays a one-time
     // warmup (lazy statics, thread-local init) that would otherwise skew the
     // repeat-stability comparison below.
-    let _ = run_route();
-    let first = run_route();
-    let second = run_route();
+    let _ = run_route(engine);
+    let first = run_route(engine);
+    let second = run_route(engine);
 
     // The fixture must exercise the fusion plan-build route, not the
     // direct-core fast path: a cold run builds and publishes its completed

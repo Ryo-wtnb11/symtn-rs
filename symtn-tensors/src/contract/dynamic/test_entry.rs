@@ -1,12 +1,14 @@
 use super::super::scratch::DynamicFusionScratchWorkspace;
 use super::*;
 use crate::tests::TestTensor;
+use symtn_dense::Engine;
 
 // Reference contraction path, test-only: the allocation/output reference the
 // `run_host_reference` tests compare against.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensorcontract_fusion_dynamic_plan_into_context<RuleKey, BT, BC, R, D>(
+    engine: &mut dyn Engine,
     tree_context: &mut TreeTransformExecutionContext<D, RuleKey, f64, BT>,
     contract_backend: &mut BC,
     contract_workspace: &mut BC::Workspace,
@@ -35,6 +37,7 @@ where
     let lhs_structure = std::sync::Arc::clone(lhs.structure());
     let rhs_structure = std::sync::Arc::clone(rhs.structure());
     tensorcontract_fusion_dynamic_plan_dyn_into_context(
+        engine,
         tree_context,
         contract_backend,
         contract_workspace,
@@ -60,6 +63,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_dynamic_tree_execution_artifact_for_test<R, D>(
+    engine: &mut dyn Engine,
     rule: &R,
     plan: &FusionContractPlan,
     dst: &mut TestTensor<D>,
@@ -79,6 +83,7 @@ where
     let mut fusion_block_workspace = FusionBlockContractWorkspace::default();
     let mut scratch = DynamicFusionScratchWorkspace::default();
     tensorcontract_fusion_dynamic_plan_into_context(
+        engine,
         &mut tree_context,
         &mut contract_backend,
         &mut contract_workspace,
@@ -97,6 +102,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_prelowered_dynamic_tree_execution_artifact_for_test<R, D>(
+    engine: &mut dyn Engine,
     rule: &R,
     plan: &FusionContractPlan,
     dst_space: &DynamicFusionMapSpace,
@@ -123,6 +129,7 @@ where
     let lhs_layout = lhs.prepare(rule, layout_primer)?;
     let rhs_layout = rhs.prepare(rule, layout_primer)?;
     let artifact = compile_prelowered_dynamic_tree_execution_artifact(
+        engine,
         tree_context.planning(),
         rule,
         layout_primer,
@@ -132,6 +139,7 @@ where
         &rhs_layout,
     )?;
     execute_dynamic_tree_execution_artifact(
+        engine,
         &mut tree_context,
         &mut contract_backend,
         &mut contract_workspace,
@@ -153,6 +161,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn tensorcontract_fusion_dynamic_plan_dyn_into_context<RuleKey, BT, BC, R, D>(
+    engine: &mut dyn Engine,
     tree_context: &mut TreeTransformExecutionContext<D, RuleKey, f64, BT>,
     contract_backend: &mut BC,
     contract_workspace: &mut BC::Workspace,
@@ -183,6 +192,7 @@ where
 {
     let artifact =
         compile_dynamic_tree_execution_artifact::<symtn_core::MultiplicityFreeAdmissionMode, _>(
+            engine,
             tree_context.planning(),
             rule,
             layout_primer,
@@ -194,6 +204,7 @@ where
             rhs_structure,
         )?;
     execute_dynamic_tree_execution_artifact(
+        engine,
         tree_context,
         contract_backend,
         contract_workspace,
@@ -213,6 +224,7 @@ where
 /// test resources: the arm `execute_contract_route_host` runs.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_dynamic_tree_execution_artifact<RuleKey, BT, BC, D, C>(
+    engine: &mut dyn Engine,
     tree_context: &mut TreeTransformExecutionContext<D, RuleKey, C, BT>,
     contract_backend: &mut BC,
     contract_workspace: &mut BC::Workspace,
@@ -235,6 +247,7 @@ where
     C: DenseBlockScalar,
 {
     super::super::route_host::execute_dynamic_tree_route_host(
+        engine,
         &mut super::super::route_host::EagerTreeStage {
             backend: tree_context.backend_mut(),
             workspaces: &mut Default::default(),

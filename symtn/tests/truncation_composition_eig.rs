@@ -73,25 +73,25 @@ fn fz2_leg(pairs: &[(bool, usize)]) -> GradedSpace<FermionParityFusionRule> {
 /// The whole gate for one case. `$complex` lifts the source to the complex
 /// payload of the factors.
 macro_rules! assert_eig_composition {
-    ($source:expr, $complex:expr, $truncation:expr, $policy:expr, $case:expr) => {{
+    ($engine:ident, $source:expr, $complex:expr, $truncation:expr, $policy:expr, $case:expr) => {{
         let source = &$source;
         let case: &str = $case;
         let truncation: &symtn::typed::Truncation = &$truncation;
 
         let Eig { d, v } = source
-            .eig_full(&codomain_axes(&source), &domain_axes(&source))
+            .eig_full($engine, &codomain_axes(&source), &domain_axes(&source))
             .unwrap();
         let bond = d.domain()[0].clone();
-        let spectra = d.diagview().unwrap();
+        let spectra = d.diagview($engine).unwrap();
         let found = bond.find_truncated(&spectra, truncation).unwrap();
         let got_d = d
-            .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            .restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
             .unwrap();
         let got_v = v
-            .restrict_leg(&[(v.codomain_rank(), &found.selection)])
+            .restrict_leg($engine, &[(v.codomain_rank(), &found.selection)])
             .unwrap();
 
-        let blocks = sector_matrices!(source);
+        let blocks = sector_matrices!($engine, source);
         let references: Vec<(_, Vec<Complex64>)> = blocks
             .iter()
             .map(|(sector, matrix)| (sector.clone(), triangular_eigenvalues(matrix)))
@@ -111,14 +111,21 @@ macro_rules! assert_eig_composition {
         assert_eq!(got_v.codomain(), source.codomain(), "{case}: v codomain");
         assert_eq!(got_v.domain(), got_d.domain(), "{case}: v domain");
         assert!(
-            symtn::expert::diagonal_spectrum(&got_d).unwrap().is_some(),
+            symtn::expert::diagonal_spectrum($engine, &got_d)
+                .unwrap()
+                .is_some(),
             "{case}: d stays compact"
         );
-        assert_canonical_layout!(got_d, format!("{case}: d"));
-        assert_canonical_layout!(got_v, format!("{case}: v"));
+        assert_canonical_layout!($engine, got_d, format!("{case}: d"));
+        assert_canonical_layout!($engine, got_v, format!("{case}: v"));
 
-        let terms = source.materialize().unwrap().dense_data().unwrap().len();
-        for entry in got_d.diagview().unwrap() {
+        let terms = source
+            .materialize($engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len();
+        for entry in got_d.diagview($engine).unwrap() {
             let (_, reference) = references
                 .iter()
                 .find(|(sector, _)| *sector == entry.sector)
@@ -132,8 +139,8 @@ macro_rules! assert_eig_composition {
         }
 
         let complex = $complex;
-        let left = complex.compose(&got_v).unwrap();
-        let right = got_v.compose(&got_d).unwrap();
+        let left = complex.compose($engine, &got_v).unwrap();
+        let right = got_v.compose($engine, &got_d).unwrap();
         numerics::assert_slices_close(
             &format!("{case}: t * v = v * d"),
             left.dense_data().unwrap(),
@@ -142,7 +149,7 @@ macro_rules! assert_eig_composition {
         );
         // The relation alone is met by `v = 0`. An eigenvector's scale is a
         // gauge the API leaves open, so only "nonzero" is asserted.
-        for (sector, matrix) in sector_matrices!(got_v) {
+        for (sector, matrix) in sector_matrices!($engine, got_v) {
             for col in 0..matrix.cols {
                 let norm: f64 = (0..matrix.rows)
                     .map(|row| matrix.at(row, col).norm_sqr())
@@ -164,11 +171,12 @@ macro_rules! assert_eig_composition {
 }
 
 macro_rules! eig_policy_sweep {
-    ($source:expr, $complex:expr, $target:expr, $tag:expr) => {{
+    ($engine:ident, $source:expr, $complex:expr, $target:expr, $tag:expr) => {{
         let complex = $complex;
         let source = $source;
         for (name, truncation, policy) in policies!($target) {
             assert_eig_composition!(
+                $engine,
                 source,
                 complex.clone(),
                 truncation,
@@ -197,13 +205,18 @@ where
         + symtn::sector::SectorCodec,
     D: symtn::typed::TensorScalar,
 {
-    TensorMap::from_subblock_fn(&host_runtime(), [leg], [leg], |_, indices| {
-        match indices[0].cmp(&indices[1]) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    TensorMap::from_subblock_fn(
+        engine,
+        &host_runtime(),
+        [leg],
+        [leg],
+        |_, indices| match indices[0].cmp(&indices[1]) {
             std::cmp::Ordering::Equal => diagonal(),
             std::cmp::Ordering::Less => upper(),
             std::cmp::Ordering::Greater => zero,
-        }
-    })
+        },
+    )
     .unwrap()
 }
 
@@ -254,16 +267,19 @@ where
 
 #[test]
 fn u1_eig_composition_matches_the_hand_selection_for_every_policy() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = u1_leg(&[(-1, 2), (0, 3), (1, 2)]);
     let source = real_triangular(&leg, 0x0e19_0001);
     eig_policy_sweep!(
+        engine,
         source,
-        source.convert::<Complex64>(),
+        source.convert::<Complex64>(engine).unwrap(),
         u1_leg(&[(-1, 1), (0, 2)]),
         "u1 eig f64"
     );
     let source = complex_triangular(&leg, 0x0e19_0002);
     eig_policy_sweep!(
+        engine,
         source,
         source.clone(),
         u1_leg(&[(-1, 1), (0, 2)]),
@@ -273,32 +289,50 @@ fn u1_eig_composition_matches_the_hand_selection_for_every_policy() {
 
 #[test]
 fn su2_eig_composition_matches_the_hand_selection_for_every_policy() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // dim(c) = 2j + 1 weights the rank budget and the discarded norm.
     let leg = su2_leg(&[(0, 3), (1, 2), (2, 2)]);
     let target = su2_leg(&[(0, 2), (2, 1)]);
     let source = real_triangular(&leg, 0x0e19_0003);
-    eig_policy_sweep!(source, source.convert::<Complex64>(), target, "su2 eig f64");
+    eig_policy_sweep!(
+        engine,
+        source,
+        source.convert::<Complex64>(engine).unwrap(),
+        target,
+        "su2 eig f64"
+    );
     let source = complex_triangular(&leg, 0x0e19_0004);
-    eig_policy_sweep!(source, source.clone(), target, "su2 eig c64");
+    eig_policy_sweep!(engine, source, source.clone(), target, "su2 eig c64");
 }
 
 #[test]
 fn fermionic_eig_composition_matches_the_hand_selection_for_every_policy() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fz2_leg(&[(false, 3), (true, 3)]);
     let target = fz2_leg(&[(false, 2), (true, 1)]);
     let source = real_triangular(&leg, 0x0e19_0005);
-    eig_policy_sweep!(source, source.convert::<Complex64>(), target, "fz2 eig f64");
+    eig_policy_sweep!(
+        engine,
+        source,
+        source.convert::<Complex64>(engine).unwrap(),
+        target,
+        "fz2 eig f64"
+    );
     let source = complex_triangular(&leg, 0x0e19_0006);
-    eig_policy_sweep!(source, source.clone(), target, "fz2 eig c64");
+    eig_policy_sweep!(engine, source, source.clone(), target, "fz2 eig c64");
 }
 
 #[test]
 fn lazy_adjoint_eig_composition_matches_the_hand_selection() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // The adjoint of an upper-triangular map is lower triangular, with the
     // conjugated diagonal: still a hand answer.
     let leg = u1_leg(&[(0, 3), (1, 2)]);
-    let lazy = complex_triangular(&leg, 0x0e19_0007).adjoint().unwrap();
+    let lazy = complex_triangular(&leg, 0x0e19_0007)
+        .adjoint(engine)
+        .unwrap();
     eig_policy_sweep!(
+        engine,
         lazy,
         lazy.clone(),
         u1_leg(&[(0, 2), (1, 1)]),
@@ -308,9 +342,10 @@ fn lazy_adjoint_eig_composition_matches_the_hand_selection() {
 
 #[test]
 fn a_whole_sector_is_dropped_from_the_eig_bond() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = u1_leg(&[(0, 3), (1, 2)]);
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&host_runtime(), [&leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &host_runtime(), [&leg], [&leg], |trees, indices| {
             let scale = if trees.coupled() == &U1Irrep::new(0) {
                 1.0
             } else {
@@ -324,8 +359,9 @@ fn a_whole_sector_is_dropped_from_the_eig_bond() {
         })
         .unwrap();
     let found = assert_eig_composition!(
+        engine,
         source,
-        source.convert::<Complex64>(),
+        source.convert::<Complex64>(engine).unwrap(),
         symtn::typed::Truncation::relative_cutoff(1e-3).unwrap(),
         truncation_oracle::Policy::RelativeCutoff(1e-3),
         "drop"
@@ -354,32 +390,40 @@ where
         + symtn::sector::SectorCodec,
     <R as symtn::sector::SectorCodec>::Sector: Ord + Clone,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut state = seed;
-    TensorMap::from_subblock_fn(&host_runtime(), codomain, codomain, |trees, indices| {
-        let row = (
-            trees.codomain_uncoupled().to_vec(),
-            trees.codomain_innerlines().to_vec(),
-            indices[1],
-            indices[0],
-        );
-        let col = (
-            trees.domain_uncoupled().to_vec(),
-            trees.domain_innerlines().to_vec(),
-            indices[3],
-            indices[2],
-        );
-        let value = Complex64::new(fill(&mut state), fill(&mut state));
-        match row.cmp(&col) {
-            std::cmp::Ordering::Equal => 4.0 * value,
-            std::cmp::Ordering::Less => 0.5 * value,
-            std::cmp::Ordering::Greater => Complex64::new(0.0, 0.0),
-        }
-    })
+    TensorMap::from_subblock_fn(
+        engine,
+        &host_runtime(),
+        codomain,
+        codomain,
+        |trees, indices| {
+            let row = (
+                trees.codomain_uncoupled().to_vec(),
+                trees.codomain_innerlines().to_vec(),
+                indices[1],
+                indices[0],
+            );
+            let col = (
+                trees.domain_uncoupled().to_vec(),
+                trees.domain_innerlines().to_vec(),
+                indices[3],
+                indices[2],
+            );
+            let value = Complex64::new(fill(&mut state), fill(&mut state));
+            match row.cmp(&col) {
+                std::cmp::Ordering::Equal => 4.0 * value,
+                std::cmp::Ordering::Less => 0.5 * value,
+                std::cmp::Ordering::Greater => Complex64::new(0.0, 0.0),
+            }
+        },
+    )
     .unwrap()
 }
 
 #[test]
 fn multi_tree_eig_composition_matches_the_hand_selection_for_every_policy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Two U(1) legs: coupled sector 1 carries the trees (0, 1) and (1, 0).
     let leg = u1_leg(&[(0, 2), (1, 2)]);
     let source = multi_tree_triangular([&leg, &leg], 0x0e19_0008);
@@ -394,6 +438,7 @@ fn multi_tree_eig_composition_matches_the_hand_selection_for_every_policy() {
         "the fixture must stack several trees in one coupled sector"
     );
     eig_policy_sweep!(
+        engine,
         source,
         source.clone(),
         u1_leg(&[(0, 1), (1, 2)]),
@@ -406,6 +451,7 @@ fn multi_tree_eig_composition_matches_the_hand_selection_for_every_policy() {
     let dual = leg.try_dual().unwrap();
     let source = multi_tree_triangular([&leg, &dual], 0x0e19_0009);
     eig_policy_sweep!(
+        engine,
         source,
         source.clone(),
         fz2_leg(&[(false, 2), (true, 1)]),
@@ -427,15 +473,15 @@ fn shuffle(n: usize) -> Vec<usize> {
 /// same shuffled order, gather `v'`'s columns at those positions, and keep
 /// the factorization relation.
 macro_rules! assert_shuffled_eig_composition {
-    ($source:expr, $target:expr, $tag:expr) => {{
+    ($engine:ident, $source:expr, $target:expr, $tag:expr) => {{
         let source = &$source;
         let runtime = source.runtime().clone();
         let Eig { d, v } = source
-            .eig_full(&codomain_axes(source), &domain_axes(source))
+            .eig_full($engine, &codomain_axes(source), &domain_axes(source))
             .unwrap();
         let bond = d.domain()[0].clone();
         let stored: Vec<SectorSpectrum<_, Complex64>> = d
-            .diagview()
+            .diagview($engine)
             .unwrap()
             .into_iter()
             .map(|entry| SectorSpectrum {
@@ -446,9 +492,9 @@ macro_rules! assert_shuffled_eig_composition {
                 sector: entry.sector,
             })
             .collect();
-        let d = TensorMap::diagonal(&runtime, &bond, stored).unwrap();
+        let d = TensorMap::diagonal($engine, &runtime, &bond, stored).unwrap();
         let permutation: TensorMap<_, Complex64> =
-            TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, indices| {
+            TensorMap::from_subblock_fn($engine, &runtime, [&bond], [&bond], |trees, indices| {
                 let n = bond.degeneracy(trees.coupled()).unwrap();
                 if indices[0] == shuffle(n)[indices[1]] {
                     Complex64::new(1.0, 0.0)
@@ -457,10 +503,10 @@ macro_rules! assert_shuffled_eig_composition {
                 }
             })
             .unwrap();
-        let v = v.compose(&permutation).unwrap();
-        let spectra = d.diagview().unwrap();
+        let v = v.compose($engine, &permutation).unwrap();
+        let spectra = d.diagview($engine).unwrap();
 
-        let references: Vec<(_, Vec<Complex64>)> = sector_matrices!(source)
+        let references: Vec<(_, Vec<Complex64>)> = sector_matrices!($engine, source)
             .iter()
             .map(|(sector, matrix)| {
                 let published = triangular_eigenvalues(matrix);
@@ -479,8 +525,13 @@ macro_rules! assert_shuffled_eig_composition {
                 magnitudes: values.iter().map(|value| value.norm()).collect(),
             })
             .collect();
-        let full_v = sector_matrices!(v);
-        let terms = source.materialize().unwrap().dense_data().unwrap().len();
+        let full_v = sector_matrices!($engine, v);
+        let terms = source
+            .materialize($engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len();
         let mut gapped = false;
         for (name, truncation, policy) in policies!($target) {
             let case = format!("{} {name}", $tag);
@@ -496,11 +547,15 @@ macro_rules! assert_shuffled_eig_composition {
                 gapped |= positions.windows(2).any(|pair| pair[1] != pair[0] + 1);
             }
             let selection = &found.selection;
-            let got_d = d.restrict_leg(&[(0, selection), (1, selection)]).unwrap();
-            let got_v = v.restrict_leg(&[(v.codomain_rank(), selection)]).unwrap();
+            let got_d = d
+                .restrict_leg($engine, &[(0, selection), (1, selection)])
+                .unwrap();
+            let got_v = v
+                .restrict_leg($engine, &[(v.codomain_rank(), selection)])
+                .unwrap();
 
             // Restriction is a gather at the kept positions, exactly.
-            for (sector, matrix) in sector_matrices!(got_v) {
+            for (sector, matrix) in sector_matrices!($engine, got_v) {
                 let (_, parent) = full_v.iter().find(|(s, _)| *s == sector).unwrap();
                 let positions = selection.positions(&sector).unwrap();
                 assert_eq!(matrix.cols, positions.len(), "{case}: v columns");
@@ -510,7 +565,7 @@ macro_rules! assert_shuffled_eig_composition {
                     }
                 }
             }
-            for entry in got_d.diagview().unwrap() {
+            for entry in got_d.diagview($engine).unwrap() {
                 let (_, reference) = references
                     .iter()
                     .find(|(sector, _)| *sector == entry.sector)
@@ -528,8 +583,8 @@ macro_rules! assert_shuffled_eig_composition {
                     terms,
                 );
             }
-            let left = source.compose(&got_v).unwrap();
-            let right = got_v.compose(&got_d).unwrap();
+            let left = source.compose($engine, &got_v).unwrap();
+            let right = got_v.compose($engine, &got_d).unwrap();
             numerics::assert_slices_close(
                 &format!("{case}: t * v = v * d"),
                 left.dense_data().unwrap(),
@@ -553,14 +608,17 @@ macro_rules! assert_shuffled_eig_composition {
 
 #[test]
 fn shuffled_eig_bond_is_truncated_at_tensorkits_stored_positions() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let leg = u1_leg(&[(-1, 2), (0, 4), (1, 3)]);
     assert_shuffled_eig_composition!(
+        engine,
         complex_triangular(&leg, 0x0e19_2095),
         u1_leg(&[(-1, 1), (0, 2), (1, 2)]),
         "u1 shuffled eig c64"
     );
     let leg = su2_leg(&[(0, 4), (1, 3), (2, 2)]);
     assert_shuffled_eig_composition!(
+        engine,
         complex_triangular(&leg, 0x0e19_2096),
         su2_leg(&[(0, 2), (1, 2)]),
         "su2 shuffled eig c64"

@@ -61,7 +61,7 @@ use single_precision_oracle::{fermion_su2_leg_with, K};
 
 use crate::fixtures;
 
-use fixtures::{codomain_axes, cuda_runtime, domain_axes};
+use fixtures::{codomain_axes, domain_axes, host_runtime};
 
 // ---------------------------------------------------------------------------
 // Payload markers
@@ -82,6 +82,7 @@ fn tolerance<D: DevicePayload>(terms: usize, scale: f64, kappa: f64) -> f64 {
 
 /// `||actual - expected||` over the whole tensor, against an absolute bound.
 fn assert_residual<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
     actual: &TensorMap<R, D>,
     expected: &TensorMap<R, D>,
     bound: f64,
@@ -91,9 +92,9 @@ fn assert_residual<R, D>(
     D: FactorPayload,
 {
     let residual = actual
-        .axpby(D::entry(1.0, 0.0), expected, D::entry(-1.0, 0.0))
+        .axpby(engine, D::entry(1.0, 0.0), expected, D::entry(-1.0, 0.0))
         .unwrap()
-        .norm(2.0)
+        .norm(engine, 2.0)
         .unwrap();
     assert!(
         residual <= bound,
@@ -151,6 +152,7 @@ fn fixture_parts(diagonal: &[f64; 4], row: usize, col: usize) -> (f64, f64) {
 }
 
 fn fixture_with<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     codomain: &GradedSpace<R>,
     domain: &GradedSpace<R>,
@@ -160,7 +162,7 @@ where
     R: DeviceRule,
     D: FactorPayload,
 {
-    TensorMap::<R, D>::from_subblock_fn(runtime, [codomain], [domain], |_, index| {
+    TensorMap::<R, D>::from_subblock_fn(engine, runtime, [codomain], [domain], |_, index| {
         let (re, im) = fixture_parts(diagonal, index[0], index[1]);
         D::entry(re, im)
     })
@@ -168,6 +170,7 @@ where
 }
 
 fn fixture<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     codomain: &GradedSpace<R>,
     domain: &GradedSpace<R>,
@@ -176,7 +179,7 @@ where
     R: DeviceRule,
     D: FactorPayload,
 {
-    fixture_with(runtime, codomain, domain, &POSITIVE)
+    fixture_with(engine, runtime, codomain, domain, &POSITIVE)
 }
 
 /// `sigma_max / sigma_min` of the same fixture at double precision.
@@ -185,6 +188,7 @@ where
 /// the complex field has the same singular values, and the imaginary part is
 /// included exactly when the payload under test carries one.
 fn measured_kappa<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     codomain: &GradedSpace<R>,
     domain: &GradedSpace<R>,
@@ -194,8 +198,12 @@ where
     R: DeviceRule,
     D: FactorPayload,
 {
-    let wide =
-        TensorMap::<R, Complex64>::from_subblock_fn(runtime, [codomain], [domain], |_, index| {
+    let wide = TensorMap::<R, Complex64>::from_subblock_fn(
+        engine,
+        runtime,
+        [codomain],
+        [domain],
+        |_, index| {
             let (re, im) = fixture_parts(diagonal, index[0], index[1]);
             Complex64::new(
                 re,
@@ -205,12 +213,13 @@ where
                     0.0
                 },
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let mut largest = 0.0_f64;
     let mut smallest = f64::INFINITY;
     for entry in &wide
-        .svd_vals(&codomain_axes(&wide), &domain_axes(&wide))
+        .svd_vals(engine, &codomain_axes(&wide), &domain_axes(&wide))
         .unwrap()
     {
         for &value in &entry.values {
@@ -254,6 +263,8 @@ fn su2_leg() -> GradedSpace<SU2FusionRule> {
 // ---------------------------------------------------------------------------
 
 fn assert_device_svd_matches_host<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     codomain: &GradedSpace<R>,
     domain: &GradedSpace<R>,
@@ -261,35 +272,40 @@ fn assert_device_svd_matches_host<R, D>(
     R: DeviceRule,
     D: FactorPayload,
 {
-    let source = fixture::<R, D>(runtime, codomain, domain);
-    let kappa = measured_kappa::<R, D>(runtime, codomain, domain, &POSITIVE);
+    let source = fixture::<R, D>(engine, runtime, codomain, domain);
+    let kappa = measured_kappa::<R, D>(engine, runtime, codomain, domain, &POSITIVE);
     let terms = source
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .len()
         .max(1);
-    let norm = source.norm(2.0).unwrap();
+    let norm = source.norm(engine, 2.0).unwrap();
     assert!(norm > 0.0, "the SVD fixture [{}] is vacuous", D::NAME);
     let bound = tolerance::<D>(terms, norm, kappa);
 
-    let source_payload = source.materialize().unwrap().dense_data().unwrap().to_vec();
+    let source_payload = source
+        .materialize(engine)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
     let Svd {
         u: host_u,
         s: host_s,
         vh: host_vh,
     } = source
-        .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+        .svd_compact(engine, &codomain_axes(&source), &domain_axes(&source))
         .unwrap();
 
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let Svd {
         u: device_u,
         s: device_s,
         vh: device_vh,
     } = device
-        .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+        .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
     let provider = source.provider() as *const R;
     for factor in [&device_u, &device_s, &device_vh] {
@@ -297,9 +313,9 @@ fn assert_device_svd_matches_host<R, D>(
         assert_eq!(factor.placement(), symtn::expert::Placement::Cuda(0));
     }
 
-    let u = device_u.to_host().unwrap();
-    let s = device_s.to_host().unwrap();
-    let vh = device_vh.to_host().unwrap();
+    let u = device_u.to_host(cuda).unwrap();
+    let s = device_s.to_host(cuda).unwrap();
+    let vh = device_vh.to_host(cuda).unwrap();
     for (actual, expected, what) in [
         (&u, &host_u, "svd u"),
         (&s, &host_s, "svd s"),
@@ -316,15 +332,15 @@ fn assert_device_svd_matches_host<R, D>(
     // The spectrum is gauge independent, so it is a pointwise oracle.
     numerics::assert_slices_close_scaled(
         &format!("{} [{}]", "svd spectrum", D::NAME),
-        s.materialize().unwrap().dense_data().unwrap(),
-        host_s.materialize().unwrap().dense_data().unwrap(),
+        s.materialize(engine).unwrap().dense_data().unwrap(),
+        host_s.materialize(engine).unwrap().dense_data().unwrap(),
         terms,
         kappa,
     );
 
     // Descending and non-negative within every coupled sector: the contract
     // the truncation composition below relies on.
-    for entry in &s.diagview().unwrap() {
+    for entry in &s.diagview(engine).unwrap() {
         let mut previous = f64::INFINITY;
         for (index, value) in entry.values.iter().enumerate() {
             let (re, im) = value.parts();
@@ -352,21 +368,33 @@ fn assert_device_svd_matches_host<R, D>(
 
     // Isometry and reconstruction: the two identities that hold in any gauge.
     let identity_bound = tolerance::<D>(terms, 1.0, kappa);
+    let host_product = u.adjoint(engine).unwrap().compose(engine, &u).unwrap();
+    let host_result =
+        TensorMap::<R, D>::isomorphism(engine, runtime, u.domain().iter(), u.domain().iter())
+            .unwrap();
     assert_residual(
-        &u.adjoint().unwrap().compose(&u).unwrap(),
-        &TensorMap::<R, D>::isomorphism(runtime, u.domain().iter(), u.domain().iter()).unwrap(),
+        engine,
+        &host_product,
+        &host_result,
         identity_bound,
         "svd u isometry",
     );
+    let vh_adjoint = vh.adjoint(engine).unwrap();
+    let host_result = vh.compose(engine, &vh_adjoint).unwrap();
+    let host_result_2 =
+        TensorMap::<R, D>::isomorphism(engine, runtime, vh.codomain().iter(), vh.codomain().iter())
+            .unwrap();
     assert_residual(
-        &vh.compose(&vh.adjoint().unwrap()).unwrap(),
-        &TensorMap::<R, D>::isomorphism(runtime, vh.codomain().iter(), vh.codomain().iter())
-            .unwrap(),
+        engine,
+        &host_result,
+        &host_result_2,
         identity_bound,
         "svd vh coisometry",
     );
+    let reconstruction = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
     assert_residual(
-        &u.compose(&s).unwrap().compose(&vh).unwrap(),
+        engine,
+        &reconstruction,
         &source,
         bound,
         "svd reconstruction",
@@ -374,7 +402,7 @@ fn assert_device_svd_matches_host<R, D>(
 
     // The source is an input, not scratch: bit for bit unchanged.
     assert_eq!(
-        device.to_host().unwrap().dense_data().unwrap(),
+        device.to_host(cuda).unwrap().dense_data().unwrap(),
         source_payload
     );
 }
@@ -382,28 +410,30 @@ fn assert_device_svd_matches_host<R, D>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_svd_compact_matches_the_host_at_every_payload() {
-    let runtime = cuda_runtime();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = host_runtime();
     let square = u1_leg([2, 3, 2]);
     let tall = u1_leg([3, 4, 3]);
     let su2 = su2_leg();
     let fermion = fermion_su2_leg_with([2, 2, 1]);
 
     for (codomain, domain) in [(&square, &square), (&tall, &square)] {
-        assert_device_svd_matches_host::<_, f64>(&runtime, codomain, domain);
-        assert_device_svd_matches_host::<_, Complex64>(&runtime, codomain, domain);
-        assert_device_svd_matches_host::<_, f32>(&runtime, codomain, domain);
-        assert_device_svd_matches_host::<_, Complex32>(&runtime, codomain, domain);
+        assert_device_svd_matches_host::<_, f64>(engine, cuda, &runtime, codomain, domain);
+        assert_device_svd_matches_host::<_, Complex64>(engine, cuda, &runtime, codomain, domain);
+        assert_device_svd_matches_host::<_, f32>(engine, cuda, &runtime, codomain, domain);
+        assert_device_svd_matches_host::<_, Complex32>(engine, cuda, &runtime, codomain, domain);
     }
     // Wide as well as tall, so both compact factor shapes are assembled.
-    assert_device_svd_matches_host::<_, f32>(&runtime, &square, &tall);
-    assert_device_svd_matches_host::<_, Complex32>(&runtime, &square, &tall);
+    assert_device_svd_matches_host::<_, f32>(engine, cuda, &runtime, &square, &tall);
+    assert_device_svd_matches_host::<_, Complex32>(engine, cuda, &runtime, &square, &tall);
 
     // SU(2): several quantum dimensions. fZ2 x U(1) x SU(2): fermionic signs
     // and non-Abelian recoupling in one provider.
-    assert_device_svd_matches_host::<_, f32>(&runtime, &su2, &su2);
-    assert_device_svd_matches_host::<_, Complex32>(&runtime, &su2, &su2);
-    assert_device_svd_matches_host::<_, f32>(&runtime, &fermion, &fermion);
-    assert_device_svd_matches_host::<_, Complex32>(&runtime, &fermion, &fermion);
+    assert_device_svd_matches_host::<_, f32>(engine, cuda, &runtime, &su2, &su2);
+    assert_device_svd_matches_host::<_, Complex32>(engine, cuda, &runtime, &su2, &su2);
+    assert_device_svd_matches_host::<_, f32>(engine, cuda, &runtime, &fermion, &fermion);
+    assert_device_svd_matches_host::<_, Complex32>(engine, cuda, &runtime, &fermion, &fermion);
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +441,8 @@ fn device_svd_compact_matches_the_host_at_every_payload() {
 // ---------------------------------------------------------------------------
 
 fn assert_device_qr_matches_host<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     codomain: &GradedSpace<R>,
     domain: &GradedSpace<R>,
@@ -418,27 +450,27 @@ fn assert_device_qr_matches_host<R, D>(
     R: DeviceRule,
     D: FactorPayload,
 {
-    let source = fixture::<R, D>(runtime, codomain, domain);
-    let kappa = measured_kappa::<R, D>(runtime, codomain, domain, &POSITIVE);
+    let source = fixture::<R, D>(engine, runtime, codomain, domain);
+    let kappa = measured_kappa::<R, D>(engine, runtime, codomain, domain, &POSITIVE);
     let terms = source.dense_data().unwrap().len().max(1);
-    let norm = source.norm(2.0).unwrap();
+    let norm = source.norm(engine, 2.0).unwrap();
     let bound = tolerance::<D>(terms, norm, kappa);
 
     let Qr {
         q: host_q,
         r: host_r,
     } = source
-        .qr_compact(&codomain_axes(&source), &domain_axes(&source))
+        .qr_compact(engine, &codomain_axes(&source), &domain_axes(&source))
         .unwrap();
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let Qr {
         q: device_q,
         r: device_r,
     } = device
-        .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+        .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
-    let q = device_q.to_host().unwrap();
-    let r = device_r.to_host().unwrap();
+    let q = device_q.to_host(cuda).unwrap();
+    let r = device_r.to_host(cuda).unwrap();
 
     assert_eq!(structure(&q), structure(&host_q), "qr q [{}]", D::NAME);
     assert_eq!(structure(&r), structure(&host_r), "qr r [{}]", D::NAME);
@@ -459,31 +491,41 @@ fn assert_device_qr_matches_host<R, D>(
         terms,
         kappa,
     );
+    let host_product = q.adjoint(engine).unwrap().compose(engine, &q).unwrap();
+    let host_result =
+        TensorMap::<R, D>::isomorphism(engine, runtime, q.domain().iter(), q.domain().iter())
+            .unwrap();
 
     assert_residual(
-        &q.adjoint().unwrap().compose(&q).unwrap(),
-        &TensorMap::<R, D>::isomorphism(runtime, q.domain().iter(), q.domain().iter()).unwrap(),
+        engine,
+        &host_product,
+        &host_result,
         tolerance::<D>(terms, 1.0, kappa),
         "qr q isometry",
     );
-    assert_residual(&q.compose(&r).unwrap(), &source, bound, "qr reconstruction");
+    let reconstruction = q.compose(engine, &r).unwrap();
+    assert_residual(engine, &reconstruction, &source, bound, "qr reconstruction");
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_qr_compact_matches_the_host_at_every_payload() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     fn all_payloads<R: DeviceRule>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
         runtime: &Runtime,
         codomain: &GradedSpace<R>,
         domain: &GradedSpace<R>,
     ) {
-        assert_device_qr_matches_host::<_, f64>(runtime, codomain, domain);
-        assert_device_qr_matches_host::<_, Complex64>(runtime, codomain, domain);
-        assert_device_qr_matches_host::<_, f32>(runtime, codomain, domain);
-        assert_device_qr_matches_host::<_, Complex32>(runtime, codomain, domain);
+        assert_device_qr_matches_host::<_, f64>(engine, cuda, runtime, codomain, domain);
+        assert_device_qr_matches_host::<_, Complex64>(engine, cuda, runtime, codomain, domain);
+        assert_device_qr_matches_host::<_, f32>(engine, cuda, runtime, codomain, domain);
+        assert_device_qr_matches_host::<_, Complex32>(engine, cuda, runtime, codomain, domain);
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let square = u1_leg([2, 3, 2]);
     let tall = u1_leg([3, 4, 3]);
     let su2 = su2_leg();
@@ -491,49 +533,59 @@ fn device_qr_compact_matches_the_host_at_every_payload() {
 
     // Square, tall and wide blocks.
     for (codomain, domain) in [(&square, &square), (&tall, &square), (&square, &tall)] {
-        all_payloads(&runtime, codomain, domain);
+        all_payloads(engine, cuda, &runtime, codomain, domain);
     }
     // Dual legs: the coupled sectors are the duals of the nondual case.
     let dual_square = square.try_dual().unwrap();
     let dual_tall = tall.try_dual().unwrap();
-    all_payloads(&runtime, &dual_tall, &dual_square);
+    all_payloads(engine, cuda, &runtime, &dual_tall, &dual_square);
     // SU(2): several quantum dimensions. fZ2 x U(1) x SU(2): fermionic signs
     // and non-Abelian recoupling in one provider.
-    all_payloads(&runtime, &su2, &su2);
-    all_payloads(&runtime, &fermion, &fermion);
+    all_payloads(engine, cuda, &runtime, &su2, &su2);
+    all_payloads(engine, cuda, &runtime, &fermion, &fermion);
 }
 
 /// The factorization laws where the QR is *not* unique, so no pointwise host
 /// comparison applies: `Q R = A`, `Q^H Q = 1`, block structure equal to the
 /// host's, and every `R_jj` real and non-negative.
-fn assert_device_qr_laws<R, D>(source: &TensorMap<R, D>, what: &str)
-where
+fn assert_device_qr_laws<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    source: &TensorMap<R, D>,
+    what: &str,
+) where
     R: DeviceRule,
     D: FactorPayload,
 {
     let runtime = source.runtime();
     let terms = source.dense_data().unwrap().len().max(1);
-    let norm = source.norm(2.0).unwrap();
+    let norm = source.norm(engine, 2.0).unwrap();
     let bound = tolerance::<D>(terms, norm, 1.0);
     let Qr {
         q: host_q,
         r: host_r,
     } = source
-        .qr_compact(&codomain_axes(source), &domain_axes(source))
+        .qr_compact(engine, &codomain_axes(source), &domain_axes(source))
         .unwrap();
     let Qr { q, r } = source
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .qr_compact(&codomain_axes(source), &domain_axes(source))
+        .qr_compact(cuda, &codomain_axes(source), &domain_axes(source))
         .unwrap();
-    let q = q.to_host().unwrap();
-    let r = r.to_host().unwrap();
+    let q = q.to_host(cuda).unwrap();
+    let r = r.to_host(cuda).unwrap();
     assert_eq!(structure(&q), structure(&host_q), "{what} q [{}]", D::NAME);
     assert_eq!(structure(&r), structure(&host_r), "{what} r [{}]", D::NAME);
-    assert_residual(&q.compose(&r).unwrap(), source, bound, what);
+    let reconstruction = q.compose(engine, &r).unwrap();
+    assert_residual(engine, &reconstruction, source, bound, what);
+    let host_product = q.adjoint(engine).unwrap().compose(engine, &q).unwrap();
+    let host_result =
+        TensorMap::<R, D>::isomorphism(engine, runtime, q.domain().iter(), q.domain().iter())
+            .unwrap();
     assert_residual(
-        &q.adjoint().unwrap().compose(&q).unwrap(),
-        &TensorMap::<R, D>::isomorphism(runtime, q.domain().iter(), q.domain().iter()).unwrap(),
+        engine,
+        &host_product,
+        &host_result,
         tolerance::<D>(terms, 1.0, 1.0),
         what,
     );
@@ -558,24 +610,36 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_qr_compact_obeys_its_laws_on_rank_deficient_and_dual_multileg_blocks() {
-    fn cases<D: FactorPayload>(runtime: &Runtime) {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    fn cases<D: FactorPayload>(
+        cuda: &mut dyn symtn::typed::Engine,
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+    ) {
         let leg = u1_leg([2, 3, 2]);
         // `a_ij = u_i v_j`, the product formed in `D` itself, so every coupled
         // block has rank one at every payload: a real `D` drops the imaginary
         // part of `u` and `v` before the product, not of the product.
-        let rank_one =
-            TensorMap::<U1FusionRule, D>::from_subblock_fn(runtime, [&leg], [&leg], |_, index| {
+        let rank_one = TensorMap::<U1FusionRule, D>::from_subblock_fn(
+            engine,
+            runtime,
+            [&leg],
+            [&leg],
+            |_, index| {
                 let (i, j) = (index[0] as f64, index[1] as f64);
                 let u = D::entry(1.0 + 0.5 * i, 0.25 * i);
                 let v = D::entry(1.0 + 0.25 * j, -0.125 * j);
                 u * v
-            })
-            .unwrap();
-        assert_device_qr_laws(&rank_one, "rank-one qr");
+            },
+        )
+        .unwrap();
+        assert_device_qr_laws(engine, cuda, &rank_one, "rank-one qr");
 
         let small = u1_leg([1, 2, 1]);
         let dual = small.try_dual().unwrap();
         let multileg = TensorMap::<U1FusionRule, D>::from_subblock_fn(
+            engine,
             runtime,
             [&small, &dual],
             [&small],
@@ -588,14 +652,14 @@ fn device_qr_compact_obeys_its_laws_on_rank_deficient_and_dual_multileg_blocks()
             },
         )
         .unwrap();
-        assert_device_qr_laws(&multileg, "dual multileg qr");
+        assert_device_qr_laws(engine, cuda, &multileg, "dual multileg qr");
     }
 
-    let runtime = cuda_runtime();
-    cases::<f64>(&runtime);
-    cases::<Complex64>(&runtime);
-    cases::<f32>(&runtime);
-    cases::<Complex32>(&runtime);
+    let runtime = host_runtime();
+    cases::<f64>(cuda, engine, &runtime);
+    cases::<Complex64>(cuda, engine, &runtime);
+    cases::<f32>(cuda, engine, &runtime);
+    cases::<Complex32>(cuda, engine, &runtime);
 }
 
 /// The positive-diagonal gauge the backend applies on device, read through the
@@ -607,15 +671,22 @@ fn device_qr_compact_obeys_its_laws_on_rank_deficient_and_dual_multileg_blocks()
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_qr_returns_the_positive_diagonal_gauge_at_every_payload() {
-    fn assert_gauge<D: FactorPayload>(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) {
-        let source = fixture::<U1FusionRule, D>(runtime, leg, leg);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    fn assert_gauge<D: FactorPayload>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+        leg: &GradedSpace<U1FusionRule>,
+    ) {
+        let source = fixture::<U1FusionRule, D>(engine, runtime, leg, leg);
         let terms = source.dense_data().unwrap().len().max(1);
         let Qr { r, .. } = source
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap()
-            .qr_compact(&codomain_axes(&source), &domain_axes(&source))
+            .qr_compact(cuda, &codomain_axes(&source), &domain_axes(&source))
             .unwrap();
-        let spectra = r.to_host().unwrap().diagview().unwrap();
+        let spectra = r.to_host(cuda).unwrap().diagview(engine).unwrap();
         assert!(
             !spectra.is_empty(),
             "the triangular factor [{}] has no coupled blocks",
@@ -636,12 +707,12 @@ fn device_qr_returns_the_positive_diagonal_gauge_at_every_payload() {
         }
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
-    assert_gauge::<f64>(&runtime, &leg);
-    assert_gauge::<Complex64>(&runtime, &leg);
-    assert_gauge::<f32>(&runtime, &leg);
-    assert_gauge::<Complex32>(&runtime, &leg);
+    assert_gauge::<f64>(engine, cuda, &runtime, &leg);
+    assert_gauge::<Complex64>(engine, cuda, &runtime, &leg);
+    assert_gauge::<f32>(engine, cuda, &runtime, &leg);
+    assert_gauge::<Complex32>(engine, cuda, &runtime, &leg);
 }
 
 /// A hand-computed complex phase: `A = [[-2i, 1+i], [0, 3i]]` is already upper
@@ -651,25 +722,36 @@ fn device_qr_returns_the_positive_diagonal_gauge_at_every_payload() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_qr_fixes_a_hand_computed_complex_phase() {
-    fn case<D: FactorPayload>(runtime: &Runtime) {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    fn case<D: FactorPayload>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+    ) {
         let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
         let a = [[(0.0, -2.0), (1.0, 1.0)], [(0.0, 0.0), (0.0, 3.0)]];
         let q_expected = [[(0.0, -1.0), (0.0, 0.0)], [(0.0, 0.0), (0.0, 1.0)]];
         let r_expected = [[(2.0, 0.0), (-1.0, 1.0)], [(0.0, 0.0), (3.0, 0.0)]];
-        let source =
-            TensorMap::<U1FusionRule, D>::from_subblock_fn(runtime, [&leg], [&leg], |_, x| {
+        let source = TensorMap::<U1FusionRule, D>::from_subblock_fn(
+            engine,
+            runtime,
+            [&leg],
+            [&leg],
+            |_, x| {
                 let (re, im) = a[x[0]][x[1]];
                 D::entry(re, im)
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         let Qr { q, r } = source
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap()
-            .qr_compact(&codomain_axes(&source), &domain_axes(&source))
+            .qr_compact(cuda, &codomain_axes(&source), &domain_axes(&source))
             .unwrap();
         let bound = tolerance::<D>(4, 3.0, 1.0);
         for (factor, expected, what) in [(q, q_expected, "q"), (r, r_expected, "r")] {
-            let factor = factor.to_host().unwrap();
+            let factor = factor.to_host(cuda).unwrap();
             let view = factor.subblock(0).unwrap();
             for (row, expected_row) in expected.iter().enumerate() {
                 for (col, &(re, im)) in expected_row.iter().enumerate() {
@@ -685,9 +767,9 @@ fn device_qr_fixes_a_hand_computed_complex_phase() {
         }
     }
 
-    let runtime = cuda_runtime();
-    case::<Complex64>(&runtime);
-    case::<Complex32>(&runtime);
+    let runtime = host_runtime();
+    case::<Complex64>(engine, cuda, &runtime);
+    case::<Complex32>(engine, cuda, &runtime);
 }
 
 // ---------------------------------------------------------------------------
@@ -695,6 +777,8 @@ fn device_qr_fixes_a_hand_computed_complex_phase() {
 // ---------------------------------------------------------------------------
 
 fn assert_device_eigh_matches_host<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     leg: &GradedSpace<R>,
     diagonal: &[f64; 4],
@@ -702,16 +786,16 @@ fn assert_device_eigh_matches_host<R, D>(
     R: DeviceRule,
     D: FactorPayload,
 {
-    let source = fixture_with::<R, D>(runtime, leg, leg, diagonal);
-    let kappa = measured_kappa::<R, D>(runtime, leg, leg, diagonal);
+    let source = fixture_with::<R, D>(engine, runtime, leg, leg, diagonal);
+    let kappa = measured_kappa::<R, D>(engine, runtime, leg, leg, diagonal);
     let terms = source
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .len()
         .max(1);
-    let norm = source.norm(2.0).unwrap();
+    let norm = source.norm(engine, 2.0).unwrap();
     let bound = tolerance::<D>(terms, norm, kappa);
 
     let Eigh {
@@ -719,24 +803,26 @@ fn assert_device_eigh_matches_host<R, D>(
         v: _host_v,
     } = source
         .eigh_full(
+            engine,
             &codomain_axes(&source),
             &domain_axes(&source),
             HermitianTol::DEFAULT,
         )
         .unwrap();
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let Eigh {
         d: device_d,
         v: device_v,
     } = device
         .eigh_full(
+            cuda,
             &codomain_axes(&device),
             &domain_axes(&device),
             HermitianTol::DEFAULT,
         )
         .unwrap();
-    let d = device_d.to_host().unwrap();
-    let v = device_v.to_host().unwrap();
+    let d = device_d.to_host(cuda).unwrap();
+    let v = device_v.to_host(cuda).unwrap();
 
     assert_eq!(structure(&d), structure(&host_d), "eigh d [{}]", D::NAME);
 
@@ -744,14 +830,14 @@ fn assert_device_eigh_matches_host<R, D>(
     // ordering, which both sides share, so they compare pointwise.
     numerics::assert_slices_close_scaled(
         &format!("{} [{}]", "eigh spectrum", D::NAME),
-        d.materialize().unwrap().dense_data().unwrap(),
-        host_d.materialize().unwrap().dense_data().unwrap(),
+        d.materialize(cuda).unwrap().dense_data().unwrap(),
+        host_d.materialize(engine).unwrap().dense_data().unwrap(),
         terms,
         kappa,
     );
 
     // Ascending within every coupled sector.
-    for entry in &d.diagview().unwrap() {
+    for entry in &d.diagview(engine).unwrap() {
         let mut previous = f64::NEG_INFINITY;
         for (index, value) in entry.values.iter().enumerate() {
             let (value, _) = value.parts();
@@ -764,28 +850,33 @@ fn assert_device_eigh_matches_host<R, D>(
             previous = value;
         }
     }
+    let host_result = v.adjoint(engine).unwrap().compose(engine, &v).unwrap();
+    let host_result_2 =
+        TensorMap::<R, D>::isomorphism(engine, runtime, v.domain().iter(), v.domain().iter())
+            .unwrap();
 
     assert_residual(
-        &v.adjoint().unwrap().compose(&v).unwrap(),
-        &TensorMap::<R, D>::isomorphism(runtime, v.domain().iter(), v.domain().iter()).unwrap(),
+        engine,
+        &host_result,
+        &host_result_2,
         tolerance::<D>(terms, 1.0, kappa),
         "eigh v isometry",
     );
-    assert_residual(
-        &v.compose(&d)
-            .unwrap()
-            .compose(&v.adjoint().unwrap())
-            .unwrap(),
-        &source,
-        bound,
-        "eigh reconstruction",
-    );
+    let v_adjoint = v.adjoint(engine).unwrap();
+    let host_result = v
+        .compose(engine, &d)
+        .unwrap()
+        .compose(engine, &v_adjoint)
+        .unwrap();
+    assert_residual(engine, &host_result, &source, bound, "eigh reconstruction");
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_eigh_full_matches_the_host_at_every_payload() {
-    let runtime = cuda_runtime();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = host_runtime();
     let u1 = u1_leg([2, 3, 2]);
     let su2 = su2_leg();
     let fermion = fermion_su2_leg_with([2, 2, 1]);
@@ -794,14 +885,14 @@ fn device_eigh_full_matches_the_host_at_every_payload() {
     // what separates the ascending-`lambda` contract from the former
     // `|lambda|`-descending order.
     for diagonal in [&POSITIVE, &INDEFINITE] {
-        assert_device_eigh_matches_host::<_, f64>(&runtime, &u1, diagonal);
-        assert_device_eigh_matches_host::<_, Complex64>(&runtime, &u1, diagonal);
-        assert_device_eigh_matches_host::<_, f32>(&runtime, &u1, diagonal);
-        assert_device_eigh_matches_host::<_, Complex32>(&runtime, &u1, diagonal);
-        assert_device_eigh_matches_host::<_, f32>(&runtime, &su2, diagonal);
-        assert_device_eigh_matches_host::<_, Complex32>(&runtime, &su2, diagonal);
-        assert_device_eigh_matches_host::<_, f32>(&runtime, &fermion, diagonal);
-        assert_device_eigh_matches_host::<_, Complex32>(&runtime, &fermion, diagonal);
+        assert_device_eigh_matches_host::<_, f64>(engine, cuda, &runtime, &u1, diagonal);
+        assert_device_eigh_matches_host::<_, Complex64>(engine, cuda, &runtime, &u1, diagonal);
+        assert_device_eigh_matches_host::<_, f32>(engine, cuda, &runtime, &u1, diagonal);
+        assert_device_eigh_matches_host::<_, Complex32>(engine, cuda, &runtime, &u1, diagonal);
+        assert_device_eigh_matches_host::<_, f32>(engine, cuda, &runtime, &su2, diagonal);
+        assert_device_eigh_matches_host::<_, Complex32>(engine, cuda, &runtime, &su2, diagonal);
+        assert_device_eigh_matches_host::<_, f32>(engine, cuda, &runtime, &fermion, diagonal);
+        assert_device_eigh_matches_host::<_, Complex32>(engine, cuda, &runtime, &fermion, diagonal);
     }
 }
 
@@ -818,12 +909,16 @@ fn device_eigh_full_matches_the_host_at_every_payload() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     fn perturbed<D: FactorPayload>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
         runtime: &Runtime,
         leg: &GradedSpace<U1FusionRule>,
         skew: f64,
     ) -> TensorMap<U1FusionRule, D, CudaStorage<D>> {
-        TensorMap::<U1FusionRule, D>::from_subblock_fn(runtime, [leg], [leg], |_, index| {
+        TensorMap::<U1FusionRule, D>::from_subblock_fn(engine, runtime, [leg], [leg], |_, index| {
             let (re, im) = fixture_parts(&POSITIVE, index[0], index[1]);
             if index[0] > index[1] {
                 D::entry(re + skew, im)
@@ -832,11 +927,11 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
             }
         })
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
     // 2^-20 against a fixture of Frobenius norm >= 8: a relative residual near
     // 6e-8, inside eps(f32)^(3/4) = 6.4e-6 and far outside
@@ -844,20 +939,20 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
     let skew = (-20.0_f64).exp2();
 
     assert!(
-        perturbed::<f32>(&runtime, &leg, skew)
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        perturbed::<f32>(engine, cuda, &runtime, &leg, skew)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .is_ok(),
         "an f32 block within eps(f32)^(3/4) must be admitted"
     );
     assert!(
-        perturbed::<Complex32>(&runtime, &leg, skew)
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        perturbed::<Complex32>(engine, cuda, &runtime, &leg, skew)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .is_ok(),
         "a Complex32 block within eps(f32)^(3/4) must be admitted"
     );
     assert!(
-        perturbed::<f64>(&runtime, &leg, skew)
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        perturbed::<f64>(engine, cuda, &runtime, &leg, skew)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .err()
             .unwrap()
             .report()
@@ -871,26 +966,26 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
     for (name, error) in [
         (
             "f64",
-            perturbed::<f64>(&runtime, &leg, gross)
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            perturbed::<f64>(engine, cuda, &runtime, &leg, gross)
+                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
         (
             "c64",
-            perturbed::<Complex64>(&runtime, &leg, gross)
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            perturbed::<Complex64>(engine, cuda, &runtime, &leg, gross)
+                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
         (
             "f32",
-            perturbed::<f32>(&runtime, &leg, gross)
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            perturbed::<f32>(engine, cuda, &runtime, &leg, gross)
+                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
         (
             "c32",
-            perturbed::<Complex32>(&runtime, &leg, gross)
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            perturbed::<Complex32>(engine, cuda, &runtime, &leg, gross)
+                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
     ] {
@@ -914,22 +1009,30 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_factorization_rejections_do_not_depend_on_the_payload() {
-    fn assert_rejections<D: FactorPayload>(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) {
-        let device = fixture::<U1FusionRule, D>(runtime, leg, leg)
-            .to_cuda()
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    fn assert_rejections<D: FactorPayload>(
+        cuda: &mut dyn symtn::typed::Engine,
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+        leg: &GradedSpace<U1FusionRule>,
+    ) {
+        let device = fixture::<U1FusionRule, D>(engine, runtime, leg, leg)
+            .to_cuda(cuda)
             .unwrap();
-        let lazy = device.adjoint().unwrap();
+        let lazy = device.adjoint(cuda).unwrap();
 
         let before = cuda_transfer_stats();
         for (operation, error) in [
             (
                 "svd_compact",
-                lazy.svd_compact(&codomain_axes(&lazy), &domain_axes(&lazy))
+                lazy.svd_compact(cuda, &codomain_axes(&lazy), &domain_axes(&lazy))
                     .err(),
             ),
             (
                 "eigh_full",
                 lazy.eigh_full(
+                    cuda,
                     &codomain_axes(&lazy),
                     &domain_axes(&lazy),
                     HermitianTol::DEFAULT,
@@ -953,12 +1056,12 @@ fn device_factorization_rejections_do_not_depend_on_the_payload() {
         );
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
-    assert_rejections::<f64>(&runtime, &leg);
-    assert_rejections::<Complex64>(&runtime, &leg);
-    assert_rejections::<f32>(&runtime, &leg);
-    assert_rejections::<Complex32>(&runtime, &leg);
+    assert_rejections::<f64>(cuda, engine, &runtime, &leg);
+    assert_rejections::<Complex64>(cuda, engine, &runtime, &leg);
+    assert_rejections::<f32>(cuda, engine, &runtime, &leg);
+    assert_rejections::<Complex32>(cuda, engine, &runtime, &leg);
 }
 
 // ---------------------------------------------------------------------------
@@ -976,7 +1079,9 @@ fn device_factorization_rejections_do_not_depend_on_the_payload() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_factorizations_handle_blocks_at_unaligned_offsets_at_every_payload() {
-    let runtime = cuda_runtime();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = host_runtime();
     let u1 = Arc::new(U1FusionRule);
 
     for (d0, d1) in [(3usize, 2usize), (5, 2), (3, 3), (4, 2), (2, 2)] {
@@ -985,14 +1090,14 @@ fn device_factorizations_handle_blocks_at_unaligned_offsets_at_every_payload() {
             [(U1Irrep::new(0), d0), (U1Irrep::new(1), d1)],
         )
         .unwrap();
-        assert_device_svd_matches_host::<_, f32>(&runtime, &leg, &leg);
-        assert_device_svd_matches_host::<_, Complex32>(&runtime, &leg, &leg);
-        assert_device_svd_matches_host::<_, f64>(&runtime, &leg, &leg);
-        assert_device_svd_matches_host::<_, Complex64>(&runtime, &leg, &leg);
-        assert_device_qr_matches_host::<_, f32>(&runtime, &leg, &leg);
-        assert_device_qr_matches_host::<_, Complex32>(&runtime, &leg, &leg);
-        assert_device_qr_matches_host::<_, f64>(&runtime, &leg, &leg);
-        assert_device_qr_matches_host::<_, Complex64>(&runtime, &leg, &leg);
+        assert_device_svd_matches_host::<_, f32>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_svd_matches_host::<_, Complex32>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_svd_matches_host::<_, f64>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_svd_matches_host::<_, Complex64>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_qr_matches_host::<_, f32>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_qr_matches_host::<_, Complex32>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_qr_matches_host::<_, f64>(engine, cuda, &runtime, &leg, &leg);
+        assert_device_qr_matches_host::<_, Complex64>(engine, cuda, &runtime, &leg, &leg);
     }
 }
 
@@ -1009,6 +1114,8 @@ fn device_factorizations_handle_blocks_at_unaligned_offsets_at_every_payload() {
 /// near-tie behaviour of #1324 does not apply. The discarded-weight
 /// postcondition is compared within the spectrum's own tolerance.
 fn assert_truncation_composition<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     leg: &GradedSpace<R>,
     truncation: &Truncation,
@@ -1016,28 +1123,28 @@ fn assert_truncation_composition<R, D>(
     R: DeviceRule,
     D: FactorPayload + symtn::typed::SpectrumMagnitude,
 {
-    let source = fixture::<R, D>(runtime, leg, leg);
-    let kappa = measured_kappa::<R, D>(runtime, leg, leg, &POSITIVE);
+    let source = fixture::<R, D>(engine, runtime, leg, leg);
+    let kappa = measured_kappa::<R, D>(engine, runtime, leg, leg, &POSITIVE);
     let terms = source.dense_data().unwrap().len().max(1);
-    let bound = tolerance::<D>(terms, source.norm(2.0).unwrap(), kappa);
+    let bound = tolerance::<D>(terms, source.norm(engine, 2.0).unwrap(), kappa);
 
     let expected = {
         let Svd { u, s, vh } = source
-            .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+            .svd_compact(engine, &codomain_axes(&source), &domain_axes(&source))
             .unwrap();
         let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), truncation)
+            .find_truncated(&s.diagview(engine).unwrap(), truncation)
             .unwrap();
         let s = s
-            .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
             .unwrap();
-        let mut singular_values = s.diagview().unwrap();
+        let mut singular_values = s.diagview(engine).unwrap();
         singular_values.sort_by(|left, right| left.sector.cmp(&right.sector));
         (
-            u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            u.restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
                 .unwrap(),
             s,
-            vh.restrict_leg(&[(0, &found.selection)]).unwrap(),
+            vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap(),
             singular_values,
             found.error,
         )
@@ -1049,21 +1156,25 @@ fn assert_truncation_composition<R, D>(
         s: device_s,
         vh: device_vh,
     } = source
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+        .svd_compact(cuda, &codomain_axes(&source), &domain_axes(&source))
         .unwrap();
-    let u = device_u.to_host().unwrap();
-    let s = device_s.to_host().unwrap();
-    let vh = device_vh.to_host().unwrap();
+    let u = device_u.to_host(cuda).unwrap();
+    let s = device_s.to_host(cuda).unwrap();
+    let vh = device_vh.to_host(cuda).unwrap();
 
     let found = s.domain()[0]
-        .find_truncated(&s.diagview().unwrap(), truncation)
+        .find_truncated(&s.diagview(engine).unwrap(), truncation)
         .unwrap();
     let selection = &found.selection;
-    let u = u.restrict_leg(&[(u.codomain_rank(), selection)]).unwrap();
-    let s = s.restrict_leg(&[(0, selection), (1, selection)]).unwrap();
-    let vh = vh.restrict_leg(&[(0, selection)]).unwrap();
+    let u = u
+        .restrict_leg(engine, &[(u.codomain_rank(), selection)])
+        .unwrap();
+    let s = s
+        .restrict_leg(engine, &[(0, selection), (1, selection)])
+        .unwrap();
+    let vh = vh.restrict_leg(engine, &[(0, selection)]).unwrap();
 
     assert_eq!(
         *selection.subspace(),
@@ -1084,7 +1195,7 @@ fn assert_truncation_composition<R, D>(
         );
     }
 
-    let mut kept = s.diagview().unwrap();
+    let mut kept = s.diagview(engine).unwrap();
     kept.sort_by(|left, right| left.sector.cmp(&right.sector));
     assert_eq!(kept.len(), expected_values.len());
     for (actual, oracle) in kept.iter().zip(&expected_values) {
@@ -1107,16 +1218,19 @@ fn assert_truncation_composition<R, D>(
         found.error,
         expected_error
     );
+    let host_product = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
+    let host_result = expected_u
+        .compose(engine, &expected_s)
+        .unwrap()
+        .compose(engine, &expected_vh)
+        .unwrap();
 
     // Reconstruction of the truncated triple, which is the postcondition a
     // caller composing this recipe actually relies on.
     assert_residual(
-        &u.compose(&s).unwrap().compose(&vh).unwrap(),
-        &expected_u
-            .compose(&expected_s)
-            .unwrap()
-            .compose(&expected_vh)
-            .unwrap(),
+        engine,
+        &host_product,
+        &host_result,
         bound,
         "truncated reconstruction",
     );
@@ -1125,7 +1239,9 @@ fn assert_truncation_composition<R, D>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_device_truncation_composition_matches_the_host_composition_at_every_payload() {
-    let runtime = cuda_runtime();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
     let su2 = su2_leg();
 
@@ -1137,12 +1253,12 @@ fn the_device_truncation_composition_matches_the_host_composition_at_every_paylo
     // behaviour #1324 documents is therefore out of scope here by
     // construction, not by tolerance.
     for truncation in [Truncation::Full, Truncation::rank(3), Truncation::rank(6)] {
-        assert_truncation_composition::<_, f64>(&runtime, &leg, &truncation);
-        assert_truncation_composition::<_, Complex64>(&runtime, &leg, &truncation);
-        assert_truncation_composition::<_, f32>(&runtime, &leg, &truncation);
-        assert_truncation_composition::<_, Complex32>(&runtime, &leg, &truncation);
-        assert_truncation_composition::<_, f32>(&runtime, &su2, &truncation);
-        assert_truncation_composition::<_, Complex32>(&runtime, &su2, &truncation);
+        assert_truncation_composition::<_, f64>(engine, cuda, &runtime, &leg, &truncation);
+        assert_truncation_composition::<_, Complex64>(engine, cuda, &runtime, &leg, &truncation);
+        assert_truncation_composition::<_, f32>(engine, cuda, &runtime, &leg, &truncation);
+        assert_truncation_composition::<_, Complex32>(engine, cuda, &runtime, &leg, &truncation);
+        assert_truncation_composition::<_, f32>(engine, cuda, &runtime, &su2, &truncation);
+        assert_truncation_composition::<_, Complex32>(engine, cuda, &runtime, &su2, &truncation);
     }
 }
 
@@ -1160,21 +1276,29 @@ fn the_device_truncation_composition_matches_the_host_composition_at_every_paylo
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_factorizations_cost_the_same_calls_and_half_the_bytes() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     type Cost = (u64, u64, u64, u64, u64, u64, u64);
 
-    fn measure<D: FactorPayload>(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> Cost {
-        let device = fixture::<U1FusionRule, D>(runtime, leg, leg)
-            .to_cuda()
+    fn measure<D: FactorPayload>(
+        cuda: &mut dyn symtn::typed::Engine,
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+        leg: &GradedSpace<U1FusionRule>,
+    ) -> Cost {
+        let device = fixture::<U1FusionRule, D>(engine, runtime, leg, leg)
+            .to_cuda(cuda)
             .unwrap();
         // Warm the lane, the scalar operands and the kernels of this dtype.
         drop(
             device
-                .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+                .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap(),
         );
         drop(
             device
                 .eigh_full(
+                    cuda,
                     &codomain_axes(&device),
                     &domain_axes(&device),
                     HermitianTol::DEFAULT,
@@ -1183,19 +1307,20 @@ fn device_factorizations_cost_the_same_calls_and_half_the_bytes() {
         );
         drop(
             device
-                .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+                .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap(),
         );
 
         let before = cuda_transfer_stats();
         drop(
             device
-                .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+                .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap(),
         );
         drop(
             device
                 .eigh_full(
+                    cuda,
                     &codomain_axes(&device),
                     &domain_axes(&device),
                     HermitianTol::DEFAULT,
@@ -1204,7 +1329,7 @@ fn device_factorizations_cost_the_same_calls_and_half_the_bytes() {
         );
         drop(
             device
-                .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+                .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap(),
         );
         let after = cuda_transfer_stats();
@@ -1223,18 +1348,18 @@ fn device_factorizations_cost_the_same_calls_and_half_the_bytes() {
         )
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
 
     for (narrow, wide, name) in [
         (
-            measure::<f32>(&runtime, &leg),
-            measure::<f64>(&runtime, &leg),
+            measure::<f32>(cuda, engine, &runtime, &leg),
+            measure::<f64>(cuda, engine, &runtime, &leg),
             "f32/f64",
         ),
         (
-            measure::<Complex32>(&runtime, &leg),
-            measure::<Complex64>(&runtime, &leg),
+            measure::<Complex32>(cuda, engine, &runtime, &leg),
+            measure::<Complex64>(cuda, engine, &runtime, &leg),
             "c32/c64",
         ),
     ] {
@@ -1258,22 +1383,29 @@ fn device_factorizations_cost_the_same_calls_and_half_the_bytes() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn complex_device_qr_costs_the_real_calls_and_twice_the_bytes() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     type Cost = (u64, u64, u64, u64, u64, u64, u64, u64);
 
-    fn measure<D: FactorPayload>(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> Cost {
-        let device = fixture::<U1FusionRule, D>(runtime, leg, leg)
-            .to_cuda()
+    fn measure<D: FactorPayload>(
+        cuda: &mut dyn symtn::typed::Engine,
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+        leg: &GradedSpace<U1FusionRule>,
+    ) -> Cost {
+        let device = fixture::<U1FusionRule, D>(engine, runtime, leg, leg)
+            .to_cuda(cuda)
             .unwrap();
         drop(
             device
-                .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+                .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap(),
         );
 
         let before = cuda_transfer_stats();
         drop(
             device
-                .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+                .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap(),
         );
         let after = cuda_transfer_stats();
@@ -1289,17 +1421,17 @@ fn complex_device_qr_costs_the_real_calls_and_twice_the_bytes() {
         )
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
     for (complex, real, name) in [
         (
-            measure::<Complex64>(&runtime, &leg),
-            measure::<f64>(&runtime, &leg),
+            measure::<Complex64>(cuda, engine, &runtime, &leg),
+            measure::<f64>(cuda, engine, &runtime, &leg),
             "c64/f64",
         ),
         (
-            measure::<Complex32>(&runtime, &leg),
-            measure::<f32>(&runtime, &leg),
+            measure::<Complex32>(cuda, engine, &runtime, &leg),
+            measure::<f32>(cuda, engine, &runtime, &leg),
             "c32/f32",
         ),
     ] {
@@ -1333,6 +1465,8 @@ fn complex_device_qr_costs_the_real_calls_and_twice_the_bytes() {
 /// both `A A^H` (rank deficient: zero eigenvalues in every tall sector) and
 /// `A A^H + 1` (full rank).
 fn assert_shared_plan_matches_host<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     codomain: [&GradedSpace<R>; 2],
     domain: &GradedSpace<R>,
@@ -1341,12 +1475,13 @@ fn assert_shared_plan_matches_host<R, D>(
     R: DeviceRule,
     D: FactorPayload,
 {
-    let source = TensorMap::<R, D>::rand_with_seed(runtime, codomain, [domain], seed).unwrap();
+    let source =
+        TensorMap::<R, D>::rand_with_seed(engine, runtime, codomain, [domain], seed).unwrap();
     let terms = source.dense_data().unwrap().len().max(1);
-    let norm = source.norm(2.0).unwrap();
+    let norm = source.norm(engine, 2.0).unwrap();
     let (mut largest, mut smallest) = (0.0_f64, f64::INFINITY);
     for entry in &source
-        .svd_vals(&codomain_axes(&source), &domain_axes(&source))
+        .svd_vals(engine, &codomain_axes(&source), &domain_axes(&source))
         .unwrap()
     {
         for &value in &entry.values {
@@ -1361,18 +1496,18 @@ fn assert_shared_plan_matches_host<R, D>(
     );
     let kappa = largest / smallest;
     let bound = tolerance::<D>(terms, norm, kappa);
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
 
     let Qr {
         q: host_q,
         r: host_r,
     } = source
-        .qr_compact(&codomain_axes(&source), &domain_axes(&source))
+        .qr_compact(engine, &codomain_axes(&source), &domain_axes(&source))
         .unwrap();
     let Qr { q, r } = device
-        .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+        .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
-    let (q, r) = (q.to_host().unwrap(), r.to_host().unwrap());
+    let (q, r) = (q.to_host(cuda).unwrap(), r.to_host(cuda).unwrap());
     assert_eq!(structure(&q), structure(&host_q), "plan qr q [{}]", D::NAME);
     assert_eq!(structure(&r), structure(&host_r), "plan qr r [{}]", D::NAME);
     numerics::assert_slices_close_scaled(
@@ -1390,7 +1525,8 @@ fn assert_shared_plan_matches_host<R, D>(
         kappa,
     );
     assert_residual(
-        &q.compose(&r).unwrap(),
+        engine,
+        &q.compose(cuda, &r).unwrap(),
         &source,
         bound,
         "plan qr reconstruction",
@@ -1401,15 +1537,15 @@ fn assert_shared_plan_matches_host<R, D>(
         s: host_s,
         vh: host_vh,
     } = source
-        .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+        .svd_compact(engine, &codomain_axes(&source), &domain_axes(&source))
         .unwrap();
     let Svd { u, s, vh } = device
-        .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+        .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
     let (u, s, vh) = (
-        u.to_host().unwrap(),
-        s.to_host().unwrap(),
-        vh.to_host().unwrap(),
+        u.to_host(cuda).unwrap(),
+        s.to_host(cuda).unwrap(),
+        vh.to_host(cuda).unwrap(),
     );
     assert_eq!(
         structure(&u),
@@ -1431,47 +1567,55 @@ fn assert_shared_plan_matches_host<R, D>(
     );
     numerics::assert_slices_close_scaled(
         &format!("plan svd s [{}]", D::NAME),
-        s.materialize().unwrap().dense_data().unwrap(),
-        host_s.materialize().unwrap().dense_data().unwrap(),
+        s.materialize(cuda).unwrap().dense_data().unwrap(),
+        host_s.materialize(engine).unwrap().dense_data().unwrap(),
         terms,
         kappa,
     );
     assert_residual(
-        &u.compose(&s).unwrap().compose(&vh).unwrap(),
+        engine,
+        &u.compose(cuda, &s).unwrap().compose(cuda, &vh).unwrap(),
         &source,
         bound,
         "plan svd reconstruction",
     );
+    let source_adjoint = source.adjoint(engine).unwrap();
 
-    let gram = source.compose(&source.adjoint().unwrap()).unwrap();
-    let identity =
-        TensorMap::<R, D>::isomorphism(runtime, gram.codomain().iter(), gram.domain().iter())
-            .unwrap();
+    let gram = source.compose(engine, &source_adjoint).unwrap();
+    let identity = TensorMap::<R, D>::isomorphism(
+        engine,
+        runtime,
+        gram.codomain().iter(),
+        gram.domain().iter(),
+    )
+    .unwrap();
     let shifted = gram
-        .axpby(D::entry(1.0, 0.0), &identity, D::entry(1.0, 0.0))
+        .axpby(engine, D::entry(1.0, 0.0), &identity, D::entry(1.0, 0.0))
         .unwrap();
     for (hermitian, what) in [(gram, "A A^H"), (shifted, "A A^H + 1")] {
         let terms = hermitian.dense_data().unwrap().len().max(1);
-        let scale = hermitian.norm(2.0).unwrap();
+        let scale = hermitian.norm(engine, 2.0).unwrap();
         let Eigh {
             d: host_d,
             v: host_v,
         } = hermitian
             .eigh_full(
+                engine,
                 &codomain_axes(&hermitian),
                 &domain_axes(&hermitian),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
-        let hermitian_device = hermitian.to_cuda().unwrap();
+        let hermitian_device = hermitian.to_cuda(cuda).unwrap();
         let Eigh { d, v } = hermitian_device
             .eigh_full(
+                cuda,
                 &codomain_axes(&hermitian_device),
                 &domain_axes(&hermitian_device),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
-        let (d, v) = (d.to_host().unwrap(), v.to_host().unwrap());
+        let (d, v) = (d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap());
         assert_eq!(
             structure(&d),
             structure(&host_d),
@@ -1488,15 +1632,17 @@ fn assert_shared_plan_matches_host<R, D>(
         // spectrum needs no conditioning factor even at a zero eigenvalue.
         numerics::assert_slices_close_scaled(
             &format!("plan eigh d {what} [{}]", D::NAME),
-            d.materialize().unwrap().dense_data().unwrap(),
-            host_d.materialize().unwrap().dense_data().unwrap(),
+            d.materialize(cuda).unwrap().dense_data().unwrap(),
+            host_d.materialize(engine).unwrap().dense_data().unwrap(),
             terms,
             scale.max(1.0),
         );
+        let v_adjoint = v.adjoint(cuda).unwrap();
         assert_residual(
-            &v.compose(&d)
+            engine,
+            &v.compose(cuda, &d)
                 .unwrap()
-                .compose(&v.adjoint().unwrap())
+                .compose(cuda, &v_adjoint)
                 .unwrap(),
             &hermitian,
             tolerance::<D>(terms, scale, 1.0),
@@ -1508,18 +1654,26 @@ fn assert_shared_plan_matches_host<R, D>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_factor_plan_publishes_the_host_spaces_at_every_payload() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     fn all_payloads<R: DeviceRule>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
         runtime: &Runtime,
         codomain: [&GradedSpace<R>; 2],
         domain: &GradedSpace<R>,
     ) {
-        assert_shared_plan_matches_host::<_, f64>(runtime, codomain, domain, 17);
-        assert_shared_plan_matches_host::<_, Complex64>(runtime, codomain, domain, 17);
-        assert_shared_plan_matches_host::<_, f32>(runtime, codomain, domain, 17);
-        assert_shared_plan_matches_host::<_, Complex32>(runtime, codomain, domain, 17);
+        assert_shared_plan_matches_host::<_, f64>(engine, cuda, runtime, codomain, domain, 17);
+        assert_shared_plan_matches_host::<_, Complex64>(
+            engine, cuda, runtime, codomain, domain, 17,
+        );
+        assert_shared_plan_matches_host::<_, f32>(engine, cuda, runtime, codomain, domain, 17);
+        assert_shared_plan_matches_host::<_, Complex32>(
+            engine, cuda, runtime, codomain, domain, 17,
+        );
     }
 
-    let runtime = cuda_runtime();
+    let runtime = host_runtime();
     let u1 = Arc::new(U1FusionRule);
     let leg = |sectors: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -1536,9 +1690,9 @@ fn device_factor_plan_publishes_the_host_spaces_at_every_payload() {
     let a = leg(&[(-1, 2), (0, 1), (1, 2)]);
     let b = leg(&[(0, 1), (1, 2)]).try_dual().unwrap();
     let c = leg(&[(-1, 3), (0, 2), (2, 1)]);
-    all_payloads(&runtime, [&a, &b], &c);
+    all_payloads(engine, cuda, &runtime, [&a, &b], &c);
 
     // SU(2): several trees per coupled sector with `dim(c) != 1`.
     let su2 = su2_leg();
-    all_payloads(&runtime, [&su2, &su2], &su2);
+    all_payloads(engine, cuda, &runtime, [&su2, &su2], &su2);
 }

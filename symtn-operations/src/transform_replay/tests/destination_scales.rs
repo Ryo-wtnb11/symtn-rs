@@ -44,8 +44,10 @@ fn oracle<D>(
 where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<f64> + ConjugateValue,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut out = vec![D::zero(); 20];
     tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -75,6 +77,7 @@ where
         + From<f64>
         + core::fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (dst, src, structure) = fixture();
     for members in [1, 2, 3] {
         let source = source(members, unit);
@@ -89,6 +92,7 @@ where
         for threads in [1, 4] {
             let mut actual = vec![D::from(f64::NAN); 20 * members];
             tree_transform_members_overwrite_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
                 &mut TreeTransformWorkspace::default(),
@@ -108,6 +112,7 @@ where
             for threads in [1, 4] {
                 let mut actual = vec![D::from(f64::NAN); 20];
                 tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                    engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut DefaultDenseExecutor::new(),
                     &mut TreeTransformWorkspace::default(),
@@ -138,12 +143,14 @@ fn destination_scales_fold_into_single_moves_and_multi_scatters() {
 
 #[test]
 fn unsorted_destination_scales_are_rejected_before_any_write() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (dst, src, structure) = fixture();
     let source = source(2, 1.0_f64);
     let bad = [(8, -1.0), (4, -1.0)];
     for members in [1, 2] {
         let mut out = vec![7.0; 20 * members];
         let error = tree_transform_members_overwrite_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),

@@ -30,10 +30,11 @@ macro_rules! base_suite {
 
             #[test]
             fn arithmetic_and_reductions_match_the_widened_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
                 let runtime = runtime();
                 let leg = u1_leg();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg], 9_001);
-                let (b, wb) = twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg], 9_002);
+                let (a, wa) = twin!(engine, &runtime, $narrow, $wide, [&leg, &leg], [&leg], 9_001);
+                let (b, wb) = twin!(engine, &runtime, $narrow, $wide, [&leg, &leg], [&leg], 9_002);
                 let terms = wa.dense_data().unwrap().len();
 
                 assert_payloads_agree("input", a.dense_data().unwrap(), wa.dense_data().unwrap(), 1);
@@ -42,112 +43,115 @@ macro_rules! base_suite {
                 let wide_scale = <$wide as Parts>::parts(0.5, -0.25);
                 assert_payloads_agree(
                     "scale",
-                    a.scale(scale).unwrap().dense_data().unwrap(),
-                    wa.scale(wide_scale).unwrap().dense_data().unwrap(),
+                    a.scale(engine, scale).unwrap().dense_data().unwrap(),
+                    wa.scale(engine, wide_scale).unwrap().dense_data().unwrap(),
                     1,
                 );
                 assert_payloads_agree(
                     "add",
-                    a.axpby(scale, &b, wide_of_one::<$narrow>()).unwrap().dense_data().unwrap(),
-                    wa.axpby(wide_scale, &wb, wide_of_one::<$wide>())
+                    a.axpby(engine, scale, &b, wide_of_one::<$narrow>()).unwrap().dense_data().unwrap(),
+                    wa.axpby(engine, wide_scale, &wb, wide_of_one::<$wide>())
                         .unwrap()
                         .dense_data().unwrap(),
                     2,
                 );
                 assert_payloads_agree(
                     "zeros_like",
-                    a.zeros_like().unwrap().dense_data().unwrap(),
-                    wa.zeros_like().unwrap().dense_data().unwrap(),
+                    a.zeros_like(engine).unwrap().dense_data().unwrap(),
+                    wa.zeros_like(engine).unwrap().dense_data().unwrap(),
                     1,
                 );
 
                 assert_scalars_agree(
                     "norm",
-                    Complex64::new(a.norm(2.0).unwrap(), 0.0),
-                    Complex64::new(wa.norm(2.0).unwrap(), 0.0),
+                    Complex64::new(a.norm(engine, 2.0).unwrap(), 0.0),
+                    Complex64::new(wa.norm(engine, 2.0).unwrap(), 0.0),
                     terms,
                 );
                 assert_scalars_agree(
                     "norm(Inf)",
-                    Complex64::new(a.norm(f64::INFINITY).unwrap(), 0.0),
-                    Complex64::new(wa.norm(f64::INFINITY).unwrap(), 0.0),
+                    Complex64::new(a.norm(engine, f64::INFINITY).unwrap(), 0.0),
+                    Complex64::new(wa.norm(engine, f64::INFINITY).unwrap(), 0.0),
                     1,
                 );
                 assert_scalars_agree(
                     "norm(3)",
-                    Complex64::new(a.norm(3.0).unwrap(), 0.0),
-                    Complex64::new(wa.norm(3.0).unwrap(), 0.0),
+                    Complex64::new(a.norm(engine, 3.0).unwrap(), 0.0),
+                    Complex64::new(wa.norm(engine, 3.0).unwrap(), 0.0),
                     terms,
                 );
                 assert_scalars_agree(
                     "inner",
-                    a.inner(&b).unwrap().wide(),
-                    wa.inner(&wb).unwrap().wide(),
+                    a.inner(engine, &b).unwrap().wide(),
+                    wa.inner(engine, &wb).unwrap().wide(),
                     terms,
                 );
+let a_adjoint = &a.adjoint(engine).unwrap();
 
-                let square = a.compose(&a.adjoint().unwrap()).unwrap();
-                let wide_square = wa.compose(&wa.adjoint().unwrap()).unwrap();
+                let square = a.compose(engine, a_adjoint).unwrap();
+                let wa_adjoint = &wa.adjoint(engine).unwrap();
+                let wide_square = wa.compose(engine, wa_adjoint).unwrap();
                 assert_scalars_agree(
                     "tr",
-                    square.tr().unwrap().wide(),
-                    wide_square.tr().unwrap().wide(),
+                    square.tr(engine).unwrap().wide(),
+                    wide_square.tr(engine).unwrap().wide(),
                     terms,
                 );
             }
 
             #[test]
             fn structural_transforms_match_the_widened_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
                 let runtime = runtime();
                 let leg = fermion_su2_leg();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg, &leg], 9_101);
+                let (a, wa) = twin!(engine, &runtime, $narrow, $wide, [&leg, &leg], [&leg, &leg], 9_101);
                 let terms = wa.dense_data().unwrap().len();
 
                 for (what, got, expected) in [
                     (
                         "permute",
-                        a.permute(&[1, 2], &[3, 0]).unwrap(),
-                        wa.permute(&[1, 2], &[3, 0]).unwrap(),
+                        a.permute(engine, &[1, 2], &[3, 0]).unwrap(),
+                        wa.permute(engine, &[1, 2], &[3, 0]).unwrap(),
                     ),
                     (
                         "braid",
-                        a.braid(&[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap(),
-                        wa.braid(&[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap(),
+                        a.braid(engine, &[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap(),
+                        wa.braid(engine, &[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap(),
                     ),
                     (
                         "transpose",
-                        a.transpose(&[3, 2], &[1, 0]).unwrap(),
-                        wa.transpose(&[3, 2], &[1, 0]).unwrap(),
+                        a.transpose(engine, &[3, 2], &[1, 0]).unwrap(),
+                        wa.transpose(engine, &[3, 2], &[1, 0]).unwrap(),
                     ),
                     (
                         "repartition",
-                        a.repartition(1).unwrap(),
-                        wa.repartition(1).unwrap(),
+                        a.repartition(engine, 1).unwrap(),
+                        wa.repartition(engine, 1).unwrap(),
                     ),
-                    ("twist", a.twist(&[0, 2], Direction::Forward).unwrap(), wa.twist(&[0, 2], Direction::Forward).unwrap()),
+                    ("twist", a.twist(engine, &[0, 2], Direction::Forward).unwrap(), wa.twist(engine, &[0, 2], Direction::Forward).unwrap()),
                     (
                         "inverse twist",
-                        a.twist(&[1], Direction::Inverse).unwrap(),
-                        wa.twist(&[1], Direction::Inverse).unwrap(),
+                        a.twist(engine, &[1], Direction::Inverse).unwrap(),
+                        wa.twist(engine, &[1], Direction::Inverse).unwrap(),
                     ),
-                    ("flip", a.flip(&[0], Direction::Forward).unwrap(), wa.flip(&[0], Direction::Forward).unwrap()),
+                    ("flip", a.flip(engine, &[0], Direction::Forward).unwrap(), wa.flip(engine, &[0], Direction::Forward).unwrap()),
                     (
                         "adjoint (lazy)",
-                        a.adjoint().unwrap(),
-                        wa.adjoint().unwrap(),
+                        a.adjoint(engine).unwrap(),
+                        wa.adjoint(engine).unwrap(),
                     ),
                     (
                         "adjoint materialized",
-                        a.adjoint().unwrap().permute(&[0, 1], &[2, 3]).unwrap(),
-                        wa.adjoint().unwrap().permute(&[0, 1], &[2, 3]).unwrap(),
+                        a.adjoint(engine).unwrap().permute(engine, &[0, 1], &[2, 3]).unwrap(),
+                        wa.adjoint(engine).unwrap().permute(engine, &[0, 1], &[2, 3]).unwrap(),
                     ),
                     (
                         "trace_pairs",
-                        a.trace_pairs(&[(0, 3)]).unwrap(),
-                        wa.trace_pairs(&[(0, 3)]).unwrap(),
+                        a.trace_pairs(engine, &[(0, 3)]).unwrap(),
+                        wa.trace_pairs(engine, &[(0, 3)]).unwrap(),
                     ),
                 ] {
-                    assert_payloads_agree(what, got.materialize().unwrap().dense_data().unwrap(), expected.materialize().unwrap().dense_data().unwrap(), terms);
+                    assert_payloads_agree(what, got.materialize(engine).unwrap().dense_data().unwrap(), expected.materialize(engine).unwrap().dense_data().unwrap(), terms);
                     assert_eq!(
                         got.subblock_count(),
                         expected.subblock_count(),
@@ -158,7 +162,7 @@ macro_rules! base_suite {
                 // Negative control: the fixture is not invariant under the
                 // transforms above, so agreement is evidence and not an
                 // accident of a payload the operations leave alone.
-                let moved = a.permute(&[1, 2], &[3, 0]).unwrap();
+                let moved = a.permute(engine, &[1, 2], &[3, 0]).unwrap();
                 let largest = wa
                     .dense_data().unwrap()
                     .iter()
@@ -170,7 +174,7 @@ macro_rules! base_suite {
                     "the SU(2)/fermionic fixture must be moved by permute, largest change {largest:e}"
                 );
                 assert_ne!(
-                    a.twist(&[0, 2], Direction::Forward).unwrap().dense_data().unwrap(),
+                    a.twist(engine, &[0, 2], Direction::Forward).unwrap().dense_data().unwrap(),
                     a.dense_data().unwrap(),
                     "the fZ2 twist must change the payload of an odd-sector fixture"
                 );
@@ -181,10 +185,10 @@ macro_rules! base_suite {
                 // two transforms are still executed, so the payload makes a
                 // round trip through the dense kernel rather than being
                 // returned untouched.
-                let restored = a.permute(&[1, 2], &[3, 0]).unwrap();
+                let restored = a.permute(engine, &[1, 2], &[3, 0]).unwrap();
                 assert_payloads_agree(
                     "permute round trip",
-                    restored.permute(&[3, 0], &[1, 2]).unwrap().dense_data().unwrap(),
+                    restored.permute(engine, &[3, 0], &[1, 2]).unwrap().dense_data().unwrap(),
                     a.dense_data().unwrap(),
                     terms,
                 );
@@ -192,29 +196,30 @@ macro_rules! base_suite {
 
             #[test]
             fn products_and_contractions_match_the_widened_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
                 let runtime = runtime();
                 let leg = fermion_su2_leg();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg], [&leg], 9_201);
-                let (b, wb) = twin!(&runtime, $narrow, $wide, [&leg], [&leg], 9_202);
+                let (a, wa) = twin!(engine, &runtime, $narrow, $wide, [&leg], [&leg], 9_201);
+                let (b, wb) = twin!(engine, &runtime, $narrow, $wide, [&leg], [&leg], 9_202);
                 let terms = wa.dense_data().unwrap().len();
 
                 for (what, got, expected) in [
                     (
                         "contract",
-                        a.contract(&b, &ContractSpec { lhs: &[1], rhs: &[0], codomain: &[0], domain: &[1] }).unwrap(),
-                        wa.contract(&wb, &ContractSpec { lhs: &[1], rhs: &[0], codomain: &[0], domain: &[1] }).unwrap(),
+                        a.contract(engine, &b, &ContractSpec { lhs: &[1], rhs: &[0], codomain: &[0], domain: &[1] }).unwrap(),
+                        wa.contract(engine, &wb, &ContractSpec { lhs: &[1], rhs: &[0], codomain: &[0], domain: &[1] }).unwrap(),
                     ),
-                    ("compose", a.compose(&b).unwrap(), wa.compose(&wb).unwrap()),
-                    ("otimes", a.otimes(&b).unwrap(), wa.otimes(&wb).unwrap()),
+                    ("compose", a.compose(engine, &b).unwrap(), wa.compose(engine, &wb).unwrap()),
+                    ("otimes", a.otimes(engine, &b).unwrap(), wa.otimes(engine, &wb).unwrap()),
                     (
                         "cat domain",
-                        a.cat(&b, Side::Domain).unwrap(),
-                        wa.cat(&wb, Side::Domain).unwrap(),
+                        a.cat(engine, &b, Side::Domain).unwrap(),
+                        wa.cat(engine, &wb, Side::Domain).unwrap(),
                     ),
                     (
                         "cat codomain",
-                        a.cat(&b, Side::Codomain).unwrap(),
-                        wa.cat(&wb, Side::Codomain).unwrap(),
+                        a.cat(engine, &b, Side::Codomain).unwrap(),
+                        wa.cat(engine, &wb, Side::Codomain).unwrap(),
                     ),
                 ] {
                     assert_payloads_agree(what, got.dense_data().unwrap(), expected.dense_data().unwrap(), terms);
@@ -223,9 +228,10 @@ macro_rules! base_suite {
 
             #[test]
             fn rank_five_multi_block_contraction_matches_the_widened_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
                 let runtime = runtime();
                 let leg = u1_leg();
-                let (a, wa) = twin!(
+                let (a, wa) = twin!(engine,
                     &runtime,
                     $narrow,
                     $wide,
@@ -235,39 +241,40 @@ macro_rules! base_suite {
                 );
                 assert_eq!(a.rank(), 5);
                 assert!(a.subblock_count() > 1, "the fixture must be multi-block");
-                let (b, wb) = twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg], 9_302);
+                let (b, wb) = twin!(engine, &runtime, $narrow, $wide, [&leg, &leg], [&leg], 9_302);
                 let terms = wa.dense_data().unwrap().len().max(wb.dense_data().unwrap().len());
 
                 assert_payloads_agree(
                     "rank-5 contract",
-                    a.contract(&b, &ContractSpec { lhs: &[3, 4], rhs: &[0, 1], codomain: &[0, 1, 2], domain: &[3] })
+                    a.contract(engine, &b, &ContractSpec { lhs: &[3, 4], rhs: &[0, 1], codomain: &[0, 1, 2], domain: &[3] })
                         .unwrap()
                         .dense_data().unwrap(),
-                    wa.contract(&wb, &ContractSpec { lhs: &[3, 4], rhs: &[0, 1], codomain: &[0, 1, 2], domain: &[3] })
+                    wa.contract(engine, &wb, &ContractSpec { lhs: &[3, 4], rhs: &[0, 1], codomain: &[0, 1, 2], domain: &[3] })
                         .unwrap()
                         .dense_data().unwrap(),
                     terms,
                 );
                 assert_payloads_agree(
                     "rank-5 permute",
-                    a.permute(&[4, 0, 2], &[1, 3]).unwrap().dense_data().unwrap(),
-                    wa.permute(&[4, 0, 2], &[1, 3]).unwrap().dense_data().unwrap(),
+                    a.permute(engine, &[4, 0, 2], &[1, 3]).unwrap().dense_data().unwrap(),
+                    wa.permute(engine, &[4, 0, 2], &[1, 3]).unwrap().dense_data().unwrap(),
                     terms,
                 );
             }
 
             #[test]
             fn leg_restriction_and_diagonal_views_match_the_widened_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
                 let runtime = runtime();
                 let leg = u1_leg();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg], [&leg], 9_401);
+                let (a, wa) = twin!(engine, &runtime, $narrow, $wide, [&leg], [&leg], 9_401);
                 let terms = wa.dense_data().unwrap().len();
 
                 let selection =
                     LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..2), (U1Irrep::new(1), 0..1)])
                         .unwrap();
-                let restricted = a.restrict_leg(&[(1, &selection)]).unwrap();
-                let wide_restricted = wa.restrict_leg(&[(1, &selection)]).unwrap();
+                let restricted = a.restrict_leg(engine, &[(1, &selection)]).unwrap();
+                let wide_restricted = wa.restrict_leg(engine, &[(1, &selection)]).unwrap();
                 assert_payloads_agree(
                     "restrict_leg",
                     restricted.dense_data().unwrap(),
@@ -276,8 +283,8 @@ macro_rules! base_suite {
                 );
                 assert_payloads_agree(
                     "embed_leg",
-                    restricted.embed_leg(1, &selection).unwrap().dense_data().unwrap(),
-                    wide_restricted.embed_leg(1, &selection).unwrap().dense_data().unwrap(),
+                    restricted.embed_leg(engine, 1, &selection).unwrap().dense_data().unwrap(),
+                    wide_restricted.embed_leg(engine, 1, &selection).unwrap().dense_data().unwrap(),
                     1,
                 );
 
@@ -286,41 +293,41 @@ macro_rules! base_suite {
                 // Compact diagonal storage: an operand that never
                 // materializes its off-diagonal zeros.
                 let compact: TensorMap<U1FusionRule, $narrow> =
-                    TensorMap::diagonal(&runtime, &leg, diagonal_spectra(9_402)).unwrap();
+                    TensorMap::diagonal(engine, &runtime, &leg, diagonal_spectra(9_402)).unwrap();
                 let wide_compact: TensorMap<U1FusionRule, $wide> =
-                    TensorMap::diagonal(&runtime, &leg, diagonal_spectra(9_402)).unwrap();
+                    TensorMap::diagonal(engine, &runtime, &leg, diagonal_spectra(9_402)).unwrap();
 
                 for (got, expected) in compact
-                    .diagview()
+                    .diagview(engine)
                     .unwrap()
                     .iter()
-                    .zip(wide_compact.diagview().unwrap().iter())
+                    .zip(wide_compact.diagview(engine).unwrap().iter())
                 {
                     assert_eq!(got.sector, expected.sector);
                     assert_payloads_agree("diagview", &got.values, &expected.values, 1);
                 }
                 assert_scalars_agree(
                     "compact norm",
-                    Complex64::new(compact.norm(2.0).unwrap(), 0.0),
-                    Complex64::new(wide_compact.norm(2.0).unwrap(), 0.0),
+                    Complex64::new(compact.norm(engine, 2.0).unwrap(), 0.0),
+                    Complex64::new(wide_compact.norm(engine, 2.0).unwrap(), 0.0),
                     terms,
                 );
                 assert_scalars_agree(
                     "compact tr",
-                    compact.tr().unwrap().wide(),
-                    wide_compact.tr().unwrap().wide(),
+                    compact.tr(engine).unwrap().wide(),
+                    wide_compact.tr(engine).unwrap().wide(),
                     terms,
                 );
                 assert_payloads_agree(
                     "compact restrict_leg",
-                    compact.restrict_leg(&[(0, &selection), (1, &selection)]).unwrap().materialize().unwrap().dense_data().unwrap(),
-                    wide_compact.restrict_leg(&[(0, &selection), (1, &selection)]).unwrap().materialize().unwrap().dense_data().unwrap(),
+                    compact.restrict_leg(engine, &[(0, &selection), (1, &selection)]).unwrap().materialize(engine).unwrap().dense_data().unwrap(),
+                    wide_compact.restrict_leg(engine, &[(0, &selection), (1, &selection)]).unwrap().materialize(engine).unwrap().dense_data().unwrap(),
                     1,
                 );
                 assert_payloads_agree(
                     "compact compose",
-                    compact.compose(&a).unwrap().dense_data().unwrap(),
-                    wide_compact.compose(&wa).unwrap().dense_data().unwrap(),
+                    compact.compose(engine, &a).unwrap().dense_data().unwrap(),
+                    wide_compact.compose(engine, &wa).unwrap().dense_data().unwrap(),
                     terms,
                 );
             }
@@ -332,13 +339,14 @@ macro_rules! base_suite {
             /// scratch.
             #[test]
             fn single_and_double_lanes_do_not_share_coefficient_scratch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
                 let runtime = runtime();
                 let leg = fermion_su2_leg();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg, &leg], 9_501);
+                let (a, wa) = twin!(engine, &runtime, $narrow, $wide, [&leg, &leg], [&leg, &leg], 9_501);
                 let terms = wa.dense_data().unwrap().len();
                 for _ in 0..3 {
-                    let narrow = a.permute(&[2, 0], &[1, 3]).unwrap();
-                    let wide = wa.permute(&[2, 0], &[1, 3]).unwrap();
+                    let narrow = a.permute(engine, &[2, 0], &[1, 3]).unwrap();
+                    let wide = wa.permute(engine, &[2, 0], &[1, 3]).unwrap();
                     assert_payloads_agree(
                         "interleaved permute",
                         narrow.dense_data().unwrap(),
@@ -388,6 +396,7 @@ mod checked_generic {
 
                 #[test]
                 fn su3_base_operations_match_the_widened_oracle() {
+                    let engine = &mut symtn::typed::CpuEngine::serial();
                     let runtime = runtime();
                     let provider = Arc::new(
                         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
@@ -396,8 +405,15 @@ mod checked_generic {
                     let adjoint = vec![2i64, 2];
                     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)])
                         .unwrap();
-                    let (a, wa) =
-                        twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg, &leg], 9_601);
+                    let (a, wa) = twin!(
+                        engine,
+                        &runtime,
+                        $narrow,
+                        $wide,
+                        [&leg, &leg],
+                        [&leg, &leg],
+                        9_601
+                    );
                     assert!(
                         (0..a.subblock_count()).any(|index| a
                             .subblock_fusion_trees(index)
@@ -412,39 +428,43 @@ mod checked_generic {
                     for (what, got, expected) in [
                         (
                             "permute",
-                            a.permute(&[2, 0], &[1, 3]).unwrap(),
-                            wa.permute(&[2, 0], &[1, 3]).unwrap(),
+                            a.permute(engine, &[2, 0], &[1, 3]).unwrap(),
+                            wa.permute(engine, &[2, 0], &[1, 3]).unwrap(),
                         ),
                         (
                             "repartition",
-                            a.repartition(3).unwrap(),
-                            wa.repartition(3).unwrap(),
+                            a.repartition(engine, 3).unwrap(),
+                            wa.repartition(engine, 3).unwrap(),
                         ),
-                        ("adjoint", a.adjoint().unwrap(), wa.adjoint().unwrap()),
+                        (
+                            "adjoint",
+                            a.adjoint(engine).unwrap(),
+                            wa.adjoint(engine).unwrap(),
+                        ),
                         (
                             "trace_pairs",
-                            a.trace_pairs(&[(0, 3)]).unwrap(),
-                            wa.trace_pairs(&[(0, 3)]).unwrap(),
+                            a.trace_pairs(engine, &[(0, 3)]).unwrap(),
+                            wa.trace_pairs(engine, &[(0, 3)]).unwrap(),
                         ),
                     ] {
                         assert_payloads_agree(
                             what,
-                            got.materialize().unwrap().dense_data().unwrap(),
-                            expected.materialize().unwrap().dense_data().unwrap(),
+                            got.materialize(engine).unwrap().dense_data().unwrap(),
+                            expected.materialize(engine).unwrap().dense_data().unwrap(),
                             terms,
                         );
                     }
 
                     assert_scalars_agree(
                         "norm",
-                        Complex64::new(a.norm(2.0).unwrap(), 0.0),
-                        Complex64::new(wa.norm(2.0).unwrap(), 0.0),
+                        Complex64::new(a.norm(engine, 2.0).unwrap(), 0.0),
+                        Complex64::new(wa.norm(engine, 2.0).unwrap(), 0.0),
                         terms,
                     );
                     assert_scalars_agree(
                         "inner",
-                        a.inner(&a).unwrap().wide(),
-                        wa.inner(&wa).unwrap().wide(),
+                        a.inner(engine, &a).unwrap().wide(),
+                        wa.inner(engine, &wa).unwrap().wide(),
                         terms,
                     );
                 }

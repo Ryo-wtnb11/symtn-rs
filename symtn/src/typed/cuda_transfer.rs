@@ -1,8 +1,8 @@
 use super::*;
 
 impl<R, D: CudaPayload> TensorMap<R, D> {
-    /// Uploads host ownership of a device-capable payload to this tensor's
-    /// Runtime CUDA context.
+    /// Uploads host ownership of a device-capable payload into the caller's
+    /// CUDA engine. A non-CUDA engine is refused before any upload.
     ///
     /// Dense storage uploads directly. Compact diagonal storage is expanded
     /// operation-locally and becomes dense on device; a roundtrip remains
@@ -20,8 +20,8 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     /// use symtn::sector::U1FusionRule;
     /// use symtn::typed::TensorMap;
     ///
-    /// fn c32_upload(tensor: &TensorMap<U1FusionRule, Complex32>) {
-    ///     let _ = tensor.to_cuda();
+    /// fn c32_upload(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, Complex32>) {
+    ///     let _ = tensor.to_cuda(engine);
     /// }
     /// ```
     ///
@@ -29,8 +29,8 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     /// use symtn::sector::U1FusionRule;
     /// use symtn::typed::TensorMap;
     ///
-    /// fn f32_upload(tensor: &TensorMap<U1FusionRule, f32>) {
-    ///     let _ = tensor.to_cuda();
+    /// fn f32_upload(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f32>) {
+    ///     let _ = tensor.to_cuda(engine);
     /// }
     /// ```
     ///
@@ -44,9 +44,9 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     /// use symtn::sector::TableRule;
     /// use symtn::typed::{Error, TensorMap};
     ///
-    /// fn no_table_device_svd(tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
-    ///     let device = tensor.to_cuda()?;
-    ///     let _ = device.svd_compact(&[0], &[1]);
+    /// fn no_table_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
+    ///     let device = tensor.to_cuda(engine)?;
+    ///     let _ = device.svd_compact(engine, &[0], &[1]);
     ///     Ok(())
     /// }
     /// ```
@@ -59,14 +59,17 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     /// use symtn::sector::TableRule;
     /// use symtn::typed::{Direction, Error, TensorMap};
     ///
-    /// fn no_table_device_twist(tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
-    ///     let device = tensor.to_cuda()?;
-    ///     let _ = device.twist(&[0], Direction::Forward);
+    /// fn no_table_device_twist(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
+    ///     let device = tensor.to_cuda(engine)?;
+    ///     let _ = device.twist(engine, &[0], Direction::Forward);
     ///     Ok(())
     /// }
     /// ```
-    pub fn to_cuda(&self) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
-        let mut lease = self.runtime.lease_cuda()?;
+    pub fn to_cuda(
+        &self,
+        engine: &mut dyn Engine,
+    ) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
         let upload = |body: &Arc<TypedTensorBody<R, D>>| {
             let storage = match body.data.as_ref() {
@@ -100,7 +103,8 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
 }
 
 impl<R, D: CudaPayload> TensorMap<R, D, CudaStorage<D>> {
-    /// Downloads device ownership into one final dense host buffer.
+    /// Downloads device ownership into one final dense host buffer, through
+    /// the caller's CUDA engine that owns the payload.
     ///
     /// A lazy adjoint downloads only its canonical parent and rebuilds a cold
     /// host lazy view. No receiver-sized logical adjoint is materialized.
@@ -114,11 +118,8 @@ impl<R, D: CudaPayload> TensorMap<R, D, CudaStorage<D>> {
     ///     let _ = tensor.dense_data();
     /// }
     /// ```
-    pub fn to_host(&self) -> Result<TensorMap<R, D>, Error> {
-        // ponytail: this message predates `lease_cuda`; kept byte-identical.
-        let mut lease = self.runtime.lease_cuda().map_err(|_| {
-            Error::InvalidArgument("this runtime was built without a CUDA device".to_string())
-        })?;
+    pub fn to_host(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, D>, Error> {
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
         let download = |body: &Arc<TypedTensorBody<R, D, CudaStorage<D>>>| {
             let TypedData::Dense(storage) = body.data.as_ref() else {
@@ -198,6 +199,7 @@ where
     D: CudaPayload,
 {
     fn materialize(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         source: &Self,
@@ -209,7 +211,7 @@ where
             .map(|map| cuda_adjoint_lowering(map, D::IS_COMPLEX))
             .transpose()?;
 
-        let mut lease = t.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
         if source.placement() != Placement::Cuda(cuda.device()) {
             return Err(Error::PlacementMismatch);

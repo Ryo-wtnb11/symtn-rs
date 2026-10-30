@@ -38,9 +38,10 @@ fn assert_warm(label: &str, hits: u64, mut call: impl FnMut()) {
 
 #[test]
 fn warm_working_sets_never_evict() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     symtn::cache::clear();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = |q: i32| U1Irrep::new(q);
 
     // E1-style ledger: several ops back to back without a reset, as the E1
@@ -50,18 +51,21 @@ fn warm_working_sets_never_evict() {
         (-1..=1).map(|q| (u1(q), 2)),
     )
     .unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 1).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg, &leg], 1)
+        .unwrap();
     let square =
-        TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 2).unwrap();
-    let matrix = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg], [&leg], 3).unwrap();
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg, &leg], 2)
+            .unwrap();
+    let matrix = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg], [&leg], 3).unwrap();
     assert_warm("permute", 1, || {
-        a.permute(&[1, 2], &[3, 0]).unwrap();
+        a.permute(engine, &[1, 2], &[3, 0]).unwrap();
     });
     assert_warm("compose", 1, || {
-        a.compose(&square).unwrap();
+        a.compose(engine, &square).unwrap();
     });
     assert_warm("contract", 3, || {
         a.contract(
+            engine,
             &matrix,
             &ContractSpec {
                 lhs: &[0],
@@ -73,10 +77,10 @@ fn warm_working_sets_never_evict() {
         .unwrap();
     });
     assert_warm("qr_compact", 2, || {
-        a.qr_compact(&[0, 1], &[2, 3]).unwrap();
+        a.qr_compact(engine, &[0, 1], &[2, 3]).unwrap();
     });
     assert_warm("svd_compact", 3, || {
-        a.svd_compact(&[0, 1], &[2, 3]).unwrap();
+        a.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();
     });
 
     // Sweep-like loop: an open chain `[vL, p] <- [vR]` with a distinct space
@@ -96,6 +100,7 @@ fn warm_working_sets_never_evict() {
     let sites: Vec<_> = (0..8)
         .map(|i| {
             TensorMap::<_, f64>::rand_with_seed(
+                engine,
                 &runtime,
                 [&bonds[i], &physical],
                 [&bonds[i + 1]],
@@ -104,10 +109,11 @@ fn warm_working_sets_never_evict() {
             .unwrap()
         })
         .collect();
-    let sweep = || {
+    let mut sweep = || {
         for pair in sites.windows(2) {
             let theta = pair[0]
                 .contract(
+                    engine,
                     &pair[1],
                     &ContractSpec {
                         lhs: &[2],
@@ -117,7 +123,7 @@ fn warm_working_sets_never_evict() {
                     },
                 )
                 .unwrap();
-            theta.repartition(2).unwrap();
+            theta.repartition(engine, 2).unwrap();
         }
     };
     sweep();

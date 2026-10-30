@@ -49,15 +49,16 @@
 //! use symtn::sector::{U1FusionRule, U1Irrep};
 //! use symtn::typed::{GradedSpace, Runtime, TensorMap};
 //!
+//! let engine = &mut symtn::typed::CpuEngine::serial();
 //! let rt = Runtime::builder().build()?;
 //! let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)])?;
 //! // H = diag(1, 2, 3) on charge 0 and diag(1, 2) on charge 1.
-//! let h = TensorMap::<_, f64>::from_subblock_fn(&rt, [&v], [&v], |_, i| {
+//! let h = TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v], [&v], |_, i| {
 //!     if i[0] == i[1] { (i[0] + 1) as f64 } else { 0.0 }
 //! })?;
-//! let x0 = TensorMap::<_, f64>::rand_with_seed(&rt, [&v], [], 1)?;
+//! let x0 = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [], 1)?;
 //! let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
-//!     h.compose(x)?.axpby_into(y, 1.0, 0.0)
+//!     h.compose(engine, x)?.axpby_into(engine, y, 1.0, 0.0)
 //! };
 //! let mut ws = Workspace::with_capacity(&x0, 5)?;
 //! let (values, _, _) =

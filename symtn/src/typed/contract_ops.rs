@@ -62,16 +62,17 @@ where
     /// ```compile_fail
     /// use symtn::sector::TableRule;
     /// use symtn::typed::TensorMap;
-    /// fn unavailable(tensor: &TensorMap<TableRule, f64>) {
-    ///     let _ = tensor.otimes(tensor);
+    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64>) {
+    ///     let _ = tensor.otimes(engine, tensor);
     /// }
     /// ```
     ///
     /// An adjoint view `other` (`t.adjoint_view()`) returns
     /// [`Error::Unsupported`]: this operation would copy it. Pass
-    /// `&t.adjoint()?.materialize()?` instead.
+    /// `&t.adjoint(engine)?.materialize(engine)?` instead.
     pub fn otimes<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D>>,
     ) -> Result<Self, FacadeError<R>> {
         let other = other.into().operand()?;
@@ -80,8 +81,8 @@ where
         if !self.runtime.same_runtime(&other.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
-        let lhs_owned = self.materialized_tensor_uncached()?;
-        let rhs_owned = other.materialized_tensor_uncached()?;
+        let lhs_owned = self.materialized_tensor_uncached(engine)?;
+        let rhs_owned = other.materialized_tensor_uncached(engine)?;
         let (Some(lhs_body), Some(rhs_body)) = (lhs_owned.owned_body(), rhs_owned.owned_body())
         else {
             return Err(internal_layout_error("uncached materialization is owned").into());
@@ -180,8 +181,8 @@ where
     ///
     /// **Cost.** No permute pass follows the contraction. As in TensorKit's
     /// `blas_contract!`, the GEMMs write the result directly when its layout
-    /// allows, and otherwise write a Runtime-pooled temporary that one tree
-    /// transform moves into the result, inside this call — never slower than
+    /// allows, and otherwise write a temporary allocated for this call that one
+    /// tree transform moves into the result, inside this call — never slower than
     /// the contraction followed by the explicit permute.
     ///
     /// **Braiding scope**: ordinary contraction is available only for
@@ -266,25 +267,20 @@ where
     /// non-identity source transform into device scratch, the coupled-sector
     /// GEMMs, the output transform — which is TensorKit's `blas_contract!`
     /// and QSpace's `contract` dataflow. A contraction whose canonical core
-    /// resolves from the operands alone takes no Host context lease.
+    /// resolves from the operands alone builds no Host execution context.
     ///
-    /// **Cost.** A warm call uploads nothing but the output initialisation
-    /// (#740): exactly one H2D of `required_len * size_of::<D>()` bytes, from
-    /// one host `Vec` of that size; its only device allocation is the
-    /// returned output; it downloads nothing. The first use of a transform
-    /// structure uploads its coefficient payload once (as the device
-    /// [`Self::permute`] does), and a new high-water mark of the operand or
-    /// core-destination scratch costs one zero upload of the new size per
-    /// buffer; both then stay resident on the Runtime (see
-    /// `Runtime::cuda_contract_scratch_bytes`) until the
-    /// `Runtime::clear_cuda_caches`. Per
+    /// **Cost.** The output initialisation (#740) is one H2D of
+    /// `required_len * size_of::<D>()` bytes, from one host `Vec` of that
+    /// size; nothing is downloaded. The device execution scratch belongs to
+    /// the call on the caller's engine: each call uploads the coefficient
+    /// payload of every transform structure it replays and sizes its operand
+    /// and core-destination scratch with one zero upload per buffer, and
+    /// drops them on return. Per
     /// call the device submits one region move per Single block / pack /
     /// scatter column, one GEMM per recoupling job and per coupled-sector
     /// job, one zero fill per inactive layout of each transform in overwrite
     /// mode, and one zero fill per core-destination block no GEMM writes (the
-    /// Host clears its whole core destination instead). The warm contract
-    /// holds while this Runtime's Host transform store admits the structures
-    /// (see [`Self::permute`]).
+    /// Host clears its whole core destination instead).
     ///
     /// **Numerics.** Device and Host agree to dtype tolerance, never bitwise:
     /// the GEMM summation order is cuTENSOR's, a Single-block move rounds as
@@ -326,27 +322,29 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     /// )?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 8)?;
-    /// let id = TensorMap::isomorphism(&runtime, [&v], [&v])?;
+    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 8)?;
+    /// let id = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     ///
     /// // Contracting the domain leg with the identity's codomain leg is a
     /// // no-op on the payload; `[0] ← [1]` keeps the open axes in place.
     /// let spec = ContractSpec { lhs: &[1], rhs: &[0], codomain: &[0], domain: &[1] };
-    /// let out = t.contract(&id, &spec)?;
+    /// let out = t.contract(engine, &id, &spec)?;
     /// assert_eq!(out.dense_data()?, t.dense_data()?);
     ///
     /// // Both open legs in the codomain: the same as permuting afterwards.
     /// let spec = ContractSpec { lhs: &[1], rhs: &[0], codomain: &[0, 1], domain: &[] };
-    /// assert_eq!(out.permute(&[0, 1], &[])?.dense_data()?, t.contract(&id, &spec)?.dense_data()?);
+    /// assert_eq!(out.permute(engine, &[0, 1], &[])?.dense_data()?, t.contract(engine, &id, &spec)?.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn contract<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
@@ -366,6 +364,7 @@ where
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
                 if let Some(compact) = lhs.try_contract_diagonal(
+                    engine,
                     rhs,
                     spec.lhs,
                     spec.rhs,
@@ -376,8 +375,9 @@ where
                 }
             }
         }
-        let (space, data) =
-            <R::Mode as TypedTensorContractDispatch<R, D>>::contract(self, other, spec, None)?;
+        let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
+            engine, self, other, spec, None,
+        )?;
         Ok(self.published(space, data))
     }
 
@@ -407,9 +407,10 @@ where
     ///
     /// **Route.** The same memcost choice as [`Self::contract`]: when a
     /// zero-copy candidate plus one output permute is cheaper, the product is
-    /// written with its own output order into Runtime-pooled scratch and one
-    /// tree transform adds it into `destination` with `alpha`/`beta`
-    /// (TensorKit `blas_contract!`'s `copyC`); no operand is rebuilt.
+    /// written with its own output order into a temporary allocated for this
+    /// call and one tree transform adds it into `destination` with
+    /// `alpha`/`beta` (TensorKit `blas_contract!`'s `copyC`); no operand is
+    /// rebuilt.
     ///
     /// **Compact operand.** [`Self::contract`]'s compact patterns write into
     /// `destination` without densifying (TensorKit `mul!` scaling a
@@ -457,6 +458,7 @@ where
     /// intact.
     pub fn contract_into<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
@@ -496,12 +498,13 @@ where
             S::as_host_mut(EXEC, destination),
         ) {
             if (lhs.spectrum().is_some() || rhs.spectrum().is_some())
-                && lhs.try_contract_diagonal_into(rhs, spec, dst, alpha, beta)?
+                && lhs.try_contract_diagonal_into(engine, rhs, spec, dst, alpha, beta)?
             {
                 return Ok(());
             }
         }
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            engine,
             self,
             other,
             spec,
@@ -578,7 +581,7 @@ where
     /// `planarcontract!`, which skips it for Bosonic, and equal to `@planar`).
     ///
     /// **Cost.** The owned output is the only allocation; each operand
-    /// transpose writes Runtime-pooled scratch and is skipped when the
+    /// transpose writes scratch allocated for this call and is skipped when the
     /// operand already has its planar core layout (TensorKit `A′ = A`), and
     /// the output transpose is skipped when the requested order is the
     /// core's. The work is TensorKit's `transpose!` ×2 + `mul!` +
@@ -612,29 +615,30 @@ where
     /// use symtn::sector::{TableRule, TableSector};
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let fib = Arc::new(TableRule::fibonacci());
     /// let v = GradedSpace::try_new(Arc::clone(&fib), [(TableSector::new(2), 1)])?;
     /// let b = GradedSpace::try_new(fib, [(TableSector::new(1), 2), (TableSector::new(2), 3)])?;
     /// // Golden-chain two-site H_eff: θ′[l s1 s2; r] := H[s1 s2; t1 t2] θ[l t1 t2; r].
-    /// let h: TensorMap<_, Complex64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&v, &v], 1)?;
+    /// let h: TensorMap<_, Complex64> = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 1)?;
     /// let theta: TensorMap<_, Complex64> =
-    ///     TensorMap::rand_with_seed(&runtime, [&b, &v, &v], [&b], 2)?;
+    ///     TensorMap::rand_with_seed(engine, &runtime, [&b, &v, &v], [&b], 2)?;
     /// // Open legs: s1 = 0, s2 = 1 (of h), l = 2, r = 3 (of θ).
     /// let spec = ContractSpec { lhs: &[2, 3], rhs: &[1, 2], codomain: &[2, 0, 1], domain: &[3] };
-    /// let out = h.planar_contract(&theta, &spec)?;
+    /// let out = h.planar_contract(engine, &theta, &spec)?;
     /// assert_eq!(out.codomain_rank(), 3);
     ///
     /// // The same as transposing θ by hand and composing, then transposing.
-    /// let by_hand = h
-    ///     .compose(&theta.transpose(&[1, 2], &[0, 3])?)?
-    ///     .transpose(&[2, 0, 1], &[3])?;
-    /// let residual = out.axpby(Complex64::ONE, &by_hand, -Complex64::ONE)?.norm(2.0)?;
+    /// let theta_t = theta.transpose(engine, &[1, 2], &[0, 3])?;
+    /// let by_hand = h.compose(engine, &theta_t)?.transpose(engine, &[2, 0, 1], &[3])?;
+    /// let residual = out.axpby(engine, Complex64::ONE, &by_hand, -Complex64::ONE)?.norm(engine, 2.0)?;
     /// assert!(residual < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn planar_contract<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
@@ -645,9 +649,10 @@ where
         }
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
-            return self.contract(other, spec);
+            return self.contract(engine, other, spec);
         }
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
+            engine,
             self,
             other,
             spec,
@@ -661,8 +666,8 @@ where
     /// (with `@planar`'s output rotation fused in), preserving the
     /// destination's provider, space, body and dense host allocation.
     /// `destination` must have the space of that result. It takes every
-    /// operand [`Self::planar_contract`] takes and allocates nothing owned;
-    /// scratch is Runtime-pooled.
+    /// operand [`Self::planar_contract`] takes and allocates no owned output;
+    /// its scratch is allocated for this call, as TensorKit's temporaries.
     ///
     /// `alpha` and `beta` ride the epilogue of whatever writes each element
     /// (the core GEMMs, as `mul!(C, A′, B′, α, β)`, or the output transpose),
@@ -685,6 +690,7 @@ where
     /// every check completes before the first write.
     pub fn planar_contract_into<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
@@ -713,9 +719,10 @@ where
         destination_precheck(destination, &other.storage_body().data, S::NOUN)?;
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
-            return self.contract_into(other, spec, destination, alpha, beta);
+            return self.contract_into(engine, other, spec, destination, alpha, beta);
         }
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            engine,
             self,
             other,
             spec,
@@ -753,9 +760,10 @@ where
     ///
     /// An adjoint view `other` (`t.adjoint_view()`) returns
     /// [`Error::Unsupported`]: this operation would copy it. Pass
-    /// `&t.adjoint()?.materialize()?` instead.
+    /// `&t.adjoint(engine)?.materialize(engine)?` instead.
     pub fn deligne_product<'a, R2, C>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R2, D>>,
         product: Arc<ProductFusionRule<R, R2, C>>,
     ) -> Result<TensorMap<ProductFusionRule<R, R2, C>, D>, Error>
@@ -817,9 +825,9 @@ where
             |sector| ProductSector::new(left_vacuum.clone(), sector),
             |sector| sector.right().clone(),
         )?;
-        let left = left.commit()?;
-        let right = right.commit()?;
-        left.otimes(&right)
+        let left = left.commit(engine)?;
+        let right = right.commit(engine)?;
+        left.otimes(engine, &right)
     }
 }
 
@@ -898,13 +906,14 @@ where
     /// ```compile_fail
     /// use symtn::sector::TableRule;
     /// use symtn::typed::TensorMap;
-    /// fn unavailable(tensor: &TensorMap<TableRule, f64>) {
-    ///     let _ = tensor.compose(tensor);
+    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64>) {
+    ///     let _ = tensor.compose(engine, tensor);
     /// }
     /// ```
     #[doc(alias = "mul")]
     pub fn compose<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D, S>>,
     ) -> Result<Self, FacadeError<R>> {
         let other = other.into().operand()?;
@@ -922,12 +931,14 @@ where
                 }
             }
         }
-        let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::compose(self, other)?;
+        let (space, data) =
+            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(engine, self, other)?;
         Ok(self.published(space, data))
     }
 }
 
 type RouteReplay<D, C> = fn(
+    &mut dyn Engine,
     &mut crate::runtime::TensorExecutionContext,
     &symtn_tensors::StorageContractResolution<C>,
     (&Arc<BlockStructure>, &mut [D]),
@@ -937,7 +948,9 @@ type RouteReplay<D, C> = fn(
     symtn_tensors::ContractDestinationInit<D>,
 ) -> Result<(), TransformExecError>;
 
+#[allow(clippy::too_many_arguments)]
 fn host_route_replay<L, D, C>(
+    engine: &mut dyn Engine,
     context: &mut crate::runtime::TensorExecutionContext,
     resolution: &symtn_tensors::StorageContractResolution<C>,
     dst: (&Arc<BlockStructure>, &mut [D]),
@@ -954,25 +967,24 @@ where
     C: symtn_tensors::DenseBlockScalar,
 {
     L::contract_lane(context)?
-        .execute_contract_resolution_host(resolution, dst, lhs, rhs, alpha, init)
+        .execute_contract_resolution_host(engine, resolution, dst, lhs, rhs, alpha, init)
         .map_err(TransformExecError::Replay)
 }
 
 /// One planned contraction route, handed to the storage kernel by value: the
-/// pooled context lease it was planned under (`None` when the lock-free core
-/// answered and no lease was taken), the route, and the staged destination
-/// and stored operand block structures it maps between.
+/// execution context it was planned under (`None` when the lock-free core
+/// answered and none was built), the route, and the staged destination and
+/// stored operand block structures it maps between.
 ///
-/// Host replays under that lease, taking one only when planning took none,
-/// so a Host contraction takes one lease; CUDA releases it before taking the
+/// Host replays in that context, building one only when planning built none,
+/// so a Host contraction builds one context; CUDA drops it before taking the
 /// device lease. The Host replay of the staging mode's lane is bound here,
 /// where that lane's scalar bounds are proved.
 ///
 /// Internal and unstable despite being public for [`ContractExec`].
 #[doc(hidden)]
 pub struct ContractReplay<'a, D, C> {
-    pub(super) runtime: &'a Runtime,
-    pub(super) lease: Option<crate::runtime::ContextLease<'a>>,
+    pub(super) lease: Option<crate::runtime::ContextLease>,
     execute: RouteReplay<D, C>,
     pub(super) resolution: &'a symtn_tensors::StorageContractResolution<C>,
     pub(super) destination: &'a Arc<BlockStructure>,
@@ -991,8 +1003,7 @@ where
     /// The replay of `resolution` on lane `L` into `destination`
     /// (`destination_len` elements) from the stored `operands`.
     pub(super) fn new<L: HostTreeLane<D, C>>(
-        runtime: &'a Runtime,
-        lease: Option<crate::runtime::ContextLease<'a>>,
+        lease: Option<crate::runtime::ContextLease>,
         resolution: &'a symtn_tensors::StorageContractResolution<C>,
         (destination, destination_len): (&'a DynamicFusionMapSpace, usize),
         (lhs, rhs): (
@@ -1001,7 +1012,6 @@ where
         ),
     ) -> Self {
         Self {
-            runtime,
             lease,
             execute: host_route_replay::<L, D, C>,
             resolution,
@@ -1027,6 +1037,7 @@ pub trait ContractExec<R, D>: TypedStorage<R, D> {
     /// destination, reading each operand's stored payload (a lazy adjoint's
     /// parent; Host densifies a compact operand).
     fn contract_owned<C: symtn_tensors::DenseBlockScalar>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: ContractReplay<'_, D, C>,
         lhs: &TensorMap<R, D, Self>,
@@ -1037,7 +1048,9 @@ pub trait ContractExec<R, D>: TypedStorage<R, D> {
 
     /// `destination = alpha · contract(lhs, rhs) + beta · destination` into a
     /// destination that passed every admission check.
+    #[allow(clippy::too_many_arguments)]
     fn contract_into<C: symtn_tensors::DenseBlockScalar>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: ContractReplay<'_, D, C>,
         lhs: &TensorMap<R, D, Self>,
@@ -1057,26 +1070,24 @@ pub trait ContractExec<R, D>: TypedStorage<R, D> {
 /// prepared-batch lifecycle.
 #[doc(hidden)]
 pub trait PreparedExec<R, D>: TypedStorage<R, D> {
-    /// What a prepared stack replay holds from its output allocation through
-    /// its replay: the device lease on CUDA; nothing on Host, whose replay
-    /// takes its context lease itself.
-    type MembersLease<'r>;
+    /// What a prepared stack replay holds of the caller's engine from its
+    /// output allocation through its replay: the CUDA operation context on
+    /// CUDA; the engine itself on Host.
+    type MembersLease<'e>;
 
-    /// Reserves this storage's resources for a new [`ContractWorkspace`].
-    fn reserve_members(
+    /// Opens one prepared replay on the caller's engine, after every no-write
+    /// check. An engine of the wrong kind is refused here, before any output
+    /// is allocated.
+    fn lease_members(
         _: ExecToken,
-        plan: &ContractPlan<R, D, Self>,
-        workspace: &mut ContractWorkspace<R, D, Self>,
-    ) -> Result<(), Error>;
-
-    /// Takes the lease of one prepared replay, after every no-write check.
-    fn lease_members(_: ExecToken, runtime: &Runtime) -> Result<Self::MembersLease<'_>, Error>;
+        engine: &mut dyn Engine,
+    ) -> Result<Self::MembersLease<'_>, Error>;
 
     /// A zeroed payload of `members` members of `member_len` elements each
     /// (`total` in all).
     fn zeroed_members(
         _: ExecToken,
-        lease: &Self::MembersLease<'_>,
+        lease: &mut Self::MembersLease<'_>,
         total: usize,
         member_len: usize,
         members: usize,
@@ -1106,23 +1117,15 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
 }
 
 impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
-    type MembersLease<'r> = ();
+    type MembersLease<'e> = &'e mut dyn Engine;
 
-    fn reserve_members(
-        _: ExecToken,
-        _plan: &ContractPlan<R, D>,
-        _workspace: &mut ContractWorkspace<R, D>,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn lease_members(_: ExecToken, _runtime: &Runtime) -> Result<(), Error> {
-        Ok(())
+    fn lease_members(_: ExecToken, engine: &mut dyn Engine) -> Result<&mut dyn Engine, Error> {
+        Ok(engine)
     }
 
     fn zeroed_members(
         _: ExecToken,
-        _lease: &(),
+        _lease: &mut &mut dyn Engine,
         total: usize,
         _member_len: usize,
         _members: usize,
@@ -1134,18 +1137,19 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
         _: ExecToken,
         plan: &ContractPlan<R, D>,
         workspace: &mut ContractWorkspace<R, D>,
-        _lease: &mut (),
+        engine: &mut &mut dyn Engine,
         dst: &mut Self,
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error> {
-        let mut lease = plan.runtime.lease_context()?;
-        lease
+        workspace
+            .host_context
             .context()
             .multiplicity_free_lane::<D>()?
             .execute_storage_contract_members_host(
+                &mut **engine,
                 &plan.resolution,
                 (plan.space.space().structure(), dst),
                 (lhs.0, lhs.1),
@@ -1170,6 +1174,7 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     type Caps = symtn_tensors::HostEagerExecutor;
 
     fn contract_owned<C: symtn_tensors::DenseBlockScalar>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: ContractReplay<'_, D, C>,
         lhs: &TensorMap<R, D>,
@@ -1180,6 +1185,7 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     {
         let mut data = symtn_tensors::zeroed_payload(replay.destination_len);
         host_contract(
+            engine,
             replay,
             lhs,
             rhs,
@@ -1191,6 +1197,7 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     }
 
     fn contract_into<C: symtn_tensors::DenseBlockScalar>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: ContractReplay<'_, D, C>,
         lhs: &TensorMap<R, D>,
@@ -1203,6 +1210,7 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
         D: RecouplingCoefficientAction<C>,
     {
         host_contract(
+            engine,
             replay,
             lhs,
             rhs,
@@ -1213,7 +1221,8 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     }
 }
 
-fn host_contract<R, D: TensorScalar, C>(
+fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
+    engine: &mut dyn Engine,
     replay: ContractReplay<'_, D, C>,
     lhs: &TensorMap<R, D>,
     rhs: &TensorMap<R, D>,
@@ -1222,7 +1231,6 @@ fn host_contract<R, D: TensorScalar, C>(
     init: symtn_tensors::ContractDestinationInit<D>,
 ) -> Result<(), TransformExecError> {
     let ContractReplay {
-        runtime,
         lease,
         execute,
         resolution,
@@ -1231,13 +1239,15 @@ fn host_contract<R, D: TensorScalar, C>(
         rhs: rhs_structure,
         ..
     } = replay;
-    let mut lease = match lease {
-        Some(lease) => lease,
-        None => runtime.lease_context()?,
-    };
+    let mut lease = lease.unwrap_or_else(crate::runtime::ContextLease::new);
+    #[cfg(test)]
+    if resolution.copy_c().is_some() {
+        super::probe::hit(super::probe::Event::CopyCReplay);
+    }
     let (_, lhs_data) = lhs.fusion_operand_and_data();
     let (_, rhs_data) = rhs.fusion_operand_and_data();
     execute(
+        engine,
         lease.context(),
         resolution,
         (destination_structure, destination),

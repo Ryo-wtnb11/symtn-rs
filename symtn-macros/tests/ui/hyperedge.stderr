@@ -1,5 +1,5 @@
 error: label `j` appears 3 times (a hyperedge); a label joins exactly two legs: two operand legs (contracted) or one operand leg and the left-hand side (open), and a Network has no hyperedges; hint: give each contracted leg pair its own label
- --> tests/ui/hyperedge.rs:4:55
+ --> tests/ui/hyperedge.rs:4:68
   |
-4 |     let _ = contract!([i; k] := a[i; j] * b[j; k] * c[j]);
-  |                                                       ^
+4 |     let _ = contract!(&mut engine, [i; k] := a[i; j] * b[j; k] * c[j]);
+  |                                                                    ^

@@ -16,6 +16,7 @@ fn measured<T>(operation: impl FnOnce() -> T) -> (T, u64) {
 /// Rank-4 U(1) tensor with five coupled sectors (charges -2..=2) and
 /// degeneracy 2 per leg sector, so every factor region table is nontrivial.
 fn tensor(runtime: &Runtime) -> TensorMap<U1FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -25,7 +26,7 @@ fn tensor(runtime: &Runtime) -> TensorMap<U1FusionRule, f64> {
         ],
     )
     .unwrap();
-    TensorMap::rand_with_seed(runtime, [&space, &space], [&space, &space], 1216).unwrap()
+    TensorMap::rand_with_seed(engine, runtime, [&space, &space], [&space, &space], 1216).unwrap()
 }
 
 // Allocation-call upper bounds on the SECOND compact factorization of one
@@ -37,11 +38,13 @@ fn tensor(runtime: &Runtime) -> TensorMap<U1FusionRule, f64> {
 // svd_compact 144, qr_compact 111, eigh_full 120.
 #[test]
 fn second_compact_factorization_builds_the_plan_with_a_bounded_constant() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let a = tensor(&runtime);
-    let warm_svd = a.svd_compact(&[0, 1], &[2, 3]).unwrap();
-    let (Svd { u, s, vh }, svd_calls) = measured(|| a.svd_compact(&[0, 1], &[2, 3]).unwrap());
+    let warm_svd = a.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();
+    let (Svd { u, s, vh }, svd_calls) =
+        measured(|| a.svd_compact(engine, &[0, 1], &[2, 3]).unwrap());
     black_box((&u, &s, &vh));
     assert!(
         svd_calls <= 144,
@@ -49,8 +52,8 @@ fn second_compact_factorization_builds_the_plan_with_a_bounded_constant() {
     );
     drop(warm_svd);
 
-    let warm_qr = a.qr_compact(&[0, 1], &[2, 3]).unwrap();
-    let (Qr { q, r }, qr_calls) = measured(|| a.qr_compact(&[0, 1], &[2, 3]).unwrap());
+    let warm_qr = a.qr_compact(engine, &[0, 1], &[2, 3]).unwrap();
+    let (Qr { q, r }, qr_calls) = measured(|| a.qr_compact(engine, &[0, 1], &[2, 3]).unwrap());
     black_box((&q, &r));
     assert!(
         qr_calls <= 111,
@@ -58,13 +61,13 @@ fn second_compact_factorization_builds_the_plan_with_a_bounded_constant() {
     );
     drop(warm_qr);
 
-    let hermitian = a.adjoint().unwrap().compose(&a).unwrap();
+    let hermitian = a.adjoint(engine).unwrap().compose(engine, &a).unwrap();
     let warm_eigh = hermitian
-        .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
     let (Eigh { d, v }, eigh_calls) = measured(|| {
         hermitian
-            .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
             .unwrap()
     });
     black_box((&d, &v));

@@ -7,9 +7,9 @@ OPENBLAS_NUM_THREADS=1
 OMP_NUM_THREADS=1
 MKL_NUM_THREADS=1
 : "${CARGO_TARGET_DIR:=target/operation-matrix}"
-: "${OP_MATRIX_GEMM_BACKEND:=faer}"
+: "${OP_MATRIX_THREADS:=1}"
 : "${OP_MATRIX_CARGO_FEATURES:=cpu-faer,cgc-gen}"
-export RAYON_NUM_THREADS OPENBLAS_NUM_THREADS OMP_NUM_THREADS MKL_NUM_THREADS CARGO_TARGET_DIR OP_MATRIX_GEMM_BACKEND
+export RAYON_NUM_THREADS OPENBLAS_NUM_THREADS OMP_NUM_THREADS MKL_NUM_THREADS CARGO_TARGET_DIR OP_MATRIX_THREADS
 
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -121,8 +121,8 @@ printf '# host_os=%s host_release=%s host_arch=%s cpu=%s\n' \
 printf '# rustc=%s cargo=%s\n' "$(rustc --version)" "$(cargo --version)"
 printf '# symtn_sha=%s dirty=%s lock=Cargo.lock lock_sha256=%s\n' \
     "$symtn_sha" "$symtn_dirty" "$lock_sha256"
-printf '# cargo_package=symtn cargo_features=%s gemm_backend=%s locked=true offline=true\n' \
-    "$OP_MATRIX_CARGO_FEATURES" "$OP_MATRIX_GEMM_BACKEND"
+printf '# cargo_package=symtn cargo_features=%s engine_threads=%s locked=true offline=true\n' \
+    "$OP_MATRIX_CARGO_FEATURES" "$OP_MATRIX_THREADS"
 printf '# racah_authority=%s\n' "$RACAH_AUTHORITY"
 
 for sample in 0 1 2; do

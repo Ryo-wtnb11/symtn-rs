@@ -32,7 +32,8 @@ struct Row {
 }
 
 fn row(codomain: &[usize]) -> Row {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
@@ -44,32 +45,36 @@ fn row(codomain: &[usize]) -> Row {
     )
     .unwrap();
     let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 4), (U1Irrep::new(1), 2)]).unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 6).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
     let spec = ContractSpec {
         lhs: &[2],
         rhs: &[0],
         codomain,
         domain: &[2],
     };
-    let mut out = a.contract(&b, &spec).unwrap();
-    a.contract_into(&b, &spec, &mut out, 1.0, 0.0).unwrap();
-    let eager_warm = measure(|| a.contract_into(&b, &spec, &mut out, 1.0, 0.0).unwrap());
+    let mut out = a.contract(engine, &b, &spec).unwrap();
+    a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
+        .unwrap();
+    let eager_warm = measure(|| {
+        a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
+            .unwrap()
+    });
 
-    let member = |members: usize| {
+    let mut member = |members: usize| {
         let lhs = StackedTensorMap::pack(&vec![&a; members]).unwrap();
         let rhs = StackedTensorMap::pack(&vec![&b; members]).unwrap();
-        let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
         let mut workspace = plan.workspace().unwrap();
-        plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         let mut dst = workspace.take_output().unwrap();
         let mut workspace = plan.workspace().unwrap();
         let cold = measure(|| {
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap()
         });
         let warm = measure(|| {
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap()
         });
         (cold, warm)

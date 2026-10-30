@@ -43,18 +43,19 @@ macro_rules! full_rotation {
 }
 
 macro_rules! full_transpose {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let tensor = &$tensor;
         let (codomain_axes, domain_axes) = full_rotation!(tensor);
-        tensor.transpose(&codomain_axes, &domain_axes)
+        tensor.transpose($engine, &codomain_axes, &domain_axes)
     }};
 }
 
 macro_rules! full_transpose_into {
-    ($tensor:expr, $destination:expr, $alpha:expr) => {{
+    ($engine:ident, $tensor:expr, $destination:expr, $alpha:expr) => {{
         let tensor = &$tensor;
         let (codomain_axes, domain_axes) = full_rotation!(tensor);
         tensor.transpose_into(
+            $engine,
             &codomain_axes,
             &domain_axes,
             $destination,
@@ -193,20 +194,22 @@ where
 /// identities exactly. `$body` is written once and expanded against both
 /// receiver types, so the two calls cannot drift.
 macro_rules! device_matches_host {
-    ($what:expr, $host:expr, |$t:ident| $body:expr) => {{
+    ($engine:ident, $cuda:ident, $what:expr, $host:expr, |$e:ident, $t:ident| $body:expr) => {{
         let host_source = &$host;
-        let device_source = host_source.to_cuda().unwrap();
+        let device_source = host_source.to_cuda($cuda).unwrap();
         let expected = {
+            let $e: &mut dyn symtn::typed::Engine = &mut *$engine;
             let $t = host_source;
             $body
         }
         .unwrap();
         let actual = {
+            let $e: &mut dyn symtn::typed::Engine = &mut *$cuda;
             let $t = &device_source;
             $body
         }
         .unwrap()
-        .to_host()
+        .to_host($cuda)
         .unwrap();
         let what: &str = $what;
         assert_payload_close(
@@ -224,7 +227,7 @@ macro_rules! device_matches_host {
 // ---------------------------------------------------------------------------
 
 fn runtime() -> Runtime {
-    Runtime::builder().cuda(0).build().unwrap()
+    Runtime::builder().build().unwrap()
 }
 
 /// Distinct, finite, irrational-ish entries: a permutation of the payload is
@@ -283,10 +286,13 @@ fn fz2_leg() -> GradedSpace<FermionParityFusionRule> {
 /// `[leg, leg] <- [leg]` over fZ2 with the counting fill of
 /// `typed_facade.rs::fermionic_rank_three`, whose transposes and permutes are
 /// hand-computed there.
-fn fz2_rank_three(runtime: &Runtime) -> TensorMap<FermionParityFusionRule, f64> {
+fn fz2_rank_three(
+    engine: &mut dyn symtn::typed::Engine,
+    runtime: &Runtime,
+) -> TensorMap<FermionParityFusionRule, f64> {
     let leg = fz2_leg();
     let mut next = 0.0;
-    TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], |_, _| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], |_, _| {
         next += 1.0;
         next
     })
@@ -304,6 +310,8 @@ fn fz2_rank_three(runtime: &Runtime) -> TensorMap<FermionParityFusionRule, f64> 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let u1_dual = u1_leg(&[(-1, 1), (0, 2), (1, 1)], true);
@@ -311,12 +319,18 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
 
     // U(1) with a dual leg and several coupled sectors, both dtypes.
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1, &u1], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1_dual], [&u1, &u1], real_fill)
+            .unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1, &u1], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1_dual], [&u1, &u1], complex_fill)
+            .unwrap();
     assert!(real.subblock_count() >= 2, "multi-block fixture");
 
-    let permuted = device_matches_host!("U1/f64 permute", real, |t| t.permute(&[2, 0], &[1, 3]));
+    let permuted = device_matches_host!(engine, cuda, "U1/f64 permute", real, |e, t| t.permute(
+        e,
+        &[2, 0],
+        &[1, 3]
+    ));
     assert_moved(
         real.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
@@ -325,43 +339,68 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
     // Coefficient-1 f64 block moves are bitwise on device.
     assert_eq!(
         permuted.dense_data().unwrap(),
-        real.permute(&[2, 0], &[1, 3])
+        real.permute(engine, &[2, 0], &[1, 3])
             .unwrap()
             .dense_data()
             .unwrap(),
         "coefficient-1 f64 permute must move bitwise"
     );
-    device_matches_host!("U1/c64 permute", complex, |t| t.permute(&[2, 0], &[1, 3]));
-    device_matches_host!("U1/f64 braid", real, |t| t.braid(
+    device_matches_host!(engine, cuda, "U1/c64 permute", complex, |e, t| t.permute(
+        e,
+        &[2, 0],
+        &[1, 3]
+    ));
+    device_matches_host!(engine, cuda, "U1/f64 braid", real, |e, t| t.braid(
+        e,
         &[2, 0],
         &[1, 3],
         &[3, 1, 4, 2]
     ));
-    device_matches_host!("U1/f64 transpose", real, |t| full_transpose!(t));
-    device_matches_host!("U1/c64 transpose", complex, |t| full_transpose!(t));
-    device_matches_host!("U1/f64 cyclic transpose", real, |t| t
-        .transpose(&[1, 3], &[0, 2]));
+    device_matches_host!(
+        engine,
+        cuda,
+        "U1/f64 transpose",
+        real,
+        |e, t| full_transpose!(e, t)
+    );
+    device_matches_host!(
+        engine,
+        cuda,
+        "U1/c64 transpose",
+        complex,
+        |e, t| full_transpose!(e, t)
+    );
+    device_matches_host!(engine, cuda, "U1/f64 cyclic transpose", real, |e, t| t
+        .transpose(e, &[1, 3], &[0, 2]));
 
     // SU(2): recoupling, so Multi blocks and coefficients other than 1.
     let su2_real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
+            .unwrap();
     let su2_complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2], complex_fill).unwrap();
-    let permuted =
-        device_matches_host!("SU2/f64 permute", su2_real, |t| t.permute(&[1, 2], &[3, 0]));
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], complex_fill)
+            .unwrap();
+    let permuted = device_matches_host!(engine, cuda, "SU2/f64 permute", su2_real, |e, t| t
+        .permute(e, &[1, 2], &[3, 0]));
     assert_not_a_reordering(
         su2_real.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
         "SU2/f64 permute",
     );
-    let permuted = device_matches_host!("SU2/c64 permute", su2_complex, |t| t
-        .permute(&[1, 2], &[3, 0]));
+    let permuted = device_matches_host!(engine, cuda, "SU2/c64 permute", su2_complex, |e, t| t
+        .permute(e, &[1, 2], &[3, 0]));
     assert_not_a_reordering(
         su2_complex.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
         "SU2/c64 permute",
     );
-    let transposed = device_matches_host!("SU2/f64 transpose", su2_real, |t| full_transpose!(t));
+    let transposed = device_matches_host!(
+        engine,
+        cuda,
+        "SU2/f64 transpose",
+        su2_real,
+        |e, t| full_transpose!(e, t)
+    );
     assert_not_a_reordering(
         su2_real.dense_data().unwrap(),
         transposed.dense_data().unwrap(),
@@ -376,25 +415,38 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_u1_permute_after_a_degeneracy_change_matches_the_host() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let runtime = runtime();
-    let fixture = |outer: usize, inner: usize| {
+    let fixture = |engine: &mut dyn symtn::typed::Engine, outer: usize, inner: usize| {
         let u1 = u1_leg(&[(-1, outer), (0, inner), (1, outer)], false);
         let u1_dual = u1_leg(&[(-1, inner), (0, outer), (1, inner)], true);
-        TensorMap::<_, f64>::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1, &u1], real_fill)
-            .unwrap()
+        TensorMap::<_, f64>::from_subblock_fn(
+            engine,
+            &runtime,
+            [&u1, &u1_dual],
+            [&u1, &u1],
+            real_fill,
+        )
+        .unwrap()
     };
-    let first = fixture(2, 1);
-    device_matches_host!("U1 permute, first degeneracies", first, |t| t
-        .permute(&[2, 0], &[1, 3]));
-    let changed = fixture(1, 3);
-    let device = changed.to_cuda().unwrap();
+    let first = fixture(engine, 2, 1);
+    device_matches_host!(
+        engine,
+        cuda,
+        "U1 permute, first degeneracies",
+        first,
+        |e, t| t.permute(e, &[2, 0], &[1, 3])
+    );
+    let changed = fixture(engine, 1, 3);
+    let device = changed.to_cuda(cuda).unwrap();
     for what in ["after a degeneracy change", "warm"] {
         let start = std::time::Instant::now();
-        let permuted = device.permute(&[2, 0], &[1, 3]).unwrap();
+        let permuted = device.permute(cuda, &[2, 0], &[1, 3]).unwrap();
         let elapsed = start.elapsed();
-        let permuted = permuted.to_host().unwrap();
+        let permuted = permuted.to_host(cuda).unwrap();
         eprintln!("U1 device permute {what}: {elapsed:?}");
-        let expected = changed.permute(&[2, 0], &[1, 3]).unwrap();
+        let expected = changed.permute(engine, &[2, 0], &[1, 3]).unwrap();
         assert_payload_close(
             permuted.dense_data().unwrap(),
             expected.dense_data().unwrap(),
@@ -412,6 +464,8 @@ fn device_u1_permute_after_a_degeneracy_change_matches_the_host() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_permutes_match_the_dense_physical_oracle_within_one_side() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     // The independent oracle of the acceptance gate: for a bosonic provider, a
     // permute inside the codomain and inside the domain is an axis permutation
     // of the physical dense array. SU(2) makes it non-trivial — the reduced
@@ -419,28 +473,37 @@ fn device_permutes_match_the_dense_physical_oracle_within_one_side() {
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let u1_tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
-    let device = u1_tensor.to_cuda().unwrap();
-    let moved = device.permute(&[1, 0], &[3, 2]).unwrap().to_host().unwrap();
-    let source = u1_tensor.to_physical_dense().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
+    let device = u1_tensor.to_cuda(cuda).unwrap();
+    let moved = device
+        .permute(cuda, &[1, 0], &[3, 2])
+        .unwrap()
+        .to_host(cuda)
+        .unwrap();
+    let source = u1_tensor.to_physical_dense(engine).unwrap();
     let (shape, data) = permute_dense(&source.shape, &source.data, &[1, 0, 3, 2]);
-    let actual = moved.to_physical_dense().unwrap();
+    let actual = moved.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, shape);
     assert_payload_close(&actual.data, &data, "U(1) device dense oracle");
 
     let su2 = su2_leg();
     let su2_tensor: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2], complex_fill).unwrap();
-    let device = su2_tensor.to_cuda().unwrap();
-    let moved = device.permute(&[1, 0], &[3, 2]).unwrap().to_host().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], complex_fill)
+            .unwrap();
+    let device = su2_tensor.to_cuda(cuda).unwrap();
+    let moved = device
+        .permute(cuda, &[1, 0], &[3, 2])
+        .unwrap()
+        .to_host(cuda)
+        .unwrap();
     assert_not_a_reordering(
         su2_tensor.dense_data().unwrap(),
         moved.dense_data().unwrap(),
         "SU(2) device permute",
     );
-    let source = su2_tensor.to_physical_dense().unwrap();
+    let source = su2_tensor.to_physical_dense(engine).unwrap();
     let (shape, data) = permute_dense(&source.shape, &source.data, &[1, 0, 3, 2]);
-    let actual = moved.to_physical_dense().unwrap();
+    let actual = moved.to_physical_dense(engine).unwrap();
     assert_eq!(actual.shape, shape);
     assert_payload_close(&actual.data, &data, "SU(2) device dense oracle");
 }
@@ -448,30 +511,32 @@ fn device_permutes_match_the_dense_physical_oracle_within_one_side() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_transform_laws_hold_on_device_tensors() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     // Device twins of `semantic_suite.rs`: permute composition, braid inverse,
     // bosonic braid == permute, transpose involution — all evaluated entirely
     // on device, then compared to the Host's own answer for the same law.
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
-    let device = host.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
+    let device = host.to_cuda(cuda).unwrap();
 
     // permute ∘ permute == permute(composition)
     let first = [2usize, 0, 3, 1];
     let second = [1usize, 0, 3, 2];
     let stepwise = device
-        .permute(&first[..2], &first[2..])
+        .permute(cuda, &first[..2], &first[2..])
         .unwrap()
-        .permute(&second[..2], &second[2..])
+        .permute(cuda, &second[..2], &second[2..])
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     let composed: Vec<usize> = second.iter().map(|&axis| first[axis]).collect();
     let direct = device
-        .permute(&composed[..2], &composed[2..])
+        .permute(cuda, &composed[..2], &composed[2..])
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_payload_close(
         stepwise.dense_data().unwrap(),
@@ -487,16 +552,16 @@ fn device_transform_laws_hold_on_device_tensors() {
     // braid ∘ braid⁻¹ == id, with the levels carried along the strands.
     let axes = [2usize, 0, 3, 1];
     let levels = [4usize, 1, 3, 2];
-    let braided = device.braid(&axes[..2], &axes[2..], &levels).unwrap();
+    let braided = device.braid(cuda, &axes[..2], &axes[2..], &levels).unwrap();
     let mut inverse = [0usize; 4];
     for (index, &axis) in axes.iter().enumerate() {
         inverse[axis] = index;
     }
     let carried: Vec<usize> = axes.iter().map(|&axis| levels[axis]).collect();
     let back = braided
-        .braid(&inverse[..2], &inverse[2..], &carried)
+        .braid(cuda, &inverse[..2], &inverse[2..], &carried)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_payload_close(
         back.dense_data().unwrap(),
@@ -505,16 +570,16 @@ fn device_transform_laws_hold_on_device_tensors() {
     );
 
     // Bosonic provider: braid == permute for any levels.
-    let permuted = device.permute(&axes[..2], &axes[2..]).unwrap();
+    let permuted = device.permute(cuda, &axes[..2], &axes[2..]).unwrap();
     assert_payload_close(
-        braided.to_host().unwrap().dense_data().unwrap(),
-        permuted.to_host().unwrap().dense_data().unwrap(),
+        braided.to_host(cuda).unwrap().dense_data().unwrap(),
+        permuted.to_host(cuda).unwrap().dense_data().unwrap(),
         "bosonic braid == permute",
     );
 
     // Transpose is an involution.
-    let once = full_transpose!(device).unwrap();
-    let twice = full_transpose!(once).unwrap().to_host().unwrap();
+    let once = full_transpose!(cuda, device).unwrap();
+    let twice = full_transpose!(cuda, once).unwrap().to_host(cuda).unwrap();
     assert_eq!(
         twice.dense_data().unwrap(),
         host.dense_data().unwrap(),
@@ -526,24 +591,26 @@ fn device_transform_laws_hold_on_device_tensors() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_repartition_reaches_every_split_and_round_trips() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     // The #1310 residual: codomain/domain repartition, i.e. bends, on device.
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
-    let device = host.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
+    let device = host.to_cuda(cuda).unwrap();
     for num_codomain in 0..=4 {
         let what = format!("U(1) repartition to {num_codomain}");
-        let moved = device.repartition(num_codomain).unwrap();
-        let expected = host.repartition(num_codomain).unwrap();
-        let actual = moved.to_host().unwrap();
+        let moved = device.repartition(cuda, num_codomain).unwrap();
+        let expected = host.repartition(engine, num_codomain).unwrap();
+        let actual = moved.to_host(cuda).unwrap();
         assert_payload_close(
             actual.dense_data().unwrap(),
             expected.dense_data().unwrap(),
             &what,
         );
         assert_eq!(layout(&actual), layout(&expected), "{what}: layout");
-        let back = moved.repartition(2).unwrap().to_host().unwrap();
+        let back = moved.repartition(cuda, 2).unwrap().to_host(cuda).unwrap();
         assert_eq!(
             back.dense_data().unwrap(),
             host.dense_data().unwrap(),
@@ -556,10 +623,12 @@ fn device_repartition_reaches_every_split_and_round_trips() {
     // is not a reordering of the source.
     let su2 = su2_leg();
     let su2_host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
+            .unwrap();
     for num_codomain in [0usize, 1, 3, 4] {
         let what = format!("SU(2) repartition to {num_codomain}");
-        let moved = device_matches_host!(&what, su2_host, |t| t.repartition(num_codomain));
+        let moved = device_matches_host!(engine, cuda, &what, su2_host, |e, t| t
+            .repartition(e, num_codomain));
         assert_not_a_reordering(
             su2_host.dense_data().unwrap(),
             moved.dense_data().unwrap(),
@@ -571,18 +640,20 @@ fn device_repartition_reaches_every_split_and_round_trips() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_fermionic_signs_match_the_hand_computed_fixture() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     // Device twin of `typed_facade.rs::planar_transposes_bend_where_permute_braids`
     // and `repartition_is_sign_free_even_for_a_fermionic_provider`: the values
     // are hand-computed there, not read off any symtn descriptor.
     let runtime = runtime();
-    let host = fz2_rank_three(&runtime);
+    let host = fz2_rank_three(engine, &runtime);
     assert_eq!(host.dense_data().unwrap(), [1.0, 2.0, 3.0, 4.0]);
-    let device = host.to_cuda().unwrap();
+    let device = host.to_cuda(cuda).unwrap();
 
     assert_eq!(
-        full_transpose!(device)
+        full_transpose!(cuda, device)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -590,9 +661,9 @@ fn device_fermionic_signs_match_the_hand_computed_fixture() {
     );
     assert_eq!(
         device
-            .permute(&[2], &[1, 0])
+            .permute(cuda, &[2], &[1, 0])
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -600,9 +671,9 @@ fn device_fermionic_signs_match_the_hand_computed_fixture() {
     );
     assert_eq!(
         device
-            .transpose(&[1, 2], &[0])
+            .transpose(cuda, &[1, 2], &[0])
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -610,9 +681,9 @@ fn device_fermionic_signs_match_the_hand_computed_fixture() {
     );
     assert_eq!(
         device
-            .permute(&[1, 2], &[0])
+            .permute(cuda, &[1, 2], &[0])
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -621,13 +692,13 @@ fn device_fermionic_signs_match_the_hand_computed_fixture() {
     for num_codomain in [0usize, 1, 3] {
         assert_eq!(
             device
-                .repartition(num_codomain)
+                .repartition(cuda, num_codomain)
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
-            host.repartition(num_codomain)
+            host.repartition(engine, num_codomain)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -639,9 +710,9 @@ fn device_fermionic_signs_match_the_hand_computed_fixture() {
     assert_not_a_reordering(
         host.dense_data().unwrap(),
         device
-            .permute(&[2], &[1, 0])
+            .permute(cuda, &[2], &[1, 0])
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -652,6 +723,8 @@ fn device_fermionic_signs_match_the_hand_computed_fixture() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_product_providers_match_the_host_for_signs_and_recoupling() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
 
     // fZ2 x U(1): fermionic signs on top of a charge grading.
@@ -669,20 +742,33 @@ fn device_product_providers_match_the_host_for_signs_and_recoupling() {
     )
     .unwrap();
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], real_fill).unwrap();
-    let permuted = device_matches_host!("fZ2xU1 permute", host, |t| t.permute(&[2, 1], &[0, 3]));
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], real_fill)
+            .unwrap();
+    let permuted = device_matches_host!(engine, cuda, "fZ2xU1 permute", host, |e, t| t.permute(
+        e,
+        &[2, 1],
+        &[0, 3]
+    ));
     assert_not_a_reordering(
         host.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
         "fZ2xU1 permute",
     );
-    device_matches_host!("fZ2xU1 transpose", host, |t| full_transpose!(t));
-    device_matches_host!("fZ2xU1 braid", host, |t| t.braid(
+    device_matches_host!(
+        engine,
+        cuda,
+        "fZ2xU1 transpose",
+        host,
+        |e, t| full_transpose!(e, t)
+    );
+    device_matches_host!(engine, cuda, "fZ2xU1 braid", host, |e, t| t.braid(
+        e,
         &[2, 1],
         &[0, 3],
         &[1, 4, 2, 3]
     ));
-    device_matches_host!("fZ2xU1 repartition", host, |t| t.repartition(1));
+    device_matches_host!(engine, cuda, "fZ2xU1 repartition", host, |e, t| t
+        .repartition(e, 1));
 
     // fZ2 (x) SU(2): fermionic signs *and* recoupling in one provider.
     let rule = Arc::new(
@@ -708,44 +794,76 @@ fn device_product_providers_match_the_host_for_signs_and_recoupling() {
     )
     .unwrap();
     let host: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], complex_fill).unwrap();
-    let permuted = device_matches_host!("fZ2xSU2 permute", host, |t| t.permute(&[1, 2], &[3, 0]));
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], complex_fill)
+            .unwrap();
+    let permuted = device_matches_host!(engine, cuda, "fZ2xSU2 permute", host, |e, t| t.permute(
+        e,
+        &[1, 2],
+        &[3, 0]
+    ));
     assert_not_a_reordering(
         host.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
         "fZ2xSU2 permute",
     );
-    let transposed = device_matches_host!("fZ2xSU2 transpose", host, |t| full_transpose!(t));
+    let transposed = device_matches_host!(
+        engine,
+        cuda,
+        "fZ2xSU2 transpose",
+        host,
+        |e, t| full_transpose!(e, t)
+    );
     assert_not_a_reordering(
         host.dense_data().unwrap(),
         transposed.dense_data().unwrap(),
         "fZ2xSU2 transpose",
     );
-    device_matches_host!("fZ2xSU2 repartition", host, |t| t.repartition(3));
+    device_matches_host!(engine, cuda, "fZ2xSU2 repartition", host, |e, t| t
+        .repartition(e, 3));
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_rank_five_transforms_match_the_host() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 1)], false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1, &u1], [&u1, &u1], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1, &u1], [&u1, &u1], real_fill)
+            .unwrap();
     assert!(host.subblock_count() >= 3, "multi-block rank-5 fixture");
-    let permuted = device_matches_host!("rank-5 permute", host, |t| t.permute(&[4, 1, 0], &[3, 2]));
+    let permuted = device_matches_host!(engine, cuda, "rank-5 permute", host, |e, t| t.permute(
+        e,
+        &[4, 1, 0],
+        &[3, 2]
+    ));
     assert_moved(
         host.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
         "rank-5 permute",
     );
-    device_matches_host!("rank-5 transpose", host, |t| full_transpose!(t));
-    device_matches_host!("rank-5 repartition", host, |t| t.repartition(1));
+    device_matches_host!(
+        engine,
+        cuda,
+        "rank-5 transpose",
+        host,
+        |e, t| full_transpose!(e, t)
+    );
+    device_matches_host!(engine, cuda, "rank-5 repartition", host, |e, t| t
+        .repartition(e, 1));
 
     let su2 = su2_leg();
-    let su2_host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2, &su2], [&su2, &su2], real_fill).unwrap();
-    let permuted = device_matches_host!("rank-5 SU(2) permute", su2_host, |t| t
-        .permute(&[4, 1, 0], &[3, 2]));
+    let su2_host: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2, &su2, &su2],
+        [&su2, &su2],
+        real_fill,
+    )
+    .unwrap();
+    let permuted = device_matches_host!(engine, cuda, "rank-5 SU(2) permute", su2_host, |e, t| t
+        .permute(e, &[4, 1, 0], &[3, 2]));
     assert_not_a_reordering(
         su2_host.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
@@ -756,6 +874,8 @@ fn device_rank_five_transforms_match_the_host() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_complex_su2_permute_matches_the_tensorkit_fixture() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Device twin of `tk_complex_su2.rs`: the norm is TensorKit's own value,
     // so this is a value oracle outside symtn entirely.
     let runtime = runtime();
@@ -782,6 +902,7 @@ fn device_complex_su2_permute_matches_the_tensorkit_fixture() {
         (value.rem_euclid(41) - 20) as f64
     };
     let host: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&space, &space],
         [&space, &space],
@@ -801,14 +922,14 @@ fn device_complex_su2_permute_matches_the_tensorkit_fixture() {
     )
     .unwrap();
 
-    let permuted = device_matches_host!("tk SU(2) c64 permute", host, |t| t
-        .permute(&[1, 0], &[3, 2]));
+    let permuted = device_matches_host!(engine, cuda, "tk SU(2) c64 permute", host, |e, t| t
+        .permute(e, &[1, 0], &[3, 2]));
     assert_not_a_reordering(
         host.dense_data().unwrap(),
         permuted.dense_data().unwrap(),
         "tk SU(2) c64 permute",
     );
-    let norm = permuted.norm(2.0).unwrap();
+    let norm = permuted.norm(engine, 2.0).unwrap();
     assert!(
         (norm - 40.741_733_994_626_32).abs() <= 1e-10 * 41.0,
         "TensorKit norm of the permuted tensor: got {norm}"
@@ -818,6 +939,8 @@ fn device_complex_su2_permute_matches_the_tensorkit_fixture() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_lazy_adjoint_transforms_lower_onto_the_parent_like_the_host() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Device twin of `lazy_adjoint_shared_owner.rs`: every transform of a lazy
     // adjoint lowers onto the parent and re-wraps, so it must equal the Host's
     // transform of the same lazy adjoint.
@@ -831,22 +954,22 @@ fn device_lazy_adjoint_transforms_lower_onto_the_parent_like_the_host() {
     let c = u1_leg(&[(-1, 1), (1, 2)], false);
     let d = u1_leg(&[(-2, 2), (-1, 3), (0, 1), (1, 2), (2, 1)], false);
     let u1_parent: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&a, &b, &c], [&d], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&a, &b, &c], [&d], complex_fill).unwrap();
     assert!(u1_parent.subblock_count() >= 4, "multi-block lazy fixture");
-    assert_lazy_adjoint_transforms_match_host(&u1_parent, "U(1) c64 lazy", false);
+    assert_lazy_adjoint_transforms_match_host(engine, cuda, &u1_parent, "U(1) c64 lazy", false);
 
     // SU(2): the lowered operation recouples, so the transformed adjoint is
     // not a reordering of the adjoint itself.
     let su2 = su2_leg();
     let su2_parent: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
-    assert_lazy_adjoint_transforms_match_host(&su2_parent, "SU(2) c64 lazy", true);
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
+    assert_lazy_adjoint_transforms_match_host(engine, cuda, &su2_parent, "SU(2) c64 lazy", true);
 
     // fZ2: fermionic signs under a lazy adjoint, real payload.
     let fz2 = fz2_leg();
     let fz2_parent: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&fz2, &fz2], [&fz2], real_fill).unwrap();
-    assert_lazy_adjoint_transforms_match_host(&fz2_parent, "fZ2 f64 lazy", true);
+        TensorMap::from_subblock_fn(engine, &runtime, [&fz2, &fz2], [&fz2], real_fill).unwrap();
+    assert_lazy_adjoint_transforms_match_host(engine, cuda, &fz2_parent, "fZ2 f64 lazy", true);
 }
 
 /// Runs the five transforms on a lazy adjoint, on Host and on device, and
@@ -860,6 +983,8 @@ fn device_lazy_adjoint_transforms_lower_onto_the_parent_like_the_host() {
 /// that the set as a whole exercises motion, and — for a provider that
 /// recouples — a coefficient.
 fn assert_lazy_adjoint_transforms_match_host<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     parent: &TensorMap<R, D>,
     what: &str,
     recouples: bool,
@@ -873,8 +998,8 @@ fn assert_lazy_adjoint_transforms_match_host<R, D>(
         + SectorCodec,
     D: Payload + symtn::typed::CudaPayload,
 {
-    let host_lazy = parent.adjoint().unwrap();
-    let device_lazy = parent.to_cuda().unwrap().adjoint().unwrap();
+    let host_lazy = parent.adjoint(engine).unwrap();
+    let device_lazy = parent.to_cuda(cuda).unwrap().adjoint(cuda).unwrap();
 
     let rank = host_lazy.rank();
     let split = host_lazy.codomain_rank();
@@ -892,40 +1017,44 @@ fn assert_lazy_adjoint_transforms_match_host<R, D>(
     let pairs = [
         (
             "permute",
-            host_lazy.permute(codomain_axes, domain_axes).unwrap(),
-            device_lazy.permute(codomain_axes, domain_axes).unwrap(),
+            host_lazy
+                .permute(engine, codomain_axes, domain_axes)
+                .unwrap(),
+            device_lazy
+                .permute(cuda, codomain_axes, domain_axes)
+                .unwrap(),
         ),
         (
             "braid",
             host_lazy
-                .braid(codomain_axes, domain_axes, &levels)
+                .braid(engine, codomain_axes, domain_axes, &levels)
                 .unwrap(),
             device_lazy
-                .braid(codomain_axes, domain_axes, &levels)
+                .braid(cuda, codomain_axes, domain_axes, &levels)
                 .unwrap(),
         ),
         (
             "repartition",
-            host_lazy.repartition(new_split).unwrap(),
-            device_lazy.repartition(new_split).unwrap(),
+            host_lazy.repartition(engine, new_split).unwrap(),
+            device_lazy.repartition(cuda, new_split).unwrap(),
         ),
         (
             "transpose",
-            full_transpose!(host_lazy).unwrap(),
-            full_transpose!(device_lazy).unwrap(),
+            full_transpose!(engine, host_lazy).unwrap(),
+            full_transpose!(cuda, device_lazy).unwrap(),
         ),
         (
             "cyclic transpose",
             host_lazy
-                .transpose(cyclic_codomain, &cyclic_domain)
+                .transpose(engine, cyclic_codomain, &cyclic_domain)
                 .unwrap(),
             device_lazy
-                .transpose(cyclic_codomain, &cyclic_domain)
+                .transpose(cuda, cyclic_codomain, &cyclic_domain)
                 .unwrap(),
         ),
     ];
     let adjoint_payload = host_lazy
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -934,22 +1063,22 @@ fn assert_lazy_adjoint_transforms_match_host<R, D>(
     let mut scaled = 0usize;
     for (operation, expected, actual) in pairs {
         let label = format!("{what} {operation}");
-        let actual = actual.to_host().unwrap();
+        let actual = actual.to_host(cuda).unwrap();
         assert_payload_close(
-            actual.materialize().unwrap().dense_data().unwrap(),
-            expected.materialize().unwrap().dense_data().unwrap(),
+            actual.materialize(engine).unwrap().dense_data().unwrap(),
+            expected.materialize(engine).unwrap().dense_data().unwrap(),
             &label,
         );
         assert_eq!(layout(&actual), layout(&expected), "{label}: layout");
         if adjoint_payload
             .iter()
-            .zip(actual.materialize().unwrap().dense_data().unwrap())
+            .zip(actual.materialize(engine).unwrap().dense_data().unwrap())
             .any(|(before, after)| before != after)
         {
             moved += 1;
         }
         if sorted_values(&adjoint_payload)
-            != sorted_values(actual.materialize().unwrap().dense_data().unwrap())
+            != sorted_values(actual.materialize(engine).unwrap().dense_data().unwrap())
         {
             scaled += 1;
         }
@@ -969,27 +1098,34 @@ fn assert_lazy_adjoint_transforms_match_host<R, D>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_transforms_of_an_empty_tensor_produce_an_empty_tensor() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     // `required_len == 0`: the output upload, the replay and the download all
     // have to survive a structure with no admissible block at all.
     let runtime = runtime();
     let codomain = u1_leg(&[(1, 2)], false);
     let domain = u1_leg(&[(0, 3)], false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&codomain], [&domain], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, _| 1.0).unwrap();
     assert_eq!(host.subblock_count(), 0);
-    assert!(host.materialize().unwrap().dense_data().unwrap().is_empty());
-    let device = host.to_cuda().unwrap();
+    assert!(host
+        .materialize(engine)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .is_empty());
+    let device = host.to_cuda(cuda).unwrap();
 
     for (what, actual) in [
-        ("permute", device.permute(&[1], &[0]).unwrap()),
-        ("braid", device.braid(&[1], &[0], &[1, 2]).unwrap()),
-        ("transpose", full_transpose!(device).unwrap()),
-        ("repartition", device.repartition(0).unwrap()),
+        ("permute", device.permute(cuda, &[1], &[0]).unwrap()),
+        ("braid", device.braid(cuda, &[1], &[0], &[1, 2]).unwrap()),
+        ("transpose", full_transpose!(cuda, device).unwrap()),
+        ("repartition", device.repartition(cuda, 0).unwrap()),
     ] {
-        let actual = actual.to_host().unwrap();
+        let actual = actual.to_host(cuda).unwrap();
         assert!(
             actual
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -999,11 +1135,11 @@ fn device_transforms_of_an_empty_tensor_produce_an_empty_tensor() {
         assert_eq!(actual.subblock_count(), 0, "{what}: expected no blocks");
     }
     // The lazy-adjoint lowering must survive it too.
-    assert!(full_transpose!(device.adjoint().unwrap())
+    assert!(full_transpose!(cuda, device.adjoint(cuda).unwrap())
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap()
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -1017,7 +1153,10 @@ fn device_transforms_of_an_empty_tensor_produce_an_empty_tensor() {
 /// A destination whose every element is NaN, on the model's space. Overwrite
 /// mode must clear it — every inactive destination layout included — so a
 /// surviving NaN proves a block the replay failed to write.
-fn poisoned_like<R, D>(model: &TensorMap<R, D>) -> TensorMap<R, D>
+fn poisoned_like<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    model: &TensorMap<R, D>,
+) -> TensorMap<R, D>
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -1028,7 +1167,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let poisoned = model.scale(D::nan()).unwrap();
+    let poisoned = model.scale(engine, D::nan()).unwrap();
     assert!(
         poisoned
             .dense_data()
@@ -1086,20 +1225,22 @@ fn nan_positions<D: Payload>(data: &[D]) -> Vec<usize> {
 /// `$body` is written once and expanded against both receiver types, so the
 /// Host and device calls cannot drift.
 macro_rules! device_overwrite_matches_host {
-    ($what:expr, $host:expr, $model:expr, |$t:ident, $d:ident| $body:expr) => {{
+    ($engine:ident, $cuda:ident, $what:expr, $host:expr, $model:expr, |$e:ident, $t:ident, $d:ident| $body:expr) => {{
         let host_source = &$host;
-        let device_source = host_source.to_cuda().unwrap();
+        let device_source = host_source.to_cuda($cuda).unwrap();
 
-        let mut host_destination = poisoned_like(&$model);
+        let mut host_destination = poisoned_like($engine, &$model);
         {
+            let $e: &mut dyn symtn::typed::Engine = &mut *$engine;
             let $t = host_source;
             let $d = &mut host_destination;
             $body
         }
         .unwrap();
 
-        let mut device_destination = poisoned_like(&$model).to_cuda().unwrap();
+        let mut device_destination = poisoned_like($engine, &$model).to_cuda($cuda).unwrap();
         {
+            let $e: &mut dyn symtn::typed::Engine = &mut *$cuda;
             let $t = &device_source;
             let $d = &mut device_destination;
             $body
@@ -1107,7 +1248,7 @@ macro_rules! device_overwrite_matches_host {
         .unwrap();
 
         let what: &str = $what;
-        let actual = device_destination.to_host().unwrap();
+        let actual = device_destination.to_host($cuda).unwrap();
         assert_payload_matches(
             actual.dense_data().unwrap(),
             host_destination.dense_data().unwrap(),
@@ -1125,25 +1266,31 @@ const REAL_ALPHAS: [f64; 4] = [1.0, -2.5, 0.0, -0.0];
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_matches_the_host_for_every_alpha_and_method() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let u1_dual = u1_leg(&[(-1, 1), (0, 2), (1, 1)], true);
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1, &u1], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1_dual], [&u1, &u1], real_fill)
+            .unwrap();
     assert!(real.subblock_count() >= 2, "multi-block fixture");
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1, &u1], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1_dual], [&u1, &u1], complex_fill)
+            .unwrap();
 
-    let permuted = real.permute(&[2, 0], &[1, 3]).unwrap();
-    let transposed = full_transpose!(real).unwrap();
-    let cyclic = real.transpose(&[1, 3], &[0, 2]).unwrap();
-    let bent = real.repartition(1).unwrap();
+    let permuted = real.permute(engine, &[2, 0], &[1, 3]).unwrap();
+    let transposed = full_transpose!(engine, real).unwrap();
+    let cyclic = real.transpose(engine, &[1, 3], &[0, 2]).unwrap();
+    let bent = real.repartition(engine, 1).unwrap();
     for alpha in REAL_ALPHAS {
         let written = device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/f64 permute_into alpha={alpha}"),
             real,
             permuted,
-            |t, d| t.permute_into(&[2, 0], &[1, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[2, 0], &[1, 3], d, alpha, Default::default())
         );
         if alpha != 0.0 {
             assert_moved(
@@ -1153,22 +1300,28 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             );
         }
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/f64 transpose_into alpha={alpha}"),
             real,
             transposed,
-            |t, d| full_transpose_into!(t, d, alpha)
+            |e, t, d| full_transpose_into!(e, t, d, alpha)
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/f64 transpose_into alpha={alpha}"),
             real,
             cyclic,
-            |t, d| t.transpose_into(&[1, 3], &[0, 2], d, alpha, Default::default())
+            |e, t, d| t.transpose_into(e, &[1, 3], &[0, 2], d, alpha, Default::default())
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/f64 repartition_into alpha={alpha}"),
             real,
             bent,
-            |t, d| t.repartition_into(d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
         );
     }
 
@@ -1177,13 +1330,15 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
     // NaN (or signed infinity) exactly where a block was moved and an exact
     // zero everywhere else — and the device must reproduce the Host's pattern
     // element for element.
-    let permuted_model = real.permute(&[2, 0], &[1, 3]).unwrap();
+    let permuted_model = real.permute(engine, &[2, 0], &[1, 3]).unwrap();
     for alpha in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let written = device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/f64 non-finite alpha={alpha}"),
             real,
             permuted_model,
-            |t, d| t.permute_into(&[2, 0], &[1, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[2, 0], &[1, 3], d, alpha, Default::default())
         );
         assert!(
             written
@@ -1196,9 +1351,9 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
     }
 
     // Complex payload, including a genuinely complex scale.
-    let permuted = complex.permute(&[2, 0], &[1, 3]).unwrap();
-    let transposed = full_transpose!(complex).unwrap();
-    let bent = complex.repartition(3).unwrap();
+    let permuted = complex.permute(engine, &[2, 0], &[1, 3]).unwrap();
+    let transposed = full_transpose!(engine, complex).unwrap();
+    let bent = complex.repartition(engine, 3).unwrap();
     let complex_alphas = [
         Complex64::new(1.0, 0.0),
         Complex64::new(-2.5, 0.0),
@@ -1208,22 +1363,28 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
     ];
     for alpha in complex_alphas {
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/c64 permute_into alpha={alpha}"),
             complex,
             permuted,
-            |t, d| t.permute_into(&[2, 0], &[1, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[2, 0], &[1, 3], d, alpha, Default::default())
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/c64 transpose_into alpha={alpha}"),
             complex,
             transposed,
-            |t, d| full_transpose_into!(t, d, alpha)
+            |e, t, d| full_transpose_into!(e, t, d, alpha)
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("U1/c64 repartition_into alpha={alpha}"),
             complex,
             bent,
-            |t, d| t.repartition_into(d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
         );
     }
 }
@@ -1231,24 +1392,30 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = runtime();
 
     // SU(2): Multi blocks, so the caller scale reaches the scatter rather than
     // a Single move, and the coefficients are not 1.
     let su2 = su2_leg();
     let su2_real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
+            .unwrap();
     let su2_complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2], complex_fill).unwrap();
-    let permuted = su2_real.permute(&[1, 2], &[3, 0]).unwrap();
-    let transposed = full_transpose!(su2_real).unwrap();
-    let bent = su2_real.repartition(3).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], complex_fill)
+            .unwrap();
+    let permuted = su2_real.permute(engine, &[1, 2], &[3, 0]).unwrap();
+    let transposed = full_transpose!(engine, su2_real).unwrap();
+    let bent = su2_real.repartition(engine, 3).unwrap();
     for alpha in REAL_ALPHAS {
         let written = device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("SU2/f64 permute_into alpha={alpha}"),
             su2_real,
             permuted,
-            |t, d| t.permute_into(&[1, 2], &[3, 0], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[1, 2], &[3, 0], d, alpha, Default::default())
         );
         if alpha != 0.0 {
             assert_not_a_reordering(
@@ -1258,24 +1425,31 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             );
         }
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("SU2/f64 transpose_into alpha={alpha}"),
             su2_real,
             transposed,
-            |t, d| full_transpose_into!(t, d, alpha)
+            |e, t, d| full_transpose_into!(e, t, d, alpha)
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("SU2/f64 repartition_into alpha={alpha}"),
             su2_real,
             bent,
-            |t, d| t.repartition_into(d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
         );
     }
-    let su2_permuted_c = su2_complex.permute(&[1, 2], &[3, 0]).unwrap();
+    let su2_permuted_c = su2_complex.permute(engine, &[1, 2], &[3, 0]).unwrap();
     let written = device_overwrite_matches_host!(
+        engine,
+        cuda,
         "SU2/c64 permute_into complex alpha",
         su2_complex,
         su2_permuted_c,
-        |t, d| t.permute_into(
+        |e, t, d| t.permute_into(
+            e,
             &[1, 2],
             &[3, 0],
             d,
@@ -1304,16 +1478,19 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
     )
     .unwrap();
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], real_fill).unwrap();
-    let permuted = host.permute(&[2, 1], &[0, 3]).unwrap();
-    let cyclic = host.transpose(&[1, 3], &[0, 2]).unwrap();
-    let bent = host.repartition(1).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], real_fill)
+            .unwrap();
+    let permuted = host.permute(engine, &[2, 1], &[0, 3]).unwrap();
+    let cyclic = host.transpose(engine, &[1, 3], &[0, 2]).unwrap();
+    let bent = host.repartition(engine, 1).unwrap();
     for alpha in REAL_ALPHAS {
         let written = device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("fZ2xU1 permute_into alpha={alpha}"),
             host,
             permuted,
-            |t, d| t.permute_into(&[2, 1], &[0, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[2, 1], &[0, 3], d, alpha, Default::default())
         );
         if alpha != 0.0 {
             assert_not_a_reordering(
@@ -1323,16 +1500,20 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             );
         }
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("fZ2xU1 transpose_into alpha={alpha}"),
             host,
             cyclic,
-            |t, d| t.transpose_into(&[1, 3], &[0, 2], d, alpha, Default::default())
+            |e, t, d| t.transpose_into(e, &[1, 3], &[0, 2], d, alpha, Default::default())
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("fZ2xU1 repartition_into alpha={alpha}"),
             host,
             bent,
-            |t, d| t.repartition_into(d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
         );
     }
 
@@ -1360,10 +1541,11 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
     )
     .unwrap();
     let host: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], complex_fill).unwrap();
-    let permuted = host.permute(&[1, 2], &[3, 0]).unwrap();
-    let transposed = full_transpose!(host).unwrap();
-    let bent = host.repartition(3).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], complex_fill)
+            .unwrap();
+    let permuted = host.permute(engine, &[1, 2], &[3, 0]).unwrap();
+    let transposed = full_transpose!(engine, host).unwrap();
+    let bent = host.repartition(engine, 3).unwrap();
     for alpha in [
         Complex64::new(1.0, 0.0),
         Complex64::new(-2.5, 0.0),
@@ -1372,10 +1554,12 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
         Complex64::new(0.75, -0.25),
     ] {
         let written = device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("fZ2xSU2 permute_into alpha={alpha}"),
             host,
             permuted,
-            |t, d| t.permute_into(&[1, 2], &[3, 0], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[1, 2], &[3, 0], d, alpha, Default::default())
         );
         if alpha != Complex64::new(0.0, 0.0) {
             assert_not_a_reordering(
@@ -1385,16 +1569,20 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             );
         }
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("fZ2xSU2 transpose_into alpha={alpha}"),
             host,
             transposed,
-            |t, d| full_transpose_into!(t, d, alpha)
+            |e, t, d| full_transpose_into!(e, t, d, alpha)
         );
         device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("fZ2xSU2 repartition_into alpha={alpha}"),
             host,
             bent,
-            |t, d| t.repartition_into(d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
         );
     }
 }
@@ -1402,6 +1590,8 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // At `alpha == 0` device and Host follow VectorInterface's
     // `scale(x, 0) = zero(x) * 0` (#1438): zeros whatever the source holds,
     // as TensorKit's `permute!(tdst, tsrc, p, 0, 0)`. Every other scale
@@ -1410,7 +1600,7 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let poisoned_source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1], [&u1, &u1], |trees, idx| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], |trees, idx| {
             if idx.iter().sum::<usize>() % 3 == 0 {
                 f64::NAN
             } else if idx[0] == 1 {
@@ -1430,7 +1620,7 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
         .unwrap()
         .iter()
         .any(|value| value.is_infinite()));
-    let model = poisoned_source.permute(&[1, 2], &[3, 0]).unwrap();
+    let model = poisoned_source.permute(engine, &[1, 2], &[3, 0]).unwrap();
 
     // A NaN and an infinite caller scale belong here too: the contract is
     // "alpha equals the Host", not "alpha is finite". `NaN * x` and `inf * 0`
@@ -1438,18 +1628,21 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
     // reproduce.
     for alpha in [0.0, -0.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let written = device_overwrite_matches_host!(
+            engine,
+            cuda,
             &format!("NaN source *_into alpha={alpha}"),
             poisoned_source,
             model,
-            |t, d| t.permute_into(&[1, 2], &[3, 0], d, alpha, Default::default())
+            |e, t, d| t.permute_into(e, &[1, 2], &[3, 0], d, alpha, Default::default())
         );
         // The exact NaN *set*, not merely "some NaN survived": `any` would
         // pass if only one of the poisoned blocks propagated. `device ==
         // Host` element by element is already asserted by the macro; this
         // adds that the set is non-empty, so the case cannot pass vacuously.
-        let mut host_expected = poisoned_like(&model);
+        let mut host_expected = poisoned_like(engine, &model);
         poisoned_source
             .permute_into(
+                engine,
                 &[1, 2],
                 &[3, 0],
                 &mut host_expected,
@@ -1484,45 +1677,60 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_has_no_identity_short_circuit() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Host `overwrite_tree_transform` has none: an identity axis list still
     // writes `alpha * self` into the caller's destination. A device clone
     // short circuit would silently leave the destination poisoned.
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
-    let written = device_overwrite_matches_host!("identity permute_into", host, host, |t, d| t
-        .permute_into(&[0, 1], &[2, 3], d, -2.5, 0.0));
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
+    let written = device_overwrite_matches_host!(
+        engine,
+        cuda,
+        "identity permute_into",
+        host,
+        host,
+        |e, t, d| t.permute_into(e, &[0, 1], &[2, 3], d, -2.5, 0.0)
+    );
     assert_payload_close(
         written.dense_data().unwrap(),
-        host.scale(-2.5).unwrap().dense_data().unwrap(),
+        host.scale(engine, -2.5).unwrap().dense_data().unwrap(),
         "identity permute_into writes alpha * self",
     );
 
     // Same split for `repartition`, and a rank-0 `transpose`: the returning
     // device methods clone there, the overwriting ones must still write.
-    let written =
-        device_overwrite_matches_host!("same-split repartition_into", host, host, |t, d| t
-            .repartition_into(d, 2.0, 0.0));
+    let written = device_overwrite_matches_host!(
+        engine,
+        cuda,
+        "same-split repartition_into",
+        host,
+        host,
+        |e, t, d| t.repartition_into(e, d, 2.0, 0.0)
+    );
     assert_payload_close(
         written.dense_data().unwrap(),
-        host.scale(2.0).unwrap().dense_data().unwrap(),
+        host.scale(engine, 2.0).unwrap().dense_data().unwrap(),
         "same-split repartition_into writes alpha * self",
     );
 
     let square: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], real_fill).unwrap();
-    let scalar = square.trace_pairs(&[(0, 1)]).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], real_fill).unwrap();
+    let scalar = square.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(scalar.rank(), 0);
     let written = device_overwrite_matches_host!(
+        engine,
+        cuda,
         "rank-0 transpose_into",
         scalar,
         scalar,
-        |t, d| full_transpose_into!(t, d, -0.5)
+        |e, t, d| full_transpose_into!(e, t, d, -0.5)
     );
     assert_payload_close(
         written.dense_data().unwrap(),
-        scalar.scale(-0.5).unwrap().dense_data().unwrap(),
+        scalar.scale(engine, -0.5).unwrap().dense_data().unwrap(),
         "rank-0 transpose_into writes alpha * self",
     );
 }
@@ -1530,20 +1738,22 @@ fn device_into_has_no_identity_short_circuit() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_of_an_empty_tensor_succeeds() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let runtime = runtime();
     let codomain = u1_leg(&[(1, 2)], false);
     let domain = u1_leg(&[(0, 3)], false);
     let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&codomain], [&domain], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, _| 1.0).unwrap();
     assert_eq!(host.subblock_count(), 0);
-    let model = host.permute(&[1], &[0]).unwrap();
-    let source = host.to_cuda().unwrap();
-    let mut destination = model.to_cuda().unwrap();
+    let model = host.permute(engine, &[1], &[0]).unwrap();
+    let source = host.to_cuda(cuda).unwrap();
+    let mut destination = model.to_cuda(cuda).unwrap();
     source
-        .permute_into(&[1], &[0], &mut destination, 2.0, 0.0)
+        .permute_into(cuda, &[1], &[0], &mut destination, 2.0, 0.0)
         .unwrap();
     assert!(destination
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -1553,6 +1763,8 @@ fn device_into_of_an_empty_tensor_succeeds() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_into_reads_a_lazy_source_through_its_parent_like_the_host() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // #1870: a lazy-adjoint source of the device `*_into` is read
     // through its parent's device payload (storage-mapped structure, storage
     // conjugation per task), as on Host. Each call is compared against the
@@ -1564,30 +1776,43 @@ fn device_into_reads_a_lazy_source_through_its_parent_like_the_host() {
     let c = u1_leg(&[(-1, 1), (1, 2)], false);
     let d = u1_leg(&[(-2, 2), (-1, 3), (0, 1), (1, 2), (2, 1)], false);
     let u1: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&a, &b, &c], [&d], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&a, &b, &c], [&d], complex_fill).unwrap();
     let su2 = su2_leg();
     let su2_parent: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
     let fz2 = fz2_leg();
     let fz2_parent: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&fz2, &fz2], [&fz2], real_fill).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&fz2, &fz2], [&fz2], real_fill).unwrap();
     for (alpha, beta) in [
         (Complex64::new(0.75, -0.25), Complex64::new(0.0, 0.0)),
         (Complex64::new(-2.5, 0.0), Complex64::new(0.5, 0.25)),
     ] {
-        assert_lazy_into_matches_host(&u1, alpha, beta, "U(1) c64 lazy into");
-        assert_lazy_into_matches_host(&su2_parent, alpha, beta, "SU(2) c64 lazy into");
+        assert_lazy_into_matches_host(engine, cuda, &u1, alpha, beta, "U(1) c64 lazy into");
+        assert_lazy_into_matches_host(
+            engine,
+            cuda,
+            &su2_parent,
+            alpha,
+            beta,
+            "SU(2) c64 lazy into",
+        );
     }
     for (alpha, beta) in [(1.0, 0.0), (-2.5, 0.5), (0.5, 1.0)] {
-        assert_lazy_into_matches_host(&fz2_parent, alpha, beta, "fZ2 f64 lazy into");
+        assert_lazy_into_matches_host(engine, cuda, &fz2_parent, alpha, beta, "fZ2 f64 lazy into");
     }
 }
 
 /// Runs permute/braid/transpose/repartition `*_into` of `parent.adjoint()`
 /// on Host and on device into the same `dst0` (NaN for `beta = 0`, which
 /// must never be read), and asserts device == Host == the reference steps.
-fn assert_lazy_into_matches_host<R, D>(parent: &TensorMap<R, D>, alpha: D, beta: D, what: &str)
-where
+fn assert_lazy_into_matches_host<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    parent: &TensorMap<R, D>,
+    alpha: D,
+    beta: D,
+    what: &str,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -1597,9 +1822,9 @@ where
         + SectorCodec,
     D: Payload + symtn::typed::CudaPayload,
 {
-    let host_lazy = parent.adjoint().unwrap();
-    let device_lazy = parent.to_cuda().unwrap().adjoint().unwrap();
-    let owned = host_lazy.materialize().unwrap();
+    let host_lazy = parent.adjoint(engine).unwrap();
+    let device_lazy = parent.to_cuda(cuda).unwrap().adjoint(cuda).unwrap();
+    let owned = host_lazy.materialize(engine).unwrap();
     let rank = host_lazy.rank();
     let split = host_lazy.codomain_rank();
     let mut axes: Vec<usize> = (0..rank).collect();
@@ -1611,38 +1836,40 @@ where
     let new_split = if split > 1 { split - 1 } else { split + 1 };
 
     macro_rules! case {
-        ($operation:expr, |$t:ident| $eager:expr, |$s:ident, $d:ident| $into:expr) => {{
+        ($operation:expr, |$t:ident| $eager:expr, |$e:ident, $s:ident, $d:ident| $into:expr) => {{
             let label = format!("{what} {} alpha={alpha:?} beta={beta:?}", $operation);
             let oracle_eager = {
                 let $t = &owned;
                 $eager
             }
             .unwrap();
-            let model = oracle_eager.materialize().unwrap();
+            let model = oracle_eager.materialize(engine).unwrap();
             // Built afresh per use: a clone would share the payload and trip
             // the unique-ownership check.
-            let dst0 = || {
+            let dst0 = |engine: &mut dyn symtn::typed::Engine| {
                 if beta == D::zero() {
-                    poisoned_like(&model)
+                    poisoned_like(engine, &model)
                 } else {
-                    model.scale(D::one() + D::one()).unwrap()
+                    model.scale(engine, D::one() + D::one()).unwrap()
                 }
             };
-            let mut host_destination = dst0();
+            let mut host_destination = dst0(engine);
             {
+                let $e: &mut dyn symtn::typed::Engine = &mut *engine;
                 let $s = &host_lazy;
                 let $d = &mut host_destination;
                 $into
             }
             .unwrap();
-            let mut device_destination = dst0().to_cuda().unwrap();
+            let mut device_destination = dst0(engine).to_cuda(cuda).unwrap();
             {
+                let $e: &mut dyn symtn::typed::Engine = &mut *cuda;
                 let $s = &device_lazy;
                 let $d = &mut device_destination;
                 $into
             }
             .unwrap();
-            let actual = device_destination.to_host().unwrap();
+            let actual = device_destination.to_host(cuda).unwrap();
             assert_payload_matches(
                 actual.dense_data().unwrap(),
                 host_destination.dense_data().unwrap(),
@@ -1653,7 +1880,7 @@ where
                 .dense_data()
                 .unwrap()
                 .iter()
-                .zip(dst0().dense_data().unwrap())
+                .zip(dst0(engine).dense_data().unwrap())
                 .map(|(&value, &old)| {
                     if beta == D::zero() {
                         alpha * value
@@ -1668,19 +1895,22 @@ where
 
     case!(
         "permute",
-        |t| t.permute(codomain_axes, domain_axes),
-        |s, d| s.permute_into(codomain_axes, domain_axes, d, alpha, beta)
+        |t| t.permute(engine, codomain_axes, domain_axes),
+        |e, s, d| s.permute_into(e, codomain_axes, domain_axes, d, alpha, beta)
     );
     case!(
         "braid",
-        |t| t.braid(codomain_axes, domain_axes, &levels),
-        |s, d| s.braid_into(codomain_axes, domain_axes, &levels, d, alpha, beta)
+        |t| t.braid(engine, codomain_axes, domain_axes, &levels),
+        |e, s, d| s.braid_into(e, codomain_axes, domain_axes, &levels, d, alpha, beta)
     );
     case!(
         "transpose",
-        |t| t.transpose(&full_codomain, &full_domain),
-        |s, d| s.transpose_into(&full_codomain, &full_domain, d, alpha, beta)
+        |t| t.transpose(engine, &full_codomain, &full_domain),
+        |e, s, d| s.transpose_into(e, &full_codomain, &full_domain, d, alpha, beta)
     );
-    case!("repartition", |t| t.repartition(new_split), |s, d| s
-        .repartition_into(d, alpha, beta));
+    case!(
+        "repartition",
+        |t| t.repartition(engine, new_split),
+        |e, s, d| s.repartition_into(e, d, alpha, beta)
+    );
 }

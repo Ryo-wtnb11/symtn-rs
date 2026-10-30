@@ -250,33 +250,36 @@ fn untied_truncation_is_decided_by_magnitude_alone() {
 
 #[test]
 fn svd_and_eigh_truncation_keep_tensorkits_sector_at_a_tie() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // TensorKit: svd_trunc/eigh_trunc(id(Rep[U1](0 => 1, 1 => 1, -1 => 1)),
     // truncrank(2)) both return Rep[U1](0 => 1, 1 => 1).
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(u1(0), 1), (u1(1), 1), (u1(-1), 1)],
     )
     .unwrap();
     let source: TensorMap<U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&leg], [&leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg], [&leg]).unwrap();
     let expected = GradedSpace::try_new(Arc::new(U1FusionRule), [(u1(0), 1), (u1(1), 1)]).unwrap();
     // The truncated factorizations are `*_full`/`svd_compact` -> `diagview` ->
     // `find_truncated` -> `restrict_*`; the kept bond is the restricted leg.
-    let Svd { u, s, .. } = source.svd_compact(&[0], &[1]).unwrap();
+    let Svd { u, s, .. } = source.svd_compact(engine, &[0], &[1]).unwrap();
     let found = s.domain()[0]
-        .find_truncated(&s.diagview().unwrap(), &Truncation::rank(2))
+        .find_truncated(&s.diagview(engine).unwrap(), &Truncation::rank(2))
         .unwrap();
     let u = u
-        .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+        .restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
         .unwrap();
     assert_eq!(u.domain()[0], expected);
-    let Eigh { d, .. } = source.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let Eigh { d, .. } = source
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     let found = d.domain()[0]
-        .find_truncated(&d.diagview().unwrap(), &Truncation::rank(2))
+        .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(2))
         .unwrap();
     let d = d
-        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
         .unwrap();
     assert_eq!(d.domain()[0], expected);
 }
@@ -392,7 +395,7 @@ fn every_spectrum_dtype_selects_the_same_tensorkit_positions() {
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(u1(0), 4), (u1(1), 2)]).unwrap();
     let expected = [vec![2, 3], vec![0]];
     macro_rules! check {
-        ($convert:expr) => {{
+        ($engine:ident, $convert:expr) => {{
             let spectra: Vec<SectorSpectrum<_, _>> = [u1(0), u1(1)]
                 .into_iter()
                 .zip(&values)
@@ -415,12 +418,12 @@ fn every_spectrum_dtype_selects_the_same_tensorkit_positions() {
         2 => (-v, 0.0),
         _ => (0.0, -v),
     };
-    check!(|(_, &v): (usize, &f64)| v as f32);
-    check!(|(k, &v): (usize, &f64)| {
+    check!(engine, |(_, &v): (usize, &f64)| v as f32);
+    check!(engine, |(k, &v): (usize, &f64)| {
         let (re, im) = phase(k, v);
         Complex32::new(re as f32, im as f32)
     });
-    check!(|(k, &v): (usize, &f64)| {
+    check!(engine, |(k, &v): (usize, &f64)| {
         let (re, im) = phase(k, v);
         Complex64::new(re, im)
     });

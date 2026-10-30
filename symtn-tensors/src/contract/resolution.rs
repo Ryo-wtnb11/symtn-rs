@@ -267,46 +267,40 @@ impl<C: DenseBlockScalar> StorageContractResolution<C> {
 
 #[cfg(feature = "cuda")]
 impl StorageContractResolution<f64> {
-    /// Checks, without a device, that this route has a CUDA member replay,
-    /// and returns the device plan entries one member workspace holds:
-    /// distinct core GEMM shapes, core zero fills, and each transform stage's
-    /// zero fills and scaled moves.
+    /// Checks, without a device, that this route has a CUDA member replay.
     ///
     /// Core and CopyC admit exact +1/-1 job coefficients; a DynamicTree core
     /// must be unit, its fermionic twist riding the source moves. Every
     /// transform stage must be unconjugated nonzero Single moves.
     #[doc(hidden)]
-    pub fn admit_cuda_members(&self) -> Result<usize, OperationError> {
+    pub fn admit_cuda_members(&self) -> Result<(), OperationError> {
         use symtn_operations::cuda_transform::CudaSingleMemberRegions;
         match &self.route {
             ContractRoute::Core { plan, .. } => {
                 plan.require_identity_signed_direct_replay()?;
-                self.admit_cuda_inactive_regions()?;
-                Ok(plan.cuda_direct_plan_entries())
+                self.admit_cuda_inactive_regions()
             }
             ContractRoute::CopyC(copy) => {
                 copy.core.require_identity_signed_direct_replay()?;
-                let output = CudaSingleMemberRegions::admit(&copy.transform)?;
-                self.admit_cuda_inactive_regions()?;
-                Ok(copy.core.cuda_direct_plan_entries() + output)
+                CudaSingleMemberRegions::admit(&copy.transform)?;
+                self.admit_cuda_inactive_regions()
             }
             ContractRoute::DynamicTree(artifact) => {
                 self.admit_cuda_inactive_regions()?;
                 artifact.block_plan.require_identity_direct_replay()?;
-                let mut entries = artifact.block_plan.cuda_direct_plan_entries();
                 let [lhs_scales, rhs_scales] = artifact.stage_scales();
                 for (borrowed, transform, scales) in [
                     (artifact.lhs_borrowed, &artifact.lhs_transform, lhs_scales),
                     (artifact.rhs_borrowed, &artifact.rhs_transform, rhs_scales),
                 ] {
                     if let (false, Some(structure)) = (borrowed, &transform.transform_structure) {
-                        entries += CudaSingleMemberRegions::admit_scaled(structure, scales)?;
+                        CudaSingleMemberRegions::admit_scaled(structure, scales)?;
                     }
                 }
                 if let Some(output) = &artifact.core_dst {
-                    entries += CudaSingleMemberRegions::admit(&output.output_transform_structure)?;
+                    CudaSingleMemberRegions::admit(&output.output_transform_structure)?;
                 }
-                Ok(entries)
+                Ok(())
             }
         }
     }
@@ -1095,6 +1089,7 @@ mod tests {
 
         #[test]
         fn warm_contract_compile_runs_one_preflight_and_rebuilds_no_homspace() {
+            let engine = &mut symtn_dense::CpuEngine::serial();
             // Isolated: the warm counts rely on each transformed source's
             // destination memo staying resident across the three calls, and a
             // concurrent test's cache clear would drop it mid-measurement.
@@ -1124,6 +1119,7 @@ mod tests {
                 let host = warm_counts(|| {
                     context
                         .tensorcontract_prelowered_into(
+                            engine,
                             &dst,
                             &mut dst_data,
                             crate::FusionOperand::direct(lhs.space()),
@@ -1140,6 +1136,7 @@ mod tests {
                 let storage = warm_counts(|| {
                     let resolution = context
                         .compile_storage_contract_resolution(
+                            engine,
                             &dst,
                             FusionOperand::direct(lhs.space()),
                             FusionOperand::direct(matrix.space()),
@@ -1171,6 +1168,7 @@ mod tests {
 
         #[test]
         fn warm_core_compile_checks_the_destination_once_without_building_it() {
+            let engine = &mut symtn_dense::CpuEngine::serial();
             let provider = Arc::new(U1FusionRule);
             let lhs = space(&provider, 2, 2);
             let square = space(&provider, 2, 2);
@@ -1190,6 +1188,7 @@ mod tests {
             let counts = warm_counts(|| {
                 context
                     .tensorcontract_prelowered_into(
+                        engine,
                         &dst,
                         &mut dst_data,
                         crate::FusionOperand::direct(lhs.space()),

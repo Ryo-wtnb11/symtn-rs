@@ -57,6 +57,7 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let lhs_open = lhs.rank() - lhs_axes.len();
     let open = lhs_open + rhs.rank() - rhs_axes.len();
     let identity: Vec<usize> = (0..open).collect();
@@ -66,22 +67,22 @@ where
         codomain: &identity[..lhs_open],
         domain: &identity[lhs_open..],
     };
-    let contracted = lhs.contract(rhs, &default).unwrap();
+    let contracted = lhs.contract(engine, rhs, &default).unwrap();
     // An entry is bilinear in the operands, so their lengths bound its terms.
-    let len = |t: &TensorMap<R, D>| t.materialize().unwrap().dense_data().unwrap().len();
+    let mut len = |t: &TensorMap<R, D>| t.materialize(engine).unwrap().dense_data().unwrap().len();
     let terms = len(lhs) * len(rhs);
     let mut checked = 0;
     for order in permutations(open) {
         for split in 0..=open {
             let (codomain, domain) = order.split_at(split);
             let label = format!("{what} {} {codomain:?} <- {domain:?}", D::NAME);
-            let expected = contracted.permute(codomain, domain).unwrap();
+            let expected = contracted.permute(engine, codomain, domain).unwrap();
             let spec = ContractSpec {
                 codomain,
                 domain,
                 ..default
             };
-            let got = lhs.contract(rhs, &spec).unwrap();
+            let got = lhs.contract(engine, rhs, &spec).unwrap();
             assert_eq!(got.codomain(), expected.codomain(), "{label}: codomain");
             assert_eq!(got.domain(), expected.domain(), "{label}: domain");
             numerics::assert_nonzero_slices_close(
@@ -90,8 +91,9 @@ where
                 expected.dense_data().unwrap(),
                 terms,
             );
-            let mut destination = expected.scale(D::entry(7.5, 0.0)).unwrap();
+            let mut destination = expected.scale(engine, D::entry(7.5, 0.0)).unwrap();
             lhs.contract_into(
+                engine,
                 rhs,
                 &spec,
                 &mut destination,
@@ -111,7 +113,7 @@ where
     }
 
     // The default-split destination under a spec that moves the split.
-    let mut mismatched = contracted.scale(D::entry(7.5, 0.0)).unwrap();
+    let mut mismatched = contracted.scale(engine, D::entry(7.5, 0.0)).unwrap();
     let before = mismatched.dense_data().unwrap().to_vec();
     let moved = ContractSpec {
         codomain: &identity[..lhs_open + 1],
@@ -120,6 +122,7 @@ where
     };
     assert!(
         lhs.contract_into(
+            engine,
             rhs,
             &moved,
             &mut mismatched,
@@ -151,17 +154,20 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let dual = v.try_dual().unwrap();
-    let a = TensorMap::<R, D>::from_subblock_fn(&runtime, [v, &dual], [v], fill(11)).unwrap();
-    let b = TensorMap::<R, D>::from_subblock_fn(&runtime, [v], [&dual, v], fill(12)).unwrap();
-    let lazy = TensorMap::<R, D>::from_subblock_fn(&runtime, [v], [v, &dual], fill(13))
+    let a =
+        TensorMap::<R, D>::from_subblock_fn(engine, &runtime, [v, &dual], [v], fill(11)).unwrap();
+    let b =
+        TensorMap::<R, D>::from_subblock_fn(engine, &runtime, [v], [&dual, v], fill(12)).unwrap();
+    let lazy = TensorMap::<R, D>::from_subblock_fn(engine, &runtime, [v], [v, &dual], fill(13))
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
-    let lazy_rhs = TensorMap::<R, D>::from_subblock_fn(&runtime, [&dual, v], [v], fill(14))
+    let lazy_rhs = TensorMap::<R, D>::from_subblock_fn(engine, &runtime, [&dual, v], [v], fill(14))
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
     let checked = check_every_spec(&format!("{symmetry} a[2]·b[0]"), &a, &b, &[2], &[0])
         + check_every_spec(&format!("{symmetry} a[0]·b[2]"), &a, &b, &[0], &[2])
@@ -194,14 +200,15 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let t = TensorMap::<R, f64>::from_subblock_fn(&runtime, [v, v], [v], fill(21)).unwrap();
-    let s = t.svd_compact(&[0, 1], &[2]).unwrap().s;
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let t = TensorMap::<R, f64>::from_subblock_fn(engine, &runtime, [v, v], [v], fill(21)).unwrap();
+    let s = t.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
     // A mixed compact + dense sum yields dense storage (as `forced_dense` in
     // `typed_facade.rs` pins); the dense route then runs no compact arm.
-    let zeros = TensorMap::<R, f64>::zeros(&runtime, &s.codomain(), &s.domain()).unwrap();
-    let dense_s = s.axpby(1.0, &zeros, 1.0).unwrap();
-    assert!(symtn::expert::diagonal_spectrum(&dense_s)
+    let zeros = TensorMap::<R, f64>::zeros(engine, &runtime, &s.codomain(), &s.domain()).unwrap();
+    let dense_s = s.axpby(engine, 1.0, &zeros, 1.0).unwrap();
+    assert!(symtn::expert::diagonal_spectrum(engine, &dense_s)
         .unwrap()
         .is_none());
     for (what, lhs, rhs, dense_lhs, dense_rhs, lhs_axes, rhs_axes) in [
@@ -216,18 +223,18 @@ where
             codomain: &identity[..lhs_open],
             domain: &identity[lhs_open..],
         };
-        let contracted = dense_lhs.contract(dense_rhs, &default).unwrap();
+        let contracted = dense_lhs.contract(engine, dense_rhs, &default).unwrap();
         for order in permutations(3) {
             for split in 0..=3 {
                 let (codomain, domain) = order.split_at(split);
                 let label = format!("{symmetry} {what} {codomain:?} <- {domain:?}");
-                let expected = contracted.permute(codomain, domain).unwrap();
+                let expected = contracted.permute(engine, codomain, domain).unwrap();
                 let spec = ContractSpec {
                     codomain,
                     domain,
                     ..default
                 };
-                let got = lhs.contract(rhs, &spec).unwrap();
+                let got = lhs.contract(engine, rhs, &spec).unwrap();
                 assert_eq!(got.codomain(), expected.codomain(), "{label}");
                 assert_eq!(got.domain(), expected.domain(), "{label}");
                 numerics::assert_nonzero_slices_close(
@@ -252,17 +259,19 @@ fn compact_diagonal_arms_match_contract_then_permute() {
 /// across the split needs a braid direction the spec does not carry.
 #[test]
 fn non_symmetric_braiding_is_unsupported_for_every_split() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(TableRule::fibonacci()),
         [(TableSector::new(1), 1), (TableSector::new(2), 1)],
     )
     .unwrap();
     // Fibonacci F-symbols are complex, so the payload is too.
-    let a = TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
-        Complex64::new(1.0, 0.5)
-    })
-    .unwrap();
+    let a =
+        TensorMap::<_, Complex64>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
+            Complex64::new(1.0, 0.5)
+        })
+        .unwrap();
     for (codomain, domain) in [
         (&[0][..], &[1][..]),
         (&[1][..], &[0][..]),
@@ -275,7 +284,7 @@ fn non_symmetric_braiding_is_unsupported_for_every_split() {
             codomain,
             domain,
         };
-        let error = a.contract(&a, &spec).unwrap_err();
+        let error = a.contract(engine, &a, &spec).unwrap_err();
         assert!(
             matches!(
                 &error,
@@ -297,9 +306,10 @@ fn non_symmetric_braiding_is_unsupported_for_every_split() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_split_matches_contract_then_permute() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
@@ -309,9 +319,11 @@ fn checked_generic_split_matches_contract_then_permute() {
         next
     };
     let a =
-        TensorMap::<_, f64>::from_subblock_fn(&runtime, [&leg, &leg], [&leg], &mut value).unwrap();
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], &mut value)
+            .unwrap();
     let b =
-        TensorMap::<_, f64>::from_subblock_fn(&runtime, [&leg], [&leg, &leg], &mut value).unwrap();
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg], [&leg, &leg], &mut value)
+            .unwrap();
     let identity = [0, 1, 2, 3];
     let default = ContractSpec {
         lhs: &[2],
@@ -319,17 +331,17 @@ fn checked_generic_split_matches_contract_then_permute() {
         codomain: &identity[..2],
         domain: &identity[2..],
     };
-    let contracted = a.contract(&b, &default).unwrap();
+    let contracted = a.contract(engine, &b, &default).unwrap();
     for order in permutations(4) {
         for split in 0..=4 {
             let (codomain, domain) = order.split_at(split);
-            let expected = contracted.permute(codomain, domain).unwrap();
+            let expected = contracted.permute(engine, codomain, domain).unwrap();
             let spec = ContractSpec {
                 codomain,
                 domain,
                 ..default
             };
-            let got = a.contract(&b, &spec).unwrap();
+            let got = a.contract(engine, &b, &spec).unwrap();
             assert_eq!(got.codomain(), expected.codomain());
             assert_eq!(got.domain(), expected.domain());
             let scale = expected

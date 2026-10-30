@@ -2,6 +2,7 @@
 //! adjoint structure instead of rebuilding it on every call.
 
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     CheckedFusionAlgebra, FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace,
@@ -18,7 +19,11 @@ use crate::counting_alloc;
 /// Allocation calls and bytes of one warm lazy-adjoint-source contraction
 /// `A† · B` over `A, B: V ← V`, plus the retained bytes of the memoized
 /// adjoint structure.
-fn warm_conjugated_contract<R>(rule: R, legs: &[(SectorId, usize)]) -> (usize, usize, usize)
+fn warm_conjugated_contract<R>(
+    engine: &mut dyn Engine,
+    rule: R,
+    legs: &[(SectorId, usize)],
+) -> (usize, usize, usize)
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
@@ -54,6 +59,7 @@ where
     let mut call = || {
         context
             .tensorcontract_planned_into(
+                engine,
                 &dst,
                 &mut out,
                 (FusionOperand::adjoint(lhs.space()), &lhs_data),
@@ -106,6 +112,7 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
 
 #[test]
 fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     symtn_core::clear_structure_caches();
     let fz2_u1_rule = || {
@@ -115,13 +122,19 @@ fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
         )
         .unwrap()
     };
-    let rows = |deg| {
+    let mut rows = |deg| {
         [
-            ("U1", warm_conjugated_contract(U1FusionRule, &u1(deg))),
-            ("SU2", warm_conjugated_contract(SU2FusionRule, &su2(deg))),
+            (
+                "U1",
+                warm_conjugated_contract(engine, U1FusionRule, &u1(deg)),
+            ),
+            (
+                "SU2",
+                warm_conjugated_contract(engine, SU2FusionRule, &su2(deg)),
+            ),
             (
                 "fZ2xU1",
-                warm_conjugated_contract(fz2_u1_rule(), &fz2_u1(deg)),
+                warm_conjugated_contract(engine, fz2_u1_rule(), &fz2_u1(deg)),
             ),
         ]
     };

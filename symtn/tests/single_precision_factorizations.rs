@@ -63,34 +63,34 @@ struct EigenTruncated<T> {
 }
 
 macro_rules! svd_trunc {
-    ($tensor:expr, $truncation:expr) => {{
-        let Svd { u, s, vh } = $tensor.svd_compact(&[0], &[1]).unwrap();
+    ($engine:ident, $tensor:expr, $truncation:expr) => {{
+        let Svd { u, s, vh } = $tensor.svd_compact($engine, &[0], &[1]).unwrap();
         let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), $truncation)
+            .find_truncated(&s.diagview($engine).unwrap(), $truncation)
             .unwrap();
         SvdTruncated {
-            u: u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            u: u.restrict_leg($engine, &[(u.codomain_rank(), &found.selection)])
                 .unwrap(),
-            s: s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            s: s.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
                 .unwrap(),
-            vh: vh.restrict_leg(&[(0, &found.selection)]).unwrap(),
+            vh: vh.restrict_leg($engine, &[(0, &found.selection)]).unwrap(),
             error: found.error,
         }
     }};
 }
 
 macro_rules! eigen_trunc {
-    ($full:expr, $truncation:expr) => {{
+    ($engine:ident, $full:expr, $truncation:expr) => {{
         // `$full` is an `Eigh` or an `Eig`; both name their factors `d`, `v`.
         let full = $full.unwrap();
         let (d, v) = (full.d, full.v);
         let found = d.domain()[0]
-            .find_truncated(&d.diagview().unwrap(), $truncation)
+            .find_truncated(&d.diagview($engine).unwrap(), $truncation)
             .unwrap();
         EigenTruncated {
-            d: d.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            d: d.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
                 .unwrap(),
-            v: v.restrict_leg(&[(v.codomain_rank(), &found.selection)])
+            v: v.restrict_leg($engine, &[(v.codomain_rank(), &found.selection)])
                 .unwrap(),
             error: found.error,
         }
@@ -136,8 +136,8 @@ fn indefinite_entry(row: usize, col: usize) -> (f32, f32) {
 /// A macro rather than a function so it does not have to repeat the dispatch
 /// bounds `svd_vals` carries.
 macro_rules! measured_kappa {
-    ($tensor:expr) => {{
-        let values = $tensor.svd_vals(&[0], &[1]).unwrap();
+    ($engine:ident, $tensor:expr) => {{
+        let values = $tensor.svd_vals($engine, &[0], &[1]).unwrap();
         let mut largest = 0.0f64;
         let mut smallest = f64::INFINITY;
         for entry in &values {
@@ -155,15 +155,15 @@ macro_rules! measured_kappa {
 }
 
 macro_rules! assert_reconstruction {
-    ($what:expr, $actual:expr, $expected:expr, $terms:expr, $narrow:ty) => {{
+    ($engine:ident, $what:expr, $actual:expr, $expected:expr, $terms:expr, $narrow:ty) => {{
         let actual = $actual;
         let expected = $expected;
         let residual = actual
-            .axpby(one::<$narrow>(), expected, minus_one::<$narrow>())
+            .axpby($engine, one::<$narrow>(), expected, minus_one::<$narrow>())
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
-        let bound = tolerance($terms, expected.norm(2.0).unwrap());
+        let bound = tolerance($terms, expected.norm($engine, 2.0).unwrap());
         assert!(
             residual <= bound,
             "{}: residual {residual:e} exceeds tolerance {bound:e}",
@@ -174,14 +174,19 @@ macro_rules! assert_reconstruction {
 
 /// `q† ∘ q == id` on the domain.
 macro_rules! assert_isometry {
-    ($what:expr, $rt:expr, $q:expr, $terms:expr, $narrow:ty) => {{
+    ($engine:ident, $what:expr, $rt:expr, $q:expr, $terms:expr, $narrow:ty) => {{
         let q = $q;
-        let identity =
-            TensorMap::<_, $narrow>::isomorphism($rt, q.domain().iter(), q.domain().iter())
-                .unwrap();
+        let identity = TensorMap::<_, $narrow>::isomorphism(
+            $engine,
+            $rt,
+            q.domain().iter(),
+            q.domain().iter(),
+        )
+        .unwrap();
         assert_reconstruction!(
+            $engine,
             $what,
-            &q.adjoint().unwrap().compose(q).unwrap(),
+            &q.adjoint($engine).unwrap().compose($engine, q).unwrap(),
             &identity,
             $terms,
             $narrow
@@ -191,25 +196,25 @@ macro_rules! assert_isometry {
 
 /// `q ∘ q† == id` on the codomain.
 macro_rules! assert_coisometry {
-    ($what:expr, $rt:expr, $q:expr, $terms:expr, $narrow:ty) => {{
+    ($engine:ident, $what:expr, $rt:expr, $q:expr, $terms:expr, $narrow:ty) => {{
         let q = $q;
-        let identity =
-            TensorMap::<_, $narrow>::isomorphism($rt, q.codomain().iter(), q.codomain().iter())
-                .unwrap();
-        assert_reconstruction!(
-            $what,
-            &q.compose(&q.adjoint().unwrap()).unwrap(),
-            &identity,
-            $terms,
-            $narrow
-        );
+        let identity = TensorMap::<_, $narrow>::isomorphism(
+            $engine,
+            $rt,
+            q.codomain().iter(),
+            q.codomain().iter(),
+        )
+        .unwrap();
+        let q_adjoint = q.adjoint($engine).unwrap();
+        let q_compose = q.compose($engine, &q_adjoint).unwrap();
+        assert_reconstruction!($engine, $what, &q_compose, &identity, $terms, $narrow);
     }};
 }
 
 macro_rules! assert_unitary {
-    ($what:expr, $rt:expr, $q:expr, $terms:expr, $narrow:ty) => {{
-        assert_isometry!($what, $rt, $q, $terms, $narrow);
-        assert_coisometry!($what, $rt, $q, $terms, $narrow);
+    ($engine:ident, $what:expr, $rt:expr, $q:expr, $terms:expr, $narrow:ty) => {{
+        assert_isometry!($engine, $what, $rt, $q, $terms, $narrow);
+        assert_coisometry!($engine, $what, $rt, $q, $terms, $narrow);
     }};
 }
 
@@ -224,8 +229,8 @@ macro_rules! assert_unitary {
 /// module tolerance at the entry's own scale, so it carries no absolute
 /// constant.
 macro_rules! assert_positive_real_diagonal {
-    ($what:expr, $factor:expr) => {{
-        let spectra = $factor.diagview().unwrap();
+    ($engine:ident, $what:expr, $factor:expr) => {{
+        let spectra = $factor.diagview($engine).unwrap();
         assert!(
             !spectra.is_empty(),
             "{}: the triangular factor has no coupled blocks",
@@ -281,7 +286,7 @@ macro_rules! assert_spectra_agree {
 /// Every factorization the marker admits, over one provider and one payload
 /// dtype, against the double-precision twin.
 macro_rules! factor_checks {
-    (
+    ($engine:ident,
         $name:expr, $narrow:ty, $wide:ty,
         $tall_cod:expr, $tall_dom:expr, $short_cod:expr, $short_dom:expr,
         $min_blocks:expr
@@ -293,6 +298,7 @@ macro_rules! factor_checks {
         let short_cod = $short_cod;
         let short_dom = $short_dom;
         let (tall, wide_tall) = twin_with!(
+            $engine,
             &rt,
             $narrow,
             $wide,
@@ -301,6 +307,7 @@ macro_rules! factor_checks {
             |index: &[usize]| fixture_entry(index[0], index[1])
         );
         let (short, wide_short) = twin_with!(
+            $engine,
             &rt,
             $narrow,
             $wide,
@@ -316,8 +323,8 @@ macro_rules! factor_checks {
             tall.subblock_count()
         );
 
-        let kappa = measured_kappa!(&wide_tall);
-        let short_kappa = measured_kappa!(&wide_short);
+        let kappa = measured_kappa!($engine, &wide_tall);
+        let short_kappa = measured_kappa!($engine, &wide_short);
         assert!(
             kappa < 1e4 && short_kappa < 1e4,
             "{name}: the fixture is too ill-conditioned to be a single-precision oracle \
@@ -325,17 +332,25 @@ macro_rules! factor_checks {
         );
 
         // ---- QR: gauge-fixed by the positive real diagonal of R. ----------
-        let Qr { q, r } = tall.qr_compact(&[0], &[1]).unwrap();
-        let Qr { q: wq, r: wr } = wide_tall.qr_compact(&[0], &[1]).unwrap();
+        let Qr { q, r } = tall.qr_compact($engine, &[0], &[1]).unwrap();
+        let Qr { q: wq, r: wr } = wide_tall.qr_compact($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: qr_compact (kappa {kappa:e})"),
-            &q.compose(&r).unwrap(),
+            &q.compose($engine, &r).unwrap(),
             &tall,
             terms,
             $narrow
         );
-        assert_isometry!(format!("{name}: qr_compact Q"), &rt, &q, terms, $narrow);
-        assert_positive_real_diagonal!(format!("{name}: qr_compact R"), r);
+        assert_isometry!(
+            $engine,
+            format!("{name}: qr_compact Q"),
+            &rt,
+            &q,
+            terms,
+            $narrow
+        );
+        assert_positive_real_diagonal!($engine, format!("{name}: qr_compact R"), r);
         assert_payloads_agree_scaled(
             &format!("{name}: qr_compact Q against the widened oracle (kappa {kappa:e})"),
             q.dense_data().unwrap(),
@@ -352,28 +367,44 @@ macro_rules! factor_checks {
         );
 
         // `*_full` adds null columns whose gauge nothing fixes: identities only.
-        let Qr { q, r } = tall.qr_full(&[0], &[1]).unwrap();
+        let Qr { q, r } = tall.qr_full($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: qr_full"),
-            &q.compose(&r).unwrap(),
+            &q.compose($engine, &r).unwrap(),
             &tall,
             terms,
             $narrow
         );
-        assert_isometry!(format!("{name}: qr_full Q"), &rt, &q, terms, $narrow);
+        assert_isometry!(
+            $engine,
+            format!("{name}: qr_full Q"),
+            &rt,
+            &q,
+            terms,
+            $narrow
+        );
 
         // ---- LQ. ---------------------------------------------------
-        let Lq { l, q } = short.lq_compact(&[0], &[1]).unwrap();
-        let Lq { l: wl, q: wq } = wide_short.lq_compact(&[0], &[1]).unwrap();
+        let Lq { l, q } = short.lq_compact($engine, &[0], &[1]).unwrap();
+        let Lq { l: wl, q: wq } = wide_short.lq_compact($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: lq_compact"),
-            &l.compose(&q).unwrap(),
+            &l.compose($engine, &q).unwrap(),
             &short,
             terms,
             $narrow
         );
-        assert_coisometry!(format!("{name}: lq_compact Q"), &rt, &q, terms, $narrow);
-        assert_positive_real_diagonal!(format!("{name}: lq_compact L"), l);
+        assert_coisometry!(
+            $engine,
+            format!("{name}: lq_compact Q"),
+            &rt,
+            &q,
+            terms,
+            $narrow
+        );
+        assert_positive_real_diagonal!($engine, format!("{name}: lq_compact L"), l);
         assert_payloads_agree_scaled(
             &format!("{name}: lq_compact L against the widened oracle (kappa {short_kappa:e})"),
             l.dense_data().unwrap(),
@@ -389,40 +420,77 @@ macro_rules! factor_checks {
             short_kappa,
         );
 
-        let Lq { l, q } = short.lq_full(&[0], &[1]).unwrap();
+        let Lq { l, q } = short.lq_full($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: lq_full"),
-            &l.compose(&q).unwrap(),
+            &l.compose($engine, &q).unwrap(),
             &short,
             terms,
             $narrow
         );
-        assert_coisometry!(format!("{name}: lq_full Q"), &rt, &q, terms, $narrow);
+        assert_coisometry!(
+            $engine,
+            format!("{name}: lq_full Q"),
+            &rt,
+            &q,
+            terms,
+            $narrow
+        );
 
         // ---- SVD: spectra are ordered, so they are the pointwise oracle. ---
-        let Svd { u, s, vh } = tall.svd_compact(&[0], &[1]).unwrap();
+        let Svd { u, s, vh } = tall.svd_compact($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: svd_compact"),
-            &u.compose(&s).unwrap().compose(&vh).unwrap(),
+            &u.compose($engine, &s)
+                .unwrap()
+                .compose($engine, &vh)
+                .unwrap(),
             &tall,
             terms,
             $narrow
         );
-        assert_isometry!(format!("{name}: svd_compact U"), &rt, &u, terms, $narrow);
-        assert_coisometry!(format!("{name}: svd_compact Vh"), &rt, &vh, terms, $narrow);
+        assert_isometry!(
+            $engine,
+            format!("{name}: svd_compact U"),
+            &rt,
+            &u,
+            terms,
+            $narrow
+        );
+        assert_coisometry!(
+            $engine,
+            format!("{name}: svd_compact Vh"),
+            &rt,
+            &vh,
+            terms,
+            $narrow
+        );
 
-        let Svd { u, s, vh } = tall.svd_full(&[0], &[1]).unwrap();
+        let Svd { u, s, vh } = tall.svd_full($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: svd_full"),
-            &u.compose(&s).unwrap().compose(&vh).unwrap(),
+            &u.compose($engine, &s)
+                .unwrap()
+                .compose($engine, &vh)
+                .unwrap(),
             &tall,
             terms,
             $narrow
         );
-        assert_isometry!(format!("{name}: svd_full U"), &rt, &u, terms, $narrow);
+        assert_isometry!(
+            $engine,
+            format!("{name}: svd_full U"),
+            &rt,
+            &u,
+            terms,
+            $narrow
+        );
 
-        let values = tall.svd_vals(&[0], &[1]).unwrap();
-        let wide_values = wide_tall.svd_vals(&[0], &[1]).unwrap();
+        let values = tall.svd_vals($engine, &[0], &[1]).unwrap();
+        let wide_values = wide_tall.svd_vals($engine, &[0], &[1]).unwrap();
         assert_spectra_agree!(format!("{name}: svd_vals"), &values, &wide_values, terms);
         for entry in &values {
             assert!(
@@ -440,19 +508,19 @@ macro_rules! factor_checks {
         // The fixture's singular values are separated by factors of about two,
         // which is far above the `eps(f32) * kappa` noise of the
         // decomposition, so the kept set is reproducible across dtypes.
-        let truncated = svd_trunc!(tall, &Truncation::rank(2));
-        let wide_truncated = svd_trunc!(wide_tall, &Truncation::rank(2));
+        let truncated = svd_trunc!($engine, tall, &Truncation::rank(2));
+        let wide_truncated = svd_trunc!($engine, wide_tall, &Truncation::rank(2));
         assert_eq!(
             truncated
                 .s
-                .materialize()
+                .materialize($engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
                 .len(),
             wide_truncated
                 .s
-                .materialize()
+                .materialize($engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -471,14 +539,14 @@ macro_rules! factor_checks {
         );
         let reconstructed = truncated
             .u
-            .compose(&truncated.s)
+            .compose($engine, &truncated.s)
             .unwrap()
-            .compose(&truncated.vh)
+            .compose($engine, &truncated.vh)
             .unwrap();
         let residual = reconstructed
-            .axpby(one::<$narrow>(), &tall, minus_one::<$narrow>())
+            .axpby($engine, one::<$narrow>(), &tall, minus_one::<$narrow>())
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
         assert!(
             (residual - truncated.error).abs() <= tolerance(terms, truncated.error),
@@ -488,6 +556,7 @@ macro_rules! factor_checks {
 
         // ---- Hermitian eigendecomposition. --------------------------------
         let (h, wide_h) = twin_with!(
+            $engine,
             &rt,
             $narrow,
             $wide,
@@ -497,21 +566,36 @@ macro_rules! factor_checks {
         );
         let h_terms = wide_h.dense_data().unwrap().len();
 
-        let Eigh { d, v } = h.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+        let Eigh { d, v } = h
+            .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap();
+        let v_adjoint = v.adjoint($engine).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: eigh_full"),
-            &v.compose(&d)
+            &v.compose($engine, &d)
                 .unwrap()
-                .compose(&v.adjoint().unwrap())
+                .compose($engine, &v_adjoint)
                 .unwrap(),
             &h,
             h_terms,
             $narrow
         );
-        assert_unitary!(format!("{name}: eigh_full V"), &rt, &v, h_terms, $narrow);
+        assert_unitary!(
+            $engine,
+            format!("{name}: eigh_full V"),
+            &rt,
+            &v,
+            h_terms,
+            $narrow
+        );
 
-        let eigenvalues = h.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
-        let wide_eigenvalues = wide_h.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+        let eigenvalues = h
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap();
+        let wide_eigenvalues = wide_h
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap();
         assert_spectra_agree!(
             format!("{name}: eigh_vals"),
             &eigenvalues,
@@ -527,11 +611,13 @@ macro_rules! factor_checks {
         }
 
         let truncated = eigen_trunc!(
-            h.eigh_full(&[0], &[1], HermitianTol::DEFAULT),
+            $engine,
+            h.eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT),
             &Truncation::rank(1)
         );
         let wide_truncated = eigen_trunc!(
-            wide_h.eigh_full(&[0], &[1], HermitianTol::DEFAULT),
+            $engine,
+            wide_h.eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT),
             &Truncation::rank(1)
         );
         assert!(
@@ -541,14 +627,14 @@ macro_rules! factor_checks {
         assert_eq!(
             truncated
                 .d
-                .materialize()
+                .materialize($engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
                 .len(),
             wide_truncated
                 .d
-                .materialize()
+                .materialize($engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -565,61 +651,84 @@ macro_rules! factor_checks {
         // ---- Null spaces. --------------------------------------------------
         // A tall full-column-rank map has a left null space of the leftover
         // rows; the annihilation is a forward error, hence the `kappa`.
-        let left = tall.left_null(&[0], &[1]).unwrap();
+        let left = tall.left_null($engine, &[0], &[1]).unwrap();
         assert!(
             left.dense_data().unwrap().len() > 0,
             "{name}: the tall fixture must have a nonempty left null space"
         );
         let annihilated = left
-            .adjoint()
+            .adjoint($engine)
             .unwrap()
-            .compose(&tall)
+            .compose($engine, &tall)
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
-        let bound = tolerance(terms, tall.norm(2.0).unwrap()) * kappa;
+        let bound = tolerance(terms, tall.norm($engine, 2.0).unwrap()) * kappa;
         assert!(
             annihilated <= bound,
             "{name}: left_null does not annihilate the fixture, \
              residual {annihilated:e} > {bound:e} (kappa {kappa:e})"
         );
-        assert_isometry!(format!("{name}: left_null"), &rt, &left, terms, $narrow);
+        assert_isometry!(
+            $engine,
+            format!("{name}: left_null"),
+            &rt,
+            &left,
+            terms,
+            $narrow
+        );
 
-        let right = short.right_null(&[0], &[1]).unwrap();
+        let right = short.right_null($engine, &[0], &[1]).unwrap();
         assert!(
             right.dense_data().unwrap().len() > 0,
             "{name}: the wide fixture must have a nonempty right null space"
         );
+        let right_adjoint = right.adjoint($engine).unwrap();
         let annihilated = short
-            .compose(&right.adjoint().unwrap())
+            .compose($engine, &right_adjoint)
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
-        let bound = tolerance(terms, short.norm(2.0).unwrap()) * short_kappa;
+        let bound = tolerance(terms, short.norm($engine, 2.0).unwrap()) * short_kappa;
         assert!(
             annihilated <= bound,
             "{name}: right_null does not annihilate the fixture, \
              residual {annihilated:e} > {bound:e}"
         );
-        assert_coisometry!(format!("{name}: right_null"), &rt, &right, terms, $narrow);
+        assert_coisometry!(
+            $engine,
+            format!("{name}: right_null"),
+            &rt,
+            &right,
+            terms,
+            $narrow
+        );
 
         // ---- Polar: both factors are unique for a full-rank block. ---------
-        let LeftPolar { w, p } = tall.left_polar(&[0], &[1]).unwrap();
-        let LeftPolar { w: ww, p: wp } = wide_tall.left_polar(&[0], &[1]).unwrap();
+        let LeftPolar { w, p } = tall.left_polar($engine, &[0], &[1]).unwrap();
+        let LeftPolar { w: ww, p: wp } = wide_tall.left_polar($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: left_polar"),
-            &w.compose(&p).unwrap(),
+            &w.compose($engine, &p).unwrap(),
             &tall,
             terms,
             $narrow
         );
-        assert_isometry!(format!("{name}: left_polar W"), &rt, &w, terms, $narrow);
+        assert_isometry!(
+            $engine,
+            format!("{name}: left_polar W"),
+            &rt,
+            &w,
+            terms,
+            $narrow
+        );
         assert!(
-            p.eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            p.eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap()
                 .iter()
                 .flat_map(|entry| &entry.values)
-                .all(|&value| value >= -tolerance(terms, p.norm(2.0).unwrap())),
+                .all(|&value| value >= -tolerance(terms, p.norm($engine, 2.0).unwrap())),
             "{name}: the left polar positive factor must be positive semidefinite"
         );
         assert_payloads_agree_scaled(
@@ -637,30 +746,46 @@ macro_rules! factor_checks {
             kappa,
         );
 
-        let RightPolar { p, wh: w } = short.right_polar(&[0], &[1]).unwrap();
+        let RightPolar { p, wh: w } = short.right_polar($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: right_polar"),
-            &p.compose(&w).unwrap(),
+            &p.compose($engine, &w).unwrap(),
             &short,
             terms,
             $narrow
         );
-        assert_coisometry!(format!("{name}: right_polar W"), &rt, &w, terms, $narrow);
+        assert_coisometry!(
+            $engine,
+            format!("{name}: right_polar W"),
+            &rt,
+            &w,
+            terms,
+            $narrow
+        );
 
         // ---- Lazy-adjoint receiver. ----------------------------------------
         // `short.adjoint()` is tall and is not materialized before the
         // factorization asks for its blocks.
-        let lazy = short.adjoint().unwrap();
-        let Svd { u, s, vh } = lazy.svd_compact(&[0], &[1]).unwrap();
+        let lazy = short.adjoint($engine).unwrap();
+        let Svd { u, s, vh } = lazy.svd_compact($engine, &[0], &[1]).unwrap();
         assert_reconstruction!(
+            $engine,
             format!("{name}: svd_compact on a lazy adjoint"),
-            &u.compose(&s).unwrap().compose(&vh).unwrap(),
+            &u.compose($engine, &s)
+                .unwrap()
+                .compose($engine, &vh)
+                .unwrap(),
             &lazy,
             terms,
             $narrow
         );
-        let lazy_values = lazy.svd_vals(&[0], &[1]).unwrap();
-        let wide_lazy_values = wide_short.adjoint().unwrap().svd_vals(&[0], &[1]).unwrap();
+        let lazy_values = lazy.svd_vals($engine, &[0], &[1]).unwrap();
+        let wide_lazy_values = wide_short
+            .adjoint($engine)
+            .unwrap()
+            .svd_vals($engine, &[0], &[1])
+            .unwrap();
         assert_spectra_agree!(
             format!("{name}: svd_vals on a lazy adjoint"),
             &lazy_values,
@@ -679,13 +804,14 @@ macro_rules! factor_checks {
 /// hard-coded answer: what is under test is that a single-precision payload
 /// reaches the same verdict, at a `tol` scaled to its own epsilon.
 macro_rules! hermitian_predicate_checks {
-    ($name:expr, $narrow:ty, $wide:ty, $leg:expr) => {{
+    ($engine:ident, $name:expr, $narrow:ty, $wide:ty, $leg:expr) => {{
         let rt = runtime();
         let name: &str = $name;
         let leg = $leg;
         let tall_leg = $leg;
 
         let (tall, wide_tall) = twin_with!(
+            $engine,
             &rt,
             $narrow,
             $wide,
@@ -693,47 +819,60 @@ macro_rules! hermitian_predicate_checks {
             [&leg],
             |index: &[usize]| fixture_entry(index[0], index[1])
         );
-        let gram = tall.adjoint().unwrap().compose(&tall).unwrap();
-        let wide_gram = wide_tall.adjoint().unwrap().compose(&wide_tall).unwrap();
+        let gram = tall
+            .adjoint($engine)
+            .unwrap()
+            .compose($engine, &tall)
+            .unwrap();
+        let wide_gram = wide_tall
+            .adjoint($engine)
+            .unwrap()
+            .compose($engine, &wide_tall)
+            .unwrap();
         assert!(
-            is_hermitian!(gram, PREDICATE_TOL),
+            is_hermitian!($engine, gram, PREDICATE_TOL),
             "{name}: a Gram matrix is Hermitian"
         );
         assert!(
-            is_posdef!(gram, PREDICATE_TOL),
+            is_posdef!($engine, gram, PREDICATE_TOL),
             "{name}: the Gram matrix of a full-column-rank fixture is positive definite"
         );
         assert_eq!(
-            is_posdef!(gram, PREDICATE_TOL),
-            is_posdef!(wide_gram, PREDICATE_TOL),
+            is_posdef!($engine, gram, PREDICATE_TOL),
+            is_posdef!($engine, wide_gram, PREDICATE_TOL),
             "{name}: is_posdef disagreed with the widened oracle on the Gram matrix"
         );
 
-        let (indefinite, wide_indefinite) =
-            twin_with!(&rt, $narrow, $wide, [&leg], [&leg], |index: &[usize]| {
-                indefinite_entry(index[0], index[1])
-            });
+        let (indefinite, wide_indefinite) = twin_with!(
+            $engine,
+            &rt,
+            $narrow,
+            $wide,
+            [&leg],
+            [&leg],
+            |index: &[usize]| { indefinite_entry(index[0], index[1]) }
+        );
         assert!(
-            is_hermitian!(indefinite, PREDICATE_TOL),
+            is_hermitian!($engine, indefinite, PREDICATE_TOL),
             "{name}: the indefinite fixture is Hermitian by construction"
         );
         assert!(
-            !is_posdef!(indefinite, PREDICATE_TOL),
+            !is_posdef!($engine, indefinite, PREDICATE_TOL),
             "{name}: an indefinite fixture must not be positive definite"
         );
         assert_eq!(
-            is_posdef!(indefinite, PREDICATE_TOL),
-            is_posdef!(wide_indefinite, PREDICATE_TOL),
+            is_posdef!($engine, indefinite, PREDICATE_TOL),
+            is_posdef!($engine, wide_indefinite, PREDICATE_TOL),
             "{name}: is_posdef disagreed with the widened oracle on the indefinite fixture"
         );
 
         // A compact-diagonal receiver: the spectrum factor *is* its own
         // Hermitian spectrum, so `is_posdef` answers without factorizing.
-        let Svd { u, .. } = gram.svd_compact(&[0], &[1]).unwrap();
+        let Svd { u, .. } = gram.svd_compact($engine, &[0], &[1]).unwrap();
         let _ = u;
-        let Svd { s: spectrum, .. } = tall.svd_compact(&[0], &[1]).unwrap();
+        let Svd { s: spectrum, .. } = tall.svd_compact($engine, &[0], &[1]).unwrap();
         assert!(
-            is_posdef_compact!(spectrum, PREDICATE_TOL, |v: $narrow| {
+            is_posdef_compact!($engine, spectrum, PREDICATE_TOL, |v: $narrow| {
                 numerics::Numeric::wide(v).re
             }),
             "{name}: a compact singular-value factor with positive values is positive definite"
@@ -749,9 +888,11 @@ macro_rules! factorization_suite {
 
             #[test]
             fn u1_factorizations_match_the_widened_oracle() {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 let tall = u1_leg_with([3, 4, 3]);
                 let short = u1_leg_with([2, 3, 2]);
                 factor_checks!(
+                    engine,
                     concat!("U(1) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -762,6 +903,7 @@ macro_rules! factorization_suite {
                     3
                 );
                 hermitian_predicate_checks!(
+                    engine,
                     concat!("U(1) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -771,9 +913,11 @@ macro_rules! factorization_suite {
 
             #[test]
             fn fermion_su2_factorizations_match_the_widened_oracle() {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 let tall = fermion_su2_leg_with([3, 3, 2]);
                 let short = fermion_su2_leg_with([2, 2, 1]);
                 factor_checks!(
+                    engine,
                     concat!("fZ2 x U(1) x SU(2) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -784,6 +928,7 @@ macro_rules! factorization_suite {
                     3
                 );
                 hermitian_predicate_checks!(
+                    engine,
                     concat!("fZ2 x U(1) x SU(2) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -830,12 +975,14 @@ mod checked_generic {
 
                 #[test]
                 fn su3_factorizations_match_the_widened_oracle() {
+                    let engine = &mut symtn::typed::CpuEngine::serial();
                     let rt = runtime();
                     let name = concat!("SU(3) ", stringify!($narrow));
                     let tall_leg = su3_leg(3);
                     let short_leg = su3_leg(2);
 
                     let (tall, wide_tall) = twin_with!(
+                        engine,
                         &rt,
                         $narrow,
                         $wide,
@@ -844,6 +991,7 @@ mod checked_generic {
                         |index: &[usize]| fixture_entry(index[0], index[1])
                     );
                     let (short, wide_short) = twin_with!(
+                        engine,
                         &rt,
                         $narrow,
                         $wide,
@@ -852,8 +1000,8 @@ mod checked_generic {
                         |index: &[usize]| fixture_entry(index[0], index[1])
                     );
                     let terms = wide_tall.dense_data().unwrap().len();
-                    let kappa = measured_kappa!(&wide_tall);
-                    let short_kappa = measured_kappa!(&wide_short);
+                    let kappa = measured_kappa!(engine, &wide_tall);
+                    let short_kappa = measured_kappa!(engine, &wide_short);
                     assert!(
                         kappa < 1e4 && short_kappa < 1e4,
                         "{name}: the fixture is too ill-conditioned to be a \
@@ -861,16 +1009,17 @@ mod checked_generic {
                     );
 
                     // QR, gauge-fixed by the positive diagonal of R.
-                    let Qr { q, r } = tall.qr_compact(&[0], &[1]).unwrap();
-                    let Qr { q: wq, r: wr } = wide_tall.qr_compact(&[0], &[1]).unwrap();
+                    let Qr { q, r } = tall.qr_compact(engine, &[0], &[1]).unwrap();
+                    let Qr { q: wq, r: wr } = wide_tall.qr_compact(engine, &[0], &[1]).unwrap();
                     assert_reconstruction!(
+                        engine,
                         format!("{name}: qr_compact (kappa {kappa:e})"),
-                        &q.compose(&r).unwrap(),
+                        &q.compose(engine, &r).unwrap(),
                         &tall,
                         terms,
                         $narrow
                     );
-                    assert_positive_real_diagonal!(format!("{name}: qr_compact R"), r);
+                    assert_positive_real_diagonal!(engine, format!("{name}: qr_compact R"), r);
                     assert_payloads_agree_scaled(
                         &format!("{name}: qr_compact Q against the widened oracle"),
                         q.dense_data().unwrap(),
@@ -886,34 +1035,36 @@ mod checked_generic {
                         kappa,
                     );
 
-                    let Lq { l, q } = short.lq_compact(&[0], &[1]).unwrap();
+                    let Lq { l, q } = short.lq_compact(engine, &[0], &[1]).unwrap();
                     assert_reconstruction!(
+                        engine,
                         format!("{name}: lq_compact"),
-                        &l.compose(&q).unwrap(),
+                        &l.compose(engine, &q).unwrap(),
                         &short,
                         terms,
                         $narrow
                     );
-                    assert_positive_real_diagonal!(format!("{name}: lq_compact L"), l);
+                    assert_positive_real_diagonal!(engine, format!("{name}: lq_compact L"), l);
 
                     // SVD and the checked-Generic truncation decision.
-                    let Svd { u, s, vh } = tall.svd_compact(&[0], &[1]).unwrap();
+                    let Svd { u, s, vh } = tall.svd_compact(engine, &[0], &[1]).unwrap();
                     assert_reconstruction!(
+                        engine,
                         format!("{name}: svd_compact"),
-                        &u.compose(&s).unwrap().compose(&vh).unwrap(),
+                        &u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap(),
                         &tall,
                         terms,
                         $narrow
                     );
                     assert_spectra_agree!(
                         format!("{name}: svd_vals"),
-                        &tall.svd_vals(&[0], &[1]).unwrap(),
-                        &wide_tall.svd_vals(&[0], &[1]).unwrap(),
+                        &tall.svd_vals(engine, &[0], &[1]).unwrap(),
+                        &wide_tall.svd_vals(engine, &[0], &[1]).unwrap(),
                         terms
                     );
 
-                    let truncated = svd_trunc!(tall, &Truncation::rank(1));
-                    let wide_truncated = svd_trunc!(wide_tall, &Truncation::rank(1));
+                    let truncated = svd_trunc!(engine, tall, &Truncation::rank(1));
+                    let wide_truncated = svd_trunc!(engine, wide_tall, &Truncation::rank(1));
                     assert!(
                         truncated.error > 0.0,
                         "{name}: the rank budget must discard something"
@@ -921,14 +1072,14 @@ mod checked_generic {
                     assert_eq!(
                         truncated
                             .s
-                            .diagview()
+                            .diagview(engine)
                             .unwrap()
                             .iter()
                             .map(|entry| entry.values.len())
                             .sum::<usize>(),
                         wide_truncated
                             .s
-                            .diagview()
+                            .diagview(engine)
                             .unwrap()
                             .iter()
                             .map(|entry| entry.values.len())
@@ -945,6 +1096,7 @@ mod checked_generic {
                     // Hermitian eigendecomposition on the square fixture,
                     // which `fixture_entry` makes Hermitian by construction.
                     let (h, wide_h) = twin_with!(
+                        engine,
                         &rt,
                         $narrow,
                         $wide,
@@ -958,10 +1110,12 @@ mod checked_generic {
                     // spectrum factor instead: `d` must carry exactly the
                     // eigenvalues `eigh_vals` reports, which are themselves
                     // compared against the widened oracle just below.
-                    let Eigh { d, v } = h.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+                    let Eigh { d, v } = h
+                        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+                        .unwrap();
                     assert_spectra_agree!(
                         format!("{name}: eigh_full D against eigh_vals"),
-                        &d.diagview()
+                        &d.diagview(engine)
                             .unwrap()
                             .iter()
                             .map(|entry| symtn::typed::SectorSpectrum {
@@ -975,30 +1129,37 @@ mod checked_generic {
                                     .collect::<Vec<f64>>(),
                             })
                             .collect::<Vec<_>>(),
-                        &h.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap(),
+                        &h.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+                            .unwrap(),
                         h_terms
                     );
                     // `v` is checked by the law that does not need an adjoint
                     // operand: `h ∘ v == v ∘ d`, with `h` and `d` both owned.
                     assert_reconstruction!(
+                        engine,
                         format!("{name}: eigh_full h∘v == v∘d"),
-                        &h.compose(&v).unwrap(),
-                        &v.compose(&d).unwrap(),
+                        &h.compose(engine, &v).unwrap(),
+                        &v.compose(engine, &d).unwrap(),
                         h_terms,
                         $narrow
                     );
                     assert_spectra_agree!(
                         format!("{name}: eigh_vals"),
-                        &h.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap(),
-                        &wide_h.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap(),
+                        &h.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+                            .unwrap(),
+                        &wide_h
+                            .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+                            .unwrap(),
                         h_terms
                     );
                     let truncated = eigen_trunc!(
-                        h.eigh_full(&[0], &[1], HermitianTol::DEFAULT),
+                        engine,
+                        h.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT),
                         &Truncation::rank(1)
                     );
                     let wide_truncated = eigen_trunc!(
-                        wide_h.eigh_full(&[0], &[1], HermitianTol::DEFAULT),
+                        engine,
+                        wide_h.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT),
                         &Truncation::rank(1)
                     );
                     assert_scalars_agree(
@@ -1016,11 +1177,13 @@ mod checked_generic {
                     // with the widened oracle below pins `W` and `P` — both
                     // unique — completely, and the `f64` factors are the ones
                     // those suites already prove isometric.
-                    let LeftPolar { w, p } = tall.left_polar(&[0], &[1]).unwrap();
-                    let LeftPolar { w: ww, p: wp } = wide_tall.left_polar(&[0], &[1]).unwrap();
+                    let LeftPolar { w, p } = tall.left_polar(engine, &[0], &[1]).unwrap();
+                    let LeftPolar { w: ww, p: wp } =
+                        wide_tall.left_polar(engine, &[0], &[1]).unwrap();
                     assert_reconstruction!(
+                        engine,
                         format!("{name}: left_polar"),
-                        &w.compose(&p).unwrap(),
+                        &w.compose(engine, &p).unwrap(),
                         &tall,
                         terms,
                         $narrow
@@ -1040,10 +1203,11 @@ mod checked_generic {
                         kappa,
                     );
 
-                    let RightPolar { p, wh: w } = short.right_polar(&[0], &[1]).unwrap();
+                    let RightPolar { p, wh: w } = short.right_polar(engine, &[0], &[1]).unwrap();
                     assert_reconstruction!(
+                        engine,
                         format!("{name}: right_polar"),
-                        &p.compose(&w).unwrap(),
+                        &p.compose(engine, &w).unwrap(),
                         &short,
                         terms,
                         $narrow
@@ -1052,9 +1216,13 @@ mod checked_generic {
                     // A lazy-adjoint receiver reads its parent at single
                     // precision too (#1755): the same singular values as its
                     // materialized adjoint, at the payload's precision.
-                    let lazy = short.adjoint().unwrap();
-                    let lazy_values = lazy.svd_vals(&[0], &[1]).unwrap();
-                    let eager_values = lazy.materialize().unwrap().svd_vals(&[0], &[1]).unwrap();
+                    let lazy = short.adjoint(engine).unwrap();
+                    let lazy_values = lazy.svd_vals(engine, &[0], &[1]).unwrap();
+                    let eager_values = lazy
+                        .materialize(engine)
+                        .unwrap()
+                        .svd_vals(engine, &[0], &[1])
+                        .unwrap();
                     assert_eq!(lazy_values.len(), eager_values.len(), "{name}");
                     for (a, b) in lazy_values.iter().zip(&eager_values) {
                         assert_eq!(a.sector, b.sector, "{name}");
@@ -1105,37 +1273,42 @@ mod compact_diagonal {
 
                 #[test]
                 fn compact_receivers_match_the_widened_oracle() {
+                    let engine = &mut symtn_dense::CpuEngine::serial();
                     let rt = runtime();
                     let leg = u1_leg_with([2, 3, 2]);
                     let narrow: TensorMap<U1FusionRule, $narrow> =
-                        TensorMap::diagonal(&rt, &leg, spectra()).unwrap();
+                        TensorMap::diagonal(engine, &rt, &leg, spectra()).unwrap();
                     let wide: TensorMap<U1FusionRule, $wide> =
-                        TensorMap::diagonal(&rt, &leg, spectra()).unwrap();
+                        TensorMap::diagonal(engine, &rt, &leg, spectra()).unwrap();
                     let terms = 7;
 
                     assert_spectra_agree!(
                         "compact svd_vals",
-                        &narrow.svd_vals(&[0], &[1]).unwrap(),
-                        &wide.svd_vals(&[0], &[1]).unwrap(),
+                        &narrow.svd_vals(engine, &[0], &[1]).unwrap(),
+                        &wide.svd_vals(engine, &[0], &[1]).unwrap(),
                         terms
                     );
                     assert_spectra_agree!(
                         "compact eigh_vals",
-                        &narrow.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap(),
-                        &wide.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap(),
+                        &narrow
+                            .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+                            .unwrap(),
+                        &wide
+                            .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+                            .unwrap(),
                         terms
                     );
                     assert!(
-                        is_posdef_compact!(narrow, PREDICATE_TOL, |v: $narrow| {
+                        is_posdef_compact!(engine, narrow, PREDICATE_TOL, |v: $narrow| {
                             numerics::Numeric::wide(v).re
                         }),
                         "a compact factor with positive values is positive definite"
                     );
                     assert_eq!(
-                        is_posdef_compact!(narrow, PREDICATE_TOL, |v: $narrow| {
+                        is_posdef_compact!(engine, narrow, PREDICATE_TOL, |v: $narrow| {
                             numerics::Numeric::wide(v).re
                         }),
-                        is_posdef_compact!(wide, PREDICATE_TOL, |v: $wide| {
+                        is_posdef_compact!(engine, wide, PREDICATE_TOL, |v: $wide| {
                             numerics::Numeric::wide(v).re
                         })
                     );
@@ -1143,8 +1316,8 @@ mod compact_diagonal {
                     // `find_truncated` fed from the single-precision
                     // `diagview`: the path that needs `SpectrumMagnitude` for
                     // `f32` / `Complex32`.
-                    let narrow_view = narrow.diagview().unwrap();
-                    let wide_view = wide.diagview().unwrap();
+                    let narrow_view = narrow.diagview(engine).unwrap();
+                    let wide_view = wide.diagview(engine).unwrap();
                     for policy in [
                         Truncation::rank(3),
                         Truncation::relative_cutoff(0.2).unwrap(),
@@ -1186,6 +1359,7 @@ mod compact_diagonal {
 /// payload cannot represent, the subject of the next test.
 #[test]
 fn find_truncated_is_dtype_independent_on_an_exactly_representable_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::SectorSpectrum;
 
     let rt = runtime();
@@ -1196,6 +1370,7 @@ fn find_truncated_is_dtype_independent_on_an_exactly_representable_spectrum() {
         (U1Irrep::new(1), &[3.0, 0.25]),
     ];
     let narrow: TensorMap<U1FusionRule, f32> = TensorMap::diagonal(
+        engine,
         &rt,
         &leg,
         values.map(|(sector, v)| SectorSpectrum {
@@ -1205,6 +1380,7 @@ fn find_truncated_is_dtype_independent_on_an_exactly_representable_spectrum() {
     )
     .unwrap();
     let wide: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
+        engine,
         &rt,
         &leg,
         values.map(|(sector, v)| SectorSpectrum {
@@ -1214,8 +1390,8 @@ fn find_truncated_is_dtype_independent_on_an_exactly_representable_spectrum() {
     )
     .unwrap();
 
-    let narrow_view = narrow.diagview().unwrap();
-    let wide_view = wide.diagview().unwrap();
+    let narrow_view = narrow.diagview(engine).unwrap();
+    let wide_view = wide.diagview(engine).unwrap();
     for policy in [
         Truncation::rank(3),
         Truncation::relative_cutoff(0.2).unwrap(),
@@ -1258,6 +1434,7 @@ fn find_truncated_is_dtype_independent_on_an_exactly_representable_spectrum() {
 /// do disagree about it.
 #[test]
 fn a_rank_tie_the_single_precision_payload_cannot_resolve_keeps_the_other_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = runtime();
     let leg = u1_leg_with([2, 2, 1]);
     let tie = 4.0f64;
@@ -1282,19 +1459,19 @@ fn a_rank_tie_the_single_precision_payload_cannot_resolve_keeps_the_other_sector
         }
     };
     let wide: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&leg], [&leg], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &rt, [&leg], [&leg], |trees, index| {
             entry(trees.coupled().charge(), index)
         })
         .unwrap();
     let narrow: TensorMap<U1FusionRule, f32> =
-        TensorMap::from_subblock_fn(&rt, [&leg], [&leg], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &rt, [&leg], [&leg], |trees, index| {
             entry(trees.coupled().charge(), index) as f32
         })
         .unwrap();
 
     let policy = Truncation::rank(1);
-    let got = svd_trunc!(narrow, &policy);
-    let expected = svd_trunc!(wide, &policy);
+    let got = svd_trunc!(engine, narrow, &policy);
+    let expected = svd_trunc!(engine, wide, &policy);
 
     let kept = |t: &symtn::typed::GradedSpace<U1FusionRule>| -> usize {
         t.sectors()
@@ -1346,6 +1523,7 @@ fn a_rank_tie_the_single_precision_payload_cannot_resolve_keeps_the_other_sector
 /// workspace tolerance rule with the hand value of the discarded tail.
 #[test]
 fn double_precision_truncation_decisions_and_errors_match_hand_values() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::SectorSpectrum;
 
     let rt = runtime();
@@ -1363,8 +1541,9 @@ fn double_precision_truncation_decisions_and_errors_match_hand_values() {
             values: values.to_vec(),
         })
     };
-    let tensor: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(&rt, &leg, spectra()).unwrap();
-    let view = tensor.diagview().unwrap();
+    let tensor: TensorMap<U1FusionRule, f64> =
+        TensorMap::diagonal(engine, &rt, &leg, spectra()).unwrap();
+    let view = tensor.diagview(engine).unwrap();
 
     // Hand errors: the discarded tail of the 9-value spectrum
     // {0.9, 0.3, 0.1 | 0.7, 0.2, 0.1 | 0.5, 0.3, 0.1}, whose squares sum to 1.8.

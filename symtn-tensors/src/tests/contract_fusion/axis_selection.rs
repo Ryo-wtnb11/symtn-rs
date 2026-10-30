@@ -1,8 +1,10 @@
 use super::*;
 use crate::probe::{self, Event};
+use symtn_dense::Engine;
 
 #[test]
 fn forced_axis_order_candidates_have_identical_u1_result() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: both paired caller orders and both operand orientations produce
     // the same U1 contraction result.
     let rule = U1FusionRule;
@@ -53,7 +55,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
                 TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], space.clone())
                     .unwrap();
             crate::contract::execute_dynamic_tree_execution_artifact_for_test(
-                &rule, &plan, &mut dst, &lhs, &rhs, 1.0, 0.0,
+                engine, &rule, &plan, &mut dst, &lhs, &rhs, 1.0, 0.0,
             )
             .unwrap();
             outputs.push(dst);
@@ -102,6 +104,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
     let mut oracle =
         TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], space.clone()).unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut oracle,
         &lhs,
@@ -113,6 +116,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
     .unwrap();
     let mut normal = TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], space).unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut normal,
         &lhs,
@@ -137,6 +141,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
 
 #[test]
 fn forced_orientations_match_asymmetric_u1_reduced_block_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = U1FusionRule;
     let neutral = U1Irrep::new(0).sector_id();
     let leg = |dimension| SectorLeg::new([(neutral, dimension)], false);
@@ -243,7 +248,7 @@ fn forced_orientations_match_asymmetric_u1_reduced_block_oracle() {
                 TestTensor::<f64>::from_vec_with_fusion_space(initial.clone(), dst_space.clone())
                     .unwrap();
             crate::contract::execute_dynamic_tree_execution_artifact_for_test(
-                &rule, &plan, &mut dst, &lhs, &rhs, alpha, beta,
+                engine, &rule, &plan, &mut dst, &lhs, &rhs, alpha, beta,
             )
             .unwrap();
             for (&actual, &expected) in dst.data().iter().zip(&expected) {
@@ -255,6 +260,7 @@ fn forced_orientations_match_asymmetric_u1_reduced_block_oracle() {
 
 #[test]
 fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -288,7 +294,18 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     crate::probe::take_completed_transformer_activity();
 
-    context_contract_into(&mut context, &rule, &mut dst, &lhs, &rhs, axes, 1.0, 0.0).unwrap();
+    context_contract_into(
+        engine,
+        &mut context,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        1.0,
+        0.0,
+    )
+    .unwrap();
     // What: eager resolution scores four candidates and builds only the
     // reusable completed transformers, which it publishes.
     assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 4);
@@ -297,7 +314,18 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
     let cold = crate::probe::take_completed_transformer_activity();
     assert_eq!(cold.publications + cold.hits, 2, "{cold:?}");
 
-    context_contract_into(&mut context, &rule, &mut dst, &lhs, &rhs, axes, 1.0, 0.0).unwrap();
+    context_contract_into(
+        engine,
+        &mut context,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        1.0,
+        0.0,
+    )
+    .unwrap();
     // What: an ordinary repeat resolves eagerly and hits the published
     // transformers instead of rebuilding them.
     assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 8);
@@ -307,6 +335,7 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
 
 #[test]
 fn reverse_winner_is_independent_of_first_cached_consumer() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     struct RejectingStorageGemm;
 
     impl symtn_operations::fusion_replay::StorageGemm<f64, Vec<f64>, Vec<f64>, Vec<f64>>
@@ -445,7 +474,17 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
 
     let candidate_score_calls_rec = probe::record();
     let mut one_shot_dst = fresh_dst();
-    fusion_contract_into(&rule, &mut one_shot_dst, &lhs, &rhs, axes(), alpha, beta).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut one_shot_dst,
+        &lhs,
+        &rhs,
+        axes(),
+        alpha,
+        beta,
+    )
+    .unwrap();
     assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 4);
     assert_oracle(one_shot_dst.data());
 
@@ -497,9 +536,11 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
             TestTensor::<f64>::from_vec_with_fusion_space(initial.clone(), dst_space.clone())
                 .unwrap();
         let mut dynamic_dst = initial.clone();
-        let typed_call = |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
+        let typed_call = |engine: &mut dyn Engine,
+                          context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
                           dst: &mut TestTensor<f64>| {
             context_contract_into(
+                engine,
                 context,
                 provider.as_ref(),
                 dst,
@@ -511,9 +552,11 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
             )
         };
         let dynamic_call =
-            |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
+            |engine: &mut dyn Engine,
+             context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
              dst: &mut [f64]| {
                 context.tensorcontract_prelowered_into(
+                    engine,
                     &dst_bound,
                     dst,
                     crate::FusionOperand::direct(lhs_bound.space()),
@@ -526,11 +569,11 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
                 )
             };
         if typed_first {
-            typed_call(&mut context, &mut typed_dst).unwrap();
-            dynamic_call(&mut context, &mut dynamic_dst).unwrap();
+            typed_call(engine, &mut context, &mut typed_dst).unwrap();
+            dynamic_call(engine, &mut context, &mut dynamic_dst).unwrap();
         } else {
-            dynamic_call(&mut context, &mut dynamic_dst).unwrap();
-            typed_call(&mut context, &mut typed_dst).unwrap();
+            dynamic_call(engine, &mut context, &mut dynamic_dst).unwrap();
+            typed_call(engine, &mut context, &mut typed_dst).unwrap();
         }
         assert_oracle(typed_dst.data());
         assert_oracle(&dynamic_dst);
@@ -550,9 +593,11 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
             TestTensor::<f64>::from_vec_with_fusion_space(initial.clone(), dst_space.clone())
                 .unwrap();
         let ordinary_call =
-            |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
+            |engine: &mut dyn Engine,
+             context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
              dst: &mut TestTensor<f64>| {
                 context_contract_into(
+                    engine,
                     context,
                     provider.as_ref(),
                     dst,
@@ -564,9 +609,11 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
                 )
             };
         let profiled_call =
-            |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
+            |engine: &mut dyn Engine,
+             context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
              dst: &mut TestTensor<f64>| {
                 context_contract_into(
+                    engine,
                     context,
                     provider.as_ref(),
                     dst,
@@ -581,11 +628,11 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
                 Ok::<_, OperationError>(())
             };
         if profiled_first {
-            profiled_call(&mut context, &mut profiled_dst).unwrap();
-            ordinary_call(&mut context, &mut ordinary_dst).unwrap();
+            profiled_call(engine, &mut context, &mut profiled_dst).unwrap();
+            ordinary_call(engine, &mut context, &mut ordinary_dst).unwrap();
         } else {
-            ordinary_call(&mut context, &mut ordinary_dst).unwrap();
-            profiled_call(&mut context, &mut profiled_dst).unwrap();
+            ordinary_call(engine, &mut context, &mut ordinary_dst).unwrap();
+            profiled_call(engine, &mut context, &mut profiled_dst).unwrap();
         }
         assert_oracle(ordinary_dst.data());
         assert_oracle(profiled_dst.data());
@@ -598,6 +645,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
 
 #[test]
 fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -614,6 +662,7 @@ fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
     let mut context_dst = TestTensor::<f64>::from_vec_with_fusion_space(vec![5.0], space).unwrap();
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     let error = context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -640,6 +689,7 @@ fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
 
 #[test]
 fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: both crossed caller pair orders produce one odd FermionParity result.
     let rule = FermionParityFusionRule;
     let sectors = [SectorId::new(0), SectorId::new(1)];
@@ -695,6 +745,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
             let mut contract_backend = DenseTreeTransformOperations::default_executor();
             let mut contract_workspace = TensorContractWorkspace::default();
             crate::contract::tensorcontract_fusion_dynamic_plan_into_with(
+                engine,
                 &mut tree_backend,
                 &mut tree_workspace,
                 &mut contract_backend,
@@ -756,6 +807,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
     )
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut oracle,
         &lhs,
@@ -769,6 +821,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
         TestTensor::<Complex64>::from_vec_with_fusion_space(vec![Complex64::zero(); len], space)
             .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut normal,
         &lhs,
@@ -791,6 +844,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
 
 #[test]
 fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
@@ -859,6 +913,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
             let mut contract_backend = DenseTreeTransformOperations::default_executor();
             let mut contract_workspace = TensorContractWorkspace::default();
             crate::contract::tensorcontract_fusion_dynamic_plan_into_with(
+                engine,
                 &mut tree_backend,
                 &mut tree_workspace,
                 &mut contract_backend,
@@ -878,6 +933,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
             )
             .unwrap();
             crate::contract::execute_dynamic_tree_execution_artifact_for_test(
+                engine,
                 &rule,
                 &plan,
                 &mut artifact,
@@ -950,6 +1006,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
     )
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut oracle,
         &lhs_permuted,
@@ -965,6 +1022,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
     )
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut normal,
         &lhs,

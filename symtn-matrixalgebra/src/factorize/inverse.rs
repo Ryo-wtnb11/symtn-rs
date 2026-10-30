@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 #[derive(Clone, Copy)]
 pub(super) struct InverseSectorRoute {
@@ -32,6 +33,7 @@ pub(super) struct InverseBasisExtent {
 /// The caller owns categorical admission; this body only routes the existing
 /// coupled-sector layout and performs the dense solves.
 pub(crate) fn inverse_by_sector_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: BoundDynamicFusionMapSpace<R>,
@@ -73,6 +75,7 @@ where
                 let source_matrix = &input.data()[source_region.range()];
                 let output_matrix = &mut output_data[output_regions[route.output].range()];
                 solve_inverse_sector(
+                    engine,
                     dense,
                     source_matrix,
                     output_matrix,
@@ -104,6 +107,7 @@ where
                     continue;
                 }
                 solve_inverse_sector(
+                    engine,
                     dense,
                     &source.data,
                     &mut solution,
@@ -216,6 +220,7 @@ pub fn pinv_diagonal_spectrum<D: FactorScalar>(
 /// All layout checks happen before staging or dense work.  The local staging
 /// keeps an SVD or GEMM failure from publishing a partial output.
 pub(crate) fn pinv_by_sector_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: BoundDynamicFusionMapSpace<R>,
@@ -225,12 +230,20 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    pinv_oriented_by_sector_dyn_into(dense, input, output_space, rcond, FactorPlacement::Direct)
+    pinv_oriented_by_sector_dyn_into(
+        engine,
+        dense,
+        input,
+        output_space,
+        rcond,
+        FactorPlacement::Direct,
+    )
 }
 
 /// The pseudo-inverse of the logical adjoint of `parent`, read in place:
 /// `A = U S Vh` gives `(A^H)^+ = U S^+ Vh`, in `parent`'s own hom space.
 pub(crate) fn pinv_adjoint_by_sector_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     output_space: BoundDynamicFusionMapSpace<R>,
@@ -240,10 +253,18 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    pinv_oriented_by_sector_dyn_into(dense, parent, output_space, rcond, FactorPlacement::Adjoint)
+    pinv_oriented_by_sector_dyn_into(
+        engine,
+        dense,
+        parent,
+        output_space,
+        rcond,
+        FactorPlacement::Adjoint,
+    )
 }
 
 fn pinv_oriented_by_sector_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: BoundDynamicFusionMapSpace<R>,
@@ -331,7 +352,7 @@ where
     let mut scratch = Vec::new();
     // One scope spans both passes: the staged SVDs (the cutoff is global) and
     // the per-sector reconstruction GEMMs.
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         let mut staged = Vec::with_capacity(matrices.len());
         for index in 0..matrices.len() {
             let matrix = matrices.get(index)?;
@@ -341,7 +362,7 @@ where
             let (u, singular_values, vt) = if rank == 0 {
                 (Vec::new(), Vec::new(), Vec::new())
             } else {
-                compact_svd_owned(dense, matrix.data, rows, cols)?
+                compact_svd_owned(engine, dense, matrix.data, rows, cols)?
             };
             staged.push(CompactSvdNumericalStage {
                 rows,
@@ -403,6 +424,7 @@ where
                         .map_err(OperationError::Dense)?;
                     dense
                         .dot_general_into(
+                            engine,
                             D::dense_write(output_view),
                             D::dense_read(left_view),
                             D::dense_read(right_view),
@@ -422,6 +444,7 @@ where
 }
 
 pub(crate) fn solve_left_by_sector_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     divisor: &BoundDynamicTensorRef<'_, R, D>,
     rhs: &BoundDynamicTensorRef<'_, R, D>,
@@ -532,6 +555,7 @@ where
             continue;
         }
         solve_left_sector(
+            engine,
             dense,
             &divisor.data()[divisor_region.range()],
             &rhs.data()[rhs_regions[route.rhs].range()],
@@ -613,6 +637,7 @@ pub(super) fn compile_solve_left_region_routes(
 }
 
 pub(super) fn solve_left_sector<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     divisor: &[D],
     rhs: &[D],
@@ -635,6 +660,7 @@ where
         DenseViewMut::new(output, &rhs_shape, &rhs_strides, 0).map_err(OperationError::Dense)?;
     dense
         .solve_into(
+            engine,
             D::dense_read(divisor),
             D::dense_read(rhs),
             D::dense_write(output),
@@ -670,6 +696,7 @@ where
 /// names the function the user called (`exp`) rather than whichever helper
 /// noticed first.
 pub(crate) fn map_square_sectors_dyn_into<E, R, D, S, I, F>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: BoundDynamicFusionMapSpace<R>,
@@ -681,7 +708,14 @@ where
     D: FactorScalar,
     S: Send,
     I: FnOnce(usize) -> Result<S, OperationError>,
-    F: FnMut(&mut dyn DenseExecutor, &mut S, &[D], usize, &mut [D]) -> Result<(), OperationError>
+    F: FnMut(
+            &mut dyn DenseExecutor,
+            &mut dyn Engine,
+            &mut S,
+            &[D],
+            usize,
+            &mut [D],
+        ) -> Result<(), OperationError>
         + Send,
 {
     let source_space = input.space().space();
@@ -717,7 +751,7 @@ where
         .try_fold(0, |largest, rows| rows.map(|rows| largest.max(rows)))?;
     let mut state = init(max_order)?;
     // One admitted dense scope spans every sector's kernel.
-    let output_data = in_linalg_scope(dense, |dense| {
+    let output_data = in_linalg_scope(engine, dense, |dense, engine| {
         let mut output_data = vec![D::zero(); output_len];
         let mut scratch = Vec::new();
         for (index, landing) in landings.iter().enumerate() {
@@ -730,7 +764,7 @@ where
                 &mut output_data,
                 &output_regions[landing.output],
                 &mut scratch,
-                |output| apply(dense, &mut state, matrix.data, order, output),
+                |output| apply(dense, engine, &mut state, matrix.data, order, output),
             )?;
         }
         Ok(output_data)
@@ -884,7 +918,9 @@ pub(super) fn identity_workspace<D: FactorScalar>(order: usize) -> Result<Vec<D>
     Ok(identity)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn solve_inverse_sector<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     source: &[D],
     output: &mut [D],
@@ -909,6 +945,7 @@ where
         DenseViewMut::new(output, &shape, &output_strides, 0).map_err(OperationError::Dense)?;
     dense
         .solve_into(
+            engine,
             D::dense_read(source),
             D::dense_read(identity),
             D::dense_write(output),

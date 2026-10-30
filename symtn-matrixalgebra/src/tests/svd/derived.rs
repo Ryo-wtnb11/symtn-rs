@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the largest singular value is in the later sector, and the first
     // sector sits exactly on the strict global cutoff. The parent-native seam
     // runs one SVD per stored sector, preserves provider identity, and emits
@@ -14,7 +15,8 @@ fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
     let compact_svd_copy_rec = crate::probe::record();
     let input_pack_bytes_rec = crate::probe::record();
 
-    let output = pinv_adjoint_parent_into_mf(&mut dense, &bound.as_ref().dynamic(), 0.5).unwrap();
+    let output =
+        pinv_adjoint_parent_into_mf(engine, &mut dense, &bound.as_ref().dynamic(), 0.5).unwrap();
     assert_eq!(dense.counts().svd, 2);
     assert!(Arc::ptr_eq(output.space().provider_arc(), &provider));
     let output: BoundTensorMap<_, _> = typed_from_bound_factor(output).unwrap();
@@ -27,6 +29,7 @@ fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
 
 #[test]
 fn pinv_adjoint_parent_rejects_invalid_rcond_before_svd() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the hidden seam owns the same validation precedence as ordinary
     // pinv, independently of either facade.
     let tensor = u1_block_endomorphism(&[(0, 1, vec![1.0_f64])]);
@@ -34,7 +37,7 @@ fn pinv_adjoint_parent_rejects_invalid_rcond_before_svd() {
     for rcond in [-1.0, f64::NAN, f64::INFINITY] {
         let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
         assert!(matches!(
-            pinv_adjoint_parent_into_mf(&mut dense, &bound.as_ref().dynamic(), rcond,),
+            pinv_adjoint_parent_into_mf(engine, &mut dense, &bound.as_ref().dynamic(), rcond,),
             Err(OperationError::InvalidArgument { message }) if message.contains("rcond")
         ));
     }
@@ -42,6 +45,7 @@ fn pinv_adjoint_parent_rejects_invalid_rcond_before_svd() {
 
 #[test]
 fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a successful first sector cannot publish factors or an output when
     // the second sector's SVD fails.
     let canonical = u1_block_endomorphism(&[(0, 1, vec![2.0_f64]), (1, 1, vec![3.0])]);
@@ -53,7 +57,7 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
     let input_pack_bytes_rec = crate::probe::record();
 
     assert!(matches!(
-        pinv_adjoint_parent_into_mf(&mut dense, &bound.as_ref().dynamic(), 0.0,),
+        pinv_adjoint_parent_into_mf(engine, &mut dense, &bound.as_ref().dynamic(), 0.0,),
         Err(OperationError::Dense(DenseError::Backend {
             op: "svd_into",
             ..
@@ -68,6 +72,7 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
 
 #[test]
 fn single_precision_svd_and_eig_work_end_to_end() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex32;
     let rule = Z2FusionRule;
     let sectors = [SectorId::new(0), SectorId::new(1)];
@@ -95,6 +100,7 @@ fn single_precision_svd_and_eig_work_end_to_end() {
 
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let svd = svd_compact(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor_f32),
     )
@@ -140,7 +146,8 @@ fn single_precision_svd_and_eig_work_end_to_end() {
         }
     }
     let mut context = TensorContractFusionExecutionContext::<f32, RuleIdentity>::default();
-    let reconstructed = crate::compose::compose(&mut context, &rule, &svd.u, &scaled_vh).unwrap();
+    let reconstructed =
+        crate::compose::compose(engine, &mut context, &rule, &svd.u, &scaled_vh).unwrap();
     let distance = tensor_f32
         .data()
         .iter()
@@ -166,6 +173,7 @@ fn single_precision_svd_and_eig_work_end_to_end() {
     )
     .unwrap();
     let eig = eig_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor_c32),
     )

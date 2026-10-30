@@ -67,14 +67,13 @@ mod ledger {
         TensorProductCommit,
         /// A dense executor lease was taken.
         DenseLease,
+        /// A Host contraction replayed a `copyC` route (contract into a
+        /// temporary, then one transform into the destination).
+        CopyCReplay,
         /// A lazy adjoint's payload was written out as an owned payload.
         AdjointMaterialization,
         /// A compact diagonal payload was densified for one operation.
         DiagonalMaterialization,
-        /// A materialization ran inside a runtime Host pool.
-        PooledMaterialization,
-        /// A materialization ran outside every runtime Host pool.
-        UnpooledMaterialization,
         /// A device reduction downloaded its partials.
         #[cfg(feature = "cuda")]
         CudaReductionDownload,
@@ -118,15 +117,14 @@ mod ledger {
 
     const EVENTS: usize = 32;
     #[cfg(not(feature = "cuda"))]
-    const _: () = assert!((Event::UnpooledMaterialization as usize) < EVENTS);
+    const _: () = assert!((Event::DiagonalMaterialization as usize) < EVENTS);
     #[cfg(feature = "cuda")]
     const _: () = assert!((Event::CudaSvdOutputUpload as usize) < EVENTS);
 
     /// Objects alive at once, whose peak a test bounds.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(crate) enum Gauge {
-        /// Runtime Host pools entered on this thread.
-        HostPool,
         /// Device QR route scratch.
         #[cfg(feature = "cuda")]
         CudaQrScratch,
@@ -155,6 +153,7 @@ mod ledger {
         pub(super) routes: RoutePolicy,
         fault: Option<(Fault, usize)>,
         tensor_product_rhs: Option<symtn_core::BlockStructure>,
+        dense: Option<Box<dyn symtn_dense::DenseExecutor + Send>>,
     }
 
     thread_local! {
@@ -166,6 +165,7 @@ mod ledger {
                 routes: RoutePolicy::DEFAULT,
                 fault: None,
                 tensor_product_rhs: None,
+                dense: None,
             })
         };
     }
@@ -181,6 +181,7 @@ mod ledger {
     }
 
     /// One more `gauge` object is alive.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(crate) fn enter(gauge: Gauge) {
         PROBE.with(|probe| {
             let probe = &mut *probe.borrow_mut();
@@ -191,22 +192,9 @@ mod ledger {
     }
 
     /// One `gauge` object was released.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(crate) fn leave(gauge: Gauge) {
         PROBE.with(|probe| probe.borrow_mut().live[gauge as usize] -= 1);
-    }
-
-    /// Whether a `gauge` object is alive on this thread.
-    fn alive(gauge: Gauge) -> bool {
-        PROBE.with(|probe| probe.borrow().live[gauge as usize] > 0)
-    }
-
-    /// Records whether a materialization runs inside a runtime Host pool.
-    pub(crate) fn hit_materialization_pool() {
-        hit(if alive(Gauge::HostPool) {
-            Event::PooledMaterialization
-        } else {
-            Event::UnpooledMaterialization
-        });
     }
 
     /// What this thread recorded since [`record`] returned this guard.
@@ -289,6 +277,38 @@ mod ledger {
     }
 
     /// Replaces the rhs structure the checked tensor product validates.
+    /// While the returned guard lives, every factorization on this thread
+    /// runs on `executor` instead of a fresh default one (the facade's only
+    /// dense-executor seam is this test hook); dropping the guard restores
+    /// the previous injection.
+    pub(crate) fn inject_dense(
+        executor: Box<dyn symtn_dense::DenseExecutor + Send>,
+    ) -> DenseInjection {
+        let previous = PROBE.with(|probe| probe.borrow_mut().dense.replace(executor));
+        DenseInjection {
+            previous: Some(previous),
+        }
+    }
+
+    pub(crate) struct DenseInjection {
+        previous: Option<Option<Box<dyn symtn_dense::DenseExecutor + Send>>>,
+    }
+
+    impl Drop for DenseInjection {
+        fn drop(&mut self) {
+            let previous = self.previous.take().flatten();
+            PROBE.with(|probe| probe.borrow_mut().dense = previous);
+        }
+    }
+
+    pub(crate) fn take_injected_dense() -> Option<Box<dyn symtn_dense::DenseExecutor + Send>> {
+        PROBE.with(|probe| probe.borrow_mut().dense.take())
+    }
+
+    pub(crate) fn return_injected_dense(executor: Box<dyn symtn_dense::DenseExecutor + Send>) {
+        PROBE.with(|probe| probe.borrow_mut().dense = Some(executor));
+    }
+
     pub(crate) fn override_tensor_product_rhs(structure: Option<symtn_core::BlockStructure>) {
         PROBE.with(|probe| probe.borrow_mut().tensor_product_rhs = structure);
     }

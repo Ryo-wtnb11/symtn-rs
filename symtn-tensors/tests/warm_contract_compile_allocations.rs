@@ -2,6 +2,7 @@
 //! allocations for rank-sized data.
 
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
 use symtn_tensors::{
@@ -85,6 +86,7 @@ fn coefficient_groups() -> symtn_core::StructureCacheInfo {
 /// The storage ladder these rows pin: the lock-free canonical core, then the
 /// `DynamicTree` artifact (the planner's `CopyC` rung is not measured here).
 fn storage_ladder(
+    engine: &mut dyn Engine,
     context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
     dst: &Space,
     lhs: FusionOperand<'_>,
@@ -97,7 +99,7 @@ fn storage_ladder(
     {
         Some(core) => core,
         None => context
-            .compile_storage_contract_dynamic_tree(dst, lhs, rhs, axes)
+            .compile_storage_contract_dynamic_tree(engine, dst, lhs, rhs, axes)
             .unwrap(),
     }
 }
@@ -106,7 +108,7 @@ fn storage_ladder(
 /// three ways: the canonical Core route, the same contraction with its two
 /// leading open axes swapped (a DynamicTree route whose source and output
 /// transforms keep every leg on its side), and the plan alone.
-fn warm_compile_allocations(codomain: usize, domain: usize) -> [usize; 3] {
+fn warm_compile_allocations(engine: &mut dyn Engine, codomain: usize, domain: usize) -> [usize; 3] {
     let provider = Arc::new(U1FusionRule);
     let lhs = space(&provider, codomain, domain);
     let square = space(&provider, domain, domain);
@@ -152,6 +154,7 @@ fn warm_compile_allocations(codomain: usize, domain: usize) -> [usize; 3] {
     let mut context = runtime_like_context();
     let dynamic_tree = warm_allocations(|| {
         let resolution = storage_ladder(
+            engine,
             &mut context,
             &dst,
             FusionOperand::direct(lhs.space()),
@@ -177,9 +180,11 @@ fn warm_compile_allocations(codomain: usize, domain: usize) -> [usize; 3] {
 
 #[test]
 fn warm_contract_compile_allocations_do_not_scale_with_rank() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let shapes = [(2, 1), (2, 2), (3, 2), (3, 3), (4, 3)];
-    let counts = shapes.map(|(codomain, domain)| warm_compile_allocations(codomain, domain));
+    let counts =
+        shapes.map(|(codomain, domain)| warm_compile_allocations(engine, codomain, domain));
     // What: the same allocation count of each route at every rank from 3 to
     // 7: per-call objects (plans, `Arc`s, permuted HomSpaces, the artifact),
     // never rank-sized buffers. An empty twist list is an empty scale list
@@ -197,6 +202,7 @@ fn warm_contract_compile_allocations_do_not_scale_with_rank() {
 /// A's source transform sends leg 0 to the domain and its `domain` legs to
 /// the codomain, and M's transform swaps its two legs.
 fn crossing_compile_allocations(
+    engine: &mut dyn Engine,
     leg: fn(bool) -> SectorLeg,
     codomain: usize,
     domain: usize,
@@ -217,6 +223,7 @@ fn crossing_compile_allocations(
     let mut context = runtime_like_context();
     warm_allocations(|| {
         storage_ladder(
+            engine,
             &mut context,
             &dst,
             FusionOperand::direct(lhs.space()),
@@ -235,9 +242,10 @@ const CROSSING_SHAPES: [(usize, usize); 5] = [(2, 1), (2, 2), (3, 2), (2, 3), (3
 
 #[test]
 fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let counts = CROSSING_SHAPES
-        .map(|(codomain, domain)| crossing_compile_allocations(leg, codomain, domain));
+        .map(|(codomain, domain)| crossing_compile_allocations(engine, leg, codomain, domain));
     // What: the rank-independent DynamicTree compile, and nothing per leg
     // that changes side in a source transform. #1403 removed that per-leg
     // allocation: `SectorLeg::dual` shares the source leg's sector data, as
@@ -252,10 +260,11 @@ fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
 /// storage too, so it allocates nothing per crossing leg either.
 #[test]
 fn warm_contract_compile_allocates_nothing_per_crossing_leg_the_dual_moves() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     for (codomain, domain) in [(1, 2)].into_iter().chain(CROSSING_SHAPES) {
-        let moved = crossing_compile_allocations(asymmetric_leg, codomain, domain);
-        let fixed = crossing_compile_allocations(leg, codomain, domain);
+        let moved = crossing_compile_allocations(engine, asymmetric_leg, codomain, domain);
+        let fixed = crossing_compile_allocations(engine, leg, codomain, domain);
         // What: the same count as legs the dual fixes.
         assert_eq!(moved, fixed, "rank {}", codomain + domain);
     }
@@ -267,7 +276,7 @@ fn warm_contract_compile_allocates_nothing_per_crossing_leg_the_dual_moves() {
 /// 2), so the planner builds the temporary space, its core and one permute.
 /// Paired with the same contraction through the core-then-`DynamicTree`
 /// ladder.
-fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
+fn copy_c_plan_allocations(engine: &mut dyn Engine, rank: usize) -> [usize; 2] {
     let provider = Arc::new(U1FusionRule);
     let lhs = space(&provider, rank, rank);
     let rhs = space(&provider, rank, rank);
@@ -292,6 +301,7 @@ fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
     let copy_c = warm_allocations(|| {
         let resolution = context
             .plan_contract::<DirectCoreExecutor, _>(
+                engine,
                 &dst,
                 FusionOperand::direct(lhs.space()),
                 FusionOperand::direct(rhs.space()),
@@ -305,6 +315,7 @@ fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
     });
     let dynamic_tree = warm_allocations(|| {
         let resolution = storage_ladder(
+            engine,
             &mut context,
             &dst,
             FusionOperand::direct(lhs.space()),
@@ -331,6 +342,7 @@ fn copy_c_plan_allocations(rank: usize) -> [usize; 2] {
 
 #[test]
 fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Rank 6 is the largest case (#1998): its complete HomSpace, transform
     // and fusion-tree layouts must fit the default budgets and their
@@ -342,7 +354,7 @@ fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
         let layout_bypasses =
             symtn_core::structure_cache_info(symtn_core::StructureCacheKind::SectorStructure)
                 .rejections();
-        let [copy_c, dynamic_tree] = copy_c_plan_allocations(rank);
+        let [copy_c, dynamic_tree] = copy_c_plan_allocations(engine, rank);
         eprintln!("rank {rank}: warm CopyC plan {copy_c}, DynamicTree ladder {dynamic_tree}");
         // What: device-eager CopyC planning stays a small bounded count once
         // its structures are warm (9-10 through rank 4, 18 at ranks 5 and 6
@@ -391,6 +403,7 @@ fn rank_six_complete_owner_reuses_content_across_derivations() {
 
 #[test]
 fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (#2011): the rank-6 C1p working set — the
     // CopyC output transform and the DynamicTree route's transforms — fits
@@ -423,6 +436,7 @@ fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
         let resolution = if copy_c {
             context
                 .plan_contract::<DirectCoreExecutor, _>(
+                    engine,
                     &dst,
                     FusionOperand::direct(lhs.space()),
                     FusionOperand::direct(rhs.space()),
@@ -433,6 +447,7 @@ fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
                 .unwrap()
         } else {
             storage_ladder(
+                engine,
                 &mut context,
                 &dst,
                 FusionOperand::direct(lhs.space()),

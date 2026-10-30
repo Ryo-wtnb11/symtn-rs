@@ -9,6 +9,7 @@
 //! `symtn/tests/typed_contract_host_oracle.rs` and `typed_cuda_contract.rs`.
 
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
@@ -132,33 +133,45 @@ struct CountingDense {
 impl symtn_dense::DenseExecutor for CountingDense {
     fn svd(
         &mut self,
+        engine: &mut dyn Engine,
         input: symtn_dense::DenseRead<'_>,
     ) -> Result<Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError> {
-        symtn_dense::DenseExecutor::svd(&mut self.inner, input)
+        symtn_dense::DenseExecutor::svd(&mut self.inner, engine, input)
     }
     fn qr(
         &mut self,
+        engine: &mut dyn Engine,
         input: symtn_dense::DenseRead<'_>,
     ) -> Result<Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError> {
-        symtn_dense::DenseExecutor::qr(&mut self.inner, input)
+        symtn_dense::DenseExecutor::qr(&mut self.inner, engine, input)
     }
     fn eigh(
         &mut self,
+        engine: &mut dyn Engine,
         input: symtn_dense::DenseRead<'_>,
     ) -> Result<Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError> {
-        symtn_dense::DenseExecutor::eigh(&mut self.inner, input)
+        symtn_dense::DenseExecutor::eigh(&mut self.inner, engine, input)
     }
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: symtn_dense::DenseWrite<'_>,
         lhs: symtn_dense::DenseRead<'_>,
         rhs: symtn_dense::DenseRead<'_>,
         config: &symtn_dense::DenseDotConfig,
     ) -> Result<(), symtn_dense::DenseError> {
-        symtn_dense::DenseExecutor::dot_general_into(&mut self.inner, output, lhs, rhs, config)
+        symtn_dense::DenseExecutor::dot_general_into(
+            &mut self.inner,
+            engine,
+            output,
+            lhs,
+            rhs,
+            config,
+        )
     }
     fn matmul_batch_axpby_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: symtn_dense::DenseWrite<'_>,
         lhs: symtn_dense::DenseRead<'_>,
         rhs: symtn_dense::DenseRead<'_>,
@@ -170,6 +183,7 @@ impl symtn_dense::DenseExecutor for CountingDense {
         self.submissions.push(jobs.len());
         symtn_dense::DenseExecutor::matmul_batch_axpby_into(
             &mut self.inner,
+            engine,
             output,
             lhs,
             rhs,
@@ -273,10 +287,12 @@ fn su2_rank5_case() -> Case<SU2FusionRule> {
 
 #[test]
 fn dynamic_artifact_replays_host_members() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let case = su2_rank5_case();
     let destination = case.dst();
     let resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &destination,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -317,6 +333,7 @@ fn dynamic_artifact_replays_host_members() {
             let original = actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
             assert!(
                 super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+                    engine,
                     &mut dense,
                     &mut backend,
                     &mut backend_workspace,
@@ -340,6 +357,7 @@ fn dynamic_artifact_replays_host_members() {
             let short_len = actual.len() - 1;
             assert!(
                 super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+                    engine,
                     &mut dense,
                     &mut backend,
                     &mut backend_workspace,
@@ -362,10 +380,10 @@ fn dynamic_artifact_replays_host_members() {
             assert!(backend.dense_mut().submissions.is_empty());
         }
         let builds_before = current.core_replay_builds();
-        dense.set_recoupling_threads(
-            std::num::NonZeroUsize::new(if members == 1 { 2 } else { 1 }).unwrap(),
-        );
+        let engine =
+            &mut symtn_operations::host_pool::test_engine(if members == 1 { 2 } else { 1 });
         super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+            engine,
             &mut dense,
             &mut backend,
             &mut backend_workspace,
@@ -437,11 +455,13 @@ fn dynamic_artifact_replays_host_members() {
 
 #[test]
 fn dynamic_artifact_complex_members_match_eager() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
     let case = su2_rank5_case();
     let destination = case.dst();
     let resolution = Context::<Complex64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &destination,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -470,6 +490,7 @@ fn dynamic_artifact_complex_members_match_eager() {
         let rhs = values(case.rhs.space(), 9);
         let mut actual = vec![Complex64::new(f64::NAN, f64::NAN); members * dst_len];
         super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+            engine,
             &mut DenseTreeTransformOperations::default(),
             &mut DenseTreeTransformOperations::default(),
             &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -501,10 +522,12 @@ fn dynamic_artifact_complex_members_match_eager() {
 
 #[test]
 fn dynamic_artifact_overwrites_inactive_u1_members() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (_, case, _) = overwrite_cases().pop().unwrap();
     let destination = case.dst();
     let resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &destination,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -529,6 +552,7 @@ fn dynamic_artifact_overwrites_inactive_u1_members() {
     .concat();
     let mut actual = vec![f64::NAN; 2 * dst_len];
     super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+        engine,
         &mut DenseTreeTransformOperations::default(),
         &mut DenseTreeTransformOperations::default(),
         &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -578,6 +602,7 @@ fn try_replay_members_checked(
     members: usize,
     salt: usize,
 ) -> Result<usize, symtn_operations::OperationError> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let destination = case.dst();
     let lhs_len = case.lhs.space().required_len().unwrap();
     let rhs_len = case.rhs.space().required_len().unwrap();
@@ -591,6 +616,7 @@ fn try_replay_members_checked(
     let mut actual = vec![f64::NAN; members * dst_len];
     let before = workspace.core_inactive_fills();
     super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+        engine,
         &mut DenseTreeTransformOperations::default(),
         &mut DenseTreeTransformOperations::default(),
         &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -621,8 +647,10 @@ fn try_replay_members_checked(
 }
 
 fn members_artifact(case: &Case<U1FusionRule>) -> Arc<DynamicTreeExecutionArtifact<f64>> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &case.dst(),
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -713,6 +741,7 @@ fn a_failed_replay_into_a_dirtied_workspace_destination_rezeroes_on_retry() {
 
 #[test]
 fn dynamic_artifact_rejects_malformed_twisted_members_before_writes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (_, case) = fermionic_cases().into_iter().next().unwrap();
     let lhs_one = host_data(case.lhs.space(), 3);
     let rhs_one = host_data(case.rhs.space(), 7);
@@ -735,6 +764,7 @@ fn dynamic_artifact_rejects_malformed_twisted_members_before_writes() {
     let mut dense = DenseTreeTransformOperations::new(CountingDense::default());
     let mut backend = DenseTreeTransformOperations::new(CountingDense::default());
     let error = super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+        engine,
         &mut dense,
         &mut backend,
         &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -759,6 +789,7 @@ fn dynamic_artifact_rejects_malformed_twisted_members_before_writes() {
 
 #[test]
 fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_replay() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let s = su2_leg;
     let case = Case {
@@ -771,6 +802,7 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
     let destination = case.dst();
     let resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &destination,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -812,6 +844,7 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
     assert_eq!(source.len(), 2 * source_len);
     let mut batched = vec![f64::NAN; 2 * destination_len];
     symtn_operations::tree_transform_members_overwrite_raw(
+        engine,
         &mut symtn_operations::StridedHostKernelAdapter::default(),
         &mut symtn_dense::DefaultDenseExecutor::new(),
         &mut symtn_operations::TreeTransformWorkspace::default(),
@@ -882,6 +915,7 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
         }
         let mut expected = vec![f64::NAN; destination_len];
         symtn_operations::tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
             &mut symtn_operations::StridedHostKernelAdapter::default(),
             &mut symtn_dense::DefaultDenseExecutor::new(),
             &mut symtn_operations::TreeTransformWorkspace::default(),
@@ -959,6 +993,7 @@ where
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = case.lhs.provider();
     let dst = case.dst();
     let plan =
@@ -976,6 +1011,7 @@ where
         TreeTransformExecutionContext::new(DenseTreeTransformOperations::default_executor());
     let artifact =
         compile_dynamic_tree_execution_artifact::<symtn_core::MultiplicityFreeAdmissionMode, _>(
+            engine,
             tree_context.planning(),
             rule,
             crate::contract::encoded_layout_primer::<R>,
@@ -989,6 +1025,7 @@ where
         .unwrap();
     let mut host = vec![D::zero(); dst.space().required_len().unwrap()];
     execute_dynamic_tree_execution_artifact(
+        engine,
         &mut tree_context,
         &mut DenseTreeTransformOperations::default(),
         &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -1264,10 +1301,12 @@ where
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dst = case.dst();
     let mut out = vec![D::zero(); dst.space().required_len().unwrap()];
     Context::<D>::default()
         .tensorcontract_prelowered_into(
+            engine,
             &dst,
             &mut out,
             FusionOperand::direct(case.lhs.space()),
@@ -1451,6 +1490,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = case.lhs.provider();
     let dst = case.dst();
     let e_a = case.lhs.space().required_len().unwrap();
@@ -1520,6 +1560,7 @@ where
     );
     let mut replayed = vec![0.0; dst.space().required_len().unwrap()];
     super::dynamic::execute_dynamic_tree_execution_artifact(
+        engine,
         &mut tree_context,
         &mut DenseTreeTransformOperations::default(),
         &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -1554,6 +1595,7 @@ where
     let mut first_backend_workspace = crate::contract::backend::TensorContractWorkspace::default();
     let mut first_result = vec![f64::NAN; eager.len()];
     super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+        engine,
         &mut first_dense,
         &mut first_backend,
         &mut first_backend_workspace,
@@ -1577,6 +1619,7 @@ where
     let rhs_members = [rhs.as_slice(), rhs.as_slice()].concat();
     let mut member_result = vec![f64::NAN; 2 * eager.len()];
     super::route_host::execute_dynamic_tree_execution_artifact_members_host(
+        engine,
         &mut dense,
         &mut backend,
         &mut backend_workspace,
@@ -1661,6 +1704,7 @@ impl symtn_operations::fusion_replay::StorageGemm<f64, Vec<f64>, Vec<f64>, Vec<f
 /// before any GEMM; the compiled artifact carries the twist.
 #[test]
 fn a_canonical_nonuniform_twist_leaves_the_device_core_route_for_dynamic_tree() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (_, case) = fermionic_cases().remove(2);
     let dst = case.dst();
     let (lhs, rhs) = (
@@ -1679,7 +1723,7 @@ fn a_canonical_nonuniform_twist_leaves_the_device_core_route_for_dynamic_tree() 
         .is_none()
     );
     let resolution = Context::<f64>::default()
-        .compile_storage_contract_resolution(&dst, lhs, rhs, case.axes())
+        .compile_storage_contract_resolution(engine, &dst, lhs, rhs, case.axes())
         .unwrap();
     assert!(resolution.is_dynamic_tree());
     assert!(resolution.requires_source_twist());
@@ -1710,9 +1754,11 @@ fn a_canonical_nonuniform_twist_leaves_the_device_core_route_for_dynamic_tree() 
 
 #[test]
 fn identity_source_fixtures_compile_a_dynamic_tree() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for case in [lhs_identity_case(), rhs_identity_case()] {
         let resolution = Context::<f64>::default()
             .compile_storage_contract_resolution(
+                engine,
                 &case.dst(),
                 FusionOperand::direct(case.lhs.space()),
                 FusionOperand::direct(case.rhs.space()),
@@ -1725,11 +1771,13 @@ fn identity_source_fixtures_compile_a_dynamic_tree() {
 
 #[test]
 fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let case = u1_case();
     let dst = case.dst();
     let mut context = Context::<f64>::default();
     let general = context
         .compile_storage_contract_resolution(
+            engine,
             &dst,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -1743,6 +1791,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
     let su2 = su2_case();
     let su2_resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &su2.dst(),
             FusionOperand::direct(su2.lhs.space()),
             FusionOperand::direct(su2.rhs.space()),
@@ -1765,6 +1814,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
     .unwrap();
     let canonical = context
         .compile_storage_contract_resolution(
+            engine,
             &dst,
             FusionOperand::direct(lhs.space()),
             FusionOperand::direct(rhs.space()),
@@ -1789,6 +1839,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
     .unwrap();
     let lazy = context
         .compile_storage_contract_resolution(
+            engine,
             &lazy_dst,
             FusionOperand::adjoint(lhs.space()),
             FusionOperand::direct(rhs3.space()),
@@ -1810,6 +1861,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
 /// copyC-free storage ladder compiles the prelowered `DynamicTree` artifact.
 #[test]
 fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tree() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let s = su2_leg;
     // Lazy lhs: `X^H` against `rhs` over `X^H`'s whole domain, output bent.
@@ -1864,6 +1916,7 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
         let mut context = Context::<f64>::default();
         context
             .tensorcontract_prelowered_into(
+                engine,
                 &dst,
                 &mut out,
                 lhs_operand,
@@ -1882,7 +1935,7 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
         );
         assert!(out.iter().any(|&value| value != 0.0));
         let storage = context
-            .compile_storage_contract_resolution(&dst, lhs_operand, rhs_operand, axes)
+            .compile_storage_contract_resolution(engine, &dst, lhs_operand, rhs_operand, axes)
             .unwrap();
         assert!(storage.is_dynamic_tree(), "{output:?}");
     }
@@ -1890,6 +1943,7 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
 
 #[test]
 fn a_fermionic_dual_contracted_leg_on_a_transformed_operand_reports_the_twist() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(FermionParityFusionRule);
     let odd_even = |dual| SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], dual);
     // `rhs` codomain leg 1 is dual: contracting it is a supertrace twist on
@@ -1917,6 +1971,7 @@ fn a_fermionic_dual_contracted_leg_on_a_transformed_operand_reports_the_twist() 
     let mut context = Context::<f64>::default();
     let resolution = context
         .compile_storage_contract_resolution(
+            engine,
             &dst,
             FusionOperand::direct(lhs.space()),
             FusionOperand::direct(rhs.space()),
@@ -1937,6 +1992,7 @@ fn a_fermionic_dual_contracted_leg_on_a_transformed_operand_reports_the_twist() 
 /// rule instead.
 #[test]
 fn a_zero_degeneracy_sector_never_yields_a_zero_extent_core_job() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = || {
         SectorLeg::new(
@@ -1973,6 +2029,7 @@ fn a_zero_degeneracy_sector_never_yields_a_zero_extent_core_job() {
     let dst = case.dst();
     let resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &dst,
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -2070,12 +2127,14 @@ fn overwrite_cases() -> Vec<(&'static str, Case<U1FusionRule>, Option<usize>)> {
 
 #[test]
 fn each_way_a_device_overwrite_completes_its_destination_has_a_fixture() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Why: the device gate replays these into a NaN-poisoned destination; it
     // proves the zeroing rule only if the Host compiler really resolves each
     // geometry to the writer it names.
     for (what, case, expected) in overwrite_cases() {
         let resolution = Context::<f64>::default()
             .compile_storage_contract_resolution(
+                engine,
                 &case.dst(),
                 FusionOperand::direct(case.lhs.space()),
                 FusionOperand::direct(case.rhs.space()),
@@ -2170,7 +2229,7 @@ mod device {
     }
 
     struct Replay<D: Payload> {
-        ctx: CudaDenseContext,
+        engine: symtn_dense::CudaEngine,
         transforms: CudaTreeTransformExecutor,
         scratch: CudaContractScratch,
         _payload: std::marker::PhantomData<D>,
@@ -2179,7 +2238,8 @@ mod device {
     impl<D: Payload> Replay<D> {
         fn new() -> Self {
             Self {
-                ctx: CudaDenseContext::new(0).expect("a CUDA device"),
+                engine: symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0))
+                    .expect("a CUDA device"),
                 transforms: CudaTreeTransformExecutor::default(),
                 scratch: CudaContractScratch::default(),
                 _payload: std::marker::PhantomData,
@@ -2240,7 +2300,7 @@ mod device {
             (lhs_structure, lhs): (&Arc<symtn_core::BlockStructure>, &[D]),
             (rhs_structure, rhs): (&Arc<symtn_core::BlockStructure>, &[D]),
         ) -> Vec<D> {
-            let ctx = &mut self.ctx;
+            let ctx = &mut CudaDenseContext::new(&mut self.engine).unwrap();
             let lhs = CudaStorage::<D>::upload(ctx, lhs).unwrap();
             let rhs = CudaStorage::<D>::upload(ctx, rhs).unwrap();
             let len = dst.space().required_len().unwrap();
@@ -2370,9 +2430,10 @@ mod device {
         let candidate = crate::contract::contracted_axis_order_candidates(&[2], &[0]).remove(0);
         let (first, host, _, _) = replay.run(&case, &candidate, FusionContractOrientation::LhsRhs);
         assert_close(&first, &host, "cold");
-        let poisoned = replay
-            .scratch
-            .poison_core_destination::<f64>(&replay.ctx, f64::nan());
+        let poisoned = replay.scratch.poison_core_destination::<f64>(
+            &CudaDenseContext::new(&mut replay.engine).unwrap(),
+            f64::nan(),
+        );
         assert!(poisoned > 0, "the first replay retained a core destination");
         let (second, host, _, _) = replay.run(&case, &candidate, FusionContractOrientation::LhsRhs);
         assert!(second.iter().all(|value| value.is_finite()), "{second:?}");
@@ -2440,6 +2501,7 @@ mod device {
                 let rhs = data::<D>(case.rhs.space(), 2);
                 let resolution = Context::<D>::default()
                     .compile_storage_contract_resolution(
+                        &mut replay.engine,
                         &dst,
                         FusionOperand::direct(case.lhs.space()),
                         FusionOperand::direct(case.rhs.space()),
@@ -2478,8 +2540,11 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::tree_transform::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let resolution = Context::<f64>::default()
-        .plan_contract::<crate::DirectCoreExecutor, R>(dst, lhs, rhs, lhs_axes, rhs_axes, output)
+        .plan_contract::<crate::DirectCoreExecutor, R>(
+            engine, dst, lhs, rhs, lhs_axes, rhs_axes, output,
+        )
         .unwrap();
     if resolution.copy_c().is_some() {
         RouteKind::CopyC
@@ -2501,12 +2566,14 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::tree_transform::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let lhs_data = host_data(lhs.storage_space(), 3);
     let rhs_data = host_data(rhs.storage_space(), 4);
     let mut out = vec![0.0; dst.space().required_len().unwrap()];
     let mut context = Context::<f64>::default();
     context
         .tensorcontract_prelowered_into(
+            engine,
             dst,
             &mut out,
             lhs,
@@ -2921,8 +2988,10 @@ fn small_output_takes_copy_c_without_copying_an_operand() {
             (RouteKind::CopyC, RouteKind::CopyC),
             "{name}"
         );
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let resolution = Context::<f64>::default()
             .plan_contract::<crate::DirectCoreExecutor, _>(
+                engine,
                 &case.dst(),
                 FusionOperand::direct(case.lhs.space()),
                 FusionOperand::direct(case.rhs.space()),

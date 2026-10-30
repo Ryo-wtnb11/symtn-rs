@@ -131,8 +131,9 @@ transforms publish staged coefficient groups only after destination commit.
 Complete HomSpace entries own canonical block structures; completed-transformer
 entries retain replay cores without retaining those structures.
 
-Network contraction-order caches, CUDA copies of prepared structures and
-Tenferro's cuTENSOR plans are execution resources, separate from these four.
+Network contraction-order caches, per-call CUDA copies of prepared structures
+and the engine's cuTENSOR plans are execution resources, separate from these
+four.
 Elementary-symbol caches remain in fusion-symbols. symtn writes no
 persistent tree-transform plans; network-order persistence is explicit.
 
@@ -151,7 +152,9 @@ dependency changes require explicit approval under [AGENTS.md](../AGENTS.md).
 
 ## Current deviations
 
-- `symtn-dense` re-exports Tenferro's `CpuBackendKind` through the expert API.
-- Opening a CUDA context fixes CubeCL's process-global stream count to one.
-  See [backend policy](backend_policy.md#parallel-execution) for the required
-  ordering and process-wide effects.
+- `symtn-dense` and `symtn::typed` re-export Tenferro's `Engine`, `CpuEngine`
+  and `Pool`, the caller-owned execution resources every numerical
+  operation takes.
+- `symtn-dense` and `symtn::typed` re-export Tenferro's `CudaEngine` and
+  `CudaDeviceId` (feature `cuda`), the caller-owned device engine a device
+  operation borrows; see [backend policy](backend_policy.md#parallel-execution).

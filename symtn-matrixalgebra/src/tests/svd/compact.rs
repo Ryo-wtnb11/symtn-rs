@@ -10,22 +10,30 @@ fn assert_compact_svd_direct_copy_probe(recording: &crate::probe::Recording) {
 
 #[test]
 fn compact_svd_canonical_layout_skips_input_pack_and_factor_scatter() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical coupled storage reaches final factor destinations without numerical copies.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_svd_copy_rec = crate::probe::record();
-    svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
 }
 
 #[test]
 fn direct_compact_svd_uses_owned_executor_outputs_only() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(3, 2);
     let mut direct = ScriptedExecutor::<RejectSvdInto>::default();
     svd_compact(
+        engine,
         &mut direct,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
     )
@@ -37,20 +45,20 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
     let (_, layout_space) = bind_checked_layout(&space);
     let input = BoundDynamicTensorRef::try_new(&layout_space, &data).unwrap();
     let mut generic = ScriptedExecutor::<RejectSvdInto>::default();
-    svd_compact_factors_with_spectrum_dyn_checked_generic(&mut generic, &input).unwrap();
+    svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut generic, &input).unwrap();
     assert!(generic.counts().svd > 0);
     assert_eq!(generic.counts().svd_into, 0);
 
     let (_, checked_space) = bind_checked_only(&space);
     let checked_input = BoundDynamicTensorRef::try_new(&checked_space, &data).unwrap();
     let mut checked = ScriptedExecutor::<RejectSvdInto>::default();
-    svd_compact_dyn_checked_generic(&mut checked, &checked_input).unwrap();
+    svd_compact_dyn_checked_generic(engine, &mut checked, &checked_input).unwrap();
     assert!(checked.counts().svd > 0);
     assert_eq!(checked.counts().svd_into, 0);
 
     let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let mut polar = ScriptedExecutor::<RejectSvdInto>::default();
-    left_polar(&mut polar, &bound.as_ref()).unwrap();
+    left_polar(engine, &mut polar, &bound.as_ref()).unwrap();
     assert_eq!(polar.counts().svd, 1);
     assert_eq!(polar.counts().svd_into, 0);
 
@@ -58,7 +66,7 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
     let fallback = BoundDynamicTensorRef::try_new(&fallback_space, bound.data()).unwrap();
     let mut adjoint_executor = ScriptedExecutor::<RejectSvdInto>::default();
     let compact_svd_copy_rec = crate::probe::record();
-    svd_compact_dyn(&mut adjoint_executor, &fallback).unwrap();
+    svd_compact_dyn(engine, &mut adjoint_executor, &fallback).unwrap();
     assert!(adjoint_executor.counts().svd > 0);
     assert_eq!(adjoint_executor.counts().svd_into, 0);
     let probe = compact_svd_copy_rec.compact_svd_copy();
@@ -69,6 +77,7 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
 }
 
 fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<D>::from_vec_with_fusion_space(
         source
@@ -86,7 +95,7 @@ fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>
 
     let compact_svd_copy_rec = crate::probe::record();
     let mf_svd_fallback_rec = crate::probe::record();
-    svd_compact_dyn(&mut dense, &fallback).unwrap();
+    svd_compact_dyn(engine, &mut dense, &fallback).unwrap();
     let stage = mf_svd_fallback_rec.mf_svd_fallbacks();
 
     assert_eq!(dense.counts().svd_into, 0);
@@ -101,7 +110,7 @@ fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>
     let mut adjoint_dense = ScriptedExecutor::<RejectSvdInto>::default();
     let compact_svd_copy_rec = crate::probe::record();
     let mf_svd_fallback_rec = crate::probe::record();
-    svd_compact_adjoint_factors_dyn(&mut adjoint_dense, &fallback).unwrap();
+    svd_compact_adjoint_factors_dyn(engine, &mut adjoint_dense, &fallback).unwrap();
     let adjoint_stage = mf_svd_fallback_rec.mf_svd_fallbacks();
     assert_eq!(adjoint_dense.counts().svd_into, 0);
     assert_eq!(adjoint_dense.counts().svd, 2);
@@ -125,6 +134,7 @@ fn mf_compact_svd_fallback_keeps_live_owners_for_every_dtype() {
 
 #[test]
 fn generic_compact_svd_padded_fallback_uses_owned_outputs_and_scatter() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (padded_space, padded_data) =
         padded_generic_factorization_input(&canonical_space, &canonical_data);
@@ -134,7 +144,7 @@ fn generic_compact_svd_padded_fallback_uses_owned_outputs_and_scatter() {
 
     let compact_svd_copy_rec = crate::probe::record();
     let generic_pair_rec = crate::probe::record();
-    svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &padded).unwrap();
+    svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
 
     assert!(dense.counts().svd > 0);
     assert_eq!(dense.counts().svd_into, 0);
@@ -160,6 +170,7 @@ fn generic_compact_svd_padded_fallback_uses_owned_outputs_and_scatter() {
 }
 
 fn assert_generic_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (padded_space, padded_data) =
         padded_generic_factorization_input(&canonical_space, &canonical_data);
@@ -174,7 +185,7 @@ fn assert_generic_compact_svd_fallback_live_owners<D: crate::factorize::FactorSc
     let compact_svd_copy_rec = crate::probe::record();
     let generic_pair_rec = crate::probe::record();
     let svd_stage_rec = crate::probe::record();
-    svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &padded).unwrap();
+    svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
     let stage = svd_stage_rec.checked_svd_stages();
 
     assert_eq!(dense.counts().svd_into, 0);
@@ -212,6 +223,7 @@ fn generic_compact_svd_fallback_keeps_live_owners_for_every_dtype() {
 
 #[test]
 fn generic_compact_svd_interleaved_complex_fallback_preserves_source_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data, _) = generic_values_endomorphism_input();
     let (interleaved_space, interleaved_data) =
         interleaved_generic_endomorphism_input(&canonical_space, &canonical_data);
@@ -223,11 +235,13 @@ fn generic_compact_svd_interleaved_complex_fallback_preserves_source_order() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let canonical_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &canonical).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &canonical)
+            .unwrap();
     let compact_svd_copy_rec = crate::probe::record();
     let generic_pair_rec = crate::probe::record();
     let fallback_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &interleaved).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &interleaved)
+            .unwrap();
 
     let fallback_s = generic_diagonal_factor(&fallback_svd.0, &fallback_svd.2);
     assert_compact_factors_reconstruct_input(
@@ -270,6 +284,7 @@ fn generic_compact_svd_interleaved_complex_fallback_preserves_source_order() {
 
 #[test]
 fn generic_compact_svd_padded_complex_rectangular_fallback_matches_canonical_gauge() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_svd_truncation_input::<Complex64>(true);
     let (padded_space, padded_data) =
         padded_generic_svd_truncation_input(&canonical_space, &canonical_data);
@@ -280,12 +295,14 @@ fn generic_compact_svd_padded_complex_rectangular_fallback_matches_canonical_gau
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let canonical_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &canonical).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &canonical)
+            .unwrap();
     let compact_svd_copy_rec = crate::probe::record();
     let generic_pair_rec = crate::probe::record();
     let mut reject = ScriptedExecutor::<RejectSvdInto>::default();
     let padded_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut reject, &padded).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut reject, &padded)
+            .unwrap();
 
     assert_eq!(reject.counts().svd_into, 0);
     let padded_s = generic_diagonal_factor(&padded_svd.0, &padded_svd.2);
@@ -321,6 +338,7 @@ fn generic_compact_svd_padded_complex_rectangular_fallback_matches_canonical_gau
 
 #[test]
 fn generic_compact_svd_second_dense_failure_preserves_source() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source_space, source_data) = generic_svd_truncation_input::<f64>(false);
     let (space, data) = padded_generic_svd_truncation_input(&source_space, &source_data);
     let (_, space) = bind_checked_layout(&space);
@@ -330,7 +348,7 @@ fn generic_compact_svd_second_dense_failure_preserves_source() {
 
     let compact_svd_copy_rec = crate::probe::record();
     let generic_pair_rec = crate::probe::record();
-    match svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &input) {
+    match svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &input) {
         Err(CheckedGenericFactorPlanError::Operation(OperationError::Dense(
             DenseError::Backend { op: "svd_into", .. },
         ))) => {}
@@ -351,6 +369,7 @@ fn generic_compact_svd_second_dense_failure_preserves_source() {
 
 #[test]
 fn generic_compact_svd_empty_input_skips_dense_execution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let empty_leg = SectorLeg::new([(x, 0)], false);
     let space = BoundDynamicFusionMapSpace::from_final_homspace_generic(
@@ -367,7 +386,7 @@ fn generic_compact_svd_empty_input_skips_dense_execution() {
     let mut reject = ScriptedExecutor::new(RejectExecutorCalls);
 
     let (u, vh, singular_values) =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut reject, &input).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut reject, &input).unwrap();
 
     assert!(u.data().is_empty());
     assert!(vh.data().is_empty());
@@ -376,6 +395,7 @@ fn generic_compact_svd_empty_input_skips_dense_execution() {
 
 #[test]
 fn compact_svd_adjoint_error_preserves_borrowed_input_and_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an SVD backend failure leaves the parent storage unchanged and
     // returns no partially constructed adjoint factors.
     let rule = Z2FusionRule;
@@ -383,7 +403,8 @@ fn compact_svd_adjoint_error_preserves_borrowed_input_and_publishes_no_factors()
     let before = tensor.data().to_vec();
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let mut adjoint_dense = ScriptedExecutor::<FailAfterObservingSvdInput>::default();
-    let result = svd_compact_adjoint_factors_dyn(&mut adjoint_dense, &bound.as_ref().dynamic());
+    let result =
+        svd_compact_adjoint_factors_dyn(engine, &mut adjoint_dense, &bound.as_ref().dynamic());
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
     assert!(!adjoint_dense.observed.is_empty());
@@ -391,6 +412,7 @@ fn compact_svd_adjoint_error_preserves_borrowed_input_and_publishes_no_factors()
 
 #[test]
 fn compact_svd_adjoint_late_error_preserves_borrowed_input_and_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let canonical = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let tensor = padded_copy(&rule, &canonical);
@@ -399,7 +421,7 @@ fn compact_svd_adjoint_late_error_preserves_borrowed_input_and_publishes_no_fact
     let mut dense = ScriptedExecutor::<FailSecondSvd>::default();
     let compact_svd_copy_rec = crate::probe::record();
 
-    let result = svd_compact_adjoint_factors_dyn(&mut dense, &bound.as_ref().dynamic());
+    let result = svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic());
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
@@ -410,36 +432,45 @@ fn compact_svd_adjoint_late_error_preserves_borrowed_input_and_publishes_no_fact
 }
 
 fn f64_svd_outputs(rows: usize, cols: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let data = vec![1.0; rows * cols];
     dense
-        .svd(DenseRead::F64(
-            symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
-        ))
+        .svd(
+            engine,
+            DenseRead::F64(
+                symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
+            ),
+        )
         .unwrap()
 }
 
 fn c64_svd_outputs(rows: usize, cols: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let data = vec![Complex64::new(1.0, 1.0); rows * cols];
     dense
-        .svd(DenseRead::C64(
-            symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
-        ))
+        .svd(
+            engine,
+            DenseRead::C64(
+                symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
+            ),
+        )
         .unwrap()
 }
 
 #[test]
 fn compact_owned_svd_preserves_svd_into_output_precedence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 2);
     let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let input = bound.as_ref();
-    let check = |outputs: Vec<DenseTensor>, expected: DenseError| {
+    let mut check = |outputs: Vec<DenseTensor>, expected: DenseError| {
         let mut dense = ScriptedExecutor::new(FailAfterObservingSvdInput {
             outputs: Some(outputs),
             ..Default::default()
         });
-        let error = svd_compact(&mut dense, &input).unwrap_err();
+        let error = svd_compact(engine, &mut dense, &input).unwrap_err();
         assert_eq!(error, OperationError::Dense(expected));
     };
 
@@ -488,7 +519,7 @@ fn compact_owned_svd_preserves_svd_into_output_precedence() {
         outputs: Some(outputs),
         ..Default::default()
     });
-    let error = svd_compact(&mut dense, &input).unwrap_err();
+    let error = svd_compact(engine, &mut dense, &input).unwrap_err();
     assert!(matches!(error, OperationError::Dense(actual) if actual == expected));
 
     let mut outputs = f64_svd_outputs(2, 2);
@@ -505,7 +536,7 @@ fn compact_owned_svd_preserves_svd_into_output_precedence() {
         outputs: Some(outputs),
         ..Default::default()
     });
-    let error = svd_compact(&mut dense, &input).unwrap_err();
+    let error = svd_compact(engine, &mut dense, &input).unwrap_err();
     assert!(matches!(error, OperationError::Dense(actual) if actual == expected));
 
     let mut outputs = f64_svd_outputs(2, 2);
@@ -522,12 +553,13 @@ fn compact_owned_svd_preserves_svd_into_output_precedence() {
         outputs: Some(outputs),
         ..Default::default()
     });
-    let error = svd_compact(&mut dense, &input).unwrap_err();
+    let error = svd_compact(engine, &mut dense, &input).unwrap_err();
     assert!(matches!(error, OperationError::Dense(actual) if actual == expected));
 }
 
 #[test]
 fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a provider failure cannot mutate borrowed tensor storage or return partial factors.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -535,7 +567,11 @@ fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
     let mut dense = ScriptedExecutor::<FailAfterObservingSvdInput>::default();
 
     let diagonal_bond_build_rec = crate::probe::record();
-    let result = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor));
+    let result = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    );
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
@@ -551,12 +587,13 @@ fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
 }
 
 fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let compact_svd_copy_rec = crate::probe::record();
-    let svd = svd_compact(&mut dense, &bound.as_ref()).unwrap();
+    let svd = svd_compact(engine, &mut dense, &bound.as_ref()).unwrap();
     assert_factor_layout_matches_per_tree_shapes(svd.u.space());
     assert_factor_layout_matches_per_tree_shapes(svd.s.space());
     assert_factor_layout_matches_per_tree_shapes(svd.vh.space());
@@ -590,7 +627,8 @@ fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
     }
 
     let compact_svd_copy_rec = crate::probe::record();
-    let adjoint = svd_compact_adjoint_factors_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let adjoint =
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     let adjoint_probe = compact_svd_copy_rec.compact_svd_copy();
     assert_eq!(adjoint_probe.input_pack_calls, 0);
     assert_eq!(adjoint_probe.output_scatter_calls, 0);
@@ -627,10 +665,11 @@ fn compact_svd_direct_spans_reconstruct_tall_and_wide_matrices() {
 #[test]
 fn compact_svd_direct_outputs_keep_executor_factor_owners() {
     fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
         let bound = bound_tensor(Arc::new(Z2FusionRule), tensor);
         let compact_svd_copy_rec = crate::probe::record();
-        let svd = svd_compact(&mut dense, &bound.as_ref()).unwrap();
+        let svd = svd_compact(engine, &mut dense, &bound.as_ref()).unwrap();
         assert_eq!(dense.output_ptrs.len(), 1);
         let (u, vh) = dense.output_ptrs[0];
         assert_eq!(u, svd.u.data().as_ptr() as usize);
@@ -687,6 +726,7 @@ fn compact_svd_zero_only_input_normalizes_to_an_empty_factorization_result() {
 
 #[test]
 fn compact_svd_direct_and_fallback_apply_the_same_gauge() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: direct writes do not change the canonical phase chosen by the fallback.
     let rule = Z2FusionRule;
     let tensor = rectangular_svd_tensor(3, 3);
@@ -700,11 +740,16 @@ fn compact_svd_direct_and_fallback_apply_the_same_gauge() {
         TestTensor::from_vec_with_fusion_space(transposed_data, tensor.fusion_space().clone())
             .unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let direct = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &transposed)).unwrap();
+    let direct = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &transposed),
+    )
+    .unwrap();
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let adjoint_space = bound.space().adjoint_view().unwrap();
     let fallback_input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
-    let fallback = svd_compact_dyn(&mut dense, &fallback_input).unwrap();
+    let fallback = svd_compact_dyn(engine, &mut dense, &fallback_input).unwrap();
 
     for (left, right) in direct.u.data().iter().zip(fallback.u().data()) {
         assert!((left - right).abs() < 1e-12);
@@ -718,8 +763,9 @@ fn compact_svd_direct_and_fallback_apply_the_same_gauge() {
         fallback.singular_values(),
     );
 
-    let adjoint_fallback = svd_compact_adjoint_factors_dyn(&mut dense, &fallback_input).unwrap();
-    let expected = svd_compact_factors_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let adjoint_fallback =
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &fallback_input).unwrap();
+    let expected = svd_compact_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     for (actual, expected) in adjoint_fallback.0.data().iter().zip(expected.0.data()) {
         assert!((actual - expected).abs() < 1e-12);
     }
@@ -736,13 +782,15 @@ fn compact_svd_direct_and_fallback_apply_the_same_gauge() {
 
 #[test]
 fn compact_svd_adjoint_accepts_padded_parent_layout() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the optimized adjoint path uses the existing packed fallback for
     // custom offsets instead of materializing a canonical adjoint input.
     let rule = Z2FusionRule;
     let parent = padded_copy(&rule, &rectangular_svd_tensor(5, 3));
     let bound = bound_tensor(Arc::new(rule), &parent);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let actual = svd_compact_adjoint_factors_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let actual =
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     let singular = &actual.2[0].values;
     let source = parent.structure().block(0).unwrap();
     for col in 0..5 {
@@ -763,6 +811,7 @@ fn compact_svd_adjoint_accepts_padded_parent_layout() {
 
 #[test]
 fn compact_svd_adjoint_c64_padded_parent_reconstructs_literal_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let source = rectangular_svd_tensor(5, 3);
     let complex = TestTensor::<Complex64>::from_vec_with_fusion_space(
@@ -784,7 +833,8 @@ fn compact_svd_adjoint_c64_padded_parent_reconstructs_literal_adjoint() {
     );
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
-    let actual = svd_compact_adjoint_factors_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let actual =
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     let singular = &actual.2[0].values;
     let source = parent.structure().block(0).unwrap();
     for col in 0..5 {
@@ -809,6 +859,7 @@ fn compact_svd_adjoint_c64_padded_parent_reconstructs_literal_adjoint() {
 
 #[test]
 fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
     // What: one call reconstructs mixed rectangular complex sectors directly in final storage.
@@ -835,7 +886,12 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
 
-    let svd = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let svd = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let input_regions = tensor
@@ -894,6 +950,7 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 
 #[test]
 fn compact_svd_adjoint_c64_padded_fallback_matches_canonical_gauge() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let source = mixed_rectangular_c32_tensor();
     let canonical = TestTensor::<Complex64>::from_vec_with_fusion_space(
@@ -920,10 +977,12 @@ fn compact_svd_adjoint_c64_padded_fallback_matches_canonical_gauge() {
     );
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let expected =
-        svd_compact_adjoint_factors_dyn(&mut dense, &canonical_bound.as_ref().dynamic()).unwrap();
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &canonical_bound.as_ref().dynamic())
+            .unwrap();
     let compact_svd_copy_rec = crate::probe::record();
     let actual =
-        svd_compact_adjoint_factors_dyn(&mut dense, &padded_bound.as_ref().dynamic()).unwrap();
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &padded_bound.as_ref().dynamic())
+            .unwrap();
 
     assert_eq!(
         actual.0.space().space().structure(),
@@ -947,13 +1006,19 @@ fn compact_svd_adjoint_c64_padded_fallback_matches_canonical_gauge() {
 
 #[test]
 fn compact_svd_c32_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: single-precision complex direct spans reconstruct both rectangular orientations.
     let rule = Z2FusionRule;
     let tensor = mixed_rectangular_c32_tensor();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
 
-    let svd = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let svd = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let input_regions = tensor
@@ -1012,6 +1077,7 @@ fn compact_svd_c32_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 
 #[test]
 fn compact_svd_c32_direct_and_fallback_apply_the_same_gauge() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the single-precision direct path preserves the fallback's canonical complex phase.
     let rule = Z2FusionRule;
     let real = rectangular_svd_tensor(3, 3);
@@ -1033,13 +1099,18 @@ fn compact_svd_c32_direct_and_fallback_apply_the_same_gauge() {
             .unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
-    let direct = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &transposed)).unwrap();
+    let direct = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &transposed),
+    )
+    .unwrap();
     assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let adjoint_space = bound.space().adjoint_view().unwrap();
     let fallback_input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
     let compact_svd_copy_rec = crate::probe::record();
-    let fallback = svd_compact_dyn(&mut dense, &fallback_input).unwrap();
+    let fallback = svd_compact_dyn(engine, &mut dense, &fallback_input).unwrap();
     let fallback_probe = compact_svd_copy_rec.compact_svd_copy();
     assert!(fallback_probe.input_pack_calls > 0);
     assert!(fallback_probe.output_scatter_calls > 0);
@@ -1078,6 +1149,7 @@ fn compact_svd_c32_direct_and_fallback_apply_the_same_gauge() {
 
 #[test]
 fn svd_compact_factor_dims_include_sectors_without_populated_trees() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: public compact SVD retains the complete original leg space,
     // including a sector absent from every populated fusion block.
     let rule = U1FusionRule;
@@ -1092,7 +1164,12 @@ fn svd_compact_factor_dims_include_sectors_without_populated_trees() {
     let original_homspace = tensor.fusion_space().homspace().clone();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
-    let result = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let result = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_factor_layout_matches_per_tree_shapes(result.u.space());
     assert_factor_layout_matches_per_tree_shapes(result.s.space());
@@ -1111,6 +1188,7 @@ fn svd_compact_factor_dims_include_sectors_without_populated_trees() {
 
 #[test]
 fn svd_compact_preserves_asymmetric_non_self_dual_u1_factor_layouts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical factors retain unequal degeneracies and the dual U(1)
     // domain convention while reconstructing both coupled sectors.
     let rule = U1FusionRule;
@@ -1133,7 +1211,12 @@ fn svd_compact_preserves_asymmetric_non_self_dual_u1_factor_layouts() {
     .unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
-    let svd = svd_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let svd = svd_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_factor_layout_matches_per_tree_shapes(svd.u.space());
     assert_factor_layout_matches_per_tree_shapes(svd.s.space());
@@ -1246,6 +1329,7 @@ fn svd_input_rejects_short_storage_before_dense_execution() {
 
 #[test]
 fn typed_svd_borrows_input_authority_and_retains_its_exact_allocation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: borrowed typed input creates no replacement authority, and every SVD factor inherits it.
     let rule = Z2FusionRule;
     let provider = Arc::new(rule);
@@ -1260,13 +1344,14 @@ fn typed_svd_borrows_input_authority_and_retains_its_exact_allocation() {
     assert!(std::ptr::eq(second.tensor(), input.tensor()));
 
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let factors = svd_compact(&mut dense, &first).unwrap();
+    let factors = svd_compact(engine, &mut dense, &first).unwrap();
     assert!(Arc::ptr_eq(&provider, factors.u.space().provider_arc()));
     assert!(Arc::ptr_eq(&provider, factors.s.space().provider_arc()));
     assert!(Arc::ptr_eq(&provider, factors.vh.space().provider_arc()));
 }
 
 fn assert_zero_axis_svd_compact(rows: usize, cols: usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = rectangular_svd_tensor(rows, cols);
     let input = bound_tensor(Arc::new(rule), &tensor);
@@ -1274,7 +1359,7 @@ fn assert_zero_axis_svd_compact(rows: usize, cols: usize) {
 
     {
         let diagonal_bond_build_rec = crate::probe::record();
-        let result = svd_compact_dyn(&mut dense, &input.as_ref().dynamic()).unwrap();
+        let result = svd_compact_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
         assert_eq!(
             result
                 .singular_values()
@@ -1400,6 +1485,7 @@ fn svd_compact_adjoint_gauge_fixes_final_left_factor() {
 
 #[test]
 fn noncanonical_mf_svd_and_eigh_scatter_each_output_block_once() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: on a four-sector noncanonical MF input, the compact SVD and EIGH
     // fallbacks group each factor side once and iterate only the scattered
     // blocks (F = B = 16 per side), instead of G_s * B = 64 visits per side.
@@ -1413,7 +1499,7 @@ fn noncanonical_mf_svd_and_eigh_scatter_each_output_block_once() {
     let adjoint_space = bound.space().adjoint_view().unwrap();
     let input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
     let scatter_visit_rec = crate::probe::record();
-    let (u, vh, _) = svd_compact_factors_dyn(&mut dense, &input).unwrap();
+    let (u, vh, _) = svd_compact_factors_dyn(engine, &mut dense, &input).unwrap();
     let b_u = u.space().space().structure().block_count();
     let b_vh = vh.space().space().structure().block_count();
     assert_eq!((b_u, b_vh), (16, 16));
@@ -1437,7 +1523,7 @@ fn noncanonical_mf_svd_and_eigh_scatter_each_output_block_once() {
     let adjoint_space = bound.space().adjoint_view().unwrap();
     let input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
     let scatter_visit_rec = crate::probe::record();
-    let full = eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    let full = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
     let b_v = full.v().space().space().structure().block_count();
     assert_eq!(b_v, 16);
     let probe = scatter_visit_rec.scatter_visit();

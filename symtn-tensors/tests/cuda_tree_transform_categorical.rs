@@ -29,7 +29,6 @@ use symtn_dense::{cuda_transfer_stats, CudaDenseContext, CudaScalar, CudaTransfe
 use symtn_operations::cuda::CudaStorage;
 use symtn_operations::{
     CudaTreeTransformDestination, CudaTreeTransformExecutor, DEFAULT_COEFFICIENT_BUDGET_BYTES,
-    DEFAULT_PLAN_CACHE_BUDGET_BYTES,
 };
 use symtn_tensors::{build_tree_pair_transform_group_plan, TreeTransformOperation};
 
@@ -47,8 +46,9 @@ trait DeviceScalar:
 impl DeviceScalar for f64 {}
 impl DeviceScalar for Complex64 {}
 
-fn context() -> CudaDenseContext {
-    CudaDenseContext::new(0).expect("a CUDA device")
+fn engine() -> symtn_dense::CudaEngine {
+    symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0))
+        .expect("a CUDA device")
 }
 
 fn device_replay<T: DeviceScalar>(
@@ -133,7 +133,8 @@ fn device_replay_matches_provider_compiled_recoupling_structures() {
     // What: SU(2) and fZ2 x SU(2) permutes, braids and planar transposes at
     // ranks 4 and 6, with two- and five-channel recoupling, degeneracy 1 and 2,
     // conjugated sources, both payload dtypes and both destination modes.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in fixtures() {
         check::<f64>(&mut ctx, &mut executor, &fixture);
@@ -149,7 +150,8 @@ fn the_device_applies_the_transposed_recoupling_matrix_on_provider_data() {
     // device that contracted `U` instead of `Uᵀ` would produce the other
     // buffer. The CPU-only suite proves the two buffers differ; this asserts
     // the device lands on the oracle's one.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = non_symmetric_fixture();
     assert!(
@@ -201,7 +203,8 @@ fn a_warm_provider_structure_replay_transfers_nothing() {
     // categorical layer compiled, not only for hand-written fixtures — the
     // uploaded coefficient payload and the pack/scatter workspace are the whole
     // per-structure device state.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = non_symmetric_fixture();
     let source = fixture.source::<f64>();
@@ -259,7 +262,8 @@ fn every_caller_scale_matches_the_host_on_provider_compiled_recoupling() {
     // alpha in {1, -2.5, 0, -0.0, complex}, both dtypes and both destination
     // modes. The oracle applies alpha at the scatter alone and is pinned
     // against the host in CI, including an `alpha^2` negative control.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = non_symmetric_fixture();
     check_scales::<f64>(&mut ctx, &mut executor, &fixture);
@@ -389,7 +393,8 @@ fn payload_bytes(executor: &CudaTreeTransformExecutor) -> usize {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn degeneracy_only_structures_upload_and_charge_one_coefficient_payload() {
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let (large, small) = degeneracy_pair();
     // Larger first, so the smaller one grows no workspace or template.
@@ -423,13 +428,11 @@ fn degeneracy_only_structures_upload_and_charge_one_coefficient_payload() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_shared_payload_outlives_one_evicted_holder_and_is_released_with_the_last() {
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     // One entry: every insert evicts the previous structure.
-    let mut executor = CudaTreeTransformExecutor::with_structure_entries(
-        DEFAULT_COEFFICIENT_BUDGET_BYTES,
-        DEFAULT_PLAN_CACHE_BUDGET_BYTES,
-        1,
-    );
+    let mut executor =
+        CudaTreeTransformExecutor::with_structure_entries(DEFAULT_COEFFICIENT_BUDGET_BYTES, 1);
     let (large, small) = degeneracy_pair();
     let other = non_symmetric_fixture();
     let other_bytes = {
@@ -462,7 +465,8 @@ fn a_shared_payload_outlives_one_evicted_holder_and_is_released_with_the_last() 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn dead_holders_are_purged_and_reset_releases_every_payload() {
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let (large, small) = degeneracy_pair();
     let other = non_symmetric_fixture();
@@ -490,7 +494,7 @@ fn dead_holders_are_purged_and_reset_releases_every_payload() {
         "`independent` replaced the released payload byte for byte"
     );
 
-    executor.clear(&mut ctx);
+    executor.clear();
     assert_eq!(executor.prepared_structures(), 0);
     assert_eq!(executor.executor_device_bytes(), 0);
     assert!(replay_uploads::<f64>(&mut ctx, &mut executor, &independent) > 0);
@@ -499,7 +503,8 @@ fn dead_holders_are_purged_and_reset_releases_every_payload() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn another_dtype_or_context_never_shares_a_payload() {
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let (large, small) = degeneracy_pair();
     replay_uploads::<f64>(&mut ctx, &mut executor, &large);
@@ -514,7 +519,9 @@ fn another_dtype_or_context_never_shares_a_payload() {
     assert_eq!(replay_uploads::<f64>(&mut ctx, &mut executor, &small), 0);
     assert_eq!(payload_bytes(&executor), both);
 
-    let mut other_ctx = context();
+    let mut other_ctx_engine = engine();
+
+    let mut other_ctx = CudaDenseContext::new(&mut other_ctx_engine).unwrap();
     assert_ne!(ctx.identity(), other_ctx.identity());
     assert!(
         replay_uploads::<f64>(&mut other_ctx, &mut executor, &small) > 0,

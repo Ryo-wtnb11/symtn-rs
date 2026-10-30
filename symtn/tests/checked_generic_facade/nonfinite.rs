@@ -8,8 +8,9 @@ use nonfinite_factor_input::assert_finite_input_refusals;
 /// the multiplicity-free counterpart is `factorization_nonfinite_input.rs`.
 #[test]
 fn checked_generic_factorizations_refuse_nonfinite_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 2), (Label::X, 2)]).unwrap();
@@ -22,18 +23,21 @@ fn checked_generic_factorizations_refuse_nonfinite_input() {
         one: D,
         zero: D,
     ) -> [TensorMap<CheckedOnlyToy, D>; 2] {
-        let dense = TensorMap::from_subblock_fn(runtime, [leg], [leg], |trees, index| {
-            match (
-                *trees.coupled() == Label::X && index == [1, 0],
-                index[0] == index[1],
-            ) {
-                (true, _) => bad,
-                (false, true) => one,
-                (false, false) => zero,
-            }
-        })
-        .unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let dense =
+            TensorMap::from_subblock_fn(engine, runtime, [leg], [leg], |trees, index| {
+                match (
+                    *trees.coupled() == Label::X && index == [1, 0],
+                    index[0] == index[1],
+                ) {
+                    (true, _) => bad,
+                    (false, true) => one,
+                    (false, false) => zero,
+                }
+            })
+            .unwrap();
         let diagonal = TensorMap::diagonal(
+            engine,
             runtime,
             leg,
             [
@@ -53,27 +57,38 @@ fn checked_generic_factorizations_refuse_nonfinite_input() {
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let [dense, diagonal] = cases(&runtime, &leg, bad, 1.0, 0.0);
         for (storage, t) in [("dense", &dense), ("diagonal", &diagonal)] {
-            assert_finite_input_refusals(nonfinite_factor_errors!(t), &format!("{storage} {bad}"));
+            assert_finite_input_refusals(
+                nonfinite_factor_errors!(engine, t),
+                &format!("{storage} {bad}"),
+            );
         }
         // The lazy adjoints checked mode accepts: polar reads the parent,
         // null runs the opposite null space of the parent.
-        let adjoint = dense.adjoint().unwrap();
+        let adjoint = dense.adjoint(engine).unwrap();
         let errors = vec![
             (
                 "polar",
-                nonfinite_factor_input::refusal(&adjoint.left_polar(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(
+                    &adjoint.left_polar(engine, &[0], &[1]).unwrap_err(),
+                ),
             ),
             (
                 "polar",
-                nonfinite_factor_input::refusal(&adjoint.right_polar(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(
+                    &adjoint.right_polar(engine, &[0], &[1]).unwrap_err(),
+                ),
             ),
             (
                 "null",
-                nonfinite_factor_input::refusal(&adjoint.left_null(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(
+                    &adjoint.left_null(engine, &[0], &[1]).unwrap_err(),
+                ),
             ),
             (
                 "null",
-                nonfinite_factor_input::refusal(&adjoint.right_null(&[0], &[1]).unwrap_err()),
+                nonfinite_factor_input::refusal(
+                    &adjoint.right_null(engine, &[0], &[1]).unwrap_err(),
+                ),
             ),
         ];
         assert_finite_input_refusals(errors, &format!("lazy adjoint {bad}"));
@@ -88,7 +103,10 @@ fn checked_generic_factorizations_refuse_nonfinite_input() {
             .into_iter()
             .zip(cases(&runtime, &leg, bad, one, zero))
         {
-            assert_finite_input_refusals(nonfinite_factor_errors!(&t), &format!("{storage} {bad}"));
+            assert_finite_input_refusals(
+                nonfinite_factor_errors!(engine, &t),
+                &format!("{storage} {bad}"),
+            );
         }
     }
 }
@@ -97,15 +115,16 @@ fn checked_generic_factorizations_refuse_nonfinite_input() {
 /// mode too.
 #[test]
 fn checked_generic_polar_reports_shape_before_values() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let row = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let col = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let wide: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&row], [&col], |_, _| f64::NAN).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&row], [&col], |_, _| f64::NAN).unwrap();
     let (message, error) =
-        nonfinite_factor_input::refusal(&wide.left_polar(&[0], &[1]).unwrap_err());
+        nonfinite_factor_input::refusal(&wide.left_polar(engine, &[0], &[1]).unwrap_err());
     assert_eq!(
         message,
         Some("left_polar requires rows >= columns in every coupled-sector matrix"),

@@ -14,18 +14,13 @@ selection knob or retained execution state. Preserve the
 output order; backend adapters choose dense kernels. Do not put raw BLAS calls or
 threshold-selected numerical kernels in operator code.
 
-| `Runtime::builder()` option | Effect |
-| --- | --- |
-| `linalg_backend(Faer / Blas)` | CPU factorizations and matrix functions |
-| `gemm_backend(Faer / Blas)` | CPU contraction and recoupling GEMM, independently of factorization choice |
-| `with_dense_executor(...)` | Injected factorization executor; combining it with `linalg_backend` is a build error |
-| `cuda(device)` (feature `cuda`) | Attach the explicit CUDA device |
-
-`Faer` / `Blas` are `LinalgBackend` variants. An unset CPU choice follows
-Tenferro's compiled default: BLAS when `cpu-blas` is enabled, otherwise faer.
-Selecting an unavailable provider fails at `build()`. The linked BLAS/LAPACK
-implementation is a compile-time `blas-*` choice (OpenBLAS, MKL or Accelerate),
-not a per-operation switch. See [`symtn/Cargo.toml`](../symtn/Cargo.toml).
+The CPU provider is a compile-time choice: faer by default, BLAS/LAPACK
+when `cpu-blas` or a `blas-*` feature is enabled (OpenBLAS, MKL or
+Accelerate as the linked implementation). It is not a runtime or
+per-operation switch; see [`symtn/Cargo.toml`](../symtn/Cargo.toml).
+With feature `cuda`, a device operation runs on the caller's `CudaEngine`
+(`CudaEngine::open(CudaDeviceId::from_ordinal(n))`), passed like any other
+engine; a `Runtime` is not tied to a device.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
@@ -48,46 +43,54 @@ operations. Per-method bounds remain authoritative; see the
 
 ## Parallel execution
 
-[`Runtime`](../symtn/src/runtime.rs) leases execution contexts and mintable
-dense executors from pools. Each idle pool retains at most
-`max(available_parallelism, 2)` resources (fallback 4); a resource that unwinds
-is not returned. Checkout, return, structural caches and plan caches have
-synchronization costs.
+Every numerical operation takes the caller's engine
+(`engine: &mut dyn Engine`). A `CpuEngine::serial()` runs on the calling
+thread; `CpuEngine::new(pool)` runs on a caller-owned `Pool` of threads. The
+engine owns the threads and the dense provider's resources an operation uses:
+its thread team, its buffer pool and its provider scratch. symtn stores no
+engine, pool or thread setting, and an engine that is broken by an earlier
+panic is refused with a typed error instead of a serial fallback. To run
+operations concurrently, hold one engine per thread and share the tensors and
+the `Runtime`.
 
-The compiled-default CPU executors share one `SharedCpuContext` per runtime.
-`dense_threads` sizes its pool; unset uses available parallelism, 1 runs on
-the calling thread, and 0 is an error. Host dense, tree replay, plan compile
-and strided work use that pool. `recoupling_threads` defaults to 1 and caps
-recoupling/compile parallelism within it. CPU runtime construction does not
-configure Rayon's global pool or read thread-count environment variables.
-BLAS-internal threads remain separate. An explicitly selected nondefault
-provider has a private context; an injected executor owns its configuration
-and uses the runtime state lock for factorization.
+Host parallelism is the engine's own decision. Dense kernels split work by
+Tenferro's batch policy on the engine. A backend-free Host region
+(tree-transform replay, plan compile, strided moves) takes the engine's
+placement token; a replay forks over the engine's width only when the
+engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
+destination length against the pool's dispatch cost) admits the parallel
+section. A serial engine never forks. Results are bit-identical for one
+configuration (provider, build, engine width, inputs); no promise is made
+across widths or providers. BLAS-internal threads remain separate.
 
-CUDA leases hold a process-wide lock per device ordinal plus the runtime's
-CUDA-context mutex and Tenferro's resource locks. Enqueue serializes across
-runtimes on that device. Host work does not take the CUDA lock. A host sync
-under the lease (`to_host`, scalar or spectrum downloads) blocks other
-runtimes' submissions to that device too.
+[`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
+An eager operation builds its execution scratch (tree-transform and
+contraction lanes, a factorization's dense executor) for the call and drops
+it on return, as TensorKit allocates its temporaries per call; a prepared
+plan's workspace keeps that scratch for its replays. Structural and plan
+caches take short lookup and publication locks.
 
-Opening the first CUDA context fixes CubeCL's process-global
-`streaming.max_streams` to 1. This orders writes to reused destinations and
-scratch across leases; an enqueue lock alone cannot order buffers whose bind
-preceded a later write. GPU work from different threads shares one stream
-per device. This is not a multi-stream or overlap guarantee.
+A CUDA operation borrows the caller's `CudaEngine` for its duration and
+stores nothing of it. The engine owns its stream, its allocation domain and
+its vendor handles (including Tenferro's fixed-size cuTENSOR plan cache);
+symtn takes no device lock and sets no process-wide CubeCL configuration.
+Work on one engine runs in its stream's enqueue order. A `CudaEngine` is
+`Send` but not `Sync`: to submit from several threads, hold one engine per
+thread. A buffer belongs to the engine that allocated it, and every device
+operation refuses an operand of another engine (checked by allocation domain,
+not device ordinal, so a second engine on the same device is refused too)
+before any transfer or submission; moving data between engines is an explicit
+`to_host` / `to_cuda`. A non-CUDA engine given to a device operation, or a
+CUDA engine given to a Host-only entry, is a typed refusal.
 
-Process-wide effects in
-[`single_cubecl_stream`](../symtn-dense/src/cuda_adapter/context.rs):
-
-- It reads CubeCL's file/environment configuration and overrides the stream
-  count. If CubeCL already loaded a count other than 1, device construction
-  returns `DenseError::Unsupported`.
-- The setting survives a failed device open and affects other CubeCL clients,
-  including wgpu. A later `CubeClRuntimeConfig::set` panics.
-- An ordering residual remains in Tenferro's cached `typed_device_ptr` path:
-  an unflushed CubeCL write can be overtaken by a vendor call, even on one
-  thread. symtn's empty-contraction scale/fill of an owned destination can
-  reach it. See [tenferro-rs#1868](https://github.com/tensor4all/tenferro-rs/issues/1868).
+Device execution scratch — a tree transform's uploaded coefficient vectors and
+pack/scatter workspaces, a contraction's operand scratch, the region
+primitive's scalar templates — lives for one eager operation, `*_into`
+included. A prepared plan's workspace keeps its own device buffers and the
+scalar templates of its fills, lending the templates to each call, so a warm
+replay uploads nothing; a call on another engine discards that state rather
+than submits it. A network's steps are eager operations and keep no device
+scratch between calls.
 
 ## Device validation
 
@@ -99,8 +102,8 @@ preserve the corresponding Host error categories. Executor-only failures
 `InvalidArgument`. See
 [`opaque_admission.rs`](../symtn-operations/src/opaque_admission.rs).
 
-`CudaSpectrum` records its solver context's device ordinal. Every consumer
-checks it, and any destination, before submission, allocation or empty-input
+`CudaSpectrum` records the engine (allocation domain) whose solver produced
+it. Every consumer checks it, and any destination, before submission, allocation or empty-input
 return. This is a resource guard, not a categorical convention ported from
 TensorKit, TensorOperations or QSpace. Spectra can remain device-resident;
 collecting sector

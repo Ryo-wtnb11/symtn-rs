@@ -16,10 +16,11 @@ where
 }
 
 fn assert_overwrite_matches<R, D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<R, D>,
     expected: TensorMap<R, D>,
     alpha: D,
-    overwrite: impl FnOnce(&mut TensorMap<R, D>) -> Result<(), Error>,
+    overwrite: impl FnOnce(&mut dyn Engine, &mut TensorMap<R, D>) -> Result<(), Error>,
 ) where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -31,19 +32,19 @@ fn assert_overwrite_matches<R, D>(
     D: TensorScalar + core::fmt::Debug + crate::test_numerics::numerics::Numeric,
 {
     let source_before = source.dense_data().unwrap().to_vec();
-    let mut destination = expected.zeros_like().unwrap();
+    let mut destination = expected.zeros_like(engine).unwrap();
     poison_destination(&mut destination);
     let provider = Arc::as_ptr(destination.logical_space().provider_arc());
     let body = Arc::as_ptr(owned(&destination));
     let space = destination.logical_space().space() as *const DynamicFusionMapSpace;
     let storage = destination.dense_data().unwrap().as_ptr();
 
-    overwrite(&mut destination).unwrap();
+    overwrite(engine, &mut destination).unwrap();
 
     // The overwrite folds `alpha` into the recoupling while the oracle
     // scales afterwards; a recoupled entry sums at most one term per
     // source block.
-    let scaled = expected.scale(alpha).unwrap();
+    let scaled = expected.scale(engine, alpha).unwrap();
     crate::test_numerics::numerics::assert_slices_close(
         "overwrite against the scaled owned route",
         destination.dense_data().unwrap(),
@@ -65,6 +66,7 @@ fn assert_overwrite_matches<R, D>(
 
 #[allow(clippy::too_many_arguments)]
 fn assert_contract_overwrite_matches<R, D>(
+    engine: &mut dyn Engine,
     label: &str,
     lhs: &TensorMap<R, D>,
     rhs: &TensorMap<R, D>,
@@ -91,11 +93,11 @@ fn assert_contract_overwrite_matches<R, D>(
         domain,
     };
     let expected = lhs
-        .contract(rhs, &spec)
+        .contract(engine, rhs, &spec)
         .unwrap_or_else(|error| panic!("{label} returning oracle failed: {error:?}"));
     let lhs_before = lhs.dense_data().unwrap().to_vec();
     let rhs_before = rhs.dense_data().unwrap().to_vec();
-    let mut destination = expected.zeros_like().unwrap();
+    let mut destination = expected.zeros_like(engine).unwrap();
     poison_destination(&mut destination);
     let provider = Arc::as_ptr(destination.logical_space().provider_arc());
     let body = Arc::as_ptr(owned(&destination));
@@ -103,11 +105,25 @@ fn assert_contract_overwrite_matches<R, D>(
     let storage = destination.dense_data().unwrap().as_ptr();
 
     if ordered_alias {
-        lhs.contract_into(rhs, &spec, &mut destination, alpha, D::from_real(0.0))
-            .unwrap_or_else(|error| panic!("{label} ordered overwrite failed: {error:?}"));
+        lhs.contract_into(
+            engine,
+            rhs,
+            &spec,
+            &mut destination,
+            alpha,
+            D::from_real(0.0),
+        )
+        .unwrap_or_else(|error| panic!("{label} ordered overwrite failed: {error:?}"));
     } else {
-        lhs.contract_into(rhs, &spec, &mut destination, alpha, D::from_real(0.0))
-            .unwrap_or_else(|error| panic!("{label} overwrite failed: {error:?}"));
+        lhs.contract_into(
+            engine,
+            rhs,
+            &spec,
+            &mut destination,
+            alpha,
+            D::from_real(0.0),
+        )
+        .unwrap_or_else(|error| panic!("{label} overwrite failed: {error:?}"));
     }
 
     // Owned and destination routes of one contraction. An entry is
@@ -117,7 +133,7 @@ fn assert_contract_overwrite_matches<R, D>(
     crate::test_numerics::numerics::assert_slices_close(
         label,
         destination.dense_data().unwrap(),
-        expected.scale(alpha).unwrap().dense_data().unwrap(),
+        expected.scale(engine, alpha).unwrap().dense_data().unwrap(),
         terms,
     );
     assert_eq!(lhs.dense_data().unwrap(), lhs_before);
@@ -136,7 +152,8 @@ fn assert_contract_overwrite_matches<R, D>(
 
 #[test]
 fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1_provider = Arc::new(U1FusionRule);
     let u1_leg = GradedSpace::try_new(
@@ -148,17 +165,21 @@ fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
         ],
     )
     .unwrap();
-    let u1 = TensorMap::from_subblock_fn(&runtime, [&u1_leg, &u1_leg], [&u1_leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
+    let u1 = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1_leg, &u1_leg],
+        [&u1_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
     .unwrap();
-    let u1_permuted = u1.permute(&[1], &[2, 0]).unwrap();
-    assert_overwrite_matches(&u1, u1_permuted, -1.5, |destination| {
-        u1.permute_into(&[1], &[2, 0], destination, -1.5, 0.0)
+    let u1_permuted = u1.permute(engine, &[1], &[2, 0]).unwrap();
+    assert_overwrite_matches(engine, &u1, u1_permuted, -1.5, |engine, destination| {
+        u1.permute_into(engine, &[1], &[2, 0], destination, -1.5, 0.0)
     });
-    let u1_identity = u1.zeros_like().unwrap();
-    assert_overwrite_matches(&u1, u1_identity, 0.0, |destination| {
-        u1.permute_into(&[0, 1], &[2], destination, 0.0, 0.0)
+    let u1_identity = u1.zeros_like(engine).unwrap();
+    assert_overwrite_matches(engine, &u1, u1_identity, 0.0, |engine, destination| {
+        u1.permute_into(engine, &[0, 1], &[2], destination, 0.0, 0.0)
     });
 
     let independent_leg = GradedSpace::try_new(
@@ -171,6 +192,7 @@ fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
     )
     .unwrap();
     let mut independent_destination = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&independent_leg, &independent_leg],
         [&independent_leg],
@@ -182,11 +204,18 @@ fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
         independent_destination.logical_space().provider_arc()
     ));
     let destination_provider = Arc::as_ptr(independent_destination.logical_space().provider_arc());
-    u1.permute_into(&[0, 1], &[2], &mut independent_destination, 2.0, 0.0)
-        .unwrap();
+    u1.permute_into(
+        engine,
+        &[0, 1],
+        &[2],
+        &mut independent_destination,
+        2.0,
+        0.0,
+    )
+    .unwrap();
     assert_eq!(
         independent_destination.dense_data().unwrap(),
-        u1.scale(2.0).unwrap().dense_data().unwrap()
+        u1.scale(engine, 2.0).unwrap().dense_data().unwrap()
     );
     assert_eq!(
         Arc::as_ptr(independent_destination.logical_space().provider_arc()),
@@ -202,16 +231,20 @@ fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
         ],
     )
     .unwrap();
-    let su2 =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg, &su2_leg], [&su2_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap()
-        .convert::<Complex64>();
+    let su2 = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2_leg, &su2_leg],
+        [&su2_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap()
+    .convert::<Complex64>(engine)
+    .unwrap();
     let alpha = num_complex::Complex64::new(0.75, -0.25);
-    let su2_permuted = su2.permute(&[1], &[2, 0]).unwrap();
-    assert_overwrite_matches(&su2, su2_permuted, alpha, |destination| {
-        su2.permute_into(&[1], &[2, 0], destination, alpha, alpha * 0.0)
+    let su2_permuted = su2.permute(engine, &[1], &[2, 0]).unwrap();
+    assert_overwrite_matches(engine, &su2, su2_permuted, alpha, |engine, destination| {
+        su2.permute_into(engine, &[1], &[2, 0], destination, alpha, alpha * 0.0)
     });
 
     let product_provider = Arc::new(
@@ -226,54 +259,72 @@ fn typed_tree_overwrite_matches_owned_provider_and_scalar_matrix() {
     )
     .unwrap();
     let product = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&product_leg, &product_leg],
         [&product_leg],
         |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
     )
     .unwrap();
-    let product_permuted = product.permute(&[1], &[2, 0]).unwrap();
-    assert_overwrite_matches(&product, product_permuted, 2.0, |destination| {
-        product.permute_into(&[1], &[2, 0], destination, 2.0, 0.0)
-    });
+    let product_permuted = product.permute(engine, &[1], &[2, 0]).unwrap();
+    assert_overwrite_matches(
+        engine,
+        &product,
+        product_permuted,
+        2.0,
+        |engine, destination| product.permute_into(engine, &[1], &[2, 0], destination, 2.0, 0.0),
+    );
 }
 
 #[test]
 fn typed_planar_overwrite_matches_fermionic_owned_routes() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let odd = GradedSpace::try_new(provider, [(Z2Irrep::ODD, 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&odd, &odd], [&odd, &odd], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
+    let source = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&odd, &odd],
+        [&odd, &odd],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
     .unwrap();
     let alpha = -1.25;
+    let source_transpose = source.transpose(engine, &[3, 2], &[1, 0]).unwrap();
 
     assert_overwrite_matches(
+        engine,
         &source,
-        source.transpose(&[3, 2], &[1, 0]).unwrap(),
+        source_transpose,
         alpha,
-        |destination| source.transpose_into(&[3, 2], &[1, 0], destination, alpha, alpha * 0.0),
+        |engine, destination| {
+            source.transpose_into(engine, &[3, 2], &[1, 0], destination, alpha, alpha * 0.0)
+        },
     );
+    let source_transpose = source.transpose(engine, &[1, 3], &[0, 2]).unwrap();
     assert_overwrite_matches(
+        engine,
         &source,
-        source.transpose(&[1, 3], &[0, 2]).unwrap(),
+        source_transpose,
         alpha,
-        |destination| source.transpose_into(&[1, 3], &[0, 2], destination, alpha, alpha * 0.0),
+        |engine, destination| {
+            source.transpose_into(engine, &[1, 3], &[0, 2], destination, alpha, alpha * 0.0)
+        },
     );
-    let right = source.repartition(3).unwrap();
-    assert_overwrite_matches(&source, right, alpha, |destination| {
-        source.repartition_into(destination, alpha, alpha * 0.0)
+    let right = source.repartition(engine, 3).unwrap();
+    assert_overwrite_matches(engine, &source, right, alpha, |engine, destination| {
+        source.repartition_into(engine, destination, alpha, alpha * 0.0)
     });
-    let left = source.repartition(1).unwrap();
-    assert_overwrite_matches(&source, left, alpha, |destination| {
-        source.repartition_into(destination, alpha, alpha * 0.0)
+    let left = source.repartition(engine, 1).unwrap();
+    assert_overwrite_matches(engine, &source, left, alpha, |engine, destination| {
+        source.repartition_into(engine, destination, alpha, alpha * 0.0)
     });
 }
 
-fn f64_bits<R>(tensor: &TensorMap<R, f64>) -> Vec<u64> {
+fn f64_bits<R>(engine: &mut dyn Engine, tensor: &TensorMap<R, f64>) -> Vec<u64> {
     tensor
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -282,9 +333,12 @@ fn f64_bits<R>(tensor: &TensorMap<R, f64>) -> Vec<u64> {
         .collect()
 }
 
-fn f64_destination_state<R>(tensor: &TensorMap<R, f64>) -> (Vec<u64>, [usize; 4]) {
+fn f64_destination_state<R>(
+    engine: &mut dyn Engine,
+    tensor: &TensorMap<R, f64>,
+) -> (Vec<u64>, [usize; 4]) {
     (
-        f64_bits(tensor),
+        f64_bits(engine, tensor),
         [
             Arc::as_ptr(tensor.logical_space().provider_arc()) as usize,
             Arc::as_ptr(owned(tensor)) as usize,
@@ -308,96 +362,106 @@ fn pop_dense_element<R, D>(tensor: &mut TensorMap<R, D>) {
 
 #[test]
 fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap();
-    let expected = source.permute(&[1], &[2, 0]).unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
+            indices.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap();
+    let expected = source.permute(engine, &[1], &[2, 0]).unwrap();
 
-    let assert_unchanged = |destination: &TensorMap<U1FusionRule, f64>, before: &[u64]| {
-        assert_eq!(f64_bits(destination), before);
-    };
+    let assert_unchanged =
+        |engine: &mut dyn Engine, destination: &TensorMap<U1FusionRule, f64>, before: &[u64]| {
+            assert_eq!(f64_bits(engine, destination), before);
+        };
 
-    let mut wrong_layout = source.zeros_like().unwrap();
+    let mut wrong_layout = source.zeros_like(engine).unwrap();
     poison_destination(&mut wrong_layout);
-    let before = f64_bits(&wrong_layout);
+    let before = f64_bits(engine, &wrong_layout);
     assert!(source
-        .permute_into(&[1], &[2, 0], &mut wrong_layout, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut wrong_layout, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&wrong_layout, &before);
+    assert_unchanged(engine, &wrong_layout, &before);
 
     for (codomain_axes, domain_axes) in [(&[1, 1][..], &[2][..]), (&[1][..], &[2, 3][..])] {
-        let mut destination = expected.zeros_like().unwrap();
+        let mut destination = expected.zeros_like(engine).unwrap();
         poison_destination(&mut destination);
-        let before = f64_bits(&destination);
+        let before = f64_bits(engine, &destination);
         assert!(source
-            .permute_into(codomain_axes, domain_axes, &mut destination, 1.0, 0.0)
+            .permute_into(
+                engine,
+                codomain_axes,
+                domain_axes,
+                &mut destination,
+                1.0,
+                0.0
+            )
             .is_err());
-        assert_unchanged(&destination, &before);
+        assert_unchanged(engine, &destination, &before);
     }
 
     let mut nonplanar = source
-        .transpose(&[2], &[1, 0])
+        .transpose(engine, &[2], &[1, 0])
         .unwrap()
-        .zeros_like()
+        .zeros_like(engine)
         .unwrap();
     poison_destination(&mut nonplanar);
-    let before = f64_bits(&nonplanar);
+    let before = f64_bits(engine, &nonplanar);
     assert!(source
-        .transpose_into(&[0, 2], &[1], &mut nonplanar, 1.0, 0.0)
+        .transpose_into(engine, &[0, 2], &[1], &mut nonplanar, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&nonplanar, &before);
+    assert_unchanged(engine, &nonplanar, &before);
 
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let mut foreign = expected.zeros_like().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
+    let mut foreign = expected.zeros_like(engine).unwrap();
     foreign.runtime = other_runtime;
     poison_destination(&mut foreign);
-    let before = f64_bits(&foreign);
+    let before = f64_bits(engine, &foreign);
     assert_eq!(
         source
-            .permute_into(&[1], &[2, 0], &mut foreign, 1.0, 0.0)
+            .permute_into(engine, &[1], &[2, 0], &mut foreign, 1.0, 0.0)
             .unwrap_err(),
         Error::RuntimeMismatch
     );
-    assert_unchanged(&foreign, &before);
+    assert_unchanged(engine, &foreign, &before);
 
-    let mut shared_body = expected.zeros_like().unwrap();
+    let mut shared_body = expected.zeros_like(engine).unwrap();
     poison_destination(&mut shared_body);
-    let before = f64_bits(&shared_body);
+    let before = f64_bits(engine, &shared_body);
     let shared_body_handle = shared_body.clone();
     assert!(source
-        .permute_into(&[1], &[2, 0], &mut shared_body, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut shared_body, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&shared_body, &before);
+    assert_unchanged(engine, &shared_body, &before);
     drop(shared_body_handle);
 
-    let mut shared_payload = expected.zeros_like().unwrap();
+    let mut shared_payload = expected.zeros_like(engine).unwrap();
     poison_destination(&mut shared_payload);
-    let before = f64_bits(&shared_payload);
+    let before = f64_bits(engine, &shared_payload);
     let payload_handle = shared_payload
-        .insert_unit(0, Side::Domain, Duality::Plain)
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap();
     assert!(source
-        .permute_into(&[1], &[2, 0], &mut shared_payload, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut shared_payload, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&shared_payload, &before);
+    assert_unchanged(engine, &shared_payload, &before);
     drop(payload_handle);
 
     let mut alias = source
-        .insert_unit(0, Side::Domain, Duality::Plain)
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap()
-        .remove_unit(0)
+        .remove_unit(engine, 0)
         .unwrap();
-    let before = f64_bits(&alias);
+    let before = f64_bits(engine, &alias);
     assert!(source
-        .permute_into(&[0, 1], &[2], &mut alias, 1.0, 0.0)
+        .permute_into(engine, &[0, 1], &[2], &mut alias, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&alias, &before);
+    assert_unchanged(engine, &alias, &before);
 
-    let mut bad_len = expected.zeros_like().unwrap();
+    let mut bad_len = expected.zeros_like(engine).unwrap();
     poison_destination(&mut bad_len);
     let before = {
         let TypedTensorRepr::Owned(body) = &mut bad_len.repr else {
@@ -409,47 +473,47 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
             unreachable!()
         };
         data.pop();
-        f64_bits(&bad_len)
+        f64_bits(engine, &bad_len)
     };
     assert!(source
-        .permute_into(&[1], &[2, 0], &mut bad_len, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut bad_len, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&bad_len, &before);
+    assert_unchanged(engine, &bad_len, &before);
 
-    let mut lazy_destination = expected.adjoint().unwrap();
-    let before = f64_bits(&lazy_destination);
+    let mut lazy_destination = expected.adjoint(engine).unwrap();
+    let before = f64_bits(engine, &lazy_destination);
     assert!(source
-        .permute_into(&[1], &[2, 0], &mut lazy_destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut lazy_destination, 1.0, 0.0)
         .is_err());
-    assert_eq!(f64_bits(&lazy_destination), before);
+    assert_eq!(f64_bits(engine, &lazy_destination), before);
 
-    let lazy_source = source.adjoint().unwrap();
-    let mut destination = expected.zeros_like().unwrap();
+    let lazy_source = source.adjoint(engine).unwrap();
+    let mut destination = expected.zeros_like(engine).unwrap();
     poison_destination(&mut destination);
-    let before = f64_bits(&destination);
+    let before = f64_bits(engine, &destination);
     assert!(lazy_source
-        .permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
         .is_err());
-    assert_unchanged(&destination, &before);
+    assert_unchanged(engine, &destination, &before);
 
-    let square = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let square = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
-    let compact = square.svd_compact(&[0], &[1]).unwrap().s;
-    let mut compact_destination = compact.zeros_like().unwrap();
+    let compact = square.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let mut compact_destination = compact.zeros_like(engine).unwrap();
     let before = compact_destination
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .to_vec();
     assert!(square
-        .permute_into(&[0], &[1], &mut compact_destination, 1.0, 0.0)
+        .permute_into(engine, &[0], &[1], &mut compact_destination, 1.0, 0.0)
         .is_err());
     assert_eq!(
         compact_destination
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -461,62 +525,71 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 1)]).unwrap();
     let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 1)]).unwrap();
     let z2_source =
-        TensorMap::from_subblock_fn(&runtime, [&z2_leg], [&z2_leg], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 2.0).unwrap();
     let mut z3_destination =
-        TensorMap::from_subblock_fn(&runtime, [&z3_leg], [&z3_leg], |_, _| f64::NAN).unwrap();
-    let before = f64_bits(&z3_destination);
+        TensorMap::from_subblock_fn(engine, &runtime, [&z3_leg], [&z3_leg], |_, _| f64::NAN)
+            .unwrap();
+    let before = f64_bits(engine, &z3_destination);
     assert_eq!(
         z2_source
-            .permute_into(&[0], &[1], &mut z3_destination, 1.0, 0.0)
+            .permute_into(engine, &[0], &[1], &mut z3_destination, 1.0, 0.0)
             .unwrap_err(),
         Error::RuleMismatch
     );
-    assert_eq!(f64_bits(&z3_destination), before);
+    assert_eq!(f64_bits(engine, &z3_destination), before);
 }
 
 #[test]
 fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_TREE_OVERWRITE_REUSE_ISOLATED",
         "typed::representation_gates::overwrite::typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse",
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
 
     let one_sided = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&leg],
         std::iter::empty::<&GradedSpace<U1FusionRule>>(),
         |_, _| 3.0,
     )
     .unwrap();
-    let moved = one_sided.repartition(0).unwrap();
-    assert_overwrite_matches(&one_sided, moved, 2.0, |destination| {
-        one_sided.repartition_into(destination, 2.0, 0.0)
+    let moved = one_sided.repartition(engine, 0).unwrap();
+    assert_overwrite_matches(engine, &one_sided, moved, 2.0, |engine, destination| {
+        one_sided.repartition_into(engine, destination, 2.0, 0.0)
     });
 
-    let square = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 4.0).unwrap();
-    let scalar = square.trace_pairs(&[(0, 1)]).unwrap();
-    let scalar_destination = scalar.transpose(&[], &[]).unwrap();
-    assert_overwrite_matches(&scalar, scalar_destination, -0.5, |destination| {
-        scalar.transpose_into(&[], &[], destination, -0.5, 0.0)
-    });
+    let square = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 4.0).unwrap();
+    let scalar = square.trace_pairs(engine, &[(0, 1)]).unwrap();
+    let scalar_destination = scalar.transpose(engine, &[], &[]).unwrap();
+    assert_overwrite_matches(
+        engine,
+        &scalar,
+        scalar_destination,
+        -0.5,
+        |engine, destination| scalar.transpose_into(engine, &[], &[], destination, -0.5, 0.0),
+    );
 
     let high_rank = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         (0..9).map(|_| &leg),
         (0..8).map(|_| &leg),
         |_, _| 1.0,
     )
     .unwrap();
-    let mut high_rank_destination = high_rank.zeros_like().unwrap();
+    let mut high_rank_destination = high_rank.zeros_like(engine).unwrap();
     poison_destination(&mut high_rank_destination);
-    let before = f64_bits(&high_rank_destination);
+    let before = f64_bits(engine, &high_rank_destination);
     assert!(high_rank
         .permute_into(
+            engine,
             &[0, 1, 2, 3, 4, 5, 6, 7, 17],
             &[8, 9, 10, 11, 12, 13, 14, 15],
             &mut high_rank_destination,
@@ -524,23 +597,24 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
             0.0,
         )
         .is_err());
-    assert_eq!(f64_bits(&high_rank_destination), before);
+    assert_eq!(f64_bits(engine, &high_rank_destination), before);
 
     crate::cache::clear();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap();
-    let expected = source.permute(&[1], &[2, 0]).unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
+            indices.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap();
+    let expected = source.permute(engine, &[1], &[2, 0]).unwrap();
     crate::cache::clear();
-    let mut first = expected.zeros_like().unwrap();
+    let mut first = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(&[1], &[2, 0], &mut first, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut first, 1.0, 0.0)
         .unwrap();
     let cold = crate::test_cache::completed();
-    let mut second = expected.zeros_like().unwrap();
+    let mut second = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(&[1], &[2, 0], &mut second, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut second, 1.0, 0.0)
         .unwrap();
     let warm = crate::test_cache::completed();
     assert_eq!(warm.entries(), cold.entries());
@@ -550,9 +624,10 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
 
 #[test]
 fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: exact-layout admission and completed replay share one Runtime
     // without serializing execution or changing results across callers.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -562,23 +637,25 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
         ],
     )
     .unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap();
-    let expected = source.permute(&[1], &[2, 0]).unwrap();
-    let mut warm = expected.zeros_like().unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
+            indices.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap();
+    let expected = source.permute(engine, &[1], &[2, 0]).unwrap();
+    let mut warm = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(&[1], &[2, 0], &mut warm, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut warm, 1.0, 0.0)
         .unwrap();
 
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..4)
             .map(|_| {
                 scope.spawn(|| {
-                    let mut destination = expected.zeros_like().unwrap();
+                    let engine = &mut symtn_dense::CpuEngine::serial();
+                    let mut destination = expected.zeros_like(engine).unwrap();
                     source
-                        .permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+                        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
                         .unwrap();
                     destination
                 })
@@ -595,7 +672,8 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
 
 #[test]
 fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1_leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -606,11 +684,11 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         ],
     )
     .unwrap();
-    let u1 = TensorMap::from_subblock_fn(&runtime, [&u1_leg], [&u1_leg], |_, indices| {
+    let u1 = TensorMap::from_subblock_fn(engine, &runtime, [&u1_leg], [&u1_leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
-    assert_contract_overwrite_matches("u1", &u1, &u1, &[1], &[0], &[0, 1], -1.5, false);
+    assert_contract_overwrite_matches(engine, "u1", &u1, &u1, &[1], &[0], &[0, 1], -1.5, false);
 
     let su2_leg = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
@@ -620,12 +698,15 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         ],
     )
     .unwrap();
-    let su2 = TensorMap::from_subblock_fn(&runtime, [&su2_leg], [&su2_leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap()
-    .convert::<Complex64>();
+    let su2 =
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |_, indices| {
+            indices.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap()
+        .convert::<Complex64>(engine)
+        .unwrap();
     assert_contract_overwrite_matches(
+        engine,
         "su2",
         &su2,
         &su2,
@@ -637,11 +718,12 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
     );
 
     let odd = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 2)]).unwrap();
-    let fermionic = TensorMap::from_subblock_fn(&runtime, [&odd], [&odd], |_, indices| {
+    let fermionic = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
     assert_contract_overwrite_matches(
+        engine,
         "fz2",
         &fermionic,
         &fermionic,
@@ -662,12 +744,16 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         ],
     )
     .unwrap();
-    let product =
-        TensorMap::from_subblock_fn(&runtime, [&product_leg], [&product_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap();
+    let product = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&product_leg],
+        [&product_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap();
     assert_contract_overwrite_matches(
+        engine,
         "product",
         &product,
         &product,
@@ -683,9 +769,11 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         [(CU1Irrep::from_twice_charge(1), 1)],
     )
     .unwrap();
-    let cu1 = TensorMap::from_subblock_fn(&runtime, [&q, &q, &q], [&q], |_, _| 1.0).unwrap();
+    let cu1 =
+        TensorMap::from_subblock_fn(engine, &runtime, [&q, &q, &q], [&q], |_, _| 1.0).unwrap();
     let cu1_expected = cu1
         .contract(
+            engine,
             &cu1,
             &ContractSpec {
                 lhs: &[3],
@@ -697,6 +785,7 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         .unwrap();
     assert!(cu1_expected.dense_data().unwrap().contains(&0.0));
     assert_contract_overwrite_matches(
+        engine,
         "cu1",
         &cu1,
         &cu1,
@@ -710,8 +799,9 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
 
 #[test]
 fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let build = |provider: Arc<U1FusionRule>, offset: f64| {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let mut build = |provider: Arc<U1FusionRule>, offset: f64| {
         let leg = GradedSpace::try_new(
             provider,
             [
@@ -721,7 +811,7 @@ fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
             ],
         )
         .unwrap();
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             offset + indices.iter().sum::<usize>() as f64
         })
         .unwrap()
@@ -734,6 +824,7 @@ fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
     let destination_rhs = build(destination_provider, 0.0);
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -745,6 +836,7 @@ fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
         .unwrap();
     let mut destination = destination_lhs
         .contract(
+            engine,
             &destination_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -754,7 +846,7 @@ fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
             },
         )
         .unwrap()
-        .zeros_like()
+        .zeros_like(engine)
         .unwrap();
     poison_destination(&mut destination);
 
@@ -771,7 +863,7 @@ fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
     let space = destination.logical_space().space() as *const DynamicFusionMapSpace;
     let storage = destination.dense_data().unwrap().as_ptr();
 
-    lhs.contract_into(&rhs, &RANK_TWO_COMPOSE, &mut destination, 1.0, 0.0)
+    lhs.contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut destination, 1.0, 0.0)
         .unwrap();
 
     assert_eq!(
@@ -792,25 +884,27 @@ fn typed_contract_overwrite_keeps_distinct_destination_provider_authority() {
 
 #[test]
 fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 3), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices[0] + 2 * indices[1] + 1) as f64
     })
     .unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (2 * indices[0] + indices[1] + 1) as f64
     })
     .unwrap();
-    let lazy_lhs = lhs.adjoint().unwrap();
-    let lazy_rhs = rhs.adjoint().unwrap();
+    let lazy_lhs = lhs.adjoint(engine).unwrap();
+    let lazy_rhs = rhs.adjoint(engine).unwrap();
     let expected = lazy_lhs
         .contract(
+            engine,
             &lazy_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -820,10 +914,17 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
             },
         )
         .unwrap();
-    let mut destination = expected.zeros_like().unwrap();
+    let mut destination = expected.zeros_like(engine).unwrap();
     poison_destination(&mut destination);
     lazy_lhs
-        .contract_into(&lazy_rhs, &RANK_TWO_COMPOSE, &mut destination, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &lazy_rhs,
+            &RANK_TWO_COMPOSE,
+            &mut destination,
+            1.0,
+            0.0,
+        )
         .unwrap();
     assert_eq!(
         destination.dense_data().unwrap(),
@@ -835,10 +936,11 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
         };
     }
 
-    let Svd { u, s, .. } = lhs.svd_compact(&[0], &[1]).unwrap();
+    let Svd { u, s, .. } = lhs.svd_compact(engine, &[0], &[1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     let expected = u
         .contract(
+            engine,
             &s,
             &ContractSpec {
                 lhs: &[1],
@@ -848,9 +950,9 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
             },
         )
         .unwrap();
-    let mut destination = expected.zeros_like().unwrap();
+    let mut destination = expected.zeros_like(engine).unwrap();
     poison_destination(&mut destination);
-    u.contract_into(&s, &RANK_TWO_COMPOSE, &mut destination, 1.0, 0.0)
+    u.contract_into(engine, &s, &RANK_TWO_COMPOSE, &mut destination, 1.0, 0.0)
         .unwrap();
     assert_eq!(
         destination.dense_data().unwrap(),
@@ -863,20 +965,22 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
 
 #[test]
 fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices[0] + 2 * indices[1] + 1) as f64
     })
     .unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (2 * indices[0] + indices[1] + 1) as f64
     })
     .unwrap();
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -886,17 +990,18 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             },
         )
         .unwrap();
-    let destination = || {
-        let mut destination = expected.zeros_like().unwrap();
+    let destination = |engine: &mut dyn Engine| {
+        let mut destination = expected.zeros_like(engine).unwrap();
         poison_destination(&mut destination);
         destination
     };
 
-    let mut foreign = destination();
-    foreign.runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let before = f64_destination_state(&foreign);
+    let mut foreign = destination(engine);
+    foreign.runtime = Runtime::builder().build().unwrap();
+    let before = f64_destination_state(engine, &foreign);
     assert_eq!(
         lhs.contract_into(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[9],
@@ -909,17 +1014,19 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         .unwrap_err(),
         Error::RuntimeMismatch
     );
-    assert_eq!(f64_destination_state(&foreign), before);
+    assert_eq!(f64_destination_state(engine, &foreign), before);
 
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let foreign_rhs = TensorMap::from_subblock_fn(&other_runtime, [&leg], [&leg], |_, indices| {
-        (indices[0] + indices[1] + 1) as f64
-    })
-    .unwrap();
-    let mut rejected = destination();
-    let before = f64_destination_state(&rejected);
+    let other_runtime = Runtime::builder().build().unwrap();
+    let foreign_rhs =
+        TensorMap::from_subblock_fn(engine, &other_runtime, [&leg], [&leg], |_, indices| {
+            (indices[0] + indices[1] + 1) as f64
+        })
+        .unwrap();
+    let mut rejected = destination(engine);
+    let before = f64_destination_state(engine, &rejected);
     assert_eq!(
         lhs.contract_into(
+            engine,
             &foreign_rhs,
             &ContractSpec {
                 lhs: &[9],
@@ -932,7 +1039,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         .unwrap_err(),
         Error::RuntimeMismatch
     );
-    assert_eq!(f64_destination_state(&rejected), before);
+    assert_eq!(f64_destination_state(engine, &rejected), before);
 
     for spec in [
         ContractSpec {
@@ -950,12 +1057,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             ..RANK_TWO_COMPOSE
         },
     ] {
-        let mut rejected = destination();
-        let before = f64_destination_state(&rejected);
+        let mut rejected = destination(engine);
+        let before = f64_destination_state(engine, &rejected);
         assert!(lhs
-            .contract_into(&rhs, &spec, &mut rejected, 1.0, 0.0)
+            .contract_into(engine, &rhs, &spec, &mut rejected, 1.0, 0.0)
             .is_err());
-        assert_eq!(f64_destination_state(&rejected), before);
+        assert_eq!(f64_destination_state(engine, &rejected), before);
     }
 
     let bad_leg = GradedSpace::try_new(
@@ -964,103 +1071,124 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     )
     .unwrap();
     let bad_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&bad_leg], [&bad_leg], |_, _| 1.0).unwrap();
-    let mut rejected = destination();
-    let before = f64_destination_state(&rejected);
+        TensorMap::from_subblock_fn(engine, &runtime, [&bad_leg], [&bad_leg], |_, _| 1.0).unwrap();
+    let mut rejected = destination(engine);
+    let before = f64_destination_state(engine, &rejected);
     assert!(lhs
-        .contract_into(&bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
+        .contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
         .is_err());
-    assert_eq!(f64_destination_state(&rejected), before);
+    assert_eq!(f64_destination_state(engine, &rejected), before);
 
     let mut wrong_layout = lhs
-        .insert_unit(0, Side::Domain, Duality::Plain)
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap()
-        .zeros_like()
+        .zeros_like(engine)
         .unwrap();
     poison_destination(&mut wrong_layout);
-    let before = f64_destination_state(&wrong_layout);
+    let before = f64_destination_state(engine, &wrong_layout);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut wrong_layout, 1.0, 0.0)
+        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut wrong_layout, 1.0, 0.0)
         .is_err());
-    assert_eq!(f64_destination_state(&wrong_layout), before);
+    assert_eq!(f64_destination_state(engine, &wrong_layout), before);
 
     for malformed in ["lhs", "rhs", "destination"] {
-        let mut bad_lhs = lhs.scale(1.0).unwrap();
-        let mut bad_rhs = rhs.scale(1.0).unwrap();
-        let mut rejected = destination();
+        let mut bad_lhs = lhs.scale(engine, 1.0).unwrap();
+        let mut bad_rhs = rhs.scale(engine, 1.0).unwrap();
+        let mut rejected = destination(engine);
         match malformed {
             "lhs" => pop_dense_element(&mut bad_lhs),
             "rhs" => pop_dense_element(&mut bad_rhs),
             "destination" => pop_dense_element(&mut rejected),
             _ => unreachable!(),
         }
-        let before = f64_destination_state(&rejected);
+        let before = f64_destination_state(engine, &rejected);
         assert!(bad_lhs
-            .contract_into(&bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
+            .contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
             .is_err());
-        assert_eq!(f64_destination_state(&rejected), before);
+        assert_eq!(f64_destination_state(engine, &rejected), before);
     }
 
     let mut lhs_alias = lhs
-        .insert_unit(0, Side::Domain, Duality::Plain)
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap()
-        .remove_unit(0)
+        .remove_unit(engine, 0)
         .unwrap();
-    let before = f64_destination_state(&lhs_alias);
+    let before = f64_destination_state(engine, &lhs_alias);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut lhs_alias, 1.0, 0.0)
+        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut lhs_alias, 1.0, 0.0)
         .is_err());
-    assert_eq!(f64_destination_state(&lhs_alias), before);
+    assert_eq!(f64_destination_state(engine, &lhs_alias), before);
 
     let mut rhs_alias = rhs
-        .insert_unit(0, Side::Domain, Duality::Plain)
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap()
-        .remove_unit(0)
+        .remove_unit(engine, 0)
         .unwrap();
-    let before = f64_destination_state(&rhs_alias);
+    let before = f64_destination_state(engine, &rhs_alias);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut rhs_alias, 1.0, 0.0)
+        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut rhs_alias, 1.0, 0.0)
         .is_err());
-    assert_eq!(f64_destination_state(&rhs_alias), before);
+    assert_eq!(f64_destination_state(engine, &rhs_alias), before);
 
-    let mut shared_body = destination();
+    let mut shared_body = destination(engine);
     let shared_body_handle = shared_body.clone();
-    let before = f64_destination_state(&shared_body);
+    let before = f64_destination_state(engine, &shared_body);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut shared_body, 1.0, 0.0)
+        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut shared_body, 1.0, 0.0)
         .is_err());
-    assert_eq!(f64_destination_state(&shared_body), before);
+    assert_eq!(f64_destination_state(engine, &shared_body), before);
     drop(shared_body_handle);
 
-    let mut shared_payload = destination();
+    let mut shared_payload = destination(engine);
     let shared_payload_handle = shared_payload
-        .insert_unit(0, Side::Domain, Duality::Plain)
+        .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap();
-    let before = f64_destination_state(&shared_payload);
+    let before = f64_destination_state(engine, &shared_payload);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut shared_payload, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            &mut shared_payload,
+            1.0,
+            0.0
+        )
         .is_err());
-    assert_eq!(f64_destination_state(&shared_payload), before);
+    assert_eq!(f64_destination_state(engine, &shared_payload), before);
     drop(shared_payload_handle);
 
-    let mut lazy_destination = expected.adjoint().unwrap();
+    let mut lazy_destination = expected.adjoint(engine).unwrap();
     let TypedTensorRepr::Adjoint(view) = &lazy_destination.repr else {
         unreachable!()
     };
     let view = Arc::as_ptr(view);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut lazy_destination, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            &mut lazy_destination,
+            1.0,
+            0.0
+        )
         .is_err());
     let TypedTensorRepr::Adjoint(after) = &lazy_destination.repr else {
         unreachable!()
     };
     assert_eq!(Arc::as_ptr(after), view);
 
-    let mut compact_destination = lhs.svd_compact(&[0], &[1]).unwrap().s;
+    let mut compact_destination = lhs.svd_compact(engine, &[0], &[1]).unwrap().s;
     let payload = Arc::clone(&owned(&compact_destination).data);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert!(lhs
-        .contract_into(&rhs, &RANK_TWO_COMPOSE, &mut compact_destination, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            &mut compact_destination,
+            1.0,
+            0.0
+        )
         .is_err());
     assert!(Arc::ptr_eq(&owned(&compact_destination).data, &payload));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -1069,11 +1197,15 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
     let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 1)]).unwrap();
     let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 1)]).unwrap();
-    let z2_lhs = TensorMap::from_subblock_fn(&runtime, [&z2_leg], [&z2_leg], |_, _| 1.0).unwrap();
-    let z2_rhs = TensorMap::from_subblock_fn(&runtime, [&z2_leg], [&z2_leg], |_, _| 2.0).unwrap();
-    let z3_rhs = TensorMap::from_subblock_fn(&runtime, [&z3_leg], [&z3_leg], |_, _| 2.0).unwrap();
+    let z2_lhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 1.0).unwrap();
+    let z2_rhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 2.0).unwrap();
+    let z3_rhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&z3_leg], [&z3_leg], |_, _| 2.0).unwrap();
     let mut rejected = z2_lhs
         .contract(
+            engine,
             &z2_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1083,21 +1215,23 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             },
         )
         .unwrap()
-        .zeros_like()
+        .zeros_like(engine)
         .unwrap();
     poison_destination(&mut rejected);
-    let before = f64_destination_state(&rejected);
+    let before = f64_destination_state(engine, &rejected);
     assert_eq!(
         z2_lhs
-            .contract_into(&z3_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
+            .contract_into(engine, &z3_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
             .unwrap_err(),
         Error::RuleMismatch
     );
-    assert_eq!(f64_destination_state(&rejected), before);
+    assert_eq!(f64_destination_state(engine, &rejected), before);
 
-    let z3_lhs = TensorMap::from_subblock_fn(&runtime, [&z3_leg], [&z3_leg], |_, _| 1.0).unwrap();
+    let z3_lhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&z3_leg], [&z3_leg], |_, _| 1.0).unwrap();
     let mut z3_destination = z3_lhs
         .contract(
+            engine,
             &z3_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1107,28 +1241,36 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             },
         )
         .unwrap()
-        .zeros_like()
+        .zeros_like(engine)
         .unwrap();
     poison_destination(&mut z3_destination);
-    let before = f64_destination_state(&z3_destination);
+    let before = f64_destination_state(engine, &z3_destination);
     assert_eq!(
         z2_lhs
-            .contract_into(&z2_rhs, &RANK_TWO_COMPOSE, &mut z3_destination, 1.0, 0.0)
+            .contract_into(
+                engine,
+                &z2_rhs,
+                &RANK_TWO_COMPOSE,
+                &mut z3_destination,
+                1.0,
+                0.0
+            )
             .unwrap_err(),
         Error::RuleMismatch
     );
-    assert_eq!(f64_destination_state(&z3_destination), before);
+    assert_eq!(f64_destination_state(engine, &z3_destination), before);
 }
 
 #[test]
 fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_CONTRACT_OVERWRITE_REUSE_ISOLATED",
         "typed::representation_gates::overwrite::typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache",
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
     let left = GradedSpace::try_new(
@@ -1142,16 +1284,17 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
     )
     .unwrap();
     let disjoint = GradedSpace::try_new(provider, [(U1Irrep::new(3), 1)]).unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&left], [&bond], |_, indices| {
+    let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&left], [&bond], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
     for open in [&partly_disjoint, &disjoint] {
-        let rhs = TensorMap::from_subblock_fn(&runtime, [&bond], [open], |_, indices| {
+        let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&bond], [open], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 2.0
         })
         .unwrap();
         assert_contract_overwrite_matches(
+            engine,
             "unmatched sectors",
             &lhs,
             &rhs,
@@ -1165,10 +1308,12 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
 
     let provider = Arc::new(CU1FusionRule);
     let q = GradedSpace::try_new(provider, [(CU1Irrep::from_twice_charge(1), 1)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&q, &q, &q], [&q], |_, _| 1.0).unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&q, &q, &q], [&q], |_, _| 1.0).unwrap();
     let axes = [5, 1, 3, 0, 4, 2];
     let expected = source
         .contract(
+            engine,
             &source,
             &ContractSpec {
                 lhs: &[3],
@@ -1179,10 +1324,11 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
         )
         .unwrap();
     crate::cache::clear();
-    let mut first = expected.zeros_like().unwrap();
+    let mut first = expected.zeros_like(engine).unwrap();
     poison_destination(&mut first);
     source
         .contract_into(
+            engine,
             &source,
             &ContractSpec {
                 lhs: &[3],
@@ -1196,10 +1342,11 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
         )
         .unwrap();
     let cold = crate::test_cache::completed();
-    let mut second = expected.zeros_like().unwrap();
+    let mut second = expected.zeros_like(engine).unwrap();
     poison_destination(&mut second);
     source
         .contract_into(
+            engine,
             &source,
             &ContractSpec {
                 lhs: &[3],

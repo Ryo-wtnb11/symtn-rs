@@ -468,19 +468,20 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap, Truncation};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)])?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&v], 6)?;
+    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 6)?;
     ///
-    /// let Svd { u, s, vh } = t.svd_compact(&[0, 1], &[2])?;
-    /// let found = s.domain()[0].find_truncated(&s.diagview()?, &Truncation::rank(2))?;
-    /// let u = u.restrict_leg(&[(u.codomain_rank(), &found.selection)])?;
-    /// let s = s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])?;
-    /// let vh = vh.restrict_leg(&[(0, &found.selection)])?;
+    /// let Svd { u, s, vh } = t.svd_compact(engine, &[0, 1], &[2])?;
+    /// let found = s.domain()[0].find_truncated(&s.diagview(engine)?, &Truncation::rank(2))?;
+    /// let u = u.restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])?;
+    /// let s = s.restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])?;
+    /// let vh = vh.restrict_leg(engine, &[(0, &found.selection)])?;
     ///
     /// // The best rank-2 approximation, and the weight it discards.
-    /// let approximation = u.compose(&s)?.compose(&vh)?;
-    /// let residual = t.axpby(1.0, &approximation, -1.0)?.norm(2.0)?;
+    /// let approximation = u.compose(engine, &s)?.compose(engine, &vh)?;
+    /// let residual = t.axpby(engine, 1.0, &approximation, -1.0)?.norm(engine, 2.0)?;
     /// assert!((residual - found.error).abs() < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```

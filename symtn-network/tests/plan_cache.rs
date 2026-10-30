@@ -1,5 +1,6 @@
 use std::sync::{Arc, Barrier};
 use symtn::typed::ContractSpec;
+use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -18,25 +19,27 @@ fn space(provider: Arc<U1FusionRule>, dim: usize) -> GradedSpace<U1FusionRule> {
 }
 
 fn pair(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     space: &GradedSpace<U1FusionRule>,
     seed: u64,
 ) -> (TensorMap<U1FusionRule, f64>, TensorMap<U1FusionRule, f64>) {
     (
-        TensorMap::rand_with_seed(runtime, [space], [space], seed).unwrap(),
-        TensorMap::rand_with_seed(runtime, [space], [space], seed + 1).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [space], [space], seed).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [space], [space], seed + 1).unwrap(),
     )
 }
 
 #[test]
 fn typed_static_cache_preserves_hit_clear_and_workspace_stats() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = space(provider, 3);
-    let (a, b) = pair(&runtime, &space, 10);
+    let (a, b) = pair(engine, &runtime, &space, 10);
 
     let first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let cold = plan_cache_stats(&runtime);
     assert_eq!((cold.misses, cold.hits, cold.entries), (1, 0, 1));
@@ -52,7 +55,7 @@ fn typed_static_cache_preserves_hit_clear_and_workspace_stats() {
     assert_eq!(cold.workspace_byte_rejections, 0);
 
     let second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let warm = plan_cache_stats(&runtime);
     assert_eq!(first.dense_data().unwrap(), second.dense_data().unwrap());
@@ -66,14 +69,15 @@ fn typed_static_cache_preserves_hit_clear_and_workspace_stats() {
 
 #[test]
 fn parked_host_workspace_releases_provider_and_rebinds_exact_current_arc() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let first_provider = Arc::new(U1FusionRule);
     let first_weak = Arc::downgrade(&first_provider);
     let first_space = space(Arc::clone(&first_provider), 2);
-    let (a, b) = pair(&runtime, &first_space, 20);
+    let (a, b) = pair(engine, &runtime, &first_space, 20);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     drop((a, b, first_space, first_provider));
@@ -81,9 +85,9 @@ fn parked_host_workspace_releases_provider_and_rebinds_exact_current_arc() {
 
     let current_provider = Arc::new(U1FusionRule);
     let current_space = space(Arc::clone(&current_provider), 2);
-    let (c, d) = pair(&runtime, &current_space, 30);
+    let (c, d) = pair(engine, &runtime, &current_space, 30);
     let output = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&c, &d])
+        .contract(engine, &[&c, &d])
         .unwrap();
     assert!(std::ptr::eq(output.provider(), current_provider.as_ref()));
     assert_eq!(plan_cache_stats(&runtime).workspace_reuses, 1);
@@ -91,6 +95,7 @@ fn parked_host_workspace_releases_provider_and_rebinds_exact_current_arc() {
 
 #[test]
 fn dimension_drift_replans_into_the_same_cache_entry() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
@@ -102,16 +107,16 @@ fn dimension_drift_replans_into_the_same_cache_entry() {
     let provider = Arc::new(U1FusionRule);
     let small = space(Arc::clone(&provider), 2);
     let large = space(provider, 5);
-    let (a, b) = pair(&runtime, &small, 40);
+    let (a, b) = pair(engine, &runtime, &small, 40);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
-    let (c, d) = pair(&runtime, &large, 50);
+    let (c, d) = pair(engine, &runtime, &large, 50);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&c, &d])
+            .contract(engine, &[&c, &d])
             .unwrap(),
     );
     let stats = plan_cache_stats(&runtime);
@@ -120,6 +125,7 @@ fn dimension_drift_replans_into_the_same_cache_entry() {
 
 #[test]
 fn disabled_cache_keeps_entries_and_counters_empty() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
@@ -129,12 +135,12 @@ fn disabled_cache_keeps_entries_and_counters_empty() {
         },
     );
     let space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&runtime, &space, 60);
+    let (a, b) = pair(engine, &runtime, &space, 60);
     let first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     assert_eq!(first.dense_data().unwrap(), second.dense_data().unwrap());
     assert_eq!(plan_cache_stats(&runtime), Default::default());
@@ -142,6 +148,7 @@ fn disabled_cache_keeps_entries_and_counters_empty() {
 
 #[test]
 fn lru_hit_touches_entry_before_capacity_eviction() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
@@ -151,37 +158,37 @@ fn lru_hit_touches_entry_before_capacity_eviction() {
         },
     );
     let space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&runtime, &space, 70);
+    let (a, b) = pair(engine, &runtime, &space, 70);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["k"], &["i"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     drop(
         net(&[op(&["j"], &["k"]), op(&["i"], &["j"])], &["k"], &["i"])
-            .contract(&[&b, &a])
+            .contract(engine, &[&b, &a])
             .unwrap(),
     );
     let before = plan_cache_stats(&runtime);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     assert_eq!(plan_cache_stats(&runtime).hits, before.hits + 1);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["k"], &["i"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     let after = plan_cache_stats(&runtime);
@@ -191,13 +198,14 @@ fn lru_hit_touches_entry_before_capacity_eviction() {
 
 #[test]
 fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let first = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&first, ""), 0);
     let first_space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&first, &first_space, 82);
+    let (a, b) = pair(engine, &first, &first_space, 82);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     let saved = save_plan_cache(&first);
@@ -211,10 +219,10 @@ fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
     // The miss searches afresh: nothing is replayed, and with persistence off
     // the fresh order is not recorded either.
     let space = space(Arc::new(U1FusionRule), 2);
-    let (c, d) = pair(&runtime, &space, 84);
+    let (c, d) = pair(engine, &runtime, &space, 84);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&c, &d])
+            .contract(engine, &[&c, &d])
             .unwrap(),
     );
     let stats = plan_cache_stats(&runtime);
@@ -224,6 +232,7 @@ fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
 
 #[test]
 fn persisted_orders_are_bounded_by_the_plan_cache_capacity() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
@@ -234,20 +243,20 @@ fn persisted_orders_are_bounded_by_the_plan_cache_capacity() {
     );
     assert_eq!(load_plan_cache(&runtime, ""), 0);
     let space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&runtime, &space, 86);
+    let (a, b) = pair(engine, &runtime, &space, 86);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["k"], &["i"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i", "k"], &[])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     assert_eq!(plan_cache_stats(&runtime).persisted_orders, 2);
@@ -269,11 +278,13 @@ fn persisted_orders_are_bounded_by_the_plan_cache_capacity() {
 
 #[test]
 fn concurrent_cached_calls_share_one_plan_and_bound_idle_pool() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space = space(Arc::new(U1FusionRule), 8);
-    let (a, b) = pair(&runtime, &space, 90);
+    let (a, b) = pair(engine, &runtime, &space, 90);
     let expected = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[1],
@@ -291,9 +302,10 @@ fn concurrent_cached_calls_share_one_plan_and_bound_idle_pool() {
             let a = &a;
             let b = &b;
             handles.push(scope.spawn(move || {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 barrier.wait();
                 net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-                    .contract(&[a, b])
+                    .contract(engine, &[a, b])
                     .unwrap()
             }));
         }
@@ -322,27 +334,28 @@ fn concurrent_cached_calls_share_one_plan_and_bound_idle_pool() {
 /// test; after the preflight only a runtime fault can fail an execution.
 #[test]
 fn a_metadata_rejection_leases_no_workspace_and_the_next_call_reuses_the_idle_one() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let other = Runtime::builder().build().unwrap();
     let local_space = space(Arc::new(U1FusionRule), 2);
     let other_space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&runtime, &local_space, 100);
-    let (_, foreign) = pair(&other, &other_space, 110);
+    let (a, b) = pair(engine, &runtime, &local_space, 100);
+    let (_, foreign) = pair(engine, &other, &other_space, 110);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     let warm = plan_cache_stats(&runtime);
     assert!(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &foreign])
+            .contract(engine, &[&a, &foreign])
             .is_err()
     );
     assert_eq!(plan_cache_stats(&runtime), warm);
     drop(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap(),
     );
     let stats = plan_cache_stats(&runtime);
@@ -354,10 +367,11 @@ fn a_metadata_rejection_leases_no_workspace_and_the_next_call_reuses_the_idle_on
 
 #[test]
 fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space = space(Arc::new(U1FusionRule), 8);
-    let (a, b) = pair(&runtime, &space, 130);
-    let (c, _) = pair(&runtime, &space, 132);
+    let (a, b) = pair(engine, &runtime, &space, 130);
+    let (c, _) = pair(engine, &runtime, &space, 132);
 
     drop(
         net(
@@ -365,7 +379,7 @@ fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
             &["i"],
             &["l"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     let charge = plan_cache_stats(&runtime).retained_workspace_bytes;
@@ -385,7 +399,7 @@ fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
             &["i"],
             &["l"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     let rejected = plan_cache_stats(&runtime);
@@ -408,7 +422,7 @@ fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
             &["i"],
             &["l"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     let admitted = plan_cache_stats(&runtime);
@@ -435,7 +449,7 @@ fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
             &["i"],
             &["l"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     assert_eq!(plan_cache_stats(&runtime).workspace_byte_rejections, 2);
@@ -443,6 +457,7 @@ fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
 
 #[test]
 fn configuration_flushes_and_capacity_shrink_release_synchronously() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
@@ -452,15 +467,15 @@ fn configuration_flushes_and_capacity_shrink_release_synchronously() {
         },
     );
     let space = space(Arc::new(U1FusionRule), 8);
-    let (a, b) = pair(&runtime, &space, 140);
-    let (c, _) = pair(&runtime, &space, 142);
+    let (a, b) = pair(engine, &runtime, &space, 140);
+    let (c, _) = pair(engine, &runtime, &space, 142);
     drop(
         net(
             &[op(&["i"], &["j"]), op(&["j"], &["k"]), op(&["k"], &["l"])],
             &["i"],
             &["l"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     drop(
@@ -469,7 +484,7 @@ fn configuration_flushes_and_capacity_shrink_release_synchronously() {
             &["l"],
             &["i"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     let initial = plan_cache_stats(&runtime);
@@ -496,7 +511,7 @@ fn configuration_flushes_and_capacity_shrink_release_synchronously() {
             &["i"],
             &["l"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     drop(
@@ -505,7 +520,7 @@ fn configuration_flushes_and_capacity_shrink_release_synchronously() {
             &["l"],
             &["i"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap(),
     );
     let repopulated = plan_cache_stats(&runtime);
@@ -546,11 +561,12 @@ fn configuration_flushes_and_capacity_shrink_release_synchronously() {
 /// plan and idle workspace, so the next call is a hit, not a re-plan.
 #[test]
 fn enabled_reconfiguration_retains_plans_and_workspaces() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space = space(Arc::new(U1FusionRule), 3);
-    let (a, b) = pair(&runtime, &space, 150);
+    let (a, b) = pair(engine, &runtime, &space, 150);
     let cold = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let before = plan_cache_stats(&runtime);
     assert_eq!(
@@ -585,7 +601,7 @@ fn enabled_reconfiguration_retains_plans_and_workspaces() {
     );
 
     let warm = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let after = plan_cache_stats(&runtime);
     assert_eq!((after.misses, after.hits, after.replans), (1, 1, 0));
@@ -595,6 +611,7 @@ fn enabled_reconfiguration_retains_plans_and_workspaces() {
 
 #[test]
 fn a_foreign_extension_value_coexists_with_the_plan_cache() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Another crate's value in the runtime's extension slot must not make the
     // first contraction panic ("runtime plan-cache slot claimed by another
     // type"). Each type has its own entry: the plan cache works and the
@@ -605,12 +622,12 @@ fn a_foreign_extension_value_coexists_with_the_plan_cache() {
         slot.get_or_insert_with(|| 7u8);
     });
     let space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&runtime, &space, 130);
+    let (a, b) = pair(engine, &runtime, &space, 130);
     let first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     let stats = plan_cache_stats(&runtime);
     assert_eq!((stats.misses, stats.hits, stats.entries), (1, 1, 1));
@@ -623,12 +640,13 @@ fn a_foreign_extension_value_coexists_with_the_plan_cache() {
 
 #[test]
 fn dropping_warm_runtime_breaks_the_cache_workspace_cycle() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let identity = symtn::typed::__network::runtime_identity(&runtime);
     let space = space(Arc::new(U1FusionRule), 2);
-    let (a, b) = pair(&runtime, &space, 120);
+    let (a, b) = pair(engine, &runtime, &space, 120);
     let output = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap();
     drop((output, a, b, space, runtime));
     assert!(!identity.is_alive());
@@ -636,11 +654,12 @@ fn dropping_warm_runtime_breaks_the_cache_workspace_cycle() {
 
 #[test]
 fn output_order_and_split_key_separate_cached_step_specs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // The last step writes the requested output orientation in its own
     // ContractSpec, so that spec is part of the cached plan. Networks that
     // differ only in output order or split must neither share an entry nor
     // replay each other's spec.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let (p, q, c, r) = (
         space(Arc::clone(&provider), 2),
@@ -648,10 +667,12 @@ fn output_order_and_split_key_separate_cached_step_specs() {
         space(Arc::clone(&provider), 4),
         space(Arc::clone(&provider), 5),
     );
-    let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&p, &q], [&c], 71).unwrap();
-    let b = TensorMap::rand_with_seed(&runtime, [&c], [&r], 72).unwrap();
+    let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&p, &q], [&c], 71)
+        .unwrap();
+    let b = TensorMap::rand_with_seed(engine, &runtime, [&c], [&r], 72).unwrap();
     let chain = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[2],
@@ -661,37 +682,37 @@ fn output_order_and_split_key_separate_cached_step_specs() {
             },
         )
         .unwrap();
-    let run = |which: usize| match which {
+    let run = |engine: &mut dyn Engine, which: usize| match which {
         0 => net(
             &[op(&["p", "q"], &["c"]), op(&["c"], &["r"])],
             &["p", "q"],
             &["r"],
         )
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap(),
         1 => net(
             &[op(&["p", "q"], &["c"]), op(&["c"], &["r"])],
             &["p", "r"],
             &["q"],
         )
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap(),
         _ => net(
             &[op(&["p", "q"], &["c"]), op(&["c"], &["r"])],
             &["q", "p"],
             &["r"],
         )
-        .contract(&[&a, &b])
+        .contract(engine, &[&a, &b])
         .unwrap(),
     };
     let expected = [
         chain.clone(),
-        chain.permute(&[0, 2], &[1]).unwrap(),
-        chain.permute(&[1, 0], &[2]).unwrap(),
+        chain.permute(engine, &[0, 2], &[1]).unwrap(),
+        chain.permute(engine, &[1, 0], &[2]).unwrap(),
     ];
     for round in 0..2 {
         for (which, expected) in expected.iter().enumerate() {
-            let actual = run(which);
+            let actual = run(engine, which);
             assert_eq!(actual.codomain(), expected.codomain(), "{round}/{which}");
             assert_eq!(actual.domain(), expected.domain(), "{round}/{which}");
             assert_eq!(

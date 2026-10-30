@@ -94,8 +94,11 @@ fn operands<R: TypedSectorAdmission>(
 where
     R::Mode: Mode<R>,
 {
-    let a = TensorMap::from_subblock_fn(runtime, [v, w], [v, w], |t, i| value(t, i, 1)).unwrap();
-    let b = TensorMap::from_subblock_fn(runtime, [w, v], [v, w], |t, i| value(t, i, 2)).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let a = TensorMap::from_subblock_fn(engine, runtime, [v, w], [v, w], |t, i| value(t, i, 1))
+        .unwrap();
+    let b = TensorMap::from_subblock_fn(engine, runtime, [w, v], [v, w], |t, i| value(t, i, 2))
+        .unwrap();
     (a, b)
 }
 
@@ -136,12 +139,13 @@ where
     R::Mode: Mode<R>,
     R::Sector: Debug,
 {
-    let a_p = a.permute(&[0, 3], &[2, 1]).unwrap();
-    let b_p = b.permute(&[1, 3], &[0, 2]).unwrap();
-    let core = a_p.compose(&b_p).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let a_p = a.permute(engine, &[0, 3], &[2, 1]).unwrap();
+    let b_p = b.permute(engine, &[1, 3], &[0, 2]).unwrap();
+    let core = a_p.compose(engine, &b_p).unwrap();
     if check_steps {
-        let c = a.contract(b, &spec()).unwrap();
-        let steps = core.permute(&CODOMAIN, &DOMAIN).unwrap();
+        let c = a.contract(engine, b, &spec()).unwrap();
+        let steps = core.permute(engine, &CODOMAIN, &DOMAIN).unwrap();
         assert_eq!(c.codomain(), steps.codomain(), "{what}: codomain");
         assert_eq!(c.domain(), steps.domain(), "{what}: domain");
         assert_close(
@@ -185,7 +189,7 @@ where
 
 #[test]
 fn generic_toy_core_composition_matches_block_products() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(GenericToy),
         [(GenericLabel::Vacuum, 2), (GenericLabel::X, 3)],
@@ -207,7 +211,7 @@ mod racah {
 
     #[test]
     fn su3_staged_contraction_matches_block_products() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         );
@@ -289,7 +293,8 @@ mod racah {
 
     #[test]
     fn checked_su2_staged_contraction_matches_multiplicity_free_and_dense() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let degeneracies = [(0usize, 2usize), (1, 2), (2, 1)];
 
         let mf_v = GradedSpace::try_new(
@@ -299,13 +304,13 @@ mod racah {
         .unwrap();
         let mf_w = mf_v.try_dual().unwrap();
         let (a, b) = operands(&runtime, &mf_v, &mf_w, su2_value);
-        let mf = a.contract(&b, &spec()).unwrap();
+        let mf = a.contract(engine, &b, &spec()).unwrap();
 
         // Physical dense oracle of the multiplicity-free result.
         let (pa, pb, pc) = (
-            a.to_physical_dense().unwrap(),
-            b.to_physical_dense().unwrap(),
-            mf.to_physical_dense().unwrap(),
+            a.to_physical_dense(engine).unwrap(),
+            b.to_physical_dense(engine).unwrap(),
+            mf.to_physical_dense(engine).unwrap(),
         );
         let at = |shape: &[usize], index: [usize; 4]| {
             index
@@ -347,7 +352,7 @@ mod racah {
         let w = v.try_dual().unwrap();
         let (a, b) = operands(&runtime, &v, &w, sun_value);
         assert!(block_product_case("SU(2)", &a, &b, true) >= 2);
-        let checked = a.contract(&b, &spec()).unwrap();
+        let checked = a.contract(engine, &b, &spec()).unwrap();
 
         let checked = entries(&checked, sun_spin);
         let mf = entries(&mf, su2_spin);

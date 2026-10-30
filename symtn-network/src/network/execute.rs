@@ -1,4 +1,5 @@
 use super::*;
+use symtn::typed::Engine;
 
 /// A [`Network`] with a resolved contraction order for concrete operand
 /// shapes. Inspect the order via [`Self::plan`], run it via
@@ -371,7 +372,7 @@ impl PlannedNetwork {
 
 /// The device network preflight [`PlannedNetwork::execute`] and
 /// [`Network::contract`] run through `NetworkOperandStorage::admit_operands`:
-/// a Runtime with a device, every operand on it, then
+/// the caller's CUDA engine, every operand on its device, then
 /// [`device_operand_admission`]. These are every rejection class a device
 /// step could raise that the storage-generic body would not already raise
 /// before its first step, decided from operand metadata alone — no
@@ -381,6 +382,7 @@ impl PlannedNetwork {
 /// the same step, and schedules are produced only by `compile_schedule`.
 #[cfg(feature = "cuda")]
 pub(super) fn cuda_operand_admission<R, D>(
+    engine: &mut dyn Engine,
     tensors: &[&TensorMap<R, D, CudaStorage<D>>],
     contracts: bool,
 ) -> Result<(), Error>
@@ -388,15 +390,10 @@ where
     R: TypedSectorAdmission + symtn::sector::FusionRule,
     D: CudaPayload,
 {
-    let device = tensors
-        .first()
-        .ok_or_else(|| invalid("network execution requires at least one operand"))
-        .map(|tensor| __network::cuda_device_ordinal(tensor.runtime()))?
-        .ok_or_else(|| {
-            invalid(
-                "this runtime was built without a CUDA device; use Runtime::builder().cuda(device)",
-            )
-        })?;
+    let device = __network::cuda_engine_device(engine)?;
+    if tensors.is_empty() {
+        return Err(invalid("network execution requires at least one operand"));
+    }
     for &tensor in tensors {
         if tensor.placement() != Placement::Cuda(device) {
             return Err(Error::PlacementMismatch);
@@ -457,6 +454,7 @@ impl PlannedNetwork {
     /// successful execution returns a new owned tensor.
     pub fn execute<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
@@ -474,8 +472,8 @@ impl PlannedNetwork {
             ))
             .into());
         }
-        S::admit_operands(tensors, !self.schedule.steps.is_empty())?;
-        self.execute_admitted(tensors, workspace)
+        S::admit_operands(engine, tensors, !self.schedule.steps.is_empty())?;
+        self.execute_admitted(engine, tensors, workspace)
     }
 
     /// [`Self::execute`] after its operand count and admission, for callers
@@ -483,6 +481,7 @@ impl PlannedNetwork {
     /// [`Network::contract`] before its plan lookup.
     pub(crate) fn execute_admitted<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
@@ -492,7 +491,7 @@ impl PlannedNetwork {
         D: TensorScalar,
         S: NetworkPayloadStorage<D>,
     {
-        match self.execute_with_workspace_meter(tensors, workspace, None) {
+        match self.execute_with_workspace_meter(engine, tensors, workspace, None) {
             Ok(result) => Ok(result),
             Err(MeteredNetworkError::Tensor(error)) => Err(error),
             Err(MeteredNetworkError::Payload(_)) => {
@@ -503,6 +502,7 @@ impl PlannedNetwork {
 
     pub(super) fn execute_with_workspace_meter<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
         mut meter: Option<&mut PayloadMeter>,
@@ -565,7 +565,7 @@ impl PlannedNetwork {
                 .enumerate()
                 .map(|(index, tensor)| {
                     if self.conj[index] {
-                        <R::Mode as NetworkModeDispatch<R, D, S>>::adjoint_operand(tensor)
+                        <R::Mode as NetworkModeDispatch<R, D, S>>::adjoint_operand(engine, tensor)
                     } else {
                         Ok((*tensor).clone())
                     }
@@ -681,8 +681,9 @@ impl PlannedNetwork {
                 codomain: &step.codomain,
                 domain: &step.domain,
             };
-            let contracted =
-                <R::Mode as NetworkModeDispatch<R, D, S>>::contract_step(lhs, rhs, buffer, &spec)?;
+            let contracted = <R::Mode as NetworkModeDispatch<R, D, S>>::contract_step(
+                engine, lhs, rhs, buffer, &spec,
+            )?;
             if let Some(meter) = meter.as_deref_mut() {
                 let mut payloads =
                     retained_payloads.expect("meter requires retained payload snapshot");
@@ -715,8 +716,9 @@ impl PlannedNetwork {
             .as_ref()
             .ok_or_else(|| FacadeError::<R>::from(invalid("no final tensor produced")))?;
         if let Some((codomain, domain)) = &self.schedule.final_permutation {
-            let output =
-                <R::Mode as NetworkModeDispatch<R, D, S>>::permute_final(result, codomain, domain)?;
+            let output = <R::Mode as NetworkModeDispatch<R, D, S>>::permute_final(
+                engine, result, codomain, domain,
+            )?;
             if let Some(meter) = meter {
                 let mut payloads = intermediate_payloads(intermediates);
                 payloads.push(__network::network_owned_payload(&output));

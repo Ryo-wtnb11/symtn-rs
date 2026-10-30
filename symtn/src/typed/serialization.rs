@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn_core::{FusionTreeKey, MultiplicityIndex, SectorLeg, TypedSectorAdmission};
@@ -1639,6 +1640,7 @@ where
 }
 
 fn build_adjoint<R, D, C>(
+    engine: &mut dyn Engine,
     parent: TensorMap<R, D>,
 ) -> Result<TensorMap<R, D>, DecodeError<C, FacadeError<R>>>
 where
@@ -1646,7 +1648,7 @@ where
     R::Mode: TypedAdjointSpace<R>,
     D: TensorScalar,
 {
-    let tensor = parent.adjoint().map_err(DecodeError::Facade)?;
+    let tensor = parent.adjoint(engine).map_err(DecodeError::Facade)?;
     if !matches!(tensor.repr, TypedTensorRepr::Adjoint(_)) {
         return Err(DecodeError::InvalidFormat(
             "lazy-adjoint record is not lazy for this provider mode".to_string(),
@@ -1656,6 +1658,7 @@ where
 }
 
 fn decode_tensor<R, D, C>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     bytes: &[u8],
     limits: DecodeLimits,
@@ -1684,7 +1687,7 @@ where
             parent_blocks,
         } => {
             let parent = build_dense(runtime, &provider, parent_space, parent_blocks, limits)?;
-            build_adjoint(parent)
+            build_adjoint(engine, parent)
         }
     }
 }
@@ -1746,7 +1749,8 @@ where
     /// }
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let runtime = Runtime::builder().dense_threads(1).build()?;
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
+    /// let runtime = Runtime::builder().build()?;
     /// let provider = Arc::new(U1FusionRule);
     /// let codec = U1Codec(Arc::clone(&provider));
     /// let space = GradedSpace::try_new(
@@ -1756,6 +1760,7 @@ where
     ///
     /// let space_bytes = space.to_bytes_with(&codec)?;
     /// let restored_space = GradedSpace::from_bytes_with(
+    ///     engine,
     ///     &space_bytes,
     ///     DecodeLimits::default(),
     ///     &codec,
@@ -1763,14 +1768,14 @@ where
     /// assert_eq!(restored_space.sectors()?, space.sectors()?);
     /// assert!(std::ptr::eq(restored_space.provider(), provider.as_ref()));
     ///
-    /// let tensor = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+    /// let tensor = TensorMap::<U1FusionRule, f64>::from_subblock_fn(engine,
     ///     &runtime,
     ///     [&space],
     ///     [&space],
     ///     |_, indices| indices.iter().sum::<usize>() as f64,
     /// )?;
     /// let tensor_bytes = tensor.to_bytes_with(&codec)?;
-    /// let restored_tensor = TensorMap::<U1FusionRule, f64>::from_bytes_with(
+    /// let restored_tensor = TensorMap::<U1FusionRule, f64>::from_bytes_with(engine,
     ///     &runtime,
     ///     &tensor_bytes,
     ///     DecodeLimits::default(),
@@ -1807,6 +1812,7 @@ where
     /// [`TypedPersistenceCodec`] for provider-key checks, resource limits,
     /// compatibility, and failure guarantees.
     pub fn from_bytes_with<C>(
+        engine: &mut dyn Engine,
         bytes: &[u8],
         limits: DecodeLimits,
         codec: &C,
@@ -1814,6 +1820,8 @@ where
     where
         C: TypedPersistenceCodec<R>,
     {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         preflight_graded_space::<C::Error, FacadeError<R>>(bytes, limits)?;
         let (mut reader, key) = read_header(bytes, limits, KIND_SPACE, SCALAR_NONE)?;
         let provider = resolve_provider(codec, key)?;
@@ -1861,6 +1869,7 @@ macro_rules! tensor_persistence_impl {
             /// lazy adjoint. See [`TypedPersistenceCodec`] for provider-key
             /// checks, resource limits, compatibility, and failure guarantees.
             pub fn from_bytes_with<C>(
+                engine: &mut dyn Engine,
                 runtime: &Runtime,
                 bytes: &[u8],
                 limits: DecodeLimits,
@@ -1869,7 +1878,7 @@ macro_rules! tensor_persistence_impl {
             where
                 C: TypedPersistenceCodec<R>,
             {
-                decode_tensor(runtime, bytes, limits, codec)
+                decode_tensor(engine, runtime, bytes, limits, codec)
             }
         }
     };

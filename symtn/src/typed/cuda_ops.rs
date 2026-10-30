@@ -12,24 +12,26 @@ use super::*;
 ///
 /// use symtn::sector::U1Irrep;
 /// use symtn::sector::U1FusionRule;
-/// use symtn::typed::{Runtime, Svd, TensorMap, Truncation};
+/// use symtn::typed::{CudaDeviceId, CudaEngine, Runtime, Svd, TensorMap, Truncation};
 /// use symtn::typed::GradedSpace;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let runtime = Runtime::builder().cuda(0).build()?;
+/// let engine = &mut symtn::typed::CpuEngine::serial();
+/// let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0))?;
+/// let runtime = Runtime::builder().build()?;
 /// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)])?;
-/// let device = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+/// let device = TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
 ///     (index[0] + 2 * index[1]) as f64
 /// })?
-/// .to_cuda()?;
+/// .to_cuda(cuda)?;
 ///
-/// let Svd { u, s, vh } = device.svd_compact(&[0], &[1])?;
+/// let Svd { u, s, vh } = device.svd_compact(cuda, &[0], &[1])?;
 /// // Until a device `restrict_leg` lands, the factors move to the host once.
-/// let (u, s, vh) = (u.to_host()?, s.to_host()?, vh.to_host()?);
-/// let found = s.domain()[0].find_truncated(&s.diagview()?, &Truncation::rank(2))?;
-/// let u = u.restrict_leg(&[(u.codomain_rank(), &found.selection)])?;
-/// let s = s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])?;
-/// let vh = vh.restrict_leg(&[(0, &found.selection)])?;
+/// let (u, s, vh) = (u.to_host(cuda)?, s.to_host(cuda)?, vh.to_host(cuda)?);
+/// let found = s.domain()[0].find_truncated(&s.diagview(engine)?, &Truncation::rank(2))?;
+/// let u = u.restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])?;
+/// let s = s.restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])?;
+/// let vh = vh.restrict_leg(engine, &[(0, &found.selection)])?;
 /// # let _ = (u, s, vh, found.error);
 /// # Ok(())
 /// # }
@@ -52,13 +54,13 @@ use super::*;
 /// use symtn::sector::{CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, TypedSectorAdmission};
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn no_checked_generic_cuda_svd<R>(tensor: &TensorMap<R, f64, CudaStorage>)
+/// fn no_checked_generic_cuda_svd<R>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<R, f64, CudaStorage>)
 /// where
 ///     R: TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>
 ///         + CheckedGenericFusion
 ///         + CheckedGenericRigidSymbols<Scalar = f64>,
 /// {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -73,8 +75,8 @@ use super::*;
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{CudaPayload, CudaStorage, TensorMap};
 ///
-/// fn device_payload_only<D: CudaPayload>(tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+/// fn device_payload_only<D: CudaPayload>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>) {
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -83,10 +85,10 @@ use super::*;
 /// use symtn::typed::FactorizationScalar;
 /// use symtn::typed::{CudaPayload, CudaStorage, TensorMap};
 ///
-/// fn device_payload_and_host_factorizing<D: CudaPayload + FactorizationScalar>(
+/// fn device_payload_and_host_factorizing<D: CudaPayload + FactorizationScalar>(engine: &mut dyn symtn::typed::Engine,
 ///     tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>,
 /// ) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -94,10 +96,10 @@ use super::*;
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{CudaFactorizationPayload, CudaStorage, TensorMap};
 ///
-/// fn device_factorizing<D: CudaFactorizationPayload>(
+/// fn device_factorizing<D: CudaFactorizationPayload>(engine: &mut dyn symtn::typed::Engine,
 ///     tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>,
 /// ) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -108,12 +110,12 @@ use super::*;
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn f32_device_svd(tensor: &TensorMap<U1FusionRule, f32, CudaStorage<f32>>) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+/// fn f32_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f32, CudaStorage<f32>>) {
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 ///
-/// fn f64_device_svd(tensor: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>) {
-///     let _ = tensor.svd_compact(&[0], &[1]);
+/// fn f64_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>) {
+///     let _ = tensor.svd_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -122,12 +124,12 @@ use super::*;
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{CudaStorage, HermitianTol, TensorMap};
 ///
-/// fn c32_device_eigh(tensor: &TensorMap<U1FusionRule, Complex32, CudaStorage<Complex32>>) {
-///     let _ = tensor.eigh_full(&[0], &[1], HermitianTol::DEFAULT);
+/// fn c32_device_eigh(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, Complex32, CudaStorage<Complex32>>) {
+///     let _ = tensor.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT);
 /// }
 ///
-/// fn c64_device_eigh(tensor: &TensorMap<U1FusionRule, Complex64, CudaStorage<Complex64>>) {
-///     let _ = tensor.eigh_full(&[0], &[1], HermitianTol::DEFAULT);
+/// fn c64_device_eigh(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, Complex64, CudaStorage<Complex64>>) {
+///     let _ = tensor.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT);
 /// }
 /// ```
 impl<R, D> TensorMap<R, D, CudaStorage<D>>
@@ -173,6 +175,7 @@ where
     /// factor plan. No device lock is taken and no output exists yet.
     fn cuda_factor_preflight(
         &self,
+        engine: &mut dyn Engine,
         operation: &'static str,
         endomorphism: Option<symtn_matrixalgebra::seam::EndomorphismFamily>,
     ) -> Result<(&CudaStorage<D>, CompactFactorPlan), Error> {
@@ -194,9 +197,9 @@ where
             symtn_matrixalgebra::seam::validate_endomorphism_region_stacking(&regions, family)?;
         }
         {
-            // Preflight only: the ordinal is immutable, so this placement
-            // check takes no device lock at all.
-            let device = self.runtime.cuda_device_ordinal_checked()?;
+            // Preflight only: opens no device work; a non-CUDA engine is
+            // refused here, before any output exists.
+            let device = crate::runtime::cuda_call(engine)?.device();
             Self::validate_cuda_owned_metadata(
                 Placement::Cuda(device),
                 source.placement(),
@@ -208,10 +211,10 @@ where
     }
 
     /// The device kernel of [`TensorMap::svd_compact`] on the current split.
-    fn svd_compact_matrix(&self) -> Result<Svd<Self>, Error> {
+    fn svd_compact_matrix(&self, engine: &mut dyn Engine) -> Result<Svd<Self>, Error> {
         // As for typed CUDA QR, all provider work and final-space admission
         // complete before the execution lock and before any output exists.
-        let (source, plan) = self.cuda_factor_preflight("svd_compact", None)?;
+        let (source, plan) = self.cuda_factor_preflight(engine, "svd_compact", None)?;
         let treewise = probe::RoutePolicy::current().svd_treewise;
         let left_space = plan.left_space(self.logical_space())?;
         let right_space = plan.right_space(self.logical_space())?;
@@ -225,7 +228,7 @@ where
         let middle_len = middle_space.space().required_len()?;
         let right_len = right_space.space().required_len()?;
         let (left_data, middle_data, right_data) = {
-            let mut lease = self.runtime.lease_cuda()?;
+            let mut lease = crate::runtime::cuda_call(engine)?;
             let cuda = &mut *lease;
             require_finite_cuda_input::<D>(
                 cuda,
@@ -369,10 +372,15 @@ where
     }
 
     /// The device kernel of [`TensorMap::eigh_full`] on the current split.
-    fn eigh_full_matrix(&self, hermitian_tol: HermitianTol) -> Result<Eigh<Self>, Error> {
+    fn eigh_full_matrix(
+        &self,
+        engine: &mut dyn Engine,
+        hermitian_tol: HermitianTol,
+    ) -> Result<Eigh<Self>, Error> {
         // The Host compact factor plan: an endomorphism's compact bond keeps
         // every eigenpair (`min(n, n) = n`), so its left route is EIGH's.
         let (source, plan) = self.cuda_factor_preflight(
+            engine,
             "eigh_full",
             Some(symtn_matrixalgebra::seam::EndomorphismFamily::EighFull),
         )?;
@@ -382,7 +390,7 @@ where
         // a late nonfinite or non-Hermitian sector cannot trigger partial
         // numerical work; finiteness first, as on the Host.
         {
-            let mut lease = self.runtime.lease_cuda()?;
+            let mut lease = crate::runtime::cuda_call(engine)?;
             let cuda = &mut *lease;
             require_finite_cuda_input::<D>(
                 cuda,
@@ -404,7 +412,7 @@ where
         }
 
         let (spectra, mut raw_vectors, orders, permuted) = {
-            let mut lease = self.runtime.lease_cuda()?;
+            let mut lease = crate::runtime::cuda_call(engine)?;
             let cuda = &mut *lease;
             let mut device_spectra = Vec::with_capacity(plan.source_regions().len());
             let mut vectors = Vec::with_capacity(plan.source_regions().len());
@@ -482,7 +490,7 @@ where
         )?;
 
         let (diagonal_data, vector_data) = {
-            let mut lease = self.runtime.lease_cuda()?;
+            let mut lease = crate::runtime::cuda_call(engine)?;
             let cuda = &mut *lease;
             let diagonal_data = CudaStorage::upload_owned(cuda, diagonal_host)?;
             let mut vector_data = CudaStorage::upload_owned(cuda, vec![D::ZERO; vector_len])?;
@@ -615,13 +623,13 @@ where
 /// use symtn::sector::{CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, TypedSectorAdmission};
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn no_checked_generic_cuda_qr<R>(tensor: &TensorMap<R, f64, CudaStorage>)
+/// fn no_checked_generic_cuda_qr<R>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<R, f64, CudaStorage>)
 /// where
 ///     R: TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>
 ///         + CheckedGenericFusion
 ///         + CheckedGenericRigidSymbols<Scalar = f64>,
 /// {
-///     let _ = tensor.qr_compact(&[0], &[1]);
+///     let _ = tensor.qr_compact(engine, &[0], &[1]);
 /// }
 /// ```
 ///
@@ -629,10 +637,10 @@ where
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{CudaFactorizationPayload, CudaStorage, TensorMap};
 ///
-/// fn device_qr<D: CudaFactorizationPayload>(
+/// fn device_qr<D: CudaFactorizationPayload>(engine: &mut dyn symtn::typed::Engine,
 ///     tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>,
 /// ) {
-///     let _ = tensor.qr_compact(&[0], &[1]);
+///     let _ = tensor.qr_compact(engine, &[0], &[1]);
 /// }
 /// ```
 impl<R, D> TensorMap<R, D, CudaStorage<D>>
@@ -647,17 +655,17 @@ where
     D: CudaFactorizationPayload,
 {
     /// The device kernel of [`TensorMap::qr_compact`] on the current split.
-    fn qr_compact_matrix(&self) -> Result<Qr<Self>, Error> {
+    fn qr_compact_matrix(&self, engine: &mut dyn Engine) -> Result<Qr<Self>, Error> {
         // Provider queries and final HomSpace admission belong outside the
         // execution lock; the plan owns every source-to-factor route.
-        let (source, plan) = self.cuda_factor_preflight("qr_compact", None)?;
+        let (source, plan) = self.cuda_factor_preflight(engine, "qr_compact", None)?;
         let left_space = plan.left_space(self.logical_space())?;
         let right_space = plan.right_space(self.logical_space())?;
         let left_len = left_space.space().required_len()?;
         let right_len = right_space.space().required_len()?;
 
         let (left_data, right_data) = {
-            let mut lease = self.runtime.lease_cuda()?;
+            let mut lease = crate::runtime::cuda_call(engine)?;
             let cuda = &mut *lease;
             require_finite_cuda_input::<D>(
                 cuda,
@@ -744,28 +752,32 @@ where
     D: CudaFactorizationPayload,
 {
     fn qr_compact(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Qr<TensorMap<R, D, Self>>, Error> {
-        t.qr_compact_matrix()
+        t.qr_compact_matrix(engine)
     }
 
     fn svd_compact(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Svd<TensorMap<R, D, Self>>, Error> {
-        t.svd_compact_matrix()
+        t.svd_compact_matrix(engine)
     }
 
     fn eigh_full(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<TensorMap<R, D, Self>>, Error> {
-        t.eigh_full_matrix(hermitian_tol)
+        t.eigh_full_matrix(engine, hermitian_tol)
     }
 
     fn eigh_full_stack(
+        engine: &mut dyn Engine,
         _: ExecToken,
         plan: &EighFullPlan<R, D, Self>,
         source: &StackedTensorMap<R, D, Self>,
@@ -773,6 +785,7 @@ where
         workspace: &mut EighFullWorkspace<R, D, Self>,
     ) -> Result<(), BatchError> {
         plan.run_cuda(
+            engine,
             source,
             buffers,
             &mut workspace.sorted,

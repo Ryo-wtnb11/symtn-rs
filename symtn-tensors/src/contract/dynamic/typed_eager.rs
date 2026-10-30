@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 use crate::tests::TestTensor;
 use symtn_operations::TensorContractSpec;
@@ -8,6 +9,7 @@ use crate::tree_transform::build_tree_pair_transform_group_plan;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensorcontract_fusion_dynamic_plan_into_with<BT, BC, R, D>(
+    engine: &mut dyn Engine,
     tree_backend: &mut BT,
     tree_workspace: &mut BT::Workspace,
     contract_backend: &mut BC,
@@ -101,6 +103,7 @@ where
 
     if let Some(lhs_core) = lhs_core.as_mut() {
         tree_pair_transform_typed_to_dynamic(
+            engine,
             tree_backend,
             tree_workspace,
             rule,
@@ -115,6 +118,7 @@ where
     }
     if let Some(rhs_core) = rhs_core.as_mut() {
         tree_pair_transform_typed_to_dynamic(
+            engine,
             tree_backend,
             tree_workspace,
             rule,
@@ -149,6 +153,7 @@ where
         let dst_space = dst.dynamic_space().clone();
         let dst_structure = std::sync::Arc::clone(dst.structure());
         return tensorcontract_dynamic_core_into_raw(
+            engine,
             contract_backend,
             contract_workspace,
             rule,
@@ -169,6 +174,7 @@ where
     let core_dst_space_for_contract = core_dst.space().clone();
     let core_dst_structure = std::sync::Arc::clone(core_dst.space().structure());
     tensorcontract_dynamic_core_into_raw(
+        engine,
         contract_backend,
         contract_workspace,
         rule,
@@ -182,6 +188,7 @@ where
         D::zero(),
     )?;
     tree_pair_transform_dynamic_to_typed(
+        engine,
         tree_backend,
         tree_workspace,
         rule,
@@ -221,6 +228,7 @@ where
     reason = "the typed-to-dynamic replay boundary keeps backend resources, transform, structures, buffers, conjugation, and alpha explicit"
 )]
 fn tree_pair_transform_typed_to_dynamic<BT, R, D>(
+    engine: &mut dyn Engine,
     tree_backend: &mut BT,
     tree_workspace: &mut BT::Workspace,
     rule: &R,
@@ -246,6 +254,7 @@ where
     )?;
     let dst_structure = std::sync::Arc::clone(dst.space().structure());
     tree_backend.tree_transform_structure_overwrite_into_raw(
+        engine,
         tree_workspace,
         &structure,
         &dst_structure,
@@ -262,6 +271,7 @@ where
     reason = "the dynamic-to-typed replay boundary keeps backend resources, transform, operands, and alpha/beta explicit"
 )]
 fn tree_pair_transform_dynamic_to_typed<BT, R, D>(
+    engine: &mut dyn Engine,
     tree_backend: &mut BT,
     tree_workspace: &mut BT::Workspace,
     rule: &R,
@@ -282,6 +292,7 @@ where
     let dst_structure = std::sync::Arc::clone(dst.structure());
     let src_structure = std::sync::Arc::clone(src.space().structure());
     tree_backend.tree_transform_structure_into_raw(
+        engine,
         tree_workspace,
         &structure,
         &dst_structure,
@@ -295,6 +306,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn tensorcontract_dynamic_core_into_raw<B, R, D>(
+    engine: &mut dyn Engine,
     backend: &mut B,
     workspace: &mut B::Workspace,
     rule: &R,
@@ -315,6 +327,7 @@ where
 {
     let _ = dst_structure;
     tensorcontract_core_fusion_blocks_into_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         backend,
         workspace,

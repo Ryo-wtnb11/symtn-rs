@@ -225,46 +225,58 @@ pub(super) fn assert_compact_factors_reconstruct_input<R, D>(
 }
 
 pub(super) fn f64_qr_outputs(rows: usize, cols: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let data = vec![1.0; rows * cols];
     dense
-        .qr(DenseRead::F64(
-            symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
-        ))
+        .qr(
+            engine,
+            DenseRead::F64(
+                symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
+            ),
+        )
         .unwrap()
 }
 
 pub(super) fn c64_qr_outputs(rows: usize, cols: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let data = vec![Complex64::new(1.0, 1.0); rows * cols];
     dense
-        .qr(DenseRead::C64(
-            symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
-        ))
+        .qr(
+            engine,
+            DenseRead::C64(
+                symtn_dense::DenseView::new(&data, &[rows, cols], &[1, rows], 0).unwrap(),
+            ),
+        )
         .unwrap()
 }
 
 pub(super) fn f64_eigh_outputs(order: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let data = vec![1.0; order * order];
     let shape = [order, order];
     let strides = [1, order];
     dense
-        .eigh(DenseRead::F64(
-            symtn_dense::DenseView::new(&data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh(
+            engine,
+            DenseRead::F64(symtn_dense::DenseView::new(&data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap()
 }
 
 pub(super) fn c64_eigh_outputs(order: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let data = vec![Complex64::new(1.0, 1.0); order * order];
     let shape = [order, order];
     let strides = [1, order];
     dense
-        .eigh(DenseRead::C64(
-            symtn_dense::DenseView::new(&data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh(
+            engine,
+            DenseRead::C64(symtn_dense::DenseView::new(&data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap()
 }
 
@@ -395,6 +407,7 @@ where
     R::Key: 'static + Clone + Eq + std::hash::Hash + Send + Sync,
     D: symtn_tensors::DenseRecouplingScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     fn bind<R: MultiplicityFreeFusionRule>(
         provider: &Arc<R>,
         space: &DynamicFusionMapSpace,
@@ -414,6 +427,7 @@ where
         OutputAxisOrder::Identity => (0..dst_space.space().rank()).collect(),
     };
     context.tensorcontract_planned_into(
+        engine,
         &dst_space,
         dst.data_mut(),
         (FusionOperand::direct(lhs_space.space()), lhs.data()),
@@ -691,8 +705,10 @@ pub(super) fn assert_eigh_preflight_at<D: FactorScalar + std::fmt::Debug>(
     accepted: bool,
     hermitian_tol: HermitianTol,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
     let error = eigh_full_dyn(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), tensor).dynamic(),
         hermitian_tol,

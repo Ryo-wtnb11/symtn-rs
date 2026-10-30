@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 /// Null space of a compact diagonal, published through `authority`.
 ///
@@ -40,6 +41,7 @@ where
 }
 
 fn null_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
     side: FactorSide,
@@ -55,7 +57,7 @@ where
         source,
         Some(FactorFamily::Null),
         |space, spectrum| null_diagonal(&M::authority(space), space, spectrum, side),
-        |dense, input| null_dense(dense, &M::authority(input.space()), input, side),
+        |dense, input| null_dense(engine, dense, &M::authority(input.space()), input, side),
     )
 }
 
@@ -66,6 +68,7 @@ where
 /// published; a compact diagonal has an empty null space.
 #[doc(hidden)]
 pub fn left_null_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, M::Error>
@@ -75,7 +78,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    null_from_source::<M, _, _, _, _>(lease, source, FactorSide::Left)
+    null_from_source::<M, _, _, _, _>(engine, lease, source, FactorSide::Left)
 }
 
 /// Right null space of `source` in fusion mode `M`: per coupled sector the
@@ -83,6 +86,7 @@ where
 /// (MatrixAlgebraKit `lq_null!`); see [`left_null_from_source`].
 #[doc(hidden)]
 pub fn right_null_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, M::Error>
@@ -92,7 +96,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    null_from_source::<M, _, _, _, _>(lease, source, FactorSide::Right)
+    null_from_source::<M, _, _, _, _>(engine, lease, source, FactorSide::Right)
 }
 
 #[cfg(test)]
@@ -101,6 +105,7 @@ where
 /// Each sector keeps the `rows - cols` (when positive) trailing columns of its
 /// full QR's `Q`; sectors with no null directions drop out of `W`.
 pub(crate) fn left_null<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<BoundTensorMap<R, D>, OperationError>
@@ -109,13 +114,14 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let out = left_null_dyn(dense, &input.dynamic())?;
+    let out = left_null_dyn(engine, dense, &input.dynamic())?;
     typed_from_bound_factor(out)
 }
 
 #[cfg(test)]
 /// Provider-bound dynamic-rank [`left_null`].
 pub(crate) fn left_null_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
@@ -124,7 +130,13 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    null_dense(dense, &MfAuthority(input.space()), input, FactorSide::Left)
+    null_dense(
+        engine,
+        dense,
+        &MfAuthority(input.space()),
+        input,
+        FactorSide::Left,
+    )
 }
 
 #[cfg(test)]
@@ -133,6 +145,7 @@ where
 /// Each sector keeps the `cols - rows` (when positive) trailing rows of its
 /// full LQ's `Q`; sectors with no null directions drop out of `W`.
 pub(crate) fn right_null<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<BoundTensorMap<R, D>, OperationError>
@@ -141,13 +154,14 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let out = right_null_dyn(dense, &input.dynamic())?;
+    let out = right_null_dyn(engine, dense, &input.dynamic())?;
     typed_from_bound_factor(out)
 }
 
 #[cfg(test)]
 /// Provider-bound dynamic-rank [`right_null`].
 pub(crate) fn right_null_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
@@ -156,7 +170,13 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    null_dense(dense, &MfAuthority(input.space()), input, FactorSide::Right)
+    null_dense(
+        engine,
+        dense,
+        &MfAuthority(input.space()),
+        input,
+        FactorSide::Right,
+    )
 }
 
 #[cfg(test)]
@@ -166,6 +186,7 @@ where
 /// staged before the bond is admitted and scattered by the shared checked
 /// factor builder.
 pub(crate) fn left_null_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -175,6 +196,7 @@ where
     D: FactorScalar,
 {
     null_dense(
+        engine,
         dense,
         &CheckedAuthority(input.space().provider_arc()),
         input,
@@ -186,6 +208,7 @@ where
 /// Checked-Generic right null space; see
 /// [`left_null_dyn_checked_generic`] for the transaction boundary.
 pub(crate) fn right_null_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -195,6 +218,7 @@ where
     D: FactorScalar,
 {
     null_dense(
+        engine,
         dense,
         &CheckedAuthority(input.space().provider_arc()),
         input,
@@ -210,6 +234,7 @@ where
 /// is `(rows - cols)₊` per sector, decided by the space alone, so a sector
 /// whose null side is not the longer one needs no dense work at all.
 fn null_dense<A, E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     authority: &A,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -228,7 +253,7 @@ where
         FactorSide::Right => space.homspace().domain(),
     })?;
     let mut pairs = Vec::new();
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for index in 0..matrices.len() {
             let matrix = matrices.get(index)?;
             let (rows, cols) = (matrix.rows, matrix.cols);
@@ -241,7 +266,7 @@ where
                 continue;
             }
             let null_dim = extent - other;
-            let basis = qr_null_basis(dense, matrix.data, rows, cols, side)?;
+            let basis = qr_null_basis(engine, dense, matrix.data, rows, cols, side)?;
             null_dimensions.insert(matrix.sector, null_dim);
             let (left, right) = match side {
                 FactorSide::Left => (basis, Vec::new()),
@@ -276,6 +301,7 @@ where
 /// MatrixAlgebraKit `qr_null!`'s `Q * [0; I]` up to a unitary gauge on the
 /// null block, which the null-space contract leaves free.
 fn qr_null_basis<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     rows: usize,
@@ -290,7 +316,7 @@ where
         FactorSide::Left => (rows, cols),
         FactorSide::Right => (cols, rows),
     };
-    let (mut q, _) = augmented_identity_qr(dense, m, n, |block| match side {
+    let (mut q, _) = augmented_identity_qr(engine, dense, m, n, |block| match side {
         FactorSide::Left => block.copy_from_slice(matrix),
         FactorSide::Right => adjoint_col_major_into(matrix, rows, cols, block),
     })?;

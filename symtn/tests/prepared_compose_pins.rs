@@ -65,9 +65,10 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut state = 0xcbf2_9ce4_8422_2325;
     for index in 0..stack.len() {
-        let member = stack.member(index).unwrap();
+        let member = stack.member(engine, index).unwrap();
         fold(
             &mut state,
             member.dense_data().unwrap().iter().flat_map(|value| {
@@ -99,7 +100,8 @@ fn record<R, D>(
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let stacks = |count, salt| {
         (
             StackedTensorMap::pack(&members::<R, D>(&runtime, &[&v, &v], &[&w], count, salt))
@@ -112,11 +114,12 @@ fn record<R, D>(
     // A first composition on another plan creates the Runtime's context and
     // fills the process-wide caches, whose cold cost depends on the platform
     // and the enabled features; the rows below count this plan's own work.
-    let warmup = ComposePlan::new(&lhs, &rhs).unwrap();
+    let warmup = ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let warmup_workspace = &mut warmup.workspace().unwrap();
     warmup
-        .execute(&lhs, &rhs, &mut warmup.workspace().unwrap())
+        .execute(engine, &lhs, &rhs, warmup_workspace)
         .unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut retained_by_call = Vec::new();
     for (call, count) in [1usize, 2, 17, 1].into_iter().enumerate() {
@@ -127,22 +130,27 @@ fn record<R, D>(
                 .unwrap()
         });
         let (_, first, first_bytes) = calls(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         });
         let (_, warm, warm_bytes) = calls(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         });
-        let output = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let output = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         let value = stack_digest(output);
         let output_bytes = output.len()
-            * output.member(0).unwrap().dense_data().unwrap().len()
+            * output
+                .member(engine, 0)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .len()
             * std::mem::size_of::<D>();
         let retained = workspace.retained_bytes();
         // The first `execute_into` may grow the Runtime context's fill
         // scratch once; the second is warm.
         for (warm_into, mut dst) in fills.into_iter().enumerate() {
             let (_, into, into_bytes) = calls(|| {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                     .unwrap();
             });
             assert_eq!(stack_digest(&dst), value, "{key}: execute_into == execute");
@@ -186,16 +194,17 @@ fn record<R, D>(
 /// Every rejected call of `mismatched_stacks_are_typed_errors_before_any_work`
 /// and the foreign workspace, as the error each returns.
 fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let lhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 3, 1)).unwrap();
     let rhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 3, 2)).unwrap();
     let short = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 2, 2)).unwrap();
     let foreign =
         StackedTensorMap::pack(&members::<_, f64>(&other_runtime, &[&w], &[&v], 3, 2)).unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
-    let other_plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let other_plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut ws = plan.workspace().unwrap();
     let mut other_ws = other_plan.workspace().unwrap();
     let mut wrong_dst =
@@ -208,39 +217,39 @@ fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
     vec![
         (
             "new: foreign runtime",
-            show(ComposePlan::new(&lhs, &foreign).map(|_| ())),
+            show(ComposePlan::new(engine, &lhs, &foreign).map(|_| ())),
         ),
         (
             "new: member counts differ",
-            show(ComposePlan::new(&lhs, &short).map(|_| ())),
+            show(ComposePlan::new(engine, &lhs, &short).map(|_| ())),
         ),
         (
             "execute: swapped operands",
-            show(plan.execute(&rhs, &lhs, &mut ws).map(|_| ())),
+            show(plan.execute(engine, &rhs, &lhs, &mut ws).map(|_| ())),
         ),
         (
             "execute: foreign runtime",
-            show(plan.execute(&lhs, &foreign, &mut ws).map(|_| ())),
+            show(plan.execute(engine, &lhs, &foreign, &mut ws).map(|_| ())),
         ),
         (
             "execute: member counts differ",
-            show(plan.execute(&lhs, &short, &mut ws).map(|_| ())),
+            show(plan.execute(engine, &lhs, &short, &mut ws).map(|_| ())),
         ),
         (
             "execute_into: wrong destination",
-            show(plan.execute_into(&lhs, &rhs, &mut wrong_dst, &mut ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, &mut wrong_dst, &mut ws)),
         ),
         (
             "execute_into: short destination",
-            show(plan.execute_into(&lhs, &rhs, &mut short_dst, &mut ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, &mut short_dst, &mut ws)),
         ),
         (
             "execute_into: foreign workspace",
-            show(plan.execute_into(&lhs, &rhs, &mut dst, &mut other_ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut other_ws)),
         ),
         (
             "execute: foreign workspace",
-            show(plan.execute(&lhs, &rhs, &mut other_ws).map(|_| ())),
+            show(plan.execute(engine, &lhs, &rhs, &mut other_ws).map(|_| ())),
         ),
     ]
 }

@@ -66,6 +66,7 @@ fn bench_permute_u1_many(c: &mut Criterion) {
     c.bench_function("permute_u1_many_deg2_c21", |bencher| {
         bencher.iter(|| {
             tree_transform_structure_overwrite_with_strided_kernel_raw(
+                strided_kernel::Exec::serial(),
                 &mut kernels,
                 &mut workspace,
                 &transform,

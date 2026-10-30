@@ -462,10 +462,6 @@ jobs:
           key: backend-cuda
       - run: cargo check --locked --workspace --all-targets --no-default-features --features cuda,cpu-faer
         working-directory: symtn
-      # GPU-free: the single-stream configuration (#1391) is set and checked
-      # before any device access.
-      - run: cargo test --locked -p symtn-dense --no-default-features --features cuda,cpu-faer --test cuda_stream_config_conflict --test cuda_stream_config_single
-        working-directory: symtn
       - name: Run GPU-free CUDA library tests
         working-directory: symtn
         run: |
@@ -474,8 +470,8 @@ jobs:
           trap 'rm -f "$test_output"' EXIT
           cargo test --locked -p symtn-dense -p symtn --lib --no-default-features --features cuda,cpu-faer \
             -- --color never 2>&1 | tee "$test_output"
-          test "$(grep -Ec '^test cuda_adapter::tests::[^ ]+ \.\.\. ok$' "$test_output")" -ge 9
-          test "$(grep -Ec '^test (runtime::tests::cuda_device_lock_is_one_per_ordinal|typed::batched::contract_batch::fermionic_unit_tests::(signed_direct_can_leave_inactive_destination_blocks|cuda_dynamic_tree_admission_is_single_only)|typed::representation_gates::cuda::[^ ]+|typed::representation_gates::cuda_factorize::typed_cuda_[^ ]+) \.\.\. ok$' "$test_output")" -ge 8
+          test "$(grep -Ec '^test cuda_adapter::tests::[^ ]+ \.\.\. ok$' "$test_output")" -ge 11
+          test "$(grep -Ec '^test (runtime::tests::cuda_call_refuses_a_cpu_engine|typed::batched::contract_batch::fermionic_unit_tests::(signed_direct_can_leave_inactive_destination_blocks|cuda_dynamic_tree_admission_is_single_only)|typed::representation_gates::cuda::[^ ]+|typed::representation_gates::cuda_factorize::typed_cuda_[^ ]+) \.\.\. ok$' "$test_output")" -ge 8
           grep -Fxq 'test typed::batched::contract_batch::fermionic_unit_tests::cuda_dynamic_tree_admission_is_single_only ... ok' "$test_output"
       - name: Run GPU-free CUDA tree-transform admission tests
         working-directory: symtn

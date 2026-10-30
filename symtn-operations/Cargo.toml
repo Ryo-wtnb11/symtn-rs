@@ -15,21 +15,21 @@ num-complex = "0.4"
 num-traits = "0.2"
 smallvec = { version = "1", features = ["const_generics", "union"] }
 strided-kernel.workspace = true
-# Tree-transform replay parallelism uses rayon directly: strided-kernel's
-# unconditional "parallel" feature above already pulls rayon into every
-# build, so this adds no dependency weight. Replay, compile and strided
-# regions run inside the runtime's one CPU pool (`host_pool`).
-rayon = "1.10"
 rustc-hash = "2"
+# Recovers the caller's `CpuEngine` behind `&mut dyn Engine` for Host
+# regions (`host_pool::region`); the version symtn-dense uses.
+tenferro-cpu = { version = "0.8.0", default-features = false, optional = true }
 
 [features]
+# A compiled CPU provider: Host regions take the caller CPU engine's token.
+tenferro = ["dep:tenferro-cpu", "symtn-dense/tenferro"]
 default = ["cpu-faer"]
-cpu-faer = ["symtn-dense/cpu-faer"]
-cpu-blas = ["symtn-dense/cpu-blas"]
-blas-accelerate = ["symtn-dense/blas-accelerate"]
-blas-openblas = ["symtn-dense/blas-openblas"]
-blas-mkl = ["symtn-dense/blas-mkl"]
-provider-inject = ["symtn-dense/provider-inject"]
+cpu-faer = ["tenferro", "symtn-dense/cpu-faer"]
+cpu-blas = ["tenferro", "symtn-dense/cpu-blas"]
+blas-accelerate = ["tenferro", "symtn-dense/blas-accelerate"]
+blas-openblas = ["tenferro", "symtn-dense/blas-openblas"]
+blas-mkl = ["tenferro", "symtn-dense/blas-mkl"]
+provider-inject = ["tenferro", "symtn-dense/provider-inject"]
 # Unstable, internal: reference oracle for tree-transform replay (per-block
 # strided driver and scalar recoupling); production replay never uses it
 # (#1767). It also adds `HostKernelAdapter::recoupling_src_times_u_transpose`,
@@ -56,9 +56,6 @@ harness = false
 name = "tree_transform_lowering"
 harness = false
 
-[lints.rust]
-# `symtn_scope_audit`: CI-only coverage audit of Host pool entry (host_pool.rs).
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(symtn_scope_audit)"] }
 
 [[test]]
 name = "integration"

@@ -2,7 +2,7 @@ use num_complex::{Complex32, Complex64};
 
 use crate::{
     DenseDType, DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseView,
-    DenseViewMut, DenseWrite,
+    DenseViewMut, DenseWrite, Engine,
 };
 
 /// One GEMM of a batched matmul over shared flat buffers: the column-major
@@ -68,12 +68,24 @@ mod sealed {
 
 /// The body of a [`DenseExecutor::with_linalg_scope`].
 pub type DenseLinalgScopeBody<'a> =
-    dyn FnMut(&mut dyn DenseExecutor) -> Result<(), DenseError> + Send + 'a;
+    dyn FnMut(&mut dyn DenseExecutor, &mut dyn Engine) -> Result<(), DenseError> + Send + 'a;
 
 pub trait DenseExecutor: sealed::AsDynDenseExecutor {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError>;
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError>;
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError>;
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError>;
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError>;
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError>;
 
     /// Runs `body` once with this executor, letting the sequence of per-matrix
     /// calls it makes share one backend admission where the executor has a
@@ -86,10 +98,15 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// it must not rely on the caller's thread-local state. It must reach
     /// dense work only through the executor it is given: another executor, or
     /// work started on other threads that re-enters this one, can panic in the
-    /// backend's re-entry guard. The default runs `body(self)` on the calling
-    /// thread.
-    fn with_linalg_scope(&mut self, body: &mut DenseLinalgScopeBody<'_>) -> Result<(), DenseError> {
-        body(self.as_dyn_dense_executor())
+    /// backend's re-entry guard. The body receives the same caller engine; it
+    /// must pass that engine to every executor call it makes. The default runs
+    /// `body(self, engine)` on the calling thread.
+    fn with_linalg_scope(
+        &mut self,
+        engine: &mut dyn Engine,
+        body: &mut DenseLinalgScopeBody<'_>,
+    ) -> Result<(), DenseError> {
+        body(self.as_dyn_dense_executor(), engine)
     }
 
     /// Applies `op` to each input in order and returns exactly one entry per
@@ -101,14 +118,15 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// once per batch, not once per matrix.
     fn factorize_batch(
         &mut self,
+        engine: &mut dyn Engine,
         op: DenseFactorization,
         inputs: &[DenseRead<'_>],
     ) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
         inputs
             .iter()
             .map(|&input| match op {
-                DenseFactorization::Svd => self.svd(input),
-                DenseFactorization::Qr => self.qr(input),
+                DenseFactorization::Svd => self.svd(engine, input),
+                DenseFactorization::Qr => self.qr(engine, input),
             })
             .collect()
     }
@@ -129,6 +147,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// before constructing or calling its backend.
     fn svd_full_owned(
         &mut self,
+        _engine: &mut dyn Engine,
         _input: DenseOwned,
         _rows: usize,
         _cols: usize,
@@ -142,6 +161,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// Solve `a * x = b` into caller-owned storage.
     fn solve_into(
         &mut self,
+        _engine: &mut dyn Engine,
         _a: DenseRead<'_>,
         _b: DenseRead<'_>,
         _x: DenseWrite<'_>,
@@ -154,12 +174,13 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
 
     fn svd_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         u: DenseWrite<'_>,
         s: DenseWrite<'_>,
         vt: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
-        let outputs = self.svd(input)?;
+        let outputs = self.svd(engine, input)?;
         if outputs.len() != 3 {
             return Err(arity_mismatch("svd_into", 3, outputs.len()));
         }
@@ -170,11 +191,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
 
     fn qr_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         q: DenseWrite<'_>,
         r: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
-        let outputs = self.qr(input)?;
+        let outputs = self.qr(engine, input)?;
         if outputs.len() != 2 {
             return Err(arity_mismatch("qr_into", 2, outputs.len()));
         }
@@ -184,11 +206,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
 
     fn eigh_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         values: DenseWrite<'_>,
         vectors: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
-        let outputs = self.eigh(input)?;
+        let outputs = self.eigh(engine, input)?;
         if outputs.len() != 2 {
             return Err(arity_mismatch("eigh_into", 2, outputs.len()));
         }
@@ -199,8 +222,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// General (non-Hermitian) eigendecomposition `(values, vectors)`; both
     /// outputs are complex regardless of the input scalar. The default reports
     /// [`DenseError::Unsupported`] without inspecting the input.
-    fn eig(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        let _ = input;
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let _ = (engine, input);
         Err(DenseError::Unsupported {
             op: "eig",
             message: "executor does not implement the general eigendecomposition".to_string(),
@@ -211,8 +238,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// `U`/`Vt` (LAPACK `job='N'`, MatrixAlgebraKit `svd_vals`). The default
     /// computes the full SVD and drops the vectors — correct but wasteful;
     /// backends with a no-vector LAPACK path override this.
-    fn svd_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
-        let mut outputs = self.svd(input)?;
+    fn svd_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
+        let mut outputs = self.svd(engine, input)?;
         if outputs.len() != 3 {
             return Err(arity_mismatch("svd_vals", 3, outputs.len()));
         }
@@ -222,8 +253,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// Hermitian eigenvalues only, without eigenvectors (LAPACK `job='N'`,
     /// MatrixAlgebraKit `eigh_vals`). Default drops the vectors from the full
     /// decomposition; backends override with a no-vector path.
-    fn eigh_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
-        let mut outputs = self.eigh(input)?;
+    fn eigh_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
+        let mut outputs = self.eigh(engine, input)?;
         if outputs.len() != 2 {
             return Err(arity_mismatch("eigh_vals", 2, outputs.len()));
         }
@@ -234,8 +269,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// `job='N'`, MatrixAlgebraKit `eig_vals`); complex regardless of input
     /// scalar. Default drops the vectors; backends override with a no-vector
     /// path.
-    fn eig_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
-        let mut outputs = self.eig(input)?;
+    fn eig_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
+        let mut outputs = self.eig(engine, input)?;
         if outputs.len() != 2 {
             return Err(arity_mismatch("eig_vals", 2, outputs.len()));
         }
@@ -244,6 +283,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
 
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -252,11 +292,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
 
     fn matmul_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
     ) -> Result<(), DenseError> {
-        self.dot_general_into(output, lhs, rhs, &DenseDotConfig::matmul())
+        self.dot_general_into(engine, output, lhs, rhs, &DenseDotConfig::matmul())
     }
 
     /// Accumulate-form matmul: `output = alpha * lhs * rhs + beta * output`
@@ -266,6 +307,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// Accumulate-capable backends override it.
     fn matmul_axpby_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -273,7 +315,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
         if alpha.is_one() && beta.is_zero() {
-            return self.matmul_into(output, lhs, rhs);
+            return self.matmul_into(engine, output, lhs, rhs);
         }
         Err(DenseError::Unsupported {
             op: "matmul_axpby_into",
@@ -300,6 +342,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     )]
     fn matmul_batch_axpby_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -314,6 +357,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             (DenseWrite::F32(out), DenseRead::F32(lhs), DenseRead::F32(rhs)) => {
                 matmul_batch_axpby_serial(
                     self,
+                    engine,
                     out,
                     lhs,
                     rhs,
@@ -327,6 +371,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             (DenseWrite::F64(out), DenseRead::F64(lhs), DenseRead::F64(rhs)) => {
                 matmul_batch_axpby_serial(
                     self,
+                    engine,
                     out,
                     lhs,
                     rhs,
@@ -340,6 +385,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             (DenseWrite::C32(out), DenseRead::C32(lhs), DenseRead::C32(rhs)) => {
                 matmul_batch_axpby_serial(
                     self,
+                    engine,
                     out,
                     lhs,
                     rhs,
@@ -353,6 +399,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             (DenseWrite::C64(out), DenseRead::C64(lhs), DenseRead::C64(rhs)) => {
                 matmul_batch_axpby_serial(
                     self,
+                    engine,
                     out,
                     lhs,
                     rhs,
@@ -377,6 +424,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_with_ops_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -388,7 +436,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
-            return self.matmul_batch_axpby_into(output, lhs, rhs, jobs, runs, alpha, beta);
+            return self.matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta);
         }
         Err(DenseError::Unsupported {
             op: "matmul_batch_axpby_with_ops_into",
@@ -634,6 +682,7 @@ pub fn strided_batch_runs_into(jobs: &[DenseGemmBatchJob], runs: &mut Vec<usize>
 #[allow(clippy::too_many_arguments)]
 fn matmul_batch_axpby_serial<E, T, W, R>(
     executor: &mut E,
+    engine: &mut dyn Engine,
     mut output: DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -670,6 +719,7 @@ where
         let dst_offset = batch_offset(output.offset(), job.dst_offset)?;
         let dst_view = DenseViewMut::new(output.data_mut(), &dst_shape, &dst_strides, dst_offset)?;
         executor.matmul_axpby_into(
+            engine,
             wrap_write(dst_view),
             wrap_read(lhs_view),
             wrap_read(rhs_view),

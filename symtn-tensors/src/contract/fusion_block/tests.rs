@@ -156,6 +156,7 @@ fn assert_missing_input_group_scales_destination<R>(rule: &R, coupled: [SectorId
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let codomain = SectorLeg::new(coupled.map(|sector| (sector, 1)), false);
     let domain = SectorLeg::new(coupled.map(|sector| (sector, 1)), false);
     let homspace = FusionTreeHomSpace::new(
@@ -200,6 +201,7 @@ where
     let mut dense_workspace = TensorContractWorkspace::default();
     let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
     plan.execute_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         &mut BackendRank2Gemm::<_, _, f64>::new(&mut dense, &mut dense_workspace),
         &mut fusion_workspace,
@@ -251,6 +253,7 @@ fn destination_order_join_preserves_structural_zero_for_builtin_rules() {
 
 #[test]
 fn canonical_region_join_scales_missing_sector_without_layout_compile() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let outer = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let inner = || SectorLeg::new([(SectorId::new(0), 1)], false);
@@ -284,6 +287,7 @@ fn canonical_region_join_scales_missing_sector_without_layout_compile() {
     let mut dense_workspace = TensorContractWorkspace::default();
     let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
     plan.execute_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         &mut BackendRank2Gemm::<_, _, f64>::new(&mut dense, &mut dense_workspace),
         &mut fusion_workspace,
@@ -433,6 +437,7 @@ fn generic_layout_keeps_interleaved_cartesian_vertex_order() {
 
 #[test]
 fn generic_multiplicity_grid_uses_canonical_region_gemm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = LayoutToyGenericRule;
     let leg = || SectorLeg::new([(SectorId::new(1), 1)], false);
     let homspace = || {
@@ -472,6 +477,7 @@ fn generic_multiplicity_grid_uses_canonical_region_gemm() {
     let mut dense_workspace = TensorContractWorkspace::default();
     let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
     plan.execute_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         &mut BackendRank2Gemm::<_, _, f64>::new(&mut dense, &mut dense_workspace),
         &mut fusion_workspace,
@@ -533,6 +539,7 @@ fn storage_direct_replay_runs_without_host_slice_contract() {
 
 #[test]
 fn storage_direct_replay_matches_host_execute_raw() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let leg =
         |dims: usize| SectorLeg::new([(SectorId::new(0), dims), (SectorId::new(1), dims)], false);
@@ -568,6 +575,7 @@ fn storage_direct_replay_matches_host_execute_raw() {
     let structure = std::sync::Arc::clone(space.structure());
     let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
     plan.execute_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         &mut BackendRank2Gemm::<_, _, f64>::new(&mut backend, &mut workspace),
         &mut fusion_workspace,
@@ -583,7 +591,7 @@ fn storage_direct_replay_matches_host_execute_raw() {
     .unwrap();
 
     let mut direct = vec![0.0; len];
-    let mut gemm = HostStorageGemm::new(&mut backend, &mut workspace);
+    let mut gemm = HostStorageGemm::new(engine, &mut backend, &mut workspace);
     plan.execute_direct_on_storage_prezeroed(
         &mut gemm,
         &mut direct,
@@ -797,6 +805,7 @@ fn a_non_canonical_composition_misses_the_direct_core_with_the_unchanged_message
 /// (the same tensor, block for block).
 #[test]
 fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = std::sync::Arc::new(Z2FusionRule);
     let (canonical, reordered) = z2_reordered_rank4();
     let bind = |space| {
@@ -857,12 +866,13 @@ fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
     let rhs_data: Vec<f64> = (0..rhs.space().required_len().unwrap())
         .map(|i| 1.0 - i as f64 * 0.125)
         .collect();
-    let run = |parent: &crate::BoundDynamicFusionMapSpace<Z2FusionRule>| {
+    let mut run = |parent: &crate::BoundDynamicFusionMapSpace<Z2FusionRule>| {
         let mut context =
             crate::TensorContractFusionExecutionContext::<f64, crate::RuleIdentity>::default();
         let lhs = crate::FusionOperand::adjoint(parent.space());
         let resolution = context
             .compile_storage_contract_resolution(
+                engine,
                 &dst,
                 lhs,
                 crate::FusionOperand::direct(rhs.space()),
@@ -878,6 +888,7 @@ fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
         let mut out = vec![0.0; dst.space().required_len().unwrap()];
         context
             .tensorcontract_prelowered_into(
+                engine,
                 &dst,
                 &mut out,
                 lhs,
@@ -918,6 +929,7 @@ fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
 /// block order the executor copies either side, so the scorer must charge it.
 #[test]
 fn an_identity_side_is_free_in_selection_only_over_canonical_layouts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = std::sync::Arc::new(Z2FusionRule);
     let (canonical, reordered) = z2_reordered_rank4();
     let bind = |space| {
@@ -983,7 +995,7 @@ fn an_identity_side_is_free_in_selection_only_over_canonical_layouts() {
         let rhs_data: Vec<f64> = (0..rhs.space().required_len().unwrap())
             .map(|i| 1.0 - i as f64 * 0.375)
             .collect();
-        let run = |parent: &crate::BoundDynamicFusionMapSpace<Z2FusionRule>| {
+        let mut run = |parent: &crate::BoundDynamicFusionMapSpace<Z2FusionRule>| {
             let mut context =
                 crate::TensorContractFusionExecutionContext::<f64, crate::RuleIdentity>::default();
             let lhs = if adjoint {
@@ -993,6 +1005,7 @@ fn an_identity_side_is_free_in_selection_only_over_canonical_layouts() {
             };
             let resolution = context
                 .compile_storage_contract_resolution(
+                    engine,
                     &dst,
                     lhs,
                     crate::FusionOperand::direct(rhs.space()),
@@ -1007,6 +1020,7 @@ fn an_identity_side_is_free_in_selection_only_over_canonical_layouts() {
             let mut out = vec![0.0; dst.space().required_len().unwrap()];
             context
                 .tensorcontract_prelowered_into(
+                    engine,
                     &dst,
                     &mut out,
                     lhs,
@@ -1072,6 +1086,7 @@ fn adjoint_operand_without_canonical_regions_uses_exact_fallback() {
 
 #[test]
 fn rank22_adjoint_reentry_keeps_matrix_orientation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -1105,6 +1120,7 @@ fn rank22_adjoint_reentry_keeps_matrix_orientation() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TensorContractWorkspace::default();
     plan.execute_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         &mut BackendRank2Gemm::<_, _, f64>::new(&mut backend, &mut workspace),
         &mut FusionBlockContractWorkspace::default(),
@@ -1183,11 +1199,14 @@ fn storage_direct_replay_on_cuda_matches_host() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TensorContractWorkspace::default();
     let mut expected = vec![0.0; len];
-    let mut gemm = HostStorageGemm::new(&mut backend, &mut workspace);
+    let mut cpu = symtn_dense::CpuEngine::serial();
+    let mut gemm = HostStorageGemm::new(&mut cpu, &mut backend, &mut workspace);
     plan.execute_direct_on_storage_prezeroed(&mut gemm, &mut expected, &lhs_data, &rhs_data)
         .unwrap();
 
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut cuda =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut cuda).unwrap();
     let lhs_dev = CudaStorage::upload(&ctx, &lhs_data).unwrap();
     let rhs_dev = CudaStorage::upload(&ctx, &rhs_data).unwrap();
     let mut dst_dev = CudaStorage::upload(&ctx, &vec![0.0; len]).unwrap();
@@ -1298,11 +1317,13 @@ fn run_core_plan(
     alpha: f64,
     beta: f64,
 ) -> Vec<f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut output = init.to_vec();
     let mut dense = DenseTreeTransformOperations::default();
     let mut dense_workspace = TensorContractWorkspace::default();
     let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
     plan.execute_raw(
+        engine,
         &mut crate::StridedHostKernelAdapter::default(),
         &mut BackendRank2Gemm::<_, _, f64>::new(&mut dense, &mut dense_workspace),
         &mut fusion_workspace,

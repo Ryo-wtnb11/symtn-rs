@@ -1464,6 +1464,7 @@ where
 #[allow(clippy::type_complexity)]
 #[cfg(test)]
 fn tensortrace_owned_in<M, R, D, P>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     stage: M::TraceStage<'_>,
     src: &BoundDynamicFusionMapSpace<R>,
     read: impl FnOnce(&TensorTraceFusionStructure<M::Coeff>) -> Option<D>,
@@ -1483,13 +1484,15 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<M::Coeff>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
     P: AsRef<[D]>,
 {
     trace_staged_in::<M, R, D, _, M::Error>(stage, src, axes, read, |structure, value, nout| {
         Ok(match value {
             Some(value) => vec![value * alpha],
             None => tensortrace_fusion_structure_owned_host(
+                exec,
                 structure,
                 nout,
                 src.space().structure(),
@@ -1637,6 +1640,7 @@ where
 #[allow(clippy::type_complexity)]
 #[cfg(test)]
 pub(crate) fn tensortrace_multiplicity_free_in<R, D, P>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     stage: TensorTraceStage<'_, R, BoundDynamicFusionMapSpace<R>>,
     src: &BoundDynamicFusionMapSpace<R>,
     read: impl FnOnce(&TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -1654,11 +1658,12 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<f64>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
     P: AsRef<[D]>,
 {
     tensortrace_owned_in::<MultiplicityFreeAdmissionMode, R, D, P>(
-        stage, src, read, payload, axes, alpha,
+        exec, stage, src, read, payload, axes, alpha,
     )
 }
 
@@ -1669,6 +1674,7 @@ where
 #[allow(clippy::type_complexity)]
 #[cfg(test)]
 pub(crate) fn tensortrace_checked_generic_in<R, D, P>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     stage: TensorTraceStage<'_, R, PreparedCheckedGenericDynamicSpace>,
     src: &BoundDynamicFusionMapSpace<R>,
     read: impl FnOnce(&TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -1686,11 +1692,12 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<f64>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
     P: AsRef<[D]>,
 {
     tensortrace_owned_in::<CheckedGenericAdmissionMode, R, D, P>(
-        stage, src, read, payload, axes, alpha,
+        exec, stage, src, read, payload, axes, alpha,
     )
 }
 
@@ -1785,6 +1792,7 @@ where
 #[doc(hidden)]
 #[cfg(test)]
 pub(crate) fn tensortrace_fusion_dyn_owned_generic_checked<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     dst_space: &BoundDynamicFusionMapSpace<R>,
     src_space: &BoundDynamicFusionMapSpace<R>,
     src_data: &[D],
@@ -1802,12 +1810,14 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let mut coefficients = CheckedPendingCoefficients::new();
     let structure =
         compile_fusion_dyn_generic_checked(dst_space, src_space, axes, &mut coefficients)?;
     let data = tensortrace_fusion_dyn_structure_owned(
+        exec,
         &structure,
         dst_space.space(),
         src_space.space(),
@@ -2008,7 +2018,9 @@ where
 /// The one Host replay of a compiled fusion trace: structure identity and
 /// data extents, the `beta` pass over every destination layout, then one
 /// strided add per term.
+#[allow(clippy::too_many_arguments)]
 fn replay_fusion_trace_host<C, T>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     structure: &TensorTraceFusionStructure<C>,
     dst_structure: &Arc<BlockStructure>,
     dst_data: &mut [T],
@@ -2027,12 +2039,13 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     structure.validate_replay_structures(dst_structure, src_structure)?;
     validate_trace_data_extents(dst_structure, dst_data.len(), src_structure, src_data.len())?;
     let descriptor = structure.descriptor();
-    scale_trace_destination_layouts(descriptor, dst_data, beta)?;
+    scale_trace_destination_layouts(exec, descriptor, dst_data, beta)?;
     for (term, fusion_term) in structure.paired_terms() {
         tensortrace_raw_strided_kernel_add_with_coefficient_trusted(
             dst_data,
@@ -2061,6 +2074,7 @@ where
 /// fermionic supertrace).
 #[allow(clippy::too_many_arguments)]
 pub fn tensortrace_fusion_dyn_into<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     dst_space: &BoundDynamicFusionMapSpace<R>,
     dst_data: &mut [D],
     src_space: &BoundDynamicFusionMapSpace<R>,
@@ -2081,9 +2095,11 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     tensortrace_fusion_dyn_into_raw(
+        exec,
         src_space.provider(),
         dst_space.space(),
         dst_data,
@@ -2101,6 +2117,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn tensortrace_fusion_dyn_into_checked<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     dst_space: &BoundDynamicFusionMapSpace<R>,
     dst_data: &mut [D],
     src_space: &BoundDynamicFusionMapSpace<R>,
@@ -2121,9 +2138,11 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     tensortrace_fusion_dyn_into_checked_raw(
+        exec,
         src_space.provider(),
         dst_space.space(),
         dst_data,
@@ -2143,6 +2162,7 @@ where
 /// initialized destination when canonical physical coverage is unavailable.
 #[doc(hidden)]
 pub fn tensortrace_fusion_dyn_owned<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     dst_space: &BoundDynamicFusionMapSpace<R>,
     src_space: &BoundDynamicFusionMapSpace<R>,
     src_data: &[D],
@@ -2161,7 +2181,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure = TensorTraceFusionStructure::compile_fusion_dyn_raw(
         src_space.provider(),
@@ -2170,6 +2191,7 @@ where
         axes,
     )?;
     tensortrace_fusion_dyn_structure_owned(
+        exec,
         &structure,
         dst_space.space(),
         src_space.space(),
@@ -2182,6 +2204,7 @@ where
 #[doc(hidden)]
 #[cfg(test)]
 pub(crate) fn tensortrace_fusion_dyn_owned_checked<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     dst_space: &BoundDynamicFusionMapSpace<R>,
     src_space: &BoundDynamicFusionMapSpace<R>,
     src_data: &[D],
@@ -2200,7 +2223,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure = TensorTraceFusionStructure::compile_fusion_dyn_checked_raw(
         src_space.provider(),
@@ -2209,6 +2233,7 @@ where
         axes,
     )?;
     tensortrace_fusion_dyn_structure_owned(
+        exec,
         &structure,
         dst_space.space(),
         src_space.space(),
@@ -2220,6 +2245,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensortrace_fusion_dyn_into_raw<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     rule: &R,
     dst_space: &DynamicFusionMapSpace,
     dst_data: &mut [D],
@@ -2241,12 +2267,13 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure =
         TensorTraceFusionStructure::compile_fusion_dyn_raw(rule, dst_space, src_space, axes)?;
     tensortrace_fusion_dyn_structure_into_raw(
-        &structure, dst_space, dst_data, src_space, src_data, alpha, beta,
+        exec, &structure, dst_space, dst_data, src_space, src_data, alpha, beta,
     )
 }
 
@@ -2255,6 +2282,7 @@ where
 #[doc(hidden)]
 #[cfg(test)]
 pub(crate) fn tensortrace_fusion_dyn_structure_owned<C, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     structure: &TensorTraceFusionStructure<C>,
     dst_space: &DynamicFusionMapSpace,
     src_space: &DynamicFusionMapSpace,
@@ -2271,9 +2299,11 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     trace_structure_owned_parts(
+        exec,
         structure,
         dst_space.structure(),
         dst_space.nout(),
@@ -2284,6 +2314,7 @@ where
 }
 
 fn trace_structure_owned_parts<C, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     structure: &TensorTraceFusionStructure<C>,
     dst_structure: &Arc<BlockStructure>,
     dst_nout: usize,
@@ -2301,7 +2332,8 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     // Why: a public executor must not replay terms compiled for other spaces;
     // the pointer-equality fast path keeps compiled-in-place callers free.
@@ -2343,6 +2375,7 @@ where
         .map_err(OperationError::from_core_preserving_context)?;
     let mut data = vec![D::zero(); required_len];
     replay_fusion_trace_host(
+        exec,
         structure,
         dst_structure,
         &mut data,
@@ -2360,6 +2393,7 @@ where
 /// trace-into entries).
 #[doc(hidden)]
 pub(crate) fn tensortrace_fusion_dyn_structure_into_raw<C, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     structure: &TensorTraceFusionStructure<C>,
     dst_space: &DynamicFusionMapSpace,
     dst_data: &mut [D],
@@ -2378,11 +2412,13 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     // Why: a public executor must not replay terms compiled for other spaces;
     // the pointer-equality fast path keeps compiled-in-place callers free.
     replay_fusion_trace_host(
+        exec,
         structure,
         dst_space.structure(),
         dst_data,
@@ -2397,6 +2433,7 @@ where
 /// payload of the compiled destination (`dst_nout` its codomain rank).
 #[doc(hidden)]
 pub fn tensortrace_fusion_structure_owned_host<C, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     structure: &TensorTraceFusionStructure<C>,
     dst_nout: usize,
     src_structure: &Arc<BlockStructure>,
@@ -2413,9 +2450,11 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     trace_structure_owned_parts(
+        exec,
         structure,
         &structure.dst_structure,
         dst_nout,
@@ -2429,6 +2468,7 @@ where
 /// `dst = alpha · trace(src) + beta · dst` over the compiled destination.
 #[doc(hidden)]
 pub fn tensortrace_fusion_structure_into_host<C, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     structure: &TensorTraceFusionStructure<C>,
     dst_data: &mut [D],
     src_structure: &Arc<BlockStructure>,
@@ -2446,9 +2486,11 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<C>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     replay_fusion_trace_host(
+        exec,
         structure,
         &structure.dst_structure,
         dst_data,
@@ -2484,6 +2526,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 pub(crate) fn tensortrace_fusion_dyn_into_checked_raw<R, D>(
+    exec: symtn_operations::host_pool::Exec<'_>,
     rule: &R,
     dst_space: &DynamicFusionMapSpace,
     dst_data: &mut [D],
@@ -2505,13 +2548,14 @@ where
         + One
         + ConjugateValue
         + RecouplingCoefficientAction<R::Scalar>
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let structure = TensorTraceFusionStructure::compile_fusion_dyn_checked_raw(
         rule, dst_space, src_space, axes,
     )?;
     tensortrace_fusion_dyn_structure_into_raw(
-        &structure, dst_space, dst_data, src_space, src_data, alpha, beta,
+        exec, &structure, dst_space, dst_data, src_space, src_data, alpha, beta,
     )
 }
 
@@ -2543,6 +2587,7 @@ fn validate_trace_data_extents(
 }
 
 fn scale_trace_destination_layouts<T>(
+    mut exec: symtn_operations::host_pool::Exec<'_>,
     descriptor: &TensorTraceDescriptor,
     dst: &mut [T],
     beta: T,
@@ -2555,7 +2600,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if beta.is_one() {
         return Ok(());
@@ -2564,6 +2610,7 @@ where
         let zero = [T::zero()];
         for layout in descriptor.destination_layouts() {
             axpby_raw_strided_kernel_trusted(
+                exec.reborrow(),
                 dst,
                 &zero,
                 descriptor.destination_shape(layout),

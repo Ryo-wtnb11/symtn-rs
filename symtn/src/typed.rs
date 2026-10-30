@@ -32,6 +32,7 @@
 //! use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Error> {
+//! let engine = &mut symtn::typed::CpuEngine::serial();
 //! let runtime = Runtime::builder().build()?;
 //! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
 //!
@@ -39,7 +40,7 @@
 //! let odd = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
 //! let v = GradedSpace::try_new(Arc::new(rule), [(even, 2), (odd, 1)])?;
 //!
-//! let t: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&v], [&v])?;
+//! let t: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
 //! assert_eq!(t.subblock_count(), 2);
 //! assert_eq!(t.subblock_fusion_trees(0)?.coupled(), &even);
 //! # Ok(())
@@ -264,10 +265,9 @@ pub type PhysicalDenseError<E> = symtn_tensors::PhysicalConversionError<E>;
 
 /// Every fallible method here returns this error.
 pub use crate::error::{Alternative, Error};
-#[cfg(feature = "cuda")]
-pub use crate::runtime::CudaTreeTransformStats;
-/// The runtime every constructor here takes, its builder and configuration.
-pub use crate::runtime::{LinalgBackend, Runtime, RuntimeBuilder, RuntimeConfigError};
+/// The runtime every constructor here takes (prepared structural state) and
+/// its builder.
+pub use crate::runtime::{Runtime, RuntimeBuilder};
 /// The complex payload scalars.
 pub use num_complex::{Complex32, Complex64};
 /// Block and fusion-tree keys and vertex labels read from a [`TensorMap`],
@@ -276,6 +276,14 @@ pub use symtn_core::{
     BlockKey, BlockKeyKind, CheckedFusionSpaceError, FusionTreeGroupKey, FusionTreeKey,
     FusionTreePairKey, MultiplicityIndex, OpaqueBlockKey,
 };
+/// The caller-owned execution resources every numerical operation takes as
+/// its first argument (`engine: &mut dyn Engine`): tenferro's engine trait,
+/// its CPU engine and the CPU engine's thread pool.
+pub use symtn_dense::{CpuEngine, Engine, Pool};
+/// The caller-owned CUDA engine every device operation borrows, and the
+/// device id it opens on.
+#[cfg(feature = "cuda")]
+pub use symtn_dense::{CudaDeviceId, CudaEngine};
 /// The device-scalar supertrait of [`CudaPayload`] and its real counterpart.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{CudaRealScalar, CudaScalar};

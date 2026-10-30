@@ -46,8 +46,9 @@ fn tensor<R: TypedSectorAdmission>(
 where
     R::Mode: Mode<R>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let legs = vec![leg; rank / 2];
-    TensorMap::from_subblock_fn(runtime, legs.clone(), legs, |trees, indices| {
+    TensorMap::from_subblock_fn(engine, runtime, legs.clone(), legs, |trees, indices| {
         trees.codomain_vertices().first().map_or(0, |v| v.get()) as f64
             + indices.iter().sum::<usize>() as f64
     })
@@ -96,8 +97,9 @@ fn warm<R: TypedSectorAdmission>(leg: &GradedSpace<R>, rank: usize) -> Warm
 where
     R::Mode: Mode<R>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     symtn::cache::clear();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = leg.clone();
     let lhs = tensor(&runtime, &leg, rank);
     let rhs = tensor(&runtime, &leg, rank);
@@ -118,25 +120,26 @@ where
 
     use symtn::cache::StructureCacheKind::{CompletedTreeTransformer, TreeTransformCoefficients};
     let fresh = lookups(TreeTransformCoefficients);
-    drop(lhs.permute(codomain, domain).unwrap());
+    drop(lhs.permute(engine, codomain, domain).unwrap());
     let cold = lookups(TreeTransformCoefficients);
     let permute_groups = cold - fresh;
-    let out_blocks = lhs.contract(&rhs, &spec).unwrap().subblock_count();
+    let out_blocks = lhs.contract(engine, &rhs, &spec).unwrap().subblock_count();
     let groups = lookups(TreeTransformCoefficients) - cold;
-    let (out, permute) = counting_alloc::measure(|| lhs.permute(codomain, domain).unwrap());
+    let (out, permute) = counting_alloc::measure(|| lhs.permute(engine, codomain, domain).unwrap());
     drop(out);
     let warm_lookups = lookups(TreeTransformCoefficients);
     let warm_hits = hits(CompletedTreeTransformer);
-    let (out, contract) = counting_alloc::measure(|| lhs.contract(&rhs, &spec).unwrap());
+    let (out, contract) = counting_alloc::measure(|| lhs.contract(engine, &rhs, &spec).unwrap());
     assert_eq!(lookups(TreeTransformCoefficients), warm_lookups);
     let transformer_hits = hits(CompletedTreeTransformer) - warm_hits;
     drop(out);
     let lhs_core: Vec<usize> = (0..rank - 1).collect();
     let rhs_core: Vec<usize> = (1..rank).collect();
+    let rhs_permute = &rhs.permute(engine, &[0], &rhs_core).unwrap();
     let core = lhs
-        .permute(&lhs_core, &[rank - 1])
+        .permute(engine, &lhs_core, &[rank - 1])
         .unwrap()
-        .compose(&rhs.permute(&[0], &rhs_core).unwrap())
+        .compose(engine, rhs_permute)
         .unwrap();
     Warm {
         permute: (permute.calls, permute.bytes),

@@ -6,6 +6,7 @@
 //! that does not describe its network is rejected when it is used.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
@@ -36,15 +37,15 @@ fn chain() -> Network {
     )
 }
 
-fn chain_tensors(runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
+fn chain_tensors(engine: &mut dyn Engine, runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
     let provider = Arc::new(U1FusionRule);
     let space =
         |dim| GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), dim)]).unwrap();
     let (two, eight) = (space(2), space(8));
     [
-        TensorMap::rand_with_seed(runtime, [&two], [&two], 1).unwrap(),
-        TensorMap::rand_with_seed(runtime, [&two], [&two], 2).unwrap(),
-        TensorMap::rand_with_seed(runtime, [&two], [&eight], 3).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [&two], [&two], 1).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [&two], [&two], 2).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [&two], [&eight], 3).unwrap(),
     ]
 }
 
@@ -156,6 +157,7 @@ fn from_text_rejects_malformed_text_with_a_contract_error() {
 
 #[test]
 fn load_plan_cache_drops_unparsable_entries_and_keeps_the_rest() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let corrupt = B_C_FIRST.replacen("step 1 2 3", "step 1 2 x", 1);
     let blob = cache_blob(&[("bad", &corrupt), ("good", B_C_FIRST)]);
     let runtime = Runtime::builder().build().unwrap();
@@ -174,8 +176,8 @@ fn load_plan_cache_drops_unparsable_entries_and_keeps_the_rest() {
     assert_ne!(stale_header, header);
     let runtime = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&runtime, &stale), 0);
-    let tensors = chain_tensors(&runtime);
-    chain().contract(&tensors.each_ref()).unwrap();
+    let tensors = chain_tensors(engine, &runtime);
+    chain().contract(engine, &tensors.each_ref()).unwrap();
     assert_eq!(plan_cache_stats(&runtime).persisted_orders, 0);
 }
 
@@ -204,11 +206,12 @@ fn load_plan_cache_resumes_at_the_next_topo_line_after_a_corrupt_entry() {
 
 #[test]
 fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Record the searched order to learn this network's persisted key.
     let searched = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&searched, ""), 0);
-    let tensors = chain_tensors(&searched);
-    let expected = chain().contract(&tensors.each_ref()).unwrap();
+    let tensors = chain_tensors(engine, &searched);
+    let expected = chain().contract(engine, &tensors.each_ref()).unwrap();
     let saved = save_plan_cache(&searched);
     let topology = saved.lines().nth(1).unwrap().strip_prefix("TOPO ").unwrap();
     let blob = cache_blob(&[(topology, B_C_FIRST)]);
@@ -219,8 +222,8 @@ fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
 
     let replayed = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&replayed, &blob), 1);
-    let tensors = chain_tensors(&replayed);
-    let actual = chain().contract(&tensors.each_ref()).unwrap();
+    let tensors = chain_tensors(engine, &replayed);
+    let actual = chain().contract(engine, &tensors.each_ref()).unwrap();
     // A fresh search would have recorded its own order over the loaded one.
     assert_eq!(save_plan_cache(&replayed), blob);
     assert_eq!(plan_cache_stats(&replayed).misses, 1);
@@ -235,10 +238,11 @@ fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
 
 #[test]
 fn loaded_order_for_another_network_is_rejected_when_used() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let searched = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&searched, ""), 0);
-    let tensors = chain_tensors(&searched);
-    chain().contract(&tensors.each_ref()).unwrap();
+    let tensors = chain_tensors(engine, &searched);
+    chain().contract(engine, &tensors.each_ref()).unwrap();
     let saved = save_plan_cache(&searched);
     let topology = saved.lines().nth(1).unwrap().strip_prefix("TOPO ").unwrap();
 
@@ -250,9 +254,9 @@ fn loaded_order_for_another_network_is_rejected_when_used() {
         load_plan_cache(&runtime, &cache_blob(&[(topology, &wrong_labels)])),
         1
     );
-    let tensors = chain_tensors(&runtime);
+    let tensors = chain_tensors(engine, &runtime);
     assert!(matches!(
-        chain().contract(&tensors.each_ref()),
+        chain().contract(engine, &tensors.each_ref()),
         Err(Error::InvalidArgument(message)) if message.contains("result_labels")
     ));
 }
@@ -327,11 +331,12 @@ fn plan_text_round_trips_labels_with_whitespace_line_breaks_and_escapes() {
 
 #[test]
 fn plan_cache_persists_and_replays_an_order_for_labels_needing_escapes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // A searched entry saves and reloads byte-identically.
     let searched = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&searched, ""), 0);
-    let tensors = chain_tensors(&searched);
-    let expected = odd_chain().contract(&tensors.each_ref()).unwrap();
+    let tensors = chain_tensors(engine, &searched);
+    let expected = odd_chain().contract(engine, &tensors.each_ref()).unwrap();
     let saved = save_plan_cache(&searched);
     assert_eq!(saved.lines().filter(|l| l.starts_with("TOPO ")).count(), 1);
     let reloaded = Runtime::builder().build().unwrap();
@@ -344,8 +349,8 @@ fn plan_cache_persists_and_replays_an_order_for_labels_needing_escapes() {
     assert_ne!(saved, blob);
     let replayed = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&replayed, &blob), 1);
-    let tensors = chain_tensors(&replayed);
-    let actual = odd_chain().contract(&tensors.each_ref()).unwrap();
+    let tensors = chain_tensors(engine, &replayed);
+    let actual = odd_chain().contract(engine, &tensors.each_ref()).unwrap();
     assert_eq!(save_plan_cache(&replayed), blob);
     numerics::assert_slices_close(
         "A (B C) against the searched order",

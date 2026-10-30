@@ -18,17 +18,20 @@ than the other way round.
 
 Mirrors `benchmarks/operation_matrix.md`:
 
-- A fresh `Runtime` (`cuda(device).dense_threads(1)`) per row.
+- A fresh `Runtime`, serial `CpuEngine` and `CudaEngine` per row.
 - The Host fixture is built and uploaded **before** any timer starts.
-- `cold`: the genuine first call of the measured operation on that Runtime,
+- `cold`: the genuine first call of the measured operation on that engine,
   one iteration. Nothing calls the operation before this: `bench` hands the
   first call's output back to the caller, which is what the correctness check
   consumes.
-  `Runtime` construction warms the tenferro backend libraries (cuTENSOR,
-  cuSOLVER/cuBLAS handles, #1278), so `cold` does not contain that one-time
-  handle initialization; it happens before the fixture is built. What a `cold`
+  Fixture setup warms the engine's tenferro backend libraries (cuTENSOR,
+  cuSOLVER/cuBLAS handles, `CudaDenseContext::warm_up`), so `cold` does not
+  contain that one-time handle initialization. What a `cold`
   cell carries beyond the warm cost is CubeCL's NVRTC compile of each kernel
-  family it first touches and the cuTENSOR plan for its shape. The dated record
+  family it first touches, the cuTENSOR plan for its shape, and the call's
+  device execution scratch (tree-transform coefficient uploads and
+  workspaces), which is invocation-local and so is also paid by every `warm`
+  call. The dated record
   `cuda-baseline-2026-09-20.md` predates the warm-up and includes the
   initialization in every `cold` cell.
 - `first_after_setup`: used instead of `cold` for the two transfer rows, whose
@@ -55,14 +58,15 @@ One process per invocation. The Host `operation_matrix.sh` wrapper takes a
 three-process median; this runner does not, so a timing is this process's
 per-iteration median with no between-process variance estimate.
 
-### Runtime construction
+### Engine construction
 
-The header line `# runtime_build_ns first=... second=...` reports one
-`Runtime::builder().cuda(device).dense_threads(1).build()` each, as single
-observations rather than medians. `first` is the process's first CUDA Runtime
-and also pays CUDA context creation; `second` is a second fresh Runtime in the
-same process, whose CUDA context is warm but whose tenferro backend instance,
-and so whose backend warm-up, is new. The line exists so that the backend
+Every row opens a fresh `CudaEngine` and runs `CudaDenseContext::warm_up` on it
+during fixture setup, so backend library initialization (cuTENSOR, cuSOLVER,
+cuBLAS handles) stays out of the `cold` cells. The header line
+`# engine_open_ns first=... second=...` reports one `CudaEngine::open` plus
+`warm_up` each, as single observations rather than medians. `first` is the
+process's first CUDA engine and also pays CUDA context creation; `second` is a
+second fresh engine in the same process. The line exists so that the
 initialization the `cold` cells do not carry stays visible.
 
 ### Synchronization and the completion barrier

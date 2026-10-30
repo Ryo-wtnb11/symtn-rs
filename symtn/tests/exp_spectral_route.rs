@@ -135,15 +135,15 @@ fn u1_leg() -> GradedSpace<U1FusionRule> {
 }
 
 macro_rules! exp_of {
-    ($runtime:expr, $leg:expr, $dtype:ty, $fill:expr) => {{
+    ($engine:ident, $runtime:expr, $leg:expr, $dtype:ty, $fill:expr) => {{
         let fill = $fill;
         let tensor: TensorMap<_, $dtype> =
-            TensorMap::from_subblock_fn($runtime, [$leg], [$leg], |_, index| {
+            TensorMap::from_subblock_fn($engine, $runtime, [$leg], [$leg], |_, index| {
                 let value: Complex64 = fill(index[0], index[1]);
                 <$dtype as Scalar>::from_parts(value.re, value.im)
             })
             .unwrap();
-        blocks(&tensor.exp(&[0], &[1]).unwrap())
+        blocks(&tensor.exp($engine, &[0], &[1]).unwrap())
     }};
 }
 
@@ -162,30 +162,31 @@ fn general_complex(i: usize, j: usize) -> Complex64 {
 
 #[test]
 fn multiplicity_free_exp_routes_by_the_hermitian_predicate() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = u1_leg();
     for (what, image, fill, hermitian) in [
         (
             "f64 Hermitian",
-            exp_of!(&runtime, &leg, f64, hermitian_real),
+            exp_of!(engine, &runtime, &leg, f64, hermitian_real),
             hermitian_real as fn(_, _) -> _,
             true,
         ),
         (
             "c64 Hermitian",
-            exp_of!(&runtime, &leg, Complex64, hermitian_complex),
+            exp_of!(engine, &runtime, &leg, Complex64, hermitian_complex),
             hermitian_complex,
             true,
         ),
         (
             "f64 general",
-            exp_of!(&runtime, &leg, f64, general_real),
+            exp_of!(engine, &runtime, &leg, f64, general_real),
             general_real,
             false,
         ),
         (
             "c64 general",
-            exp_of!(&runtime, &leg, Complex64, general_complex),
+            exp_of!(engine, &runtime, &leg, Complex64, general_complex),
             general_complex,
             false,
         ),
@@ -207,15 +208,16 @@ fn boundary_fill(scale: f64) -> impl Fn(usize, usize) -> Complex64 {
 
 #[test]
 fn multiplicity_free_exp_route_switches_at_the_predicate_boundary() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = u1_leg();
-    let below = exp_of!(&runtime, &leg, f64, boundary_fill(0.5));
+    let below = exp_of!(engine, &runtime, &leg, f64, boundary_fill(0.5));
     assert!(
         below.iter().all(|block| exactly_hermitian(block)),
         "below: spectral"
     );
     assert_matches_taylor("below", &below, &boundary_fill(0.5));
-    let above = exp_of!(&runtime, &leg, f64, boundary_fill(2.0));
+    let above = exp_of!(engine, &runtime, &leg, f64, boundary_fill(2.0));
     assert!(
         above.iter().all(|block| !exactly_hermitian(block)),
         "above: Padé"
@@ -229,9 +231,10 @@ fn multiplicity_free_exp_route_switches_at_the_predicate_boundary() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_and_multiplicity_free_exp_take_the_same_route() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let mf = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
         [0, 1, 2].map(|twice| (SU2Irrep::from_twice_spin(twice), N)),
@@ -243,9 +246,9 @@ fn checked_and_multiplicity_free_exp_take_the_same_route() {
     )
     .unwrap();
     macro_rules! both {
-        ($dtype:ty, $fill:expr, $hermitian:expr, $what:expr) => {{
-            let mf = exp_of!(&runtime, &mf, $dtype, $fill);
-            let checked = exp_of!(&runtime, &checked, $dtype, $fill);
+        ($engine:ident, $dtype:ty, $fill:expr, $hermitian:expr, $what:expr) => {{
+            let mf = exp_of!($engine, &runtime, &mf, $dtype, $fill);
+            let checked = exp_of!($engine, &runtime, &checked, $dtype, $fill);
             assert_matches_taylor($what, &mf, &$fill);
             assert_matches_taylor($what, &checked, &$fill);
             for (a, b) in mf.iter().zip(&checked) {
@@ -263,10 +266,16 @@ fn checked_and_multiplicity_free_exp_take_the_same_route() {
             }
         }};
     }
-    both!(f64, hermitian_real, true, "f64 Hermitian");
-    both!(Complex64, hermitian_complex, true, "c64 Hermitian");
-    both!(f64, general_real, false, "f64 general");
-    both!(Complex64, general_complex, false, "c64 general");
-    both!(f64, boundary_fill(0.5), true, "below the predicate");
-    both!(f64, boundary_fill(2.0), false, "above the predicate");
+    both!(engine, f64, hermitian_real, true, "f64 Hermitian");
+    both!(engine, Complex64, hermitian_complex, true, "c64 Hermitian");
+    both!(engine, f64, general_real, false, "f64 general");
+    both!(engine, Complex64, general_complex, false, "c64 general");
+    both!(engine, f64, boundary_fill(0.5), true, "below the predicate");
+    both!(
+        engine,
+        f64,
+        boundary_fill(2.0),
+        false,
+        "above the predicate"
+    );
 }

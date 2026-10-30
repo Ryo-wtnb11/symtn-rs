@@ -10,29 +10,30 @@ where
     /// The one body of the inverse. A lazy adjoint is redirected,
     /// `(A^H)^-1 = (A^-1)^H`; a compact diagonal inverts its entries
     /// (TensorKit `inv(::DiagonalTensorMap)`).
-    pub(super) fn factor_inv(&self) -> Result<Self, FacadeError<R>> {
+    pub(super) fn factor_inv(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
         self.require_isomorphic("inv requires isomorphic codomain and domain")?;
-        self.factor_inv_admitted()
+        self.factor_inv_admitted(engine)
     }
 
     /// The representation stage of [`Self::factor_inv`]. The redirect
     /// re-enters here rather than at the preflight: `A^H` and `A` are
     /// isomorphic together, so the parent needs no second check.
-    fn factor_inv_admitted(&self) -> Result<Self, FacadeError<R>> {
+    fn factor_inv_admitted(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
         if matches!(&self.repr, TypedTensorRepr::Adjoint(_)) {
             const { assert!(redirects(FactorOp::Inv)) };
-            return self.adjoint_of_parent(Self::factor_inv_admitted);
+            return self.adjoint_of_parent(engine, Self::factor_inv_admitted);
         }
         if let Some(spectrum) = self.spectrum() {
             self.admit_compact(spectrum)?;
             return Ok(self.with_spectrum(inv_spectrum(spectrum)?));
         }
         let output = self.swapped_output_space()?;
-        let _host_pool = self.runtime.enter_host_pool();
         let (space, data) = self.dense_operand()?;
         let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
         let factor = RuntimeDense(&self.runtime)
-            .run(|dense| symtn_matrixalgebra::seam::inv_direct_into_dyn(dense, &input, output))
+            .run(|dense| {
+                symtn_matrixalgebra::seam::inv_direct_into_dyn(engine, dense, &input, output)
+            })
             .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
@@ -40,7 +41,11 @@ where
     /// The one body of the pseudo-inverse: a lazy adjoint `A^H` is read
     /// through its parent's SVD, `(A^H)^+ = U S^+ Vh`; a compact diagonal
     /// inverts its retained entries.
-    pub(super) fn factor_pinv(&self, rcond: f64) -> Result<Self, FacadeError<R>> {
+    pub(super) fn factor_pinv(
+        &self,
+        engine: &mut dyn Engine,
+        rcond: f64,
+    ) -> Result<Self, FacadeError<R>> {
         // Ahead of every arm, so all of them answer alike: the dense seams
         // repeat this check for their own expert callers, but the compact arm
         // never reaches a seam. TensorKit's `pinv` has no space check.
@@ -67,14 +72,13 @@ where
             return Ok(self.with_spectrum(inverted));
         }
         let output = self.swapped_output_space()?;
-        let _host_pool = self.runtime.enter_host_pool();
         let factor = match &self.repr {
             TypedTensorRepr::Adjoint(view) => {
                 let parent = BoundDynamicTensorRef::try_new(&view.parent.space, view.parent_data())
                     .map_err(Error::from)?;
                 RuntimeDense(&self.runtime).run(|dense| {
                     symtn_matrixalgebra::seam::pinv_adjoint_parent_direct_into_dyn(
-                        dense, &parent, output, rcond,
+                        engine, dense, &parent, output, rcond,
                     )
                 })
             }
@@ -82,7 +86,9 @@ where
                 let (space, data) = self.dense_operand()?;
                 let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
                 RuntimeDense(&self.runtime).run(|dense| {
-                    symtn_matrixalgebra::seam::pinv_direct_into_dyn(dense, &input, output, rcond)
+                    symtn_matrixalgebra::seam::pinv_direct_into_dyn(
+                        engine, dense, &input, output, rcond,
+                    )
                 })
             }
         }

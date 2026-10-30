@@ -240,7 +240,8 @@ where
         + Clone
         + 'static,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let build = |stacking| endomorphism(&runtime, rule.clone(), sectors, stacking);
     let good = build(Stacking::Canonical);
     let tilings = [
@@ -257,48 +258,48 @@ where
     let cube = compose_oracle(&square, &entries(&good));
     for (stacking, tensor) in &tilings {
         let what = |op: &str| format!("{stacking:?} {op}");
-        let squared = tensor.compose(tensor).unwrap();
+        let squared = tensor.compose(engine, tensor).unwrap();
         assert_entries_close(&entries(&squared), &square, &what("t∘t"));
-        let cubed = tensor.compose(&squared).unwrap();
+        let cubed = tensor.compose(engine, &squared).unwrap();
         assert_entries_close(&entries(&cubed), &cube, &what("t∘t∘t"));
         // A lazy adjoint admits only the ordinary layout; others are refused.
-        if let Ok(adjoint) = tensor.adjoint() {
-            let good_adjoint = good.adjoint().unwrap();
+        if let Ok(adjoint) = tensor.adjoint(engine) {
+            let good_adjoint = good.adjoint(engine).unwrap();
             assert_same_operator(
-                &adjoint.compose(tensor).unwrap(),
-                &good_adjoint.compose(&good).unwrap(),
+                &adjoint.compose(engine, tensor).unwrap(),
+                &good_adjoint.compose(engine, &good).unwrap(),
                 &what("adjoint compose"),
             );
             assert_same_operator(
-                &tensor.compose(&adjoint).unwrap(),
-                &good.compose(&good_adjoint).unwrap(),
+                &tensor.compose(engine, &adjoint).unwrap(),
+                &good.compose(engine, &good_adjoint).unwrap(),
                 &what("compose adjoint"),
             );
             assert_same_operator(
-                &adjoint.compose(&tilings[2].1).unwrap(),
-                &good_adjoint.compose(&good).unwrap(),
+                &adjoint.compose(engine, &tilings[2].1).unwrap(),
+                &good_adjoint.compose(engine, &good).unwrap(),
                 &what("adjoint compose mis-stacked"),
             );
         } else {
             assert_ne!(*stacking, Stacking::Canonical);
         }
         assert!(
-            (tensor.tr().unwrap() - good.tr().unwrap()).abs() <= 1e-12,
+            (tensor.tr(engine).unwrap() - good.tr(engine).unwrap()).abs() <= 1e-12,
             "{stacking:?} tr"
         );
         assert_same_operator(
-            &tensor.trace_pairs(&[(1, 3)]).unwrap(),
-            &good.trace_pairs(&[(1, 3)]).unwrap(),
+            &tensor.trace_pairs(engine, &[(1, 3)]).unwrap(),
+            &good.trace_pairs(engine, &[(1, 3)]).unwrap(),
             &what("trace_pairs"),
         );
         assert_same_operator(
-            &tensor.permute(&[1, 0], &[3, 2]).unwrap(),
-            &good.permute(&[1, 0], &[3, 2]).unwrap(),
+            &tensor.permute(engine, &[1, 0], &[3, 2]).unwrap(),
+            &good.permute(engine, &[1, 0], &[3, 2]).unwrap(),
             &what("permute"),
         );
         // Addition pairs storage positionally, so it admits only one layout.
-        match tensor.axpby(1.0, &good, 1.0) {
-            Ok(sum) => assert_same_operator(&sum, &good.scale(2.0).unwrap(), &what("add")),
+        match tensor.axpby(engine, 1.0, &good, 1.0) {
+            Ok(sum) => assert_same_operator(&sum, &good.scale(engine, 2.0).unwrap(), &what("add")),
             Err(error) => assert!(
                 format!("{error:?}").contains("block layouts"),
                 "{stacking:?} add: {error:?}"
@@ -306,7 +307,7 @@ where
         }
         for (other_stacking, other) in &tilings {
             let what = |op: &str| format!("{stacking:?}·{other_stacking:?} {op}");
-            let product = tensor.compose(other).unwrap();
+            let product = tensor.compose(engine, other).unwrap();
             assert_entries_close(&entries(&product), &square, &what("compose"));
             // Eager composition returns a fresh tensor in the ordinary
             // layout, whatever the operand tilings.
@@ -320,6 +321,7 @@ where
             // sorted and swapped operand candidates.
             let full = good
                 .contract(
+                    engine,
                     &good,
                     &ContractSpec {
                         lhs: &[2, 3],
@@ -332,6 +334,7 @@ where
             assert_same_operator(
                 &tensor
                     .contract(
+                        engine,
                         other,
                         &ContractSpec {
                             lhs: &[2, 3],
@@ -347,6 +350,7 @@ where
             assert_same_operator(
                 &tensor
                     .contract(
+                        engine,
                         other,
                         &ContractSpec {
                             lhs: &[2, 3],
@@ -358,6 +362,7 @@ where
                     .unwrap(),
                 &good
                     .contract(
+                        engine,
                         &good,
                         &ContractSpec {
                             lhs: &[2, 3],
@@ -373,6 +378,7 @@ where
             assert_same_operator(
                 &tensor
                     .contract(
+                        engine,
                         other,
                         &ContractSpec {
                             lhs: &[3],
@@ -384,6 +390,7 @@ where
                     .unwrap(),
                 &good
                     .contract(
+                        engine,
                         &good,
                         &ContractSpec {
                             lhs: &[3],
@@ -398,6 +405,7 @@ where
             assert_same_operator(
                 &tensor
                     .contract(
+                        engine,
                         other,
                         &ContractSpec {
                             lhs: &[2],
@@ -409,6 +417,7 @@ where
                     .unwrap(),
                 &good
                     .contract(
+                        engine,
                         &good,
                         &ContractSpec {
                             lhs: &[2],
@@ -473,13 +482,14 @@ fn su2_mis_stacked_contractions_match_tree_identity() {
 /// sources (DynamicTree).
 #[test]
 fn mis_stacked_mul_form_contractions_take_the_irregular_host_core() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_MIS_STACKED_ISOLATED",
         "typed::contract_stacking_tests::mis_stacked_mul_form_contractions_take_the_irregular_host_core",
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let sectors = [
         (U1Irrep::new(-1).sector_id(), 1),
         (U1Irrep::new(0).sector_id(), 2),
@@ -504,11 +514,11 @@ fn mis_stacked_mul_form_contractions_take_the_irregular_host_core() {
             info.hits() + info.misses() + info.rejections()
         };
         let before = lookups();
-        let product = tensor.contract(&tensor, &spec).unwrap();
+        let product = tensor.contract(engine, &tensor, &spec).unwrap();
         assert_eq!(lookups(), before, "{stacking:?}: a tree transform ran");
         assert_same_operator(
             &product,
-            &good.contract(&good, &spec).unwrap(),
+            &good.contract(engine, &good, &spec).unwrap(),
             &format!("{stacking:?} irregular core"),
         );
     }
@@ -601,10 +611,11 @@ where
         + Clone
         + 'static,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let build = |stacking| endomorphism(&runtime, rule.clone(), sectors, stacking);
     let good = build(Stacking::Canonical);
-    let dense = good.to_physical_dense().unwrap();
+    let dense = good.to_physical_dense(engine).unwrap();
     // A† of a real operator: swap the codomain and domain axis pairs.
     let dense_adjoint = dense_contract(
         &dense,
@@ -624,29 +635,31 @@ where
     ]
     .map(|stacking| (format!("{stacking:?}"), build(stacking), &dense))
     .to_vec();
-    operands.push(("Adjoint".into(), good.adjoint().unwrap(), &dense_adjoint));
+    operands.push((
+        "Adjoint".into(),
+        good.adjoint(engine).unwrap(),
+        &dense_adjoint,
+    ));
     let mut checks = 0;
-    let mut check = |actual: &TensorMap<R, f64>, expected: &PhysicalDense<f64>, what: String| {
-        assert_dense_close(&actual.to_physical_dense().unwrap(), expected, &what);
+    let mut check = |engine: &mut dyn Engine,
+                     actual: &TensorMap<R, f64>,
+                     expected: &PhysicalDense<f64>,
+                     what: String| {
+        assert_dense_close(&actual.to_physical_dense(engine).unwrap(), expected, &what);
         checks += 1;
     };
     for (name, tensor, dense) in &operands {
         let square = dense_contract(dense, dense, &[2, 3], &[0, 1], &[0, 1, 2, 3]);
         let cube = dense_contract(&square, dense, &[2, 3], &[0, 1], &[0, 1, 2, 3]);
-        let squared = tensor.compose(tensor).unwrap();
-        check(&squared, &square, format!("{name} t∘t"));
-        check(
-            &tensor.compose(&squared).unwrap(),
-            &cube,
-            format!("{name} t∘t∘t"),
-        );
+        let squared = tensor.compose(engine, tensor).unwrap();
+        check(engine, &squared, &square, format!("{name} t∘t"));
+        let cubed = tensor.compose(engine, &squared).unwrap();
+        check(engine, &cubed, &cube, format!("{name} t∘t∘t"));
         for (other_name, other, other_dense) in &operands {
             let what = |op: &str| format!("{name}·{other_name} {op}");
-            check(
-                &tensor.compose(other).unwrap(),
-                &dense_contract(dense, other_dense, &[2, 3], &[0, 1], &[0, 1, 2, 3]),
-                what("compose"),
-            );
+            let operand = &dense_contract(dense, other_dense, &[2, 3], &[0, 1], &[0, 1, 2, 3]);
+            let composed = tensor.compose(engine, other).unwrap();
+            check(engine, &composed, operand, what("compose"));
             for (lhs_axes, rhs_axes, output_axes, op) in [
                 (&[2, 3][..], &[0, 1][..], &[0, 1, 2, 3][..], "contract"),
                 (&[2, 3], &[0, 1], &[2, 3, 0, 1], "contract swapped"),
@@ -660,11 +673,9 @@ where
                     codomain,
                     domain,
                 };
-                check(
-                    &tensor.contract(other, &spec).unwrap(),
-                    &dense_contract(dense, other_dense, lhs_axes, rhs_axes, output_axes),
-                    what(op),
-                );
+                let operand = &dense_contract(dense, other_dense, lhs_axes, rhs_axes, output_axes);
+                let contracted = tensor.contract(engine, other, &spec).unwrap();
+                check(engine, &contracted, operand, what(op));
             }
         }
     }
@@ -698,21 +709,24 @@ fn su2_mis_stacked_contractions_match_physical_dense_einsum() {
 
 #[test]
 fn compose_plan_rejects_a_non_direct_plan_at_new() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an expert tiling whose column trees are stacked opposite to the
     // partner's rows has no canonical fully-direct plan, so the plan refuses
     // it at `new` with the typed error the eager device composition reports,
     // while eager Host `compose` still runs it.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let sectors = [
         (U1Irrep::new(0).sector_id(), 2),
         (U1Irrep::new(1).sector_id(), 1),
     ];
     let reversed = endomorphism(&runtime, U1FusionRule, &sectors, Stacking::ColumnsReversed);
     let canonical = endomorphism(&runtime, U1FusionRule, &sectors, Stacking::Canonical);
-    assert!(reversed.compose(&canonical).is_ok());
+    assert!(reversed.compose(engine, &canonical).is_ok());
     let lhs = StackedTensorMap::pack(&[reversed]).unwrap();
     let rhs = StackedTensorMap::pack(&[canonical]).unwrap();
-    let error = ComposePlan::new(&lhs, &rhs).err().expect("non-direct plan");
+    let error = ComposePlan::new(engine, &lhs, &rhs)
+        .err()
+        .expect("non-direct plan");
     assert!(
         matches!(
             &error,

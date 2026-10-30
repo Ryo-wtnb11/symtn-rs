@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn full_svd_late_error_preserves_input_and_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the adjoint-oriented full-SVD engine finishes every sector before
     // allocating any returned factor.
     let rule = Z2FusionRule;
@@ -11,7 +12,7 @@ fn full_svd_late_error_preserves_input_and_publishes_no_factors() {
     let mut dense = ScriptedExecutor::<FailSecondSvd>::default();
 
     let buffer_builds_rec = crate::probe::record();
-    let result = svd_full_adjoint_dyn(&mut dense, &bound.as_ref().dynamic());
+    let result = svd_full_adjoint_dyn(engine, &mut dense, &bound.as_ref().dynamic());
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
@@ -21,6 +22,7 @@ fn full_svd_late_error_preserves_input_and_publishes_no_factors() {
 
 #[test]
 fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the production full SVD (direct and adjoint engines) admits U and
     // Vh layouts that the staged per-sector factors already occupy, so both
     // factors are transferred instead of zero-filled and scattered.
@@ -30,7 +32,7 @@ fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let one_sided_rec = crate::probe::record();
-    let direct = svd_full_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let direct = svd_full_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     let probe = one_sided_rec.one_sided_publication();
     assert_eq!(
         (probe.canonical_publications, probe.fallback_publications),
@@ -39,7 +41,7 @@ fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
     assert!(probe.appended_elements > 0);
 
     let one_sided_rec = crate::probe::record();
-    let adjoint = svd_full_adjoint_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let adjoint = svd_full_adjoint_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     let probe = one_sided_rec.one_sided_publication();
     assert_eq!(
         (probe.canonical_publications, probe.fallback_publications),
@@ -53,12 +55,13 @@ fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
 
 #[test]
 fn full_svd_adjoint_builds_only_the_final_factor_buffers() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = one_sector_rectangular_matrix(vec![1.0, 2.0, 3.0, 4.0, 5.0, 7.0], 2, 3);
     let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let buffer_builds_rec = crate::probe::record();
-    let output = svd_full_adjoint_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let output = svd_full_adjoint_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
 
     assert_eq!(buffer_builds_rec.factor_buffer_builds(), (1, 1));
     assert_eq!(output.u().space().space().required_len().unwrap(), 9);
@@ -68,10 +71,11 @@ fn full_svd_adjoint_builds_only_the_final_factor_buffers() {
 
 #[test]
 fn full_svd_adjoint_completion_reconstructs_rectangular_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = one_sector_rectangular_matrix(vec![1.0, 2.0, 3.0, 4.0, 5.0, 7.0], 2, 3);
     let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
-    let output = svd_full_adjoint_dyn(&mut dense, &bound.as_ref().dynamic()).unwrap();
+    let output = svd_full_adjoint_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     assert_eq!(dense.counts().svd, 1);
     let u = output.u().data();
     let s = output.s().data();
@@ -110,10 +114,12 @@ fn svd_full_rejects_a_different_provider_before_dense_execution() {
 
 #[test]
 fn svd_full_gives_square_unitaries_and_reconstructs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let full = svd_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
@@ -161,19 +167,21 @@ fn svd_full_gives_square_unitaries_and_reconstructs() {
 
 #[test]
 fn svd_full_uses_native_owned_full_svd_without_orthonormal_completion() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 3);
     let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let Some(mut dense) = NativeFullSvdSpy::new() else {
         return;
     };
 
-    let full = svd_full_dyn(&mut dense, &input.as_ref().dynamic()).unwrap();
+    let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
     assert_eq!(dense.counts().svd_full, 1);
     assert!(!full.singular_values().is_empty());
 }
 
 fn assert_native_full_svd_uses_builtin_owned_dtype<D: FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<D>::from_vec_with_fusion_space(
         source
@@ -189,7 +197,7 @@ fn assert_native_full_svd_uses_builtin_owned_dtype<D: FactorScalar>() {
         return;
     };
 
-    let full = svd_full_dyn(&mut dense, &input.as_ref().dynamic()).unwrap();
+    let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
     assert_eq!(dense.counts().svd_full, 2);
     assert_eq!(full.singular_values().len(), 2);
@@ -209,6 +217,7 @@ fn native_full_svd_uses_owned_inputs_for_every_builtin_dtype() {
 
 #[test]
 fn native_full_svd_reconstructs_complex_mixed_rectangular_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
         source
@@ -224,7 +233,7 @@ fn native_full_svd_reconstructs_complex_mixed_rectangular_sectors() {
         return;
     };
 
-    let full = svd_full_dyn(&mut dense, &input.as_ref().dynamic()).unwrap();
+    let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
     assert_eq!(dense.counts().svd_full, 2);
 
     let input_regions = tensor
@@ -373,6 +382,7 @@ where
 /// — the basis spanning the null space is not unique, so it differs between
 /// the direct provider call and the `[U1 | I]` completion fallback.
 fn assert_native_full_svd_oracle<D: FactorScalar>(tol: f64) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for (rows, cols) in [(3usize, 3usize), (4, 2), (2, 4)] {
         for kind in ["generic", "rank-deficient", "repeated"] {
             let entry = |index: usize| {
@@ -413,7 +423,7 @@ fn assert_native_full_svd_oracle<D: FactorScalar>(tol: f64) {
                 return;
             };
 
-            let full = svd_full_dyn(&mut dense, &input.as_ref().dynamic()).unwrap();
+            let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
             let context = format!("{kind} {rows}x{cols}");
             assert_eq!(
@@ -518,6 +528,7 @@ fn native_full_svd_oracle_holds_for_every_builtin_dtype_shape_and_rank() {
 
 #[test]
 fn native_full_svd_late_failure_does_not_publish_or_retry_compatibility() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = mixed_rectangular_c32_tensor();
     let before = tensor.data().to_vec();
     let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
@@ -526,7 +537,7 @@ fn native_full_svd_late_failure_does_not_publish_or_retry_compatibility() {
     };
 
     let buffer_builds_rec = crate::probe::record();
-    let result = svd_full_dyn(&mut dense, &input.as_ref().dynamic());
+    let result = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic());
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(dense.counts().svd_full, 2);
@@ -536,6 +547,7 @@ fn native_full_svd_late_failure_does_not_publish_or_retry_compatibility() {
 
 #[test]
 fn native_full_svd_reconstructs_complex_square_and_padded_inputs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let square = one_sector_rectangular_matrix(
         vec![
             Complex64::new(1.0, 2.0),
@@ -552,7 +564,7 @@ fn native_full_svd_reconstructs_complex_square_and_padded_inputs() {
             return;
         };
 
-        let full = svd_full_dyn(&mut dense, &input.as_ref().dynamic()).unwrap();
+        let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
         assert_eq!(dense.counts().svd_full, 1);
         assert_compact_factors_reconstruct_input(
@@ -566,6 +578,7 @@ fn native_full_svd_reconstructs_complex_square_and_padded_inputs() {
 
 #[test]
 fn rectangular_full_svd_has_square_outer_factors_and_reconstructs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: full SVD returns U(m,m), S(m,n), Vh(n,n) and recomposes tall and wide inputs.
     let rule = Z2FusionRule;
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -578,7 +591,7 @@ fn rectangular_full_svd_has_square_outer_factors_and_reconstructs() {
             cols,
         );
         let input = bound_tensor(Arc::new(rule), &matrix);
-        let full = svd_full(&mut dense, &input.as_ref()).unwrap();
+        let full = svd_full(engine, &mut dense, &input.as_ref()).unwrap();
         assert_factor_layout_matches_per_tree_shapes(full.u.space());
         assert_factor_layout_matches_per_tree_shapes(full.s.space());
         assert_factor_layout_matches_per_tree_shapes(full.vh.space());

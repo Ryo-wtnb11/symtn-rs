@@ -14,7 +14,8 @@ use symtn::typed::{GradedSpace, OperationError, Runtime, TensorMap};
 
 #[test]
 fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
-    let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let rt = Runtime::builder().build().unwrap();
     let rule =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64, 0], 1), (vec![1, 0], 2)]).unwrap();
@@ -33,13 +34,16 @@ fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
     };
 
     // Different sector sets with the same first sector.
-    let mismatched = TensorMap::<_, f64>::rand_with_seed(&rt, [&v], [&w], 1).unwrap();
-    rejects(mismatched.trace_pairs(&[(0, 1)]), "V <- W");
+    let mismatched = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&w], 1).unwrap();
+    rejects(mismatched.trace_pairs(engine, &[(0, 1)]), "V <- W");
     // Two codomain copies of one leg: equal, not dual.
-    let doubled = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &v], [&v, &v], 2).unwrap();
-    rejects(doubled.trace_pairs(&[(0, 1)]), "codomain V with codomain V");
+    let doubled = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 2).unwrap();
+    rejects(
+        doubled.trace_pairs(engine, &[(0, 1)]),
+        "codomain V with codomain V",
+    );
 
     // Control: the dual pair is traced.
-    let square = TensorMap::<_, f64>::rand_with_seed(&rt, [&v], [&v], 3).unwrap();
-    assert!(square.trace_pairs(&[(0, 1)]).is_ok());
+    let square = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&v], 3).unwrap();
+    assert!(square.trace_pairs(engine, &[(0, 1)]).is_ok());
 }

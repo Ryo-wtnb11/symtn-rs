@@ -46,8 +46,8 @@ impl<D> sealed::Sealed for Vec<D> {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{PreparedExec, Runtime};
 ///
-/// fn call(runtime: &Runtime) {
-///     let _lease = <Vec<f64> as PreparedExec<U1FusionRule, f64>>::lease_members(runtime);
+/// fn call(engine: &mut dyn symtn::typed::Engine, _runtime: &Runtime) {
+///     let _lease = <Vec<f64> as PreparedExec<U1FusionRule, f64>>::lease_members(engine);
 /// }
 /// ```
 #[doc(hidden)]

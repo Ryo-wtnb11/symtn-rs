@@ -1,3 +1,4 @@
+use symtn_dense::Engine;
 // The one `DenseExecutor` test double (#1825): every kernel entry forwards to
 // the compiled `DefaultDenseExecutor` and is counted where it enters the
 // executor; selected kernels can fail on their n-th call, and a strict spy
@@ -336,73 +337,78 @@ impl SpyExecutor {
 }
 
 impl DenseExecutor for SpyExecutor {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn svd(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
         self.enter(Kernel::Svd)?;
-        self.inner.svd(input)
+        self.inner.svd(engine, input)
     }
     fn svd_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         u: DenseWrite<'_>,
         s: DenseWrite<'_>,
         vt: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::SvdInto)?;
-        self.inner.svd_into(input, u, s, vt)
+        self.inner.svd_into(engine, input, u, s, vt)
     }
-    fn svd_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
+    fn svd_vals(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
         self.enter(Kernel::SvdVals)?;
-        self.inner.svd_vals(input)
+        self.inner.svd_vals(engine, input)
     }
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn qr(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
         self.enter(Kernel::Qr)?;
-        self.inner.qr(input)
+        self.inner.qr(engine, input)
     }
     fn qr_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         q: DenseWrite<'_>,
         r: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::QrInto)?;
-        self.inner.qr_into(input, q, r)
+        self.inner.qr_into(engine, input, q, r)
     }
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn eigh(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
         self.enter(Kernel::Eigh)?;
-        self.inner.eigh(input)
+        self.inner.eigh(engine, input)
     }
     fn eigh_into(
         &mut self,
+        engine: &mut dyn Engine,
         input: DenseRead<'_>,
         values: DenseWrite<'_>,
         vectors: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::EighInto)?;
-        self.inner.eigh_into(input, values, vectors)
+        self.inner.eigh_into(engine, input, values, vectors)
     }
-    fn eigh_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
+    fn eigh_vals(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
         self.enter(Kernel::EighVals)?;
-        self.inner.eigh_vals(input)
+        self.inner.eigh_vals(engine, input)
     }
-    fn eig(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+    fn eig(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
         self.enter(Kernel::Eig)?;
-        self.inner.eig(input)
+        self.inner.eig(engine, input)
     }
-    fn eig_vals(&mut self, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
+    fn eig_vals(&mut self, engine: &mut dyn Engine, input: DenseRead<'_>) -> Result<DenseTensor, DenseError> {
         self.enter(Kernel::EigVals)?;
-        self.inner.eig_vals(input)
+        self.inner.eig_vals(engine, input)
     }
     fn solve_into(
         &mut self,
+        engine: &mut dyn Engine,
         a: DenseRead<'_>,
         b: DenseRead<'_>,
         x: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::Solve)?;
-        self.inner.solve_into(a, b, x)
+        self.inner.solve_into(engine, a, b, x)
     }
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -410,20 +416,22 @@ impl DenseExecutor for SpyExecutor {
     ) -> Result<(), DenseError> {
         self.enter(Kernel::DotGeneral)?;
         self.record_gemm(Kernel::DotGeneral, &output, &lhs, &rhs);
-        self.inner.dot_general_into(output, lhs, rhs, config)
+        self.inner.dot_general_into(engine, output, lhs, rhs, config)
     }
     fn matmul_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::Matmul)?;
         self.record_gemm(Kernel::Matmul, &output, &lhs, &rhs);
-        self.inner.matmul_into(output, lhs, rhs)
+        self.inner.matmul_into(engine, output, lhs, rhs)
     }
     fn matmul_axpby_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -432,11 +440,12 @@ impl DenseExecutor for SpyExecutor {
     ) -> Result<(), DenseError> {
         self.enter(Kernel::MatmulAxpby)?;
         self.record_gemm(Kernel::MatmulAxpby, &output, &lhs, &rhs);
-        self.inner.matmul_axpby_into(output, lhs, rhs, alpha, beta)
+        self.inner.matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
     }
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -451,11 +460,12 @@ impl DenseExecutor for SpyExecutor {
             .batch_jobs
             .fetch_add(jobs.len(), std::sync::atomic::Ordering::Relaxed);
         self.inner
-            .matmul_batch_axpby_into(output, lhs, rhs, jobs, runs, alpha, beta)
+            .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
     }
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_with_ops_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -471,7 +481,7 @@ impl DenseExecutor for SpyExecutor {
         self.counts
             .batch_jobs
             .fetch_add(jobs.len(), std::sync::atomic::Ordering::Relaxed);
-        self.inner.matmul_batch_axpby_with_ops_into(
+        self.inner.matmul_batch_axpby_with_ops_into(engine,
             output, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
         )
     }

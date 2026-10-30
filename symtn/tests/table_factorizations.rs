@@ -22,6 +22,7 @@
 
 use std::f64::consts::SQRT_2;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
@@ -44,14 +45,16 @@ fn close(got: f64, want: f64, scale: f64) -> bool {
 
 /// `‖x − y‖₂`, the dimension-weighted Frobenius norm.
 fn distance(x: &Table, y: &Table) -> f64 {
-    x.axpby(Complex64::ONE, y, -Complex64::ONE)
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    x.axpby(engine, Complex64::ONE, y, -Complex64::ONE)
         .unwrap()
-        .norm(2.0)
+        .norm(engine, 2.0)
         .unwrap()
 }
 
 fn assert_near(what: &str, x: &Table, y: &Table) {
-    let scale = y.norm(2.0).unwrap().max(1.0);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let scale = y.norm(engine, 2.0).unwrap().max(1.0);
     let residual = distance(x, y);
     assert!(
         residual <= 1.0e-12 * scale,
@@ -60,17 +63,19 @@ fn assert_near(what: &str, x: &Table, y: &Table) {
 }
 
 fn identity(runtime: &Runtime, legs: &[GradedSpace<TableRule>]) -> Table {
-    TensorMap::isomorphism(runtime, legs, legs).unwrap()
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    TensorMap::isomorphism(engine, runtime, legs, legs).unwrap()
 }
 
 /// `w^H w = id` on the domain of `w`.
 fn assert_isometry(what: &str, runtime: &Runtime, w: &Table) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let gram = w
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .materialize()
+        .materialize(engine)
         .unwrap()
-        .compose(w)
+        .compose(engine, w)
         .unwrap();
     assert_near(what, &gram, &identity(runtime, &w.domain()));
 }
@@ -145,8 +150,10 @@ impl Case {
     }
 
     fn filled(&self, tag: &'static str, codomain: usize, domain: usize) -> Table {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let v = &self.v;
         TensorMap::from_subblock_fn(
+            engine,
             &self.runtime,
             vec![v; codomain],
             vec![v; domain],
@@ -184,13 +191,17 @@ impl Case {
 /// `Σ_c d_c Σ λ = tr h` and `Σ_c d_c Σ λ² = ‖h‖²` (eigh of `h = t + t^H`),
 /// and `Σ_c d_c Σ λ = tr t` (eig).
 fn spectra_satisfy_weighted_trace_identities(case: &Case) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let t = case.filled("t", 2, 2);
-    let norm2 = t.norm(2.0).unwrap().powi(2);
+    let norm2 = t.norm(engine, 2.0).unwrap().powi(2);
     for (what, svd) in [
-        ("svd_vals", t.svd_vals(&[0, 1], &[2, 3]).unwrap()),
+        ("svd_vals", t.svd_vals(engine, &[0, 1], &[2, 3]).unwrap()),
         (
             "svd_vals of the adjoint",
-            t.adjoint().unwrap().svd_vals(&[0, 1], &[2, 3]).unwrap(),
+            t.adjoint(engine)
+                .unwrap()
+                .svd_vals(engine, &[0, 1], &[2, 3])
+                .unwrap(),
         ),
     ] {
         case.assert_pair_blocks(what, &svd);
@@ -205,15 +216,15 @@ fn spectra_satisfy_weighted_trace_identities(case: &Case) {
     }
 
     let hermitian = t
-        .axpby(Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
         .unwrap();
     let eigh = hermitian
-        .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
     case.assert_pair_blocks("eigh_vals", &eigh);
     let (trace, h2) = (
-        hermitian.tr().unwrap(),
-        hermitian.norm(2.0).unwrap().powi(2),
+        hermitian.tr(engine).unwrap(),
+        hermitian.norm(engine, 2.0).unwrap().powi(2),
     );
     let got = case.weighted_sum(&eigh, |x| x);
     assert!(
@@ -223,10 +234,10 @@ fn spectra_satisfy_weighted_trace_identities(case: &Case) {
     let got = case.weighted_sum(&eigh, |x| x * x);
     assert!(close(got, h2, h2), "eigh: Σ d λ² {got} != ‖h‖² {h2}");
 
-    let eig = t.eig_vals(&[0, 1], &[2, 3]).unwrap();
+    let eig = t.eig_vals(engine, &[0, 1], &[2, 3]).unwrap();
     case.assert_pair_blocks("eig_vals", &eig);
     let got = case.weighted_sum(&eig, |z: Complex64| z);
-    let trace = t.tr().unwrap();
+    let trace = t.tr(engine).unwrap();
     assert!(
         (got - trace).norm() <= 4096.0 * f64::EPSILON * norm2,
         "eig: Σ d λ {got} != tr t {trace}"
@@ -297,65 +308,80 @@ fn assert_rank_nullity(
     assert_eq!(degeneracies(null_leg), want, "{what}: rank–nullity");
 }
 fn decompositions_reconstruct(case: &Case) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = &case.runtime;
     let t = case.filled("t", 2, 2);
     let tall = case.filled("x", 2, 1);
     let wide = case.filled("y", 1, 2);
 
-    let Svd { u, s, vh } = t.svd_compact(&[0, 1], &[2, 3]).unwrap();
-    assert_near("u s vh", &u.compose(&s).unwrap().compose(&vh).unwrap(), &t);
+    let Svd { u, s, vh } = t.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();
+    assert_near(
+        "u s vh",
+        &u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap(),
+        &t,
+    );
     assert_isometry("svd u", runtime, &u);
     assert_isometry(
         "svd vh^H",
         runtime,
-        &vh.adjoint().unwrap().materialize().unwrap(),
+        &vh.adjoint(engine).unwrap().materialize(engine).unwrap(),
     );
-    let Svd { u, s, vh } = t.svd_full(&[0, 1], &[2, 3]).unwrap();
+    let Svd { u, s, vh } = t.svd_full(engine, &[0, 1], &[2, 3]).unwrap();
     assert_near(
         "full u s vh",
-        &u.compose(&s).unwrap().compose(&vh).unwrap(),
+        &u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap(),
         &t,
     );
     assert_isometry("full svd u", runtime, &u);
 
     for (what, Qr { q, r }) in [
-        ("qr_compact", tall.qr_compact(&[0, 1], &[2]).unwrap()),
-        ("qr_full", tall.qr_full(&[0, 1], &[2]).unwrap()),
+        (
+            "qr_compact",
+            tall.qr_compact(engine, &[0, 1], &[2]).unwrap(),
+        ),
+        ("qr_full", tall.qr_full(engine, &[0, 1], &[2]).unwrap()),
     ] {
-        assert_near(what, &q.compose(&r).unwrap(), &tall);
+        assert_near(what, &q.compose(engine, &r).unwrap(), &tall);
         assert_isometry(what, runtime, &q);
     }
     for (what, Lq { l, q }) in [
-        ("lq_compact", wide.lq_compact(&[0], &[1, 2]).unwrap()),
-        ("lq_full", wide.lq_full(&[0], &[1, 2]).unwrap()),
+        (
+            "lq_compact",
+            wide.lq_compact(engine, &[0], &[1, 2]).unwrap(),
+        ),
+        ("lq_full", wide.lq_full(engine, &[0], &[1, 2]).unwrap()),
     ] {
-        assert_near(what, &l.compose(&q).unwrap(), &wide);
-        assert_isometry(what, runtime, &q.adjoint().unwrap().materialize().unwrap());
+        assert_near(what, &l.compose(engine, &q).unwrap(), &wide);
+        assert_isometry(
+            what,
+            runtime,
+            &q.adjoint(engine).unwrap().materialize(engine).unwrap(),
+        );
     }
-    let LeftPolar { w, p } = tall.left_polar(&[0, 1], &[2]).unwrap();
-    assert_near("left polar", &w.compose(&p).unwrap(), &tall);
+    let LeftPolar { w, p } = tall.left_polar(engine, &[0, 1], &[2]).unwrap();
+    assert_near("left polar", &w.compose(engine, &p).unwrap(), &tall);
     assert_isometry("left polar w", runtime, &w);
-    let RightPolar { p, wh } = wide.right_polar(&[0], &[1, 2]).unwrap();
-    assert_near("right polar", &p.compose(&wh).unwrap(), &wide);
+    let RightPolar { p, wh } = wide.right_polar(engine, &[0], &[1, 2]).unwrap();
+    assert_near("right polar", &p.compose(engine, &wh).unwrap(), &wide);
     assert_isometry(
         "right polar wh^H",
         runtime,
-        &wh.adjoint().unwrap().materialize().unwrap(),
+        &wh.adjoint(engine).unwrap().materialize(engine).unwrap(),
     );
 
     let hermitian = t
-        .axpby(Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
         .unwrap();
     let eigh = hermitian
-        .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
     assert_near(
         "v d v^H",
         &eigh
             .v
-            .compose(&eigh.d)
+            .compose(engine, &eigh.d)
             .unwrap()
-            .compose(eigh.v.adjoint_view())
+            .compose(engine, eigh.v.adjoint_view())
             .unwrap(),
         &hermitian,
     );
@@ -364,82 +390,102 @@ fn decompositions_reconstruct(case: &Case) {
     assert_same_spectra(
         "eigh_vals vs diag(eigh d)",
         &hermitian
-            .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+            .eigh_vals(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
             .unwrap(),
-        &eigh.d.diagview().unwrap(),
+        &eigh.d.diagview(engine).unwrap(),
     );
-    let eig = t.eig_full(&[0, 1], &[2, 3]).unwrap();
+    let eig = t.eig_full(engine, &[0, 1], &[2, 3]).unwrap();
     assert_near(
         "t v = v d",
-        &t.compose(&eig.v).unwrap(),
-        &eig.v.compose(&eig.d).unwrap(),
+        &t.compose(engine, &eig.v).unwrap(),
+        &eig.v.compose(engine, &eig.d).unwrap(),
     );
     assert_same_spectra(
         "eig_vals vs diag(eig d)",
-        &t.eig_vals(&[0, 1], &[2, 3]).unwrap(),
-        &eig.d.diagview().unwrap(),
+        &t.eig_vals(engine, &[0, 1], &[2, 3]).unwrap(),
+        &eig.d.diagview(engine).unwrap(),
     );
     // `t v = v d` alone holds for `v = 0`: `v` must be invertible.
     assert_near(
         "inv(eig v) eig v",
-        &eig.v.inv(&[0, 1], &[2]).unwrap().compose(&eig.v).unwrap(),
+        &eig.v
+            .inv(engine, &[0, 1], &[2])
+            .unwrap()
+            .compose(engine, &eig.v)
+            .unwrap(),
         &identity(runtime, &eig.v.domain()),
     );
 
     // exp(h) = v exp(d) v^H; inv(t) t = id; t solve(t, y) = y.
-    let small = hermitian.scale(Complex64::new(0.25, 0.0)).unwrap();
+    let small = hermitian.scale(engine, Complex64::new(0.25, 0.0)).unwrap();
     let small_eigh = small
-        .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
+    let exp_d = small_eigh.d.map_diagonal(engine, |x| x.exp()).unwrap();
     let spectral_exp = small_eigh
         .v
-        .compose(&small_eigh.d.map_diagonal(|x| x.exp()).unwrap())
+        .compose(engine, &exp_d)
         .unwrap()
-        .compose(small_eigh.v.adjoint_view())
+        .compose(engine, small_eigh.v.adjoint_view())
         .unwrap();
-    assert_near("exp", &small.exp(&[0, 1], &[2, 3]).unwrap(), &spectral_exp);
+    assert_near(
+        "exp",
+        &small.exp(engine, &[0, 1], &[2, 3]).unwrap(),
+        &spectral_exp,
+    );
     let id = identity(runtime, &t.domain());
     assert_near(
         "inv t",
-        &t.inv(&[0, 1], &[2, 3]).unwrap().compose(&t).unwrap(),
+        &t.inv(engine, &[0, 1], &[2, 3])
+            .unwrap()
+            .compose(engine, &t)
+            .unwrap(),
         &id,
     );
     let rhs = case.filled("b", 2, 1);
-    let solved = t.solve(&[0, 1], &[2, 3], &rhs, &[0, 1], &[2]).unwrap();
-    assert_near("t solve", &t.compose(&solved).unwrap(), &rhs);
+    let solved = t
+        .solve(engine, &[0, 1], &[2, 3], &rhs, &[0, 1], &[2])
+        .unwrap();
+    assert_near("t solve", &t.compose(engine, &solved).unwrap(), &rhs);
 
     // Null spaces: orthonormal, annihilated by the input, of the size
     // rank–nullity gives.
-    let n = tall.left_null(&[0, 1], &[2]).unwrap();
+    let n = tall.left_null(engine, &[0, 1], &[2]).unwrap();
     assert_isometry("left null", runtime, &n);
     assert!(
-        n.adjoint()
+        n.adjoint(engine)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
-            .compose(&tall)
+            .compose(engine, &tall)
             .unwrap()
-            .norm(2.0)
+            .norm(engine, 2.0)
             .unwrap()
             < 1.0e-12
     );
     assert_rank_nullity(
         "left null",
         case,
-        &tall.svd_vals(&[0, 1], &[2]).unwrap(),
+        &tall.svd_vals(engine, &[0, 1], &[2]).unwrap(),
         &n.domain()[0],
     );
-    let n = wide.right_null(&[0], &[1, 2]).unwrap();
+    let n = wide.right_null(engine, &[0], &[1, 2]).unwrap();
     assert_isometry(
         "right null",
         runtime,
-        &n.adjoint().unwrap().materialize().unwrap(),
+        &n.adjoint(engine).unwrap().materialize(engine).unwrap(),
     );
-    assert!(wide.compose(n.adjoint_view()).unwrap().norm(2.0).unwrap() < 1.0e-12);
+    assert!(
+        wide.compose(engine, n.adjoint_view())
+            .unwrap()
+            .norm(engine, 2.0)
+            .unwrap()
+            < 1.0e-12
+    );
     assert_rank_nullity(
         "right null",
         case,
-        &wide.svd_vals(&[0], &[1, 2]).unwrap(),
+        &wide.svd_vals(engine, &[0], &[1, 2]).unwrap(),
         &n.codomain()[0],
     );
 }
@@ -447,9 +493,14 @@ fn decompositions_reconstruct(case: &Case) {
 /// Moore–Penrose: `t · pinv(t) · t = t`, for a wide map whose `pinv` is
 /// not an inverse.
 fn pseudo_inverse_reproduces_the_input(case: &Case) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let wide = case.filled("y", 1, 2);
-    let pinv = wide.pinv(&[0], &[1, 2], 1.0e-12).unwrap();
-    let roundtrip = wide.compose(&pinv).unwrap().compose(&wide).unwrap();
+    let pinv = wide.pinv(engine, &[0], &[1, 2], 1.0e-12).unwrap();
+    let roundtrip = wide
+        .compose(engine, &pinv)
+        .unwrap()
+        .compose(engine, &wide)
+        .unwrap();
     assert_near("t pinv(t) t", &roundtrip, &wide);
 }
 
@@ -541,14 +592,15 @@ fn truncate_by_hand(
 /// `trunctol(; atol = 1)` and `truncerror(; atol = 1.5)` on the same operand
 /// (checked against TensorKit 0.17.1).
 fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3]) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let t = case.filled("t", 2, 2);
-    let norm = t.norm(2.0).unwrap();
-    let Svd { u, s, vh } = t.svd_compact(&[0, 1], &[2, 3]).unwrap();
+    let norm = t.norm(engine, 2.0).unwrap();
+    let Svd { u, s, vh } = t.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();
     // Why the rule by hand reads `s` and not `svd_vals`: the two are separate
     // SVD runs that agree only to rounding, so a threshold placed at one of
     // the values must be judged on the spectrum `find_truncated` selects from.
     let spectrum: Vec<SectorSpectrum<TableSector>> = s
-        .diagview()
+        .diagview(engine)
         .unwrap()
         .into_iter()
         .map(|entry| SectorSpectrum {
@@ -556,7 +608,7 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
             values: entry.values.iter().map(|value| value.norm()).collect(),
         })
         .collect();
-    for (compact, values) in spectrum.iter().zip(t.svd_vals(&[0, 1], &[2, 3]).unwrap()) {
+    for (compact, values) in spectrum.iter().zip(t.svd_vals(engine, &[0, 1], &[2, 3]).unwrap()) {
         assert_eq!(compact.sector, values.sector);
         for (&got, want) in compact.values.iter().zip(values.values) {
             assert!(
@@ -589,15 +641,15 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
             "{what}: the rule by hand vs TensorKit"
         );
         let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), &truncation)
+            .find_truncated(&s.diagview(engine).unwrap(), &truncation)
             .unwrap();
         let u = u
-            .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            .restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
             .unwrap();
         let s = s
-            .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
             .unwrap();
-        let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
+        let vh = vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap();
         assert_eq!(degeneracies(&s.domain()[0]), want_dims, "{what}: kept");
         assert!(
             close(found.error, want_error, norm),
@@ -605,10 +657,10 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
             found.error
         );
         // The truncated map is orthogonal to what was discarded.
-        let truncated = u.compose(&s).unwrap().compose(&vh).unwrap();
+        let truncated = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
         let want_norm = (norm * norm - want_error * want_error).sqrt();
         assert!(
-            close(truncated.norm(2.0).unwrap(), want_norm, norm),
+            close(truncated.norm(engine, 2.0).unwrap(), want_norm, norm),
             "{what}: norm"
         );
         assert!(
@@ -622,12 +674,12 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
     let (want_dims, _) = truncate_by_hand(case, &spectrum, &ByHand::Cutoff(at));
     let found = s.domain()[0]
         .find_truncated(
-            &s.diagview().unwrap(),
+            &s.diagview(engine).unwrap(),
             &Truncation::absolute_cutoff(at).unwrap(),
         )
         .unwrap();
     let s = s
-        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
         .unwrap();
     assert_eq!(degeneracies(&s.domain()[0]), want_dims, "cutoff at σ");
 }
@@ -644,6 +696,7 @@ fn exact_cutoff_is_inclusive(
     at: (&[(u16, usize)], f64),
     above: (&[(u16, usize)], f64),
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let bond = GradedSpace::try_new(
         Arc::new(rule),
         values
@@ -652,6 +705,7 @@ fn exact_cutoff_is_inclusive(
     )
     .unwrap();
     let t: Table = TensorMap::diagonal(
+        engine,
         &case.runtime,
         &bond,
         values.iter().map(|&(label, values)| SectorSpectrum {
@@ -660,22 +714,22 @@ fn exact_cutoff_is_inclusive(
         }),
     )
     .unwrap();
-    let norm = t.norm(2.0).unwrap();
-    let Svd { u, s, vh } = t.svd_compact(&[0], &[1]).unwrap();
+    let norm = t.norm(engine, 2.0).unwrap();
+    let Svd { u, s, vh } = t.svd_compact(engine, &[0], &[1]).unwrap();
     for (cutoff, (want_dims, discarded)) in [(1.0, at), (1.0_f64.next_up(), above)] {
         let found = s.domain()[0]
             .find_truncated(
-                &s.diagview().unwrap(),
+                &s.diagview(engine).unwrap(),
                 &Truncation::absolute_cutoff(cutoff).unwrap(),
             )
             .unwrap();
         let u = u
-            .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            .restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
             .unwrap();
         let s = s
-            .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
             .unwrap();
-        let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
+        let vh = vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap();
         assert_eq!(degeneracies(&s.domain()[0]), want_dims, "cutoff {cutoff}");
         let want_error = discarded.sqrt();
         assert!(
@@ -683,10 +737,10 @@ fn exact_cutoff_is_inclusive(
             "cutoff {cutoff}: error {} != {want_error}",
             found.error
         );
-        let truncated = u.compose(&s).unwrap().compose(&vh).unwrap();
+        let truncated = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
         assert!(
             close(
-                truncated.norm(2.0).unwrap(),
+                truncated.norm(engine, 2.0).unwrap(),
                 (norm * norm - discarded).sqrt(),
                 norm
             ),
@@ -753,6 +807,7 @@ fn ising_truncation_follows_the_weighted_rule() {
 /// `@planar C[b d; h f] := A[a b; c d] * B[c f; a h]` against
 /// `planarcontract!`'s steps: two crossing-free transposes, then compose.
 fn planar_contraction(case: &Case) -> Table {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let a = case.filled("a", 2, 2);
     let b = case.filled("b", 2, 2);
     let spec = ContractSpec {
@@ -761,11 +816,12 @@ fn planar_contraction(case: &Case) -> Table {
         codomain: &[0, 1],
         domain: &[3, 2],
     };
-    let c = a.planar_contract(&b, &spec).unwrap();
+    let c = a.planar_contract(engine, &b, &spec).unwrap();
+    let b_transpose = b.transpose(engine, &[2, 0], &[3, 1]).unwrap();
     let steps = a
-        .transpose(&[1, 3], &[0, 2])
+        .transpose(engine, &[1, 3], &[0, 2])
         .unwrap()
-        .compose(&b.transpose(&[2, 0], &[3, 1]).unwrap())
+        .compose(engine, &b_transpose)
         .unwrap();
     for (got, want) in c
         .dense_data()
@@ -782,21 +838,25 @@ fn planar_contraction(case: &Case) -> Table {
 /// `@planar` on the same operands), and its spectra by the weighted trace
 /// identities.
 fn planar_contraction_then_factorization(case: &Case, norm: f64, trace: Complex64) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let c = planar_contraction(case);
-    assert!(close(c.norm(2.0).unwrap(), norm, norm), "planar norm");
-    let got = c.tr().unwrap();
+    assert!(
+        close(c.norm(engine, 2.0).unwrap(), norm, norm),
+        "planar norm"
+    );
+    let got = c.tr(engine).unwrap();
     assert!(
         close(got.re, trace.re, 1.0) && close(got.im, trace.im, 1.0),
         "planar tr {got}"
     );
-    let svd = c.svd_vals(&[0, 1], &[2, 3]).unwrap();
+    let svd = c.svd_vals(engine, &[0, 1], &[2, 3]).unwrap();
     let got = case.weighted_sum(&svd, |s| s * s);
     assert!(close(got, norm * norm, norm * norm), "planar svd: Σ d σ²");
     let hermitian = c
-        .axpby(Complex64::ONE, c.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, c.adjoint_view(), Complex64::ONE)
         .unwrap();
     let eigh = hermitian
-        .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
     let got = case.weighted_sum(&eigh, |x| x);
     assert!(
@@ -826,34 +886,42 @@ fn ising_planar_contraction_then_factorization() {
 /// `H = −Σ_i P^{(1)}_{i,i+1}` on `w^{⊗L}`, built as TensorKit builds it: the
 /// two-site vacuum-channel projector, `otimes` with identities, and sums.
 fn projector_chain(runtime: &Runtime, w: &GradedSpace<TableRule>, length: usize) -> Table {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let vacuum = TableSector::new(1);
-    let projector: Table = TensorMap::from_subblock_fn(runtime, [w, w], [w, w], |trees, _| {
-        Complex64::new((*trees.coupled() == vacuum) as u8 as f64, 0.0)
-    })
-    .unwrap();
-    let identity =
-        |n: usize| -> Table { TensorMap::isomorphism(runtime, vec![w; n], vec![w; n]).unwrap() };
+    let projector: Table =
+        TensorMap::from_subblock_fn(engine, runtime, [w, w], [w, w], |trees, _| {
+            Complex64::new((*trees.coupled() == vacuum) as u8 as f64, 0.0)
+        })
+        .unwrap();
+    let identity = |engine: &mut dyn Engine, n: usize| -> Table {
+        TensorMap::isomorphism(engine, runtime, vec![w; n], vec![w; n]).unwrap()
+    };
     let mut hamiltonian: Option<Table> = None;
     for i in 1..length {
         let mut term = projector.clone();
         if i > 1 {
-            term = identity(i - 1).otimes(&term).unwrap();
+            term = identity(engine, i - 1).otimes(engine, &term).unwrap();
         }
         if i + 1 < length {
-            term = term.otimes(&identity(length - i - 1)).unwrap();
+            let identity_out = identity(engine, length - i - 1);
+            term = term.otimes(engine, &identity_out).unwrap();
         }
         hamiltonian = Some(match hamiltonian {
-            None => term.scale(-Complex64::ONE).unwrap(),
-            Some(h) => h.axpby(Complex64::ONE, &term, -Complex64::ONE).unwrap(),
+            None => term.scale(engine, -Complex64::ONE).unwrap(),
+            Some(h) => h
+                .axpby(engine, Complex64::ONE, &term, -Complex64::ONE)
+                .unwrap(),
         });
     }
     hamiltonian.unwrap()
 }
 
 fn chain_spectra(h: &Table, length: usize) -> Vec<SectorSpectrum<TableSector>> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rows: Vec<usize> = (0..length).collect();
     let cols: Vec<usize> = (length..2 * length).collect();
-    h.eigh_vals(&rows, &cols, HermitianTol::DEFAULT).unwrap()
+    h.eigh_vals(engine, &rows, &cols, HermitianTol::DEFAULT)
+        .unwrap()
 }
 
 /// The open golden chain in the fusion-path basis `x₀ = 𝟙, x₁ = τ, …,
@@ -862,6 +930,7 @@ fn chain_spectra(h: &Table, length: usize) -> Vec<SectorSpectrum<TableSector>> {
 /// `x_{i−1} = x_{i+1} = 𝟙`, the first column `(φ^{−1}, φ^{−1/2})` of
 /// `F^{τττ}_τ` for `x_{i−1} = x_{i+1} = τ`, and zero otherwise.
 fn golden_chain_by_hand(runtime: &Runtime, w: &GradedSpace<TableRule>, length: usize) -> Table {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
     let (unit, tau) = (TableSector::new(1), TableSector::new(2));
     let f_column = |x: TableSector| {
@@ -877,23 +946,29 @@ fn golden_chain_by_hand(runtime: &Runtime, w: &GradedSpace<TableRule>, length: u
         path.push(coupled);
         path
     };
-    TensorMap::from_subblock_fn(runtime, vec![w; length], vec![w; length], |trees, _| {
-        let x = path(trees.codomain_innerlines(), *trees.coupled());
-        let y = path(trees.domain_innerlines(), *trees.coupled());
-        let mut value = 0.0;
-        for i in 1..length {
-            let others_agree = (0..=length).all(|k| k == i || x[k] == y[k]);
-            if !others_agree || x[i - 1] != x[i + 1] {
-                continue;
+    TensorMap::from_subblock_fn(
+        engine,
+        runtime,
+        vec![w; length],
+        vec![w; length],
+        |trees, _| {
+            let x = path(trees.codomain_innerlines(), *trees.coupled());
+            let y = path(trees.domain_innerlines(), *trees.coupled());
+            let mut value = 0.0;
+            for i in 1..length {
+                let others_agree = (0..=length).all(|k| k == i || x[k] == y[k]);
+                if !others_agree || x[i - 1] != x[i + 1] {
+                    continue;
+                }
+                value -= if x[i - 1] == unit {
+                    1.0
+                } else {
+                    f_column(x[i]) * f_column(y[i])
+                };
             }
-            value -= if x[i - 1] == unit {
-                1.0
-            } else {
-                f_column(x[i]) * f_column(y[i])
-            };
-        }
-        Complex64::new(value, 0.0)
-    })
+            Complex64::new(value, 0.0)
+        },
+    )
     .unwrap()
 }
 
@@ -1035,11 +1110,17 @@ fn ising_sigma_chain_matches_free_fermions() {
 
 #[test]
 fn a_real_complex_embedding_factorizes_exactly_as_the_real_symbol_rule() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // One path: the complex-symbol rule runs the real-symbol rule's
     // blockwise factorizations and dimension weights bit for bit.
     let runtime = Runtime::builder().build().unwrap();
-    let (_, complex) = operands!(&runtime, Embedded::<_, false>(SU2FusionRule), su2_sectors());
-    let (_, real) = operands!(&runtime, SU2FusionRule, su2_sectors());
+    let (_, complex) = operands!(
+        engine,
+        &runtime,
+        Embedded::<_, false>(SU2FusionRule),
+        su2_sectors()
+    );
+    let (_, real) = operands!(engine, &runtime, SU2FusionRule, su2_sectors());
     let bits = |spectra: Vec<SectorSpectrum<SU2Irrep>>| -> Vec<(SU2Irrep, Vec<u64>)> {
         spectra
             .into_iter()
@@ -1052,76 +1133,86 @@ fn a_real_complex_embedding_factorizes_exactly_as_the_real_symbol_rule() {
             .collect()
     };
     assert_eq!(
-        bits(complex.svd_vals(&[0, 1], &[2, 3]).unwrap()),
-        bits(real.svd_vals(&[0, 1], &[2, 3]).unwrap())
+        bits(complex.svd_vals(engine, &[0, 1], &[2, 3]).unwrap()),
+        bits(real.svd_vals(engine, &[0, 1], &[2, 3]).unwrap())
     );
     let (cs, rs) = (
-        complex.svd_compact(&[0, 1], &[2, 3]).unwrap(),
-        real.svd_compact(&[0, 1], &[2, 3]).unwrap(),
+        complex.svd_compact(engine, &[0, 1], &[2, 3]).unwrap(),
+        real.svd_compact(engine, &[0, 1], &[2, 3]).unwrap(),
     );
     assert_eq!(cs.u.dense_data().unwrap(), rs.u.dense_data().unwrap());
     assert_eq!(cs.vh.dense_data().unwrap(), rs.vh.dense_data().unwrap());
     let truncation = Truncation::rank(5);
     let cf = cs.s.domain()[0]
-        .find_truncated(&cs.s.diagview().unwrap(), &truncation)
+        .find_truncated(&cs.s.diagview(engine).unwrap(), &truncation)
         .unwrap();
     let rf = rs.s.domain()[0]
-        .find_truncated(&rs.s.diagview().unwrap(), &truncation)
+        .find_truncated(&rs.s.diagview(engine).unwrap(), &truncation)
         .unwrap();
     assert_eq!(cf.error.to_bits(), rf.error.to_bits());
     assert_eq!(
-        cs.u.restrict_leg(&[(2, &cf.selection)])
+        cs.u.restrict_leg(engine, &[(2, &cf.selection)])
             .unwrap()
             .dense_data()
             .unwrap(),
-        rs.u.restrict_leg(&[(2, &rf.selection)])
+        rs.u.restrict_leg(engine, &[(2, &rf.selection)])
             .unwrap()
             .dense_data()
             .unwrap()
     );
     let (cq, rq) = (
-        complex.qr_compact(&[0, 1], &[2, 3]).unwrap(),
-        real.qr_compact(&[0, 1], &[2, 3]).unwrap(),
+        complex.qr_compact(engine, &[0, 1], &[2, 3]).unwrap(),
+        real.qr_compact(engine, &[0, 1], &[2, 3]).unwrap(),
     );
     assert_eq!(cq.r.dense_data().unwrap(), rq.r.dense_data().unwrap());
     macro_rules! hermitian_spectrum {
-        ($t:expr) => {
+        ($engine:ident, $t:expr) => {
             bits(
-                $t.axpby(Complex64::ONE, $t.adjoint_view(), Complex64::ONE)
+                $t.axpby($engine, Complex64::ONE, $t.adjoint_view(), Complex64::ONE)
                     .unwrap()
-                    .eigh_vals(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+                    .eigh_vals($engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
                     .unwrap(),
             )
         };
     }
-    assert_eq!(hermitian_spectrum!(complex), hermitian_spectrum!(real));
+    assert_eq!(
+        hermitian_spectrum!(engine, complex),
+        hermitian_spectrum!(engine, real)
+    );
 }
 
 #[test]
 fn a_non_real_quantum_dimension_is_refused_by_truncation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // SU(2) is `Simple`: a rank budget reads `dim(c)`. The SVD itself reads
     // no dimension and succeeds.
     let runtime = Runtime::builder().build().unwrap();
-    let (_, t) = operands!(&runtime, Embedded::<_, true>(SU2FusionRule), su2_sectors());
-    let Svd { s, .. } = t.svd_compact(&[0, 1], &[2, 3]).unwrap();
+    let (_, t) = operands!(
+        engine,
+        &runtime,
+        Embedded::<_, true>(SU2FusionRule),
+        su2_sectors()
+    );
+    let Svd { s, .. } = t.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();
     let error = s.domain()[0]
-        .find_truncated(&s.diagview().unwrap(), &Truncation::rank(5))
+        .find_truncated(&s.diagview(engine).unwrap(), &Truncation::rank(5))
         .unwrap_err();
     assert!(is_non_real_dimension(&error), "{error:?}");
 }
 
 #[test]
 fn a_prepared_batched_eigh_refuses_table_rule_payloads_with_a_typed_error() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // TableRule tensors are `Complex64`, and the prepared Host eigh supports
     // real payloads only (tenferro-rs#1923): the refusal is the same typed
     // capability error as for complex data on a real-symbol rule.
     let case = Case::ising();
     let t = case.filled("t", 1, 1);
     let h = t
-        .axpby(Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
         .unwrap();
     let stack = StackedTensorMap::pack(&[h.clone(), h]).unwrap();
-    let Err(error) = EighFullPlan::new(&stack, &[0], &[1], HermitianTol::DEFAULT) else {
+    let Err(error) = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT) else {
         panic!("a Complex64 prepared eigh must be refused");
     };
     assert!(

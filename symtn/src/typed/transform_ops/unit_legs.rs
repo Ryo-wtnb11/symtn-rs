@@ -7,6 +7,7 @@ where
 {
     pub(in crate::typed) fn insert_unit_multiplicity_free(
         &self,
+        engine: &mut dyn Engine,
         insertion: UnitLegInsertion,
     ) -> Result<Self, Error>
     where
@@ -41,14 +42,18 @@ where
             insertion,
         )
         .map_err(map_checked_unit_layout_error)?;
-        let data = self.shareable_dense_payload();
+        let data = self.shareable_dense_payload(engine);
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),
         })
     }
 
-    pub(in crate::typed) fn remove_unit_multiplicity_free(&self, axis: usize) -> Result<Self, Error>
+    pub(in crate::typed) fn remove_unit_multiplicity_free(
+        &self,
+        engine: &mut dyn Engine,
+        axis: usize,
+    ) -> Result<Self, Error>
     where
         R: CanonicalUnitFusionRule,
     {
@@ -97,7 +102,7 @@ where
             insertion,
         )
         .map_err(map_checked_unit_layout_error)?;
-        let data = self.shareable_dense_payload();
+        let data = self.shareable_dense_payload(engine);
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),
@@ -143,6 +148,7 @@ where
     /// [`GenericTensorError`] variants.
     pub fn insert_unit(
         &self,
+        engine: &mut dyn Engine,
         position: usize,
         seam: Side,
         dual: Duality,
@@ -152,7 +158,7 @@ where
             Side::Domain => UnitLegInsertion::Left { position, dual },
             Side::Codomain => UnitLegInsertion::Right { position, dual },
         };
-        <R::Mode as TypedTensorUnitDispatch<R, D>>::insert_unit(self, insertion)
+        <R::Mode as TypedTensorUnitDispatch<R, D>>::insert_unit(engine, self, insertion)
     }
 
     /// TensorKit `removeunit(t, i)`: removes the canonical unit leg at flat
@@ -168,12 +174,17 @@ where
     /// not a canonical unit leg. Otherwise the layout derivation's and
     /// validator's own classes; checked-Generic failures retain their typed
     /// [`GenericTensorError`] variants.
-    pub fn remove_unit(&self, axis: usize) -> Result<Self, FacadeError<R>> {
-        <R::Mode as TypedTensorUnitDispatch<R, D>>::remove_unit(self, axis)
+    pub fn remove_unit(
+        &self,
+        engine: &mut dyn Engine,
+        axis: usize,
+    ) -> Result<Self, FacadeError<R>> {
+        <R::Mode as TypedTensorUnitDispatch<R, D>>::remove_unit(engine, self, axis)
     }
 }
 
 pub(in crate::typed) fn generic_insert_unit<R, D>(
+    engine: &mut dyn Engine,
     tensor: &TensorMap<R, D>,
     insertion: UnitLegInsertion,
 ) -> Result<TensorMap<R, D>, GenericTensorError<R::Error>>
@@ -220,7 +231,7 @@ where
         .logical_space()
         .commit_final_homspace_generic_bound_checked(prepared)
         .map_err(map_checked_unit_commit_error)?;
-    let data = tensor.shareable_dense_payload();
+    let data = tensor.shareable_dense_payload(engine);
     Ok(TensorMap {
         runtime: tensor.runtime.clone(),
         repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),
@@ -228,6 +239,7 @@ where
 }
 
 pub(in crate::typed) fn generic_remove_unit<R, D>(
+    engine: &mut dyn Engine,
     tensor: &TensorMap<R, D>,
     axis: usize,
 ) -> Result<TensorMap<R, D>, GenericTensorError<R::Error>>
@@ -290,7 +302,7 @@ where
         .logical_space()
         .commit_final_homspace_generic_bound_checked(prepared)
         .map_err(map_checked_unit_commit_error)?;
-    let data = tensor.shareable_dense_payload();
+    let data = tensor.shareable_dense_payload(engine);
     Ok(TensorMap {
         runtime: tensor.runtime.clone(),
         repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),

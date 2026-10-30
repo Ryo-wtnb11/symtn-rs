@@ -57,7 +57,8 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    svd_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(lease, source)
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    svd_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
 }
 
 // The checked inverse and solve admission, read through the mode's
@@ -79,7 +80,8 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    eig_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(lease, source)
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    eig_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
 }
 
 fn qr_compact_checked_generic<L, E, R, D>(
@@ -92,7 +94,8 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    qr_compact_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(lease, source)
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    qr_compact_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
 }
 
 fn left_null_checked_generic<L, E, R, D>(
@@ -105,7 +108,8 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    left_null_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(lease, source)
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    left_null_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
 }
 
 fn dense_source<'a, R, D>(input: &'a BoundDynamicTensorRef<'_, R, D>) -> FactorSource<'a, R, D> {
@@ -133,7 +137,9 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     eigh_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
         dense,
         dense_source(input),
         HermitianTol::DEFAULT,

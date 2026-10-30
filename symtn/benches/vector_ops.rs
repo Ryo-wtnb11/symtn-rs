@@ -75,15 +75,16 @@ fn run<T>(filter: &str, prefix: &str, op: &str, elements: usize, mut call: impl 
 
 // Like eager_overhead_ledger: facade dispatch bounds differ between operations.
 macro_rules! bench {
-    ($runtime:expr, $filter:expr, $case:literal, $rule:expr, $labels:expr, $weights:expr,
+    ($engine:ident, $runtime:expr, $filter:expr, $case:literal, $rule:expr, $labels:expr, $weights:expr,
      $dtype:ty, $name:literal, $widen:expr, $conj:expr, $narrow:expr, $abs:expr, $one:expr) => {{
+        let engine = &mut *$engine;
         for target in [1_000usize, 10_000, 100_000, 1_000_000] {
             let labels = $labels;
             let weights: &[f64] = &$weights;
             let deg = ((target as f64 / labels.len() as f64).sqrt().round() as usize).max(1);
             let leg = GradedSpace::try_new(Arc::new($rule), labels.into_iter().map(|s| (s, deg)))?;
-            let a = TensorMap::<_, $dtype>::rand_with_seed($runtime, [&leg], [&leg], 1)?;
-            let b = TensorMap::<_, $dtype>::rand_with_seed($runtime, [&leg], [&leg], 2)?;
+            let a = TensorMap::<_, $dtype>::rand_with_seed(engine, $runtime, [&leg], [&leg], 1)?;
+            let b = TensorMap::<_, $dtype>::rand_with_seed(engine, $runtime, [&leg], [&leg], 2)?;
             let x = a.dense_data()?;
             let y = b.dense_data()?;
             assert_eq!(x.len(), weights.len() * deg * deg);
@@ -99,13 +100,13 @@ macro_rules! bench {
                     .sum::<_>()
             };
             let want = weighted(x, y);
-            let got = a.inner(&b)?;
+            let got = a.inner(engine, &b)?;
             assert!(
                 ($abs)(($widen)(got) - want) <= 2e-5 * (1.0 + ($abs)(want)),
                 "inner {prefix}"
             );
             let norm = ($abs)(weighted(x, x)).sqrt();
-            assert!((a.norm(2.0)? - norm).abs() <= 2e-5 * (1.0 + norm));
+            assert!((a.norm(engine, 2.0)? - norm).abs() <= 2e-5 * (1.0 + norm));
             macro_rules! lanes {
                 ($n:literal) => {{
                     let v = dot::<_, _, $n>(x, y, $widen, $conj);
@@ -134,27 +135,32 @@ macro_rules! bench {
                 ($abs)(weighted(black_box(x), black_box(x))).sqrt()
             });
             run($filter, &prefix, "inner", x.len(), || {
-                black_box(&a).inner(black_box(&b)).unwrap()
+                black_box(&a).inner(engine, black_box(&b)).unwrap()
             });
             run($filter, &prefix, "norm", x.len(), || {
-                black_box(&a).norm(black_box(2.0)).unwrap()
+                black_box(&a).norm(engine, black_box(2.0)).unwrap()
             });
             let one: $dtype = $one;
             let alpha = one * 0.75;
             let beta = one * 0.25;
-            let scaled = a.scale(alpha)?;
+            let scaled = a.scale(engine, alpha)?;
             for (&got, &src) in scaled.dense_data()?.iter().zip(x) {
                 assert!(($abs)(($widen)(got - alpha * src)) <= 1e-6);
             }
-            let mut dst = b.scale(one)?;
-            a.axpby_into(&mut dst, alpha, beta)?;
+            let mut dst = b.scale(engine, one)?;
+            a.axpby_into(engine, &mut dst, alpha, beta)?;
             for ((&got, &a), &b) in dst.dense_data()?.iter().zip(x).zip(y) {
                 assert!(($abs)(($widen)(got - (beta * b + alpha * a))) <= 1e-6);
             }
             // Convex updates and unit scaling keep repeated in-place inputs bounded.
             run($filter, &prefix, "axpby_into", x.len(), || {
                 black_box(&a)
-                    .axpby_into(black_box(&mut dst), black_box(alpha), black_box(beta))
+                    .axpby_into(
+                        engine,
+                        black_box(&mut dst),
+                        black_box(alpha),
+                        black_box(beta),
+                    )
                     .unwrap()
             });
             let mut buf = y.to_vec();
@@ -165,19 +171,21 @@ macro_rules! bench {
                 }
             });
             run($filter, &prefix, "scale", x.len(), || {
-                black_box(&a).scale(black_box(one)).unwrap()
+                black_box(&a).scale(engine, black_box(one)).unwrap()
             });
             run($filter, &prefix, "scale_slice", x.len(), || {
                 let factor = black_box(one);
                 black_box(x).iter().map(|&v| factor * v).collect::<Vec<_>>()
             });
             let before = dst.dense_data()?.to_vec();
-            dst.scale_assign(alpha)?;
+            dst.scale_assign(engine, alpha)?;
             for (&got, &src) in dst.dense_data()?.iter().zip(&before) {
                 assert!(($abs)(($widen)(got - alpha * src)) <= 1e-6);
             }
             run($filter, &prefix, "scale_assign", x.len(), || {
-                black_box(&mut dst).scale_assign(black_box(one)).unwrap()
+                black_box(&mut dst)
+                    .scale_assign(engine, black_box(one))
+                    .unwrap()
             });
             run($filter, &prefix, "scale_assign_slice", x.len(), || {
                 let factor = black_box(one);
@@ -192,15 +200,18 @@ macro_rules! bench {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Serial: these rows time per-call overhead and single-thread kernels.
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let filter = std::env::args()
         .skip(1)
         .find(|a| a != "--bench")
         .unwrap_or_default();
-    let runtime = Runtime::builder().dense_threads(1).build()?;
+    let runtime = Runtime::builder().build()?;
     println!("case,dtype,target,elements,op,ns/call,ns/element,allocations/call,bytes/call");
     macro_rules! cases {
-        ($d:ty, $name:literal, $w:expr, $c:expr, $n:expr, $abs:expr, $one:expr) => {
+        ($engine:ident, $d:ty, $name:literal, $w:expr, $c:expr, $n:expr, $abs:expr, $one:expr) => {
             bench!(
+                $engine,
                 &runtime,
                 &filter,
                 "U1",
@@ -216,6 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 $one
             );
             bench!(
+                $engine,
                 &runtime,
                 &filter,
                 "SU2",
@@ -237,6 +249,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
     cases!(
+        engine,
         f64,
         "f64",
         |x: f64| x,
@@ -246,6 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1.0
     );
     cases!(
+        engine,
         f32,
         "f32",
         |x: f32| f64::from(x),
@@ -255,6 +269,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1.0
     );
     cases!(
+        engine,
         Complex64,
         "Complex64",
         |x: Complex64| x,
@@ -264,6 +279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Complex64::new(1.0, 0.0)
     );
     bench!(
+        engine,
         &runtime,
         &filter,
         "Fibonacci",

@@ -308,7 +308,9 @@ fn case<D: Payload>(ctx: &mut CudaDenseContext, name: &str) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn batched_admission_matches_the_per_region_rule_with_bounded_downloads() {
-    let mut ctx = CudaDenseContext::new(0).expect("CUDA device 0");
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).expect("CUDA device 0");
     case::<f32>(&mut ctx, "f32");
     case::<f64>(&mut ctx, "f64");
     case::<Complex32>(&mut ctx, "Complex32");
@@ -442,7 +444,9 @@ fn stack_case<D: Payload>(ctx: &mut CudaDenseContext, name: &str) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn member_stacks_decide_every_member_as_the_single_rule_with_bounded_downloads() {
-    let mut ctx = CudaDenseContext::new(0).expect("CUDA device 0");
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).expect("CUDA device 0");
     stack_case::<f32>(&mut ctx, "f32");
     stack_case::<f64>(&mut ctx, "f64");
 

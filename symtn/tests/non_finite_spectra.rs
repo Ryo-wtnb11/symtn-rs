@@ -42,7 +42,7 @@ fn policies() -> Vec<Truncation> {
 }
 
 macro_rules! assert_nan_spectrum_is_rejected {
-    ($leg:expr, $sectors:expr, $scalar:expr) => {{
+    ($engine:ident, $leg:expr, $sectors:expr, $scalar:expr) => {{
         let leg = &$leg;
         let [first, second] = $sectors;
         let spectra = vec![
@@ -61,11 +61,11 @@ macro_rules! assert_nan_spectrum_is_rejected {
                 "find_truncated accepted a NaN spectrum under {policy:?}"
             );
         }
-        let diagonal = TensorMap::diagonal(&host_runtime(), leg, spectra).unwrap();
+        let diagonal = TensorMap::diagonal($engine, &host_runtime(), leg, spectra).unwrap();
         for rcond in [0.0, 0.1] {
             assert!(
                 matches!(
-                    diagonal.pinv(&[0], &[1], rcond),
+                    diagonal.pinv($engine, &[0], &[1], rcond),
                     Err(Error::Operation(error)) if *error == PINV_NONFINITE
                 ),
                 "compact pinv hid a NaN entry at rcond {rcond}"
@@ -77,15 +77,15 @@ macro_rules! assert_nan_spectrum_is_rejected {
         for policy in policies() {
             let svd =
                 diagonal
-                    .svd_compact(&[0], &[1])
+                    .svd_compact($engine, &[0], &[1])
                     .and_then(|symtn::typed::Svd { s, .. }| {
-                        s.domain()[0].find_truncated(&s.diagview()?, &policy)
+                        s.domain()[0].find_truncated(&s.diagview($engine)?, &policy)
                     });
             assert!(svd.err().unwrap().report().contains("svd input components must be finite"), "svd composition {policy:?}");
             let eigh = diagonal
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
                 .and_then(|symtn::typed::Eigh { d, .. }| {
-                    d.domain()[0].find_truncated(&d.diagview()?, &policy)
+                    d.domain()[0].find_truncated(&d.diagview($engine)?, &policy)
                 });
             assert!(eigh.err().unwrap().report().contains("eigh input components must be finite"), "eigh composition {policy:?}");
         }
@@ -121,17 +121,21 @@ fn su2() -> GradedSpace<SU2FusionRule> {
 
 #[test]
 fn u1_real_nan_spectrum_is_rejected() {
-    assert_nan_spectrum_is_rejected!(u1(), [U1Irrep::new(0), U1Irrep::new(1)], real);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    assert_nan_spectrum_is_rejected!(engine, u1(), [U1Irrep::new(0), U1Irrep::new(1)], real);
 }
 
 #[test]
 fn u1_complex_nan_spectrum_is_rejected() {
-    assert_nan_spectrum_is_rejected!(u1(), [U1Irrep::new(0), U1Irrep::new(1)], complex);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    assert_nan_spectrum_is_rejected!(engine, u1(), [U1Irrep::new(0), U1Irrep::new(1)], complex);
 }
 
 #[test]
 fn su2_real_nan_spectrum_is_rejected() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     assert_nan_spectrum_is_rejected!(
+        engine,
         su2(),
         [SU2Irrep::from_twice_spin(0), SU2Irrep::from_twice_spin(1)],
         real
@@ -140,7 +144,9 @@ fn su2_real_nan_spectrum_is_rejected() {
 
 #[test]
 fn su2_complex_nan_spectrum_is_rejected() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     assert_nan_spectrum_is_rejected!(
+        engine,
         su2(),
         [SU2Irrep::from_twice_spin(0), SU2Irrep::from_twice_spin(1)],
         complex
@@ -149,10 +155,12 @@ fn su2_complex_nan_spectrum_is_rejected() {
 
 #[test]
 fn compact_svd_rejects_infinite_input_without_changing_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // The shared finite-input stage refuses a nonfinite diagonal before any
     // work, as the dense route refuses nonfinite input (#1986); the input is
     // unchanged.
     let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &host_runtime(),
         &u1(),
         [
@@ -167,8 +175,8 @@ fn compact_svd_rejects_infinite_input_without_changing_spectrum() {
         ],
     )
     .unwrap();
-    let before = input.diagview().unwrap();
-    let error = input.svd_compact(&[0], &[1]).err().unwrap();
+    let before = input.diagview(engine).unwrap();
+    let error = input.svd_compact(engine, &[0], &[1]).err().unwrap();
     assert_eq!(
         cause::<OperationError>(&error),
         Some(&OperationError::InvalidArgument {
@@ -176,13 +184,15 @@ fn compact_svd_rejects_infinite_input_without_changing_spectrum() {
         }),
         "{error:?}"
     );
-    assert_eq!(input.diagview().unwrap(), before);
+    assert_eq!(input.diagview(engine).unwrap(), before);
 }
 
 #[test]
 fn compact_pinv_of_a_finite_diagonal_is_unchanged() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Hand-computed: sigma_max = 4, rcond 0.2 -> cutoff 0.8; 0.5 is cut.
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &host_runtime(),
         &u1(),
         [
@@ -197,7 +207,8 @@ fn compact_pinv_of_a_finite_diagonal_is_unchanged() {
         ],
     )
     .unwrap();
-    let image = symtn::expert::diagonal_spectrum(&diagonal.pinv(&[0], &[1], 0.2).unwrap())
+    let diagonal_pinv = &diagonal.pinv(engine, &[0], &[1], 0.2).unwrap();
+    let image = symtn::expert::diagonal_spectrum(engine, diagonal_pinv)
         .unwrap()
         .unwrap();
     assert_eq!(image[0].values, vec![0.25, 1.0]);
@@ -209,11 +220,16 @@ fn compact_pinv_of_a_finite_diagonal_is_unchanged() {
 /// so every provider answers the compact route's typed operation error.
 #[test]
 fn dense_pinv_of_a_nan_tensor_is_invalid_argument() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let leg = u1();
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let real: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, index: &[usize]| {
+        let real: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg],
+            [&leg],
+            |trees, index: &[usize]| {
                 if *trees.coupled() == U1Irrep::new(1) && index == [0, 0] {
                     bad
                 } else if index[0] == index[1] {
@@ -221,19 +237,30 @@ fn dense_pinv_of_a_nan_tensor_is_invalid_argument() {
                 } else {
                     0.5
                 }
-            })
-            .unwrap();
-        let complex = real.convert::<Complex64>();
+            },
+        )
+        .unwrap();
+        let complex = real.convert::<Complex64>(engine).unwrap();
         for (case, result) in [
-            ("f64 owned", real.pinv(&[0], &[1], 0.1).map(|_| ())),
+            ("f64 owned", real.pinv(engine, &[0], &[1], 0.1).map(|_| ())),
             (
                 "f64 adjoint",
-                real.adjoint().unwrap().pinv(&[0], &[1], 0.1).map(|_| ()),
+                real.adjoint(engine)
+                    .unwrap()
+                    .pinv(engine, &[0], &[1], 0.1)
+                    .map(|_| ()),
             ),
-            ("c64 owned", complex.pinv(&[0], &[1], 0.1).map(|_| ())),
+            (
+                "c64 owned",
+                complex.pinv(engine, &[0], &[1], 0.1).map(|_| ()),
+            ),
             (
                 "c64 adjoint",
-                complex.adjoint().unwrap().pinv(&[0], &[1], 0.1).map(|_| ()),
+                complex
+                    .adjoint(engine)
+                    .unwrap()
+                    .pinv(engine, &[0], &[1], 0.1)
+                    .map(|_| ()),
             ),
         ] {
             match result {
@@ -242,7 +269,7 @@ fn dense_pinv_of_a_nan_tensor_is_invalid_argument() {
             }
         }
         // rcond validation precedes the finite scan.
-        match real.pinv(&[0], &[1], -1.0) {
+        match real.pinv(engine, &[0], &[1], -1.0) {
             Err(Error::InvalidArgument(message)) => {
                 assert!(message.contains("rcond"), "{message}")
             }

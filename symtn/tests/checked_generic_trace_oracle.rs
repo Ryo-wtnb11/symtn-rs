@@ -12,6 +12,7 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::sector::LieGroupFusionRule;
@@ -25,6 +26,7 @@ type Sectors = Vec<(Vec<i64>, usize)>;
 /// Contract the codomain leg `lhs` of `x` with the leg `rhs` through
 /// `id(space(x, lhs))`, keeping the remaining legs in their partitions.
 fn contract_pair<D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     x: &TensorMap<LieGroupFusionRule, D>,
     lhs: usize,
@@ -37,13 +39,14 @@ where
     let rank = nout + x.domain().len();
     assert!(lhs < nout, "the oracle pairs a codomain leg first");
     let space = x.codomain()[lhs].clone();
-    let id = TensorMap::<_, D>::isomorphism(runtime, [&space], [&space]).unwrap();
+    let id = TensorMap::<_, D>::isomorphism(engine, runtime, [&space], [&space]).unwrap();
     let open: Vec<usize> = (0..rank)
         .filter(|&axis| axis != lhs && axis != rhs)
         .collect();
     let codomain: Vec<usize> = (0..open.len()).filter(|&k| open[k] < nout).collect();
     let domain: Vec<usize> = (0..open.len()).filter(|&k| open[k] >= nout).collect();
     x.contract(
+        engine,
         &id,
         &ContractSpec {
             lhs: &[lhs, rhs],
@@ -56,6 +59,7 @@ where
 }
 
 fn assert_trace_matches<D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     what: &str,
     source: &TensorMap<LieGroupFusionRule, D>,
@@ -64,16 +68,16 @@ fn assert_trace_matches<D>(
 ) where
     D: TensorScalar + numerics::Numeric,
 {
-    let got = source.trace_pairs(pairs).unwrap();
+    let got = source.trace_pairs(engine, pairs).unwrap();
     // Contract the pairs one at a time, renumbering the later pairs past
     // the two legs each contraction removes. A lazy adjoint is materialized
     // first, so the oracle contracts owned operands only.
-    let owned = source.materialize().unwrap();
-    let mut oracle = contract_pair(runtime, &owned, pairs[0].0, pairs[0].1);
+    let owned = source.materialize(engine).unwrap();
+    let mut oracle = contract_pair(engine, runtime, &owned, pairs[0].0, pairs[0].1);
     let mut removed = vec![pairs[0].0, pairs[0].1];
     for &(lhs, rhs) in &pairs[1..] {
         let shift = |axis: usize| axis - removed.iter().filter(|&&gone| gone < axis).count();
-        oracle = contract_pair(runtime, &oracle, shift(lhs), shift(rhs));
+        oracle = contract_pair(engine, runtime, &oracle, shift(lhs), shift(rhs));
         removed.extend([lhs, rhs]);
     }
     assert_eq!(got.codomain(), oracle.codomain(), "{what}: codomain");
@@ -107,16 +111,18 @@ fn spaces(n: usize) -> (Space, Space) {
     )
 }
 
-fn cases<D>(n: usize)
+fn cases<D>(engine: &mut dyn Engine, n: usize)
 where
     D: TensorScalar + numerics::Numeric,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (v, w) = spaces(n);
     let vd = v.try_dual().unwrap();
-    let mixed = TensorMap::<_, D>::rand_with_seed(&runtime, [&v, &w, &v], [&v, &w], 11).unwrap();
+    let mixed =
+        TensorMap::<_, D>::rand_with_seed(engine, &runtime, [&v, &w, &v], [&v, &w], 11).unwrap();
     let mixed_len = mixed.dense_data().unwrap().len();
     assert_trace_matches(
+        engine,
         &runtime,
         &format!("SU({n}) codomain-domain"),
         &mixed,
@@ -124,14 +130,16 @@ where
         mixed_len,
     );
     assert_trace_matches(
+        engine,
         &runtime,
         &format!("SU({n}) two pairs"),
         &mixed,
         &[(0, 3), (1, 4)],
         mixed_len,
     );
-    let adjoint = mixed.adjoint().unwrap();
+    let adjoint = mixed.adjoint(engine).unwrap();
     assert_trace_matches(
+        engine,
         &runtime,
         &format!("SU({n}) lazy adjoint"),
         &adjoint,
@@ -139,9 +147,11 @@ where
         mixed_len,
     );
 
-    let bent = TensorMap::<_, D>::rand_with_seed(&runtime, [&v, &w, &vd], [&w], 13).unwrap();
+    let bent =
+        TensorMap::<_, D>::rand_with_seed(engine, &runtime, [&v, &w, &vd], [&w], 13).unwrap();
     let bent_len = bent.dense_data().unwrap().len();
     assert_trace_matches(
+        engine,
         &runtime,
         &format!("SU({n}) codomain-codomain"),
         &bent,
@@ -152,12 +162,14 @@ where
 
 #[test]
 fn checked_su2_trace_matches_identity_contraction() {
-    cases::<f64>(2);
-    cases::<Complex64>(2);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    cases::<f64>(engine, 2);
+    cases::<Complex64>(engine, 2);
 }
 
 #[test]
 fn checked_su3_trace_matches_identity_contraction() {
-    cases::<f64>(3);
-    cases::<Complex64>(3);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    cases::<f64>(engine, 3);
+    cases::<Complex64>(engine, 3);
 }

@@ -54,8 +54,9 @@ where
     D: Payload,
 {
     pub fn host(&self) -> TensorMap<R, D> {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         self.tensor
-            .trace_pairs(&self.pairs)
+            .trace_pairs(engine, &self.pairs)
             .unwrap_or_else(|e| panic!("{}: {e:?}", self.name))
     }
 
@@ -82,7 +83,9 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         codomain.iter().copied(),
         domain.iter().copied(),
@@ -110,13 +113,16 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let identity: TensorMap<R, D> = TensorMap::isomorphism(runtime, [space], [space]).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let identity: TensorMap<R, D> =
+        TensorMap::isomorphism(engine, runtime, [space], [space]).unwrap();
     let open = tensor.rank() - 2;
     let axes: Vec<usize> = (0..open).collect();
     // The default split puts every open leg of `T` in the codomain; the
     // trace keeps each leg on its side, so bend the result to that split.
     let joint = tensor
         .contract(
+            engine,
             &identity,
             &ContractSpec {
                 lhs: &lhs_axes,
@@ -131,7 +137,9 @@ where
             .iter()
             .filter(|&&axis| axis < tensor.codomain_rank())
             .count();
-    joint.permute(&axes[..codomain], &axes[codomain..]).unwrap()
+    joint
+        .permute(engine, &axes[..codomain], &axes[codomain..])
+        .unwrap()
 }
 
 /// The unbent pair shapes over one bosonic leg `v` (and a spectator `w`):
@@ -360,12 +368,13 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     cases
         .into_iter()
         .map(|case| TraceCase {
             name: case.name,
             pairs: adjoint_pairs(&case.tensor, &case.pairs),
-            tensor: case.tensor.adjoint().unwrap(),
+            tensor: case.tensor.adjoint(engine).unwrap(),
             dense: false,
             identity: None,
         })
@@ -402,7 +411,8 @@ where
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
     D: Payload,
 {
-    let t = case.tensor.to_physical_dense().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let t = case.tensor.to_physical_dense(engine).unwrap();
     let strides = column_major_strides(&t.shape);
     let traced: Vec<usize> = case.pairs.iter().flat_map(|&(a, b)| [a, b]).collect();
     let open: Vec<usize> = (0..t.shape.len())

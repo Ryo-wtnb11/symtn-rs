@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn explicit_keyed_replay_accepts_dense_and_opaque_namespaces() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for key in [BlockKey::Dense, BlockKey::opaque([7, 11])] {
         let structure = BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
             key.clone(),
@@ -27,6 +28,7 @@ fn explicit_keyed_replay_accepts_dense_and_opaque_namespaces() {
         let mut workspace = TreeTransformWorkspace::default();
 
         replay_into(
+            engine,
             &mut backend,
             &mut workspace,
             &replay,
@@ -45,6 +47,7 @@ fn explicit_keyed_replay_accepts_dense_and_opaque_namespaces() {
 
 #[test]
 fn tree_transform_compile_grouped_lowers_to_replay_ready_structure() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let key10 = grouped_su2_test_pair(0);
     let key20 = grouped_su2_test_pair(2);
     let key100 = grouped_su2_test_pair(0);
@@ -86,6 +89,7 @@ fn tree_transform_compile_grouped_lowers_to_replay_ready_structure() {
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -183,6 +187,7 @@ fn grouped_storage_mapping_preserves_callback_error_order() {
 
 #[test]
 fn grouped_storage_mapping_owns_coefficients_and_matches_direct_complex_replay() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dst0 = grouped_su2_test_pair(0);
     let dst1 = grouped_su2_test_pair(2);
     let dst2 = grouped_su2_test_pair(4);
@@ -322,6 +327,7 @@ fn grouped_storage_mapping_owns_coefficients_and_matches_direct_complex_replay()
     let mut direct_workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut grouped_backend,
         &mut grouped_workspace,
         &grouped,
@@ -332,6 +338,7 @@ fn grouped_storage_mapping_owns_coefficients_and_matches_direct_complex_replay()
     )
     .unwrap();
     replay_into(
+        engine,
         &mut direct_backend,
         &mut direct_workspace,
         &direct,

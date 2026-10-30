@@ -35,6 +35,3 @@ cgc-gen = ["symtn-tensors/cgc-gen"]
 name = "integration"
 path = "tests/integration.rs"
 
-[[test]]
-name = "serial"
-path = "tests/serial.rs"

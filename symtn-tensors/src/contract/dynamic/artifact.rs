@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 #[derive(Clone, Debug)]
 pub(crate) struct DynamicTreeExecutionArtifact<C = f64> {
@@ -166,6 +167,7 @@ impl<C: DenseBlockScalar> DynamicTreeExecutionArtifact<C> {
 /// derived under `cache`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_dynamic_tree_execution_artifact<M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     rule: &R,
     authority: M::SpaceAuthority<'_>,
@@ -181,6 +183,7 @@ where
     M::Scalar: DenseBlockScalar,
 {
     let lhs_transform = M::transformed_source(
+        engine,
         cache,
         authority,
         rule,
@@ -198,6 +201,7 @@ where
             plan.lhs_source_conjugate(),
         );
     let rhs_transform = M::transformed_source(
+        engine,
         cache,
         authority,
         rule,
@@ -224,6 +228,7 @@ where
         rhs_layout_borrowable,
     )?;
     finish_dynamic_tree_execution_artifact::<M, R>(
+        engine,
         cache,
         rule,
         authority,
@@ -239,6 +244,7 @@ where
 /// a lazy adjoint read through its parent's storage.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_prelowered_dynamic_tree_execution_artifact<R>(
+    engine: &mut dyn Engine,
     planning: &mut TreeTransformPlanning,
     rule: &R,
     layout_primer: LayoutKeyBuilder<R>,
@@ -261,6 +267,7 @@ where
     );
     let lhs_direct = lhs.is_direct();
     let lhs_transform = compile_prelowered_source_transform(
+        engine,
         planning,
         rule,
         lhs,
@@ -278,6 +285,7 @@ where
             ));
     let rhs_direct = rhs.is_direct();
     let rhs_transform = compile_prelowered_source_transform(
+        engine,
         planning,
         rule,
         rhs,
@@ -302,6 +310,7 @@ where
         rhs_layout_borrowable,
     )?;
     finish_dynamic_tree_execution_artifact::<MultiplicityFreeAdmissionMode, R>(
+        engine,
         planning,
         rule,
         layout_primer,
@@ -314,6 +323,7 @@ where
 }
 
 pub(super) fn compile_prelowered_source_transform<R>(
+    engine: &mut dyn Engine,
     planning: &mut TreeTransformPlanning,
     rule: &R,
     source: &FusionOperandLayout<'_>,
@@ -326,6 +336,7 @@ where
 {
     if source.is_direct() {
         compile_transformed_source(
+            engine,
             planning,
             rule,
             source.storage_space(),
@@ -335,12 +346,20 @@ where
             layout_primer,
         )
     } else {
-        compile_transformed_source_oriented(planning, rule, source, operation, layout_primer)
+        compile_transformed_source_oriented(
+            engine,
+            planning,
+            rule,
+            source,
+            operation,
+            layout_primer,
+        )
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn finish_dynamic_tree_execution_artifact<M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     rule: &R,
     authority: M::SpaceAuthority<'_>,
@@ -392,6 +411,7 @@ where
         None
     } else {
         Some(M::core_destination(
+            engine,
             cache,
             authority,
             rule,

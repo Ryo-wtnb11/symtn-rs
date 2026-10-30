@@ -4,13 +4,19 @@ use super::*;
 
 #[test]
 fn compact_qr_canonical_layout_skips_input_pack_and_factor_scatter() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical compact QR reads source regions and writes final factor regions directly.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_qr_copy_rec = crate::probe::record();
-    qr_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    qr_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     let probe = compact_qr_copy_rec.compact_qr_copy();
     assert_eq!(probe.input_pack_bytes, 0);
@@ -19,6 +25,7 @@ fn compact_qr_canonical_layout_skips_input_pack_and_factor_scatter() {
 
 #[test]
 fn compact_qr_noncanonical_layout_uses_copy_fallback() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: expert noncanonical compact QR retains positive pack-and-scatter copy evidence.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -28,7 +35,7 @@ fn compact_qr_noncanonical_layout_uses_copy_fallback() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_qr_copy_rec = crate::probe::record();
-    qr_compact_dyn(&mut dense, &input).unwrap();
+    qr_compact_dyn(engine, &mut dense, &input).unwrap();
     let probe = compact_qr_copy_rec.compact_qr_copy();
 
     assert!(probe.input_pack_bytes > 0);
@@ -37,6 +44,7 @@ fn compact_qr_noncanonical_layout_uses_copy_fallback() {
 
 #[test]
 fn compact_qr_lq_noncanonical_layout_does_not_call_qr_into() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // The fallback still consumes `qr` outputs; its scatter is symtn-owned.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -48,22 +56,27 @@ fn compact_qr_lq_noncanonical_layout_does_not_call_qr_into() {
         ..Default::default()
     });
 
-    qr_compact_dyn(&mut dense, &input).unwrap();
-    lq_compact_dyn(&mut dense, &input).unwrap();
+    qr_compact_dyn(engine, &mut dense, &input).unwrap();
+    lq_compact_dyn(engine, &mut dense, &input).unwrap();
 
     assert!(!dense.observed.is_empty());
 }
 
 #[test]
 fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical compact LQ avoids general pack/scatter while accounting for its three reusable scratch buffers and required adjoint copies.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_lq_copy_rec = crate::probe::record();
-    let Lq { l: left, q: right } =
-        lq_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Lq { l: left, q: right } = lq_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     let probe = compact_lq_copy_rec.compact_lq_copy();
 
     assert_eq!(probe.input_pack_calls, 0);
@@ -88,6 +101,7 @@ fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
 
 #[test]
 fn compact_lq_append_proof_rejects_unordered_routes_and_fallback_matches_append() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the storage-order proof refuses permuted, gapped and duplicated
     // routes, and the zero-and-overwrite fallback it guards publishes the same
     // bits as the append path.
@@ -129,14 +143,14 @@ fn compact_lq_append_proof_rejects_unordered_routes_and_fallback_matches_append(
     let Lq {
         l: append_l,
         q: append_q,
-    } = lq_compact(&mut dense, &input).unwrap();
+    } = lq_compact(engine, &mut dense, &input).unwrap();
     assert_eq!(
         compact_lq_copy_rec.compact_lq_copy().output_prefill_bytes,
         0
     );
     crate::probe::force_lq_zeroed_publication(true);
     let compact_lq_copy_rec = crate::probe::record();
-    let fallback = lq_compact(&mut dense, &input);
+    let fallback = lq_compact(engine, &mut dense, &input);
     crate::probe::force_lq_zeroed_publication(false);
     let Lq {
         l: fallback_l,
@@ -150,6 +164,7 @@ fn compact_lq_append_proof_rejects_unordered_routes_and_fallback_matches_append(
 
 #[test]
 fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (fallback_space, fallback_data) =
         expert_generic_factorization_input(&canonical_space, &canonical_data, true);
@@ -162,21 +177,22 @@ fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
         qr_succeeds: true,
         ..Default::default()
     });
-    qr_compact_dyn_checked_generic(&mut direct_dense, &canonical).unwrap();
-    lq_compact_dyn_checked_generic(&mut direct_dense, &canonical).unwrap();
+    qr_compact_dyn_checked_generic(engine, &mut direct_dense, &canonical).unwrap();
+    lq_compact_dyn_checked_generic(engine, &mut direct_dense, &canonical).unwrap();
     assert!(!direct_dense.observed.is_empty());
 
     let mut fallback_dense = ScriptedExecutor::new(FailAfterObservingQrInput {
         qr_succeeds: true,
         ..Default::default()
     });
-    qr_compact_dyn_checked_generic(&mut fallback_dense, &fallback).unwrap();
-    lq_compact_dyn_checked_generic(&mut fallback_dense, &fallback).unwrap();
+    qr_compact_dyn_checked_generic(engine, &mut fallback_dense, &fallback).unwrap();
+    lq_compact_dyn_checked_generic(engine, &mut fallback_dense, &fallback).unwrap();
     assert!(!fallback_dense.observed.is_empty());
 }
 
 #[test]
 fn compact_lq_noncanonical_layout_uses_copy_fallback() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: expert noncanonical compact LQ retains positive general pack-and-scatter evidence without direct-region scratch accounting.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -186,7 +202,7 @@ fn compact_lq_noncanonical_layout_uses_copy_fallback() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_lq_copy_rec = crate::probe::record();
-    lq_compact_dyn(&mut dense, &input).unwrap();
+    lq_compact_dyn(engine, &mut dense, &input).unwrap();
     let probe = compact_lq_copy_rec.compact_lq_copy();
 
     assert!(probe.input_pack_bytes > 0);
@@ -198,13 +214,18 @@ fn compact_lq_noncanonical_layout_uses_copy_fallback() {
 
 #[test]
 fn compact_qr_error_preserves_borrowed_input_and_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a QR backend failure leaves borrowed storage unchanged and returns no factor pair.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingQrInput>::default();
 
-    let result = qr_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor));
+    let result = qr_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    );
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
@@ -217,6 +238,7 @@ fn compact_qr_error_preserves_borrowed_input_and_publishes_no_factors() {
 
 #[test]
 fn compact_qr_uses_owned_executor_outputs_not_qr_into() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = ScriptedExecutor::new(FailAfterObservingQrInput {
@@ -225,7 +247,7 @@ fn compact_qr_uses_owned_executor_outputs_not_qr_into() {
     });
     let input = bound_tensor(Arc::new(rule), &tensor);
 
-    let Qr { q, r } = qr_compact(&mut dense, &input.as_ref()).unwrap();
+    let Qr { q, r } = qr_compact(engine, &mut dense, &input.as_ref()).unwrap();
 
     assert!(!dense.observed.is_empty());
     assert!(!q.data().is_empty());
@@ -234,15 +256,16 @@ fn compact_qr_uses_owned_executor_outputs_not_qr_into() {
 
 #[test]
 fn compact_owned_qr_preserves_qr_into_output_precedence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 2);
     let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let input = bound.as_ref();
-    let check = |outputs: Vec<DenseTensor>, expected: DenseError| {
+    let mut check = |outputs: Vec<DenseTensor>, expected: DenseError| {
         let mut dense = ScriptedExecutor::new(FailAfterObservingQrInput {
             outputs: Some(outputs),
             ..Default::default()
         });
-        let error = qr_compact(&mut dense, &input).unwrap_err();
+        let error = qr_compact(engine, &mut dense, &input).unwrap_err();
         assert_eq!(error, OperationError::Dense(expected));
     };
 
@@ -281,19 +304,24 @@ fn compact_owned_qr_preserves_qr_into_output_precedence() {
         outputs: Some(outputs),
         ..Default::default()
     });
-    let error = qr_compact(&mut dense, &input).unwrap_err();
+    let error = qr_compact(engine, &mut dense, &input).unwrap_err();
     assert!(matches!(error, OperationError::Dense(actual) if actual == expected));
 }
 
 #[test]
 fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an LQ backend failure leaves borrowed storage unchanged and returns no factor pair.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingQrInput>::default();
 
-    let result = lq_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor));
+    let result = lq_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    );
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
@@ -302,6 +330,7 @@ fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
 
 #[test]
 fn compact_svd_qr_lq_direct_regions_follow_factor_order_for_reversed_sector_spans() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let source = mixed_rectangular_tensor((3, 2), (2, 4));
     let tensor = reversed_complete_grid_copy(&rule, &source);
@@ -326,7 +355,7 @@ fn compact_svd_qr_lq_direct_regions_follow_factor_order_for_reversed_sector_span
     let input = bound.as_ref();
     let input = input.dynamic();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let svd = svd_compact_dyn(&mut dense, &input).unwrap();
+    let svd = svd_compact_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, svd.u(), Some(svd.s()), svd.vh());
     assert_eq!(
         svd.singular_values()
@@ -342,9 +371,9 @@ fn compact_svd_qr_lq_direct_regions_follow_factor_order_for_reversed_sector_span
             .map(|region| region.coupled())
             .collect::<Vec<_>>()
     );
-    let Qr { q, r } = qr_compact_dyn(&mut dense, &input).unwrap();
+    let Qr { q, r } = qr_compact_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &q, None, &r);
-    let Lq { l, q } = lq_compact_dyn(&mut dense, &input).unwrap();
+    let Lq { l, q } = lq_compact_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &l, None, &q);
 
     let complex = TestTensor::<Complex64>::from_vec_with_fusion_space(
@@ -359,7 +388,7 @@ fn compact_svd_qr_lq_direct_regions_follow_factor_order_for_reversed_sector_span
     let complex_bound = bound_tensor(Arc::new(Z2FusionRule), &complex);
     let complex_ref = complex_bound.as_ref();
     let complex_input = complex_ref.dynamic();
-    let svd = svd_compact_dyn(&mut dense, &complex_input).unwrap();
+    let svd = svd_compact_dyn(engine, &mut dense, &complex_input).unwrap();
     assert_compact_factors_reconstruct_input(&complex_input, svd.u(), Some(svd.s()), svd.vh());
     assert_eq!(
         svd.singular_values()
@@ -378,11 +407,17 @@ fn compact_svd_qr_lq_direct_regions_follow_factor_order_for_reversed_sector_span
 }
 
 fn assert_rectangular_direct_qr(rows: usize, cols: usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_qr_copy_rec = crate::probe::record();
-    let Qr { q, r } = qr_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Qr { q, r } = qr_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     assert_factor_layout_matches_per_tree_shapes(q.space());
     assert_factor_layout_matches_per_tree_shapes(r.space());
     let probe = compact_qr_copy_rec.compact_qr_copy();
@@ -416,10 +451,12 @@ fn compact_qr_direct_spans_reconstruct_tall_and_wide_matrices() {
 
 #[test]
 fn compact_qr_direct_single_sector_keeps_executor_factor_owners() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(3, 2);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_qr_copy_rec = crate::probe::record();
     qr_compact(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
     )
@@ -440,12 +477,17 @@ fn compact_qr_zero_only_input_normalizes_to_an_empty_factorization_result() {
 }
 
 fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_lq_copy_rec = crate::probe::record();
-    let Lq { l: left, q: right } =
-        lq_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Lq { l: left, q: right } = lq_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     assert_factor_layout_matches_per_tree_shapes(left.space());
     assert_factor_layout_matches_per_tree_shapes(right.space());
     let probe = compact_lq_copy_rec.compact_lq_copy();
@@ -483,6 +525,7 @@ fn compact_lq_direct_spans_reconstruct_zero_unit_tall_wide_and_square() {
 
 #[test]
 fn compact_qr_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
     // What: one complex QR call reconstructs mixed rectangular sectors in final storage.
@@ -500,7 +543,12 @@ fn compact_qr_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_qr_copy_rec = crate::probe::record();
 
-    let Qr { q, r } = qr_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Qr { q, r } = qr_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     let probe = compact_qr_copy_rec.compact_qr_copy();
     assert_eq!(probe.input_pack_bytes, 0);
@@ -542,6 +590,7 @@ fn compact_qr_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 
 #[test]
 fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors_with_bounded_scratch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
     // What: one complex LQ call reconstructs mixed rectangular sectors using bounded adjoint scratch and final regions.
@@ -559,8 +608,12 @@ fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors_with_bounded_scratch(
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_lq_copy_rec = crate::probe::record();
 
-    let Lq { l: left, q: right } =
-        lq_compact(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let Lq { l: left, q: right } = lq_compact(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
@@ -611,9 +664,11 @@ fn assert_compact_qr_reconstructs_rule<R>(rule: &R, sectors: &[SectorId])
 where
     R: Clone + MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = tsvd_test_tensor(rule, sectors);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let Qr { q, r } = qr_compact(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new((*rule).clone()), &tensor),
     )
@@ -664,9 +719,11 @@ fn assert_compact_lq_reconstructs_rule<R>(rule: &R, sectors: &[SectorId])
 where
     R: Clone + MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = tsvd_test_tensor(rule, sectors);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let Lq { l: left, q: right } = lq_compact(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new((*rule).clone()), &tensor),
     )
@@ -804,6 +861,7 @@ fn adjoint_complex(input: &[Complex64], rows: usize, cols: usize) -> Vec<Complex
 
 #[test]
 fn full_qr_and_lq_use_original_input_only_when_economy_q_is_full() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = mixed_rectangular_tensor((2, 4), (3, 1));
     let matrices = dense_sector_matrices(1, &tensor);
@@ -812,7 +870,7 @@ fn full_qr_and_lq_use_original_input_only_when_economy_q_is_full() {
     let input = input_ref.dynamic();
 
     let mut qr_dense = ScriptedExecutor::<FullQrInputSpy>::default();
-    let Qr { q, r } = qr_full_dyn(&mut qr_dense, &input).unwrap();
+    let Qr { q, r } = qr_full_dyn(engine, &mut qr_dense, &input).unwrap();
     assert_eq!(qr_dense.observations.len(), matrices.len());
     for (observation, (_, rows, cols, matrix)) in qr_dense.observations.iter().zip(matrices.iter())
     {
@@ -827,7 +885,7 @@ fn full_qr_and_lq_use_original_input_only_when_economy_q_is_full() {
     assert_compact_factors_reconstruct_input(&input, &q, None, &r);
 
     let mut lq_dense = ScriptedExecutor::<FullQrInputSpy>::default();
-    let Lq { l, q } = lq_full_dyn(&mut lq_dense, &input).unwrap();
+    let Lq { l, q } = lq_full_dyn(engine, &mut lq_dense, &input).unwrap();
     assert_eq!(lq_dense.observations.len(), matrices.len());
     for (observation, (_, rows, cols, matrix)) in lq_dense.observations.iter().zip(matrices.iter())
     {
@@ -868,11 +926,12 @@ fn assert_checked_full_qr_lq_inputs(
     space: BoundDynamicFusionMapSpace<LateGenericSpy>,
     data: Vec<Complex64>,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let matrices = checked_fixture_matrices(&space, &data);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
 
     let mut qr_dense = ScriptedExecutor::<FullQrInputSpy>::default();
-    let Qr { q, r } = qr_full_dyn_checked_generic(&mut qr_dense, &input).unwrap();
+    let Qr { q, r } = qr_full_dyn_checked_generic(engine, &mut qr_dense, &input).unwrap();
     assert_eq!(qr_dense.observations.len(), matrices.len());
     for (observation, (rows, cols, matrix)) in qr_dense.observations.iter().zip(matrices.iter()) {
         assert_full_qr_observation(observation, matrix, *rows, *cols);
@@ -882,7 +941,7 @@ fn assert_checked_full_qr_lq_inputs(
     assert!(Arc::ptr_eq(r.space().provider_arc(), &provider));
 
     let mut lq_dense = ScriptedExecutor::<FullQrInputSpy>::default();
-    let Lq { l, q } = lq_full_dyn_checked_generic(&mut lq_dense, &input).unwrap();
+    let Lq { l, q } = lq_full_dyn_checked_generic(engine, &mut lq_dense, &input).unwrap();
     assert_eq!(lq_dense.observations.len(), matrices.len());
     for (observation, (rows, cols, matrix)) in lq_dense.observations.iter().zip(matrices.iter()) {
         let adjoint = adjoint_complex(matrix, *rows, *cols);
@@ -903,6 +962,7 @@ fn checked_full_qr_and_lq_preserve_complex_inputs_and_provider_identity() {
 
 #[test]
 fn full_and_compact_qr_lq_match_for_rank_deficient_no_completion_shapes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: with no completion columns the full and compact factorizations
     // agree (path agreement under the workspace rule, 3 = the long side), and
     // the full factors are orthonormal and reconstruct the input.
@@ -915,8 +975,8 @@ fn full_and_compact_qr_lq_match_for_rank_deficient_no_completion_shapes() {
     let wide_input_ref = wide_input.as_ref();
     let wide_input = wide_input_ref.dynamic();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let compact = qr_compact_dyn(&mut dense, &wide_input).unwrap();
-    let full = qr_full_dyn(&mut dense, &wide_input).unwrap();
+    let compact = qr_compact_dyn(engine, &mut dense, &wide_input).unwrap();
+    let full = qr_full_dyn(engine, &mut dense, &wide_input).unwrap();
     assert_eq!(full.q.space().space(), compact.q.space().space());
     assert_eq!(full.r.space().space(), compact.r.space().space());
     numerics::assert_slices_close("full vs compact", full.q.data(), compact.q.data(), 3);
@@ -929,8 +989,8 @@ fn full_and_compact_qr_lq_match_for_rank_deficient_no_completion_shapes() {
     let tall_input = bound_tensor(Arc::new(rule), &tall);
     let tall_input_ref = tall_input.as_ref();
     let tall_input = tall_input_ref.dynamic();
-    let compact = lq_compact_dyn(&mut dense, &tall_input).unwrap();
-    let full = lq_full_dyn(&mut dense, &tall_input).unwrap();
+    let compact = lq_compact_dyn(engine, &mut dense, &tall_input).unwrap();
+    let full = lq_full_dyn(engine, &mut dense, &tall_input).unwrap();
     assert_eq!(full.l.space().space(), compact.l.space().space());
     assert_eq!(full.q.space().space(), compact.q.space().space());
     numerics::assert_slices_close("full vs compact", full.l.data(), compact.l.data(), 3);
@@ -942,6 +1002,7 @@ fn full_and_compact_qr_lq_match_for_rank_deficient_no_completion_shapes() {
 
 #[test]
 fn qr_full_gives_square_unitary_and_reconstructs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;
     let tensor = tsvd_test_tensor(
         &rule,
@@ -952,6 +1013,7 @@ fn qr_full_gives_square_unitary_and_reconstructs() {
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let Qr { q, r } = qr_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
@@ -969,10 +1031,12 @@ fn qr_full_gives_square_unitary_and_reconstructs() {
 
 #[test]
 fn lq_full_reconstructs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let Lq { l, q } = lq_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
@@ -983,6 +1047,7 @@ fn lq_full_reconstructs() {
 
 #[test]
 fn null_qr_failure_preserves_input_and_builds_no_factor() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for (left, rows, cols) in [(true, 3, 2), (false, 2, 3)] {
         let tensor =
             one_sector_rectangular_matrix(vec![1.0_f64, 0.0, 0.0, 0.0, 0.0, 0.0], rows, cols);
@@ -992,9 +1057,9 @@ fn null_qr_failure_preserves_input_and_builds_no_factor() {
 
         let buffer_builds_rec = crate::probe::record();
         let result = if left {
-            left_null(&mut dense, &input.as_ref())
+            left_null(engine, &mut dense, &input.as_ref())
         } else {
-            right_null(&mut dense, &input.as_ref())
+            right_null(engine, &mut dense, &input.as_ref())
         };
 
         assert!(matches!(result, Err(OperationError::Dense(_))));
@@ -1044,14 +1109,15 @@ fn positive_diagonal_gauge_matches_tensorkit_qr_reference() {
 
 #[test]
 fn qr_compact_positive_gauge_idempotent_on_isometry() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for rule_case in [0usize, 1usize] {
         if rule_case == 0 {
             let rule = Z2FusionRule;
             let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let input = bound_tensor(Arc::new(rule), &tensor);
-            let Qr { q, .. } = qr_compact(&mut dense_executor, &input.as_ref()).unwrap();
-            let Qr { q: q2, r: r2 } = qr_compact(&mut dense_executor, &q.as_ref()).unwrap();
+            let Qr { q, .. } = qr_compact(engine, &mut dense_executor, &input.as_ref()).unwrap();
+            let Qr { q: q2, r: r2 } = qr_compact(engine, &mut dense_executor, &q.as_ref()).unwrap();
             assert_svd_blocks_match(&q, &q2);
             assert_identity_sector_matrices(&dense_sector_matrices(1, &r2));
         } else {
@@ -1065,8 +1131,8 @@ fn qr_compact_positive_gauge_idempotent_on_isometry() {
             );
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let input = bound_tensor(Arc::new(rule), &tensor);
-            let Qr { q, .. } = qr_compact(&mut dense_executor, &input.as_ref()).unwrap();
-            let Qr { q: q2, r: r2 } = qr_compact(&mut dense_executor, &q.as_ref()).unwrap();
+            let Qr { q, .. } = qr_compact(engine, &mut dense_executor, &input.as_ref()).unwrap();
+            let Qr { q: q2, r: r2 } = qr_compact(engine, &mut dense_executor, &q.as_ref()).unwrap();
             assert_svd_blocks_match(&q, &q2);
             assert_identity_sector_matrices(&dense_sector_matrices(1, &r2));
         }
@@ -1075,18 +1141,20 @@ fn qr_compact_positive_gauge_idempotent_on_isometry() {
 
 #[test]
 fn lq_compact_positive_gauge_idempotent_on_isometry() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let input = bound_tensor(Arc::new(rule), &tensor);
-    let Lq { q, .. } = lq_compact(&mut dense_executor, &input.as_ref()).unwrap();
-    let Lq { l: l2, q: q2 } = lq_compact(&mut dense_executor, &q.as_ref()).unwrap();
+    let Lq { q, .. } = lq_compact(engine, &mut dense_executor, &input.as_ref()).unwrap();
+    let Lq { l: l2, q: q2 } = lq_compact(engine, &mut dense_executor, &q.as_ref()).unwrap();
     assert_svd_blocks_match(&q, &q2);
     assert_identity_sector_matrices(&dense_sector_matrices(1, &l2));
 }
 
 #[test]
 fn lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: without region admission, LQ of a lazy adjoint publishes by tree
     // identity exactly the factors its region route publishes (#2070).
     let rule = Z2FusionRule;
@@ -1103,9 +1171,14 @@ fn lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
     for full in [false, true] {
         let mut run = || {
             if full {
-                crate::factorize::lq_full_adjoint_dyn(&mut dense, &parent, &adjoint_space)
+                crate::factorize::lq_full_adjoint_dyn(engine, &mut dense, &parent, &adjoint_space)
             } else {
-                crate::factorize::lq_compact_adjoint_dyn(&mut dense, &parent, &adjoint_space)
+                crate::factorize::lq_compact_adjoint_dyn(
+                    engine,
+                    &mut dense,
+                    &parent,
+                    &adjoint_space,
+                )
             }
             .unwrap()
         };
@@ -1125,6 +1198,7 @@ fn lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
 
 #[test]
 fn checked_lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the checked-Generic counterpart of the multiplicity-free test
     // above (#2070): the tree route publishes the region route's factors.
     let (space, data) = generic_factorization_input();
@@ -1139,12 +1213,14 @@ fn checked_lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
         let mut run = || {
             if full {
                 crate::factorize::lq_full_adjoint_dyn_checked_generic(
+                    engine,
                     &mut dense,
                     &parent,
                     &adjoint_space,
                 )
             } else {
                 crate::factorize::lq_compact_adjoint_dyn_checked_generic(
+                    engine,
                     &mut dense,
                     &parent,
                     &adjoint_space,
@@ -1244,27 +1320,33 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
         InfallibleGeneric<'static, U1AsGeneric>,
     >>::adjoint_space(checked_input.space())
     .unwrap();
-    let context = symtn_dense::SharedCpuContext::with_threads(1).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::with_shared_context(&context, None).unwrap();
-    let mut warm = |call: &mut dyn FnMut(&mut symtn_dense::DefaultDenseExecutor)| {
-        call(&mut dense);
-        call(&mut dense);
-        counting_alloc::measure(|| call(&mut dense)).1.calls
+    let mut engine = symtn_dense::CpuEngine::serial();
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+    let mut warm = |call: &mut dyn FnMut(
+        &mut symtn_dense::DefaultDenseExecutor,
+        &mut dyn symtn_dense::Engine,
+    )| {
+        call(&mut dense, &mut engine);
+        call(&mut dense, &mut engine);
+        counting_alloc::measure(|| call(&mut dense, &mut engine))
+            .1
+            .calls
     };
-    let eager = warm(&mut |dense| {
-        lq_compact_dyn_checked_generic(dense, &checked_input).unwrap();
-    }) - warm(&mut |dense| {
-        lq_compact_dyn(dense, &mf_input).unwrap();
+    let eager = warm(&mut |dense, engine| {
+        lq_compact_dyn_checked_generic(engine, dense, &checked_input).unwrap();
+    }) - warm(&mut |dense, engine| {
+        lq_compact_dyn(engine, dense, &mf_input).unwrap();
     });
-    let lazy = warm(&mut |dense| {
+    let lazy = warm(&mut |dense, engine| {
         crate::factorize::lq_compact_adjoint_dyn_checked_generic(
+            engine,
             dense,
             &checked_input,
             &checked_adjoint,
         )
         .unwrap();
-    }) - warm(&mut |dense| {
-        crate::factorize::lq_compact_adjoint_dyn(dense, &mf_input, &mf_adjoint).unwrap();
+    }) - warm(&mut |dense, engine| {
+        crate::factorize::lq_compact_adjoint_dyn(engine, dense, &mf_input, &mf_adjoint).unwrap();
     });
     [eager, lazy]
 }

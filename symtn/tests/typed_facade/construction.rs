@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn tensor_map_zeros_carries_a_complex_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the payload dtype is independent of the provider's real
     // categorical coefficient scalar.
@@ -10,7 +11,7 @@ fn tensor_map_zeros_carries_a_complex_payload() {
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalSu2Rule, Complex64> =
-        TensorMap::zeros(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&leg, &leg], [&leg, &leg]).unwrap();
 
     assert!(tensor.subblock_count() >= 2);
     assert!(tensor
@@ -22,6 +23,7 @@ fn tensor_map_zeros_carries_a_complex_payload() {
 
 #[test]
 fn tensor_map_accepts_separately_allocated_equal_identity_providers() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: two independent allocations of one rule interoperate; the facade
     // keys on `RuleIdentity`, never on `Arc` identity.
@@ -30,14 +32,20 @@ fn tensor_map_accepts_separately_allocated_equal_identity_providers() {
     assert!(!Arc::ptr_eq(&first, &second));
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::zeros(&runtime, [&z3_leg(&first, false)], [&z3_leg(&second, true)]).unwrap();
+    let tensor: TensorMap<ExternalZ3Rule, f64> = TensorMap::zeros(
+        engine,
+        &runtime,
+        [&z3_leg(&first, false)],
+        [&z3_leg(&second, true)],
+    )
+    .unwrap();
 
     assert!(tensor.subblock_count() >= 1);
 }
 
 #[test]
 fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: two providers of the same Rust type but different identities are a
     // rule mismatch, reported before any layout is staged — the caches stay
@@ -53,6 +61,7 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
     );
 
     let error = TensorMap::<ExternalZ3Rule, f64>::zeros(
+        engine,
         &runtime,
         [&z3_leg(&first, false)],
         [&z3_leg(&second, true)],
@@ -71,6 +80,7 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
 
 #[test]
 fn enumerated_rules_share_identity_by_category_value() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a fusion-symbols category under `EnumeratedCodec` is identified by
     // its value. Two separately built Z3 rules mix, and Z3 and Z5 (whose
@@ -97,15 +107,18 @@ fn enumerated_rules_share_identity_by_category_value() {
     assert!(!Arc::ptr_eq(&first, &second));
 
     let tensor =
-        TensorMap::<ZnRule, f64>::zeros(&runtime, [&leg(&first, 3)], [&leg(&second, 3)]).unwrap();
+        TensorMap::<ZnRule, f64>::zeros(engine, &runtime, [&leg(&first, 3)], [&leg(&second, 3)])
+            .unwrap();
     assert_eq!(tensor.subblock_count(), 2);
     let error =
-        TensorMap::<ZnRule, f64>::zeros(&runtime, [&leg(&first, 3)], [&leg(&z5, 5)]).unwrap_err();
+        TensorMap::<ZnRule, f64>::zeros(engine, &runtime, [&leg(&first, 3)], [&leg(&z5, 5)])
+            .unwrap_err();
     assert!(matches!(error, symtn::typed::Error::RuleMismatch));
 }
 
 #[test]
 fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: an expert codec composing `EnumeratedCodec`'s identity before
     // any rule resolves it must still separate Z3 from Z5. Charges (2, 2)
@@ -172,7 +185,7 @@ fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
 
     type WrappedRule = CategoryRule<ZN, Wrapped>;
     let runtime = runtime();
-    let blocks = |modulus: u32| {
+    let mut blocks = |modulus: u32| {
         let rule = Arc::new(WrappedRule::try_new(ZN::new(modulus).unwrap(), Wrapped).unwrap());
         let leg = |charge| {
             GradedSpace::try_new(
@@ -181,7 +194,7 @@ fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
             )
             .unwrap()
         };
-        TensorMap::<WrappedRule, f64>::zeros(&runtime, [&leg(2), &leg(2)], [&leg(1)])
+        TensorMap::<WrappedRule, f64>::zeros(engine, &runtime, [&leg(2), &leg(2)], [&leg(1)])
             .unwrap()
             .subblock_count()
     };
@@ -191,6 +204,7 @@ fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
 
 #[test]
 fn checked_construction_failure_publishes_no_cache_state() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if crate::typed_facade::run_isolated_or_return(
@@ -221,8 +235,8 @@ fn checked_construction_failure_publishes_no_cache_state() {
     );
     let runtime_before = crate::typed_facade::completed_transformers();
 
-    let error =
-        TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, [&codomain], [&domain]).unwrap_err();
+    let error = TensorMap::<ExternalZ3Rule, f64>::zeros(engine, &runtime, [&codomain], [&domain])
+        .unwrap_err();
 
     assert!(matches!(
         error,
@@ -247,6 +261,7 @@ fn checked_construction_failure_publishes_no_cache_state() {
 
 #[test]
 fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a codec that cannot decode an id the engine produced fails the
     // construction with the provider's own error instead of panicking inside
@@ -258,6 +273,7 @@ fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
 
     // Two charge-1 codomain legs couple to charge 2, the id this codec refuses.
     let error = TensorMap::<ExternalZ3Rule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&leg, &leg],
         [&leg, &leg],
@@ -270,6 +286,7 @@ fn from_block_fn_surfaces_a_decode_failure_as_the_codec_error() {
 
 #[test]
 fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the legs come back as typed graded spaces with their labels and
     // dual flags intact, and every block reports decoded labels plus a data
@@ -280,7 +297,7 @@ fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::zeros(&runtime, [&leg, &leg], [&dual]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&leg, &leg], [&dual]).unwrap();
 
     let codomain = tensor.codomain();
     let domain = tensor.domain();
@@ -309,6 +326,7 @@ fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
 
 #[test]
 fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
@@ -322,7 +340,7 @@ fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
     )
     .unwrap();
     let u1: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
             100.0 * trees.coupled().charge() as f64
                 + 10.0 * indices[0] as f64
                 + 3.0 * indices[1] as f64
@@ -398,6 +416,7 @@ fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
 
 #[test]
 fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a dual domain leg carrying charge 2 — whose dual is charge 1, so a
     // confusion between the two would show — is decoded as charge 2, matching
@@ -417,7 +436,7 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::zeros(&runtime, [&codomain, &codomain], [&domain]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&codomain, &codomain], [&domain]).unwrap();
 
     assert_eq!(tensor.subblock_count(), 1);
     let sectors = tensor.subblock_fusion_trees(0).unwrap();
@@ -433,6 +452,7 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
 
 #[test]
 fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the whole phase-2 surface works for a non-abelian (Simple) external
     // provider with a complex payload, not just for the abelian fixture.
@@ -440,14 +460,19 @@ fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
     let leg = su2_leg(&provider, false);
     let runtime = runtime();
 
-    let tensor: TensorMap<ExternalSu2Rule, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |sectors, indices| {
+    let tensor: TensorMap<ExternalSu2Rule, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |sectors, indices| {
             Complex64::new(
                 sectors.coupled().twice_spin() as f64,
                 indices.iter().sum::<usize>() as f64,
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     // Two spin-1/2 legs couple to spin 0 and spin 1 on each side.
     assert!(tensor.subblock_count() >= 2);
@@ -473,6 +498,7 @@ fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
 
 #[test]
 fn typed_block_fill_preserves_tree_and_storage_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: each typed block exposes the same tree and column-major indices
     // that drove its fill closure, without borrowing the retired facade as an
@@ -488,7 +514,8 @@ fn typed_block_fill_preserves_tree_and_storage_order() {
     )
     .unwrap();
     let typed: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], typed_fill_value).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], typed_fill_value)
+            .unwrap();
 
     assert!(typed.subblock_count() > 1);
     for index in 0..typed.subblock_count() {
@@ -521,15 +548,16 @@ fn typed_block_fill_preserves_tree_and_storage_order() {
 
 #[test]
 fn typed_rand_with_seed_is_deterministic_f64() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = u1_typed_leg();
     let first: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 7).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7).unwrap();
     let replay: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 7).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7).unwrap();
     let other: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 8).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 8).unwrap();
 
     assert!(!first.dense_data().unwrap().is_empty());
     assert_eq!(first.dense_data().unwrap(), replay.dense_data().unwrap());
@@ -538,15 +566,16 @@ fn typed_rand_with_seed_is_deterministic_f64() {
 
 #[test]
 fn typed_rand_with_seed_is_deterministic_c64() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = fz2_typed_leg();
     let first: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 11).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 11).unwrap();
     let replay: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 11).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 11).unwrap();
     let other: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 12).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 12).unwrap();
 
     assert!(first
         .dense_data()
@@ -559,6 +588,7 @@ fn typed_rand_with_seed_is_deterministic_c64() {
 
 #[test]
 fn rand_and_isomorphism_build_on_an_external_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: nothing in the new constructors needs a built-in rule — a
     // downstream Z3 provider gets a populated random tensor and a lawful
@@ -569,7 +599,7 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
     let dual = leg.try_dual().unwrap();
 
     let random: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 0x9E37_79B9_7F4A_7C15).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 0x9E37_79B9_7F4A_7C15).unwrap();
     assert!(random
         .dense_data()
         .unwrap()
@@ -578,17 +608,18 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
 
     // The fused non-dual isomorph of the dual leg has the same sector content.
     let f: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::isomorphism(&runtime, [&leg, &dual], [&dual, &leg]).unwrap();
-    let roundtrip = f.adjoint().unwrap().compose(&f).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg, &dual], [&dual, &leg]).unwrap();
+    let roundtrip = f.adjoint(engine).unwrap().compose(engine, &f).unwrap();
     // Explicit `D`: under cuda,cpu-faer serde_json adds a `PartialEq` impl
     // that makes the `assert_eq!` unable to pin `D` on its own (E0283).
     let id: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::isomorphism(&runtime, [&dual, &leg], [&dual, &leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&dual, &leg], [&dual, &leg]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
 }
 
 #[test]
 fn typed_isomorphism_satisfies_the_identity_law_on_a_builtin_rule() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `f† ∘ f = id` on the domain product, on a rank-2 <- rank-2
     // isomorphism whose two sides carry the same fused content through
@@ -600,17 +631,18 @@ fn typed_isomorphism_satisfies_the_identity_law_on_a_builtin_rule() {
     let dual = leg.try_dual().unwrap();
 
     let f: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&dual, &leg], [&leg, &dual]).unwrap();
-    let roundtrip = f.adjoint().unwrap().compose(&f).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&dual, &leg], [&leg, &dual]).unwrap();
+    let roundtrip = f.adjoint(engine).unwrap().compose(engine, &f).unwrap();
     // Explicit `D` for the cuda,cpu-faer feature set (see the ExternalZ3
     // identity-law test above).
     let id: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&leg, &dual], [&leg, &dual]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg, &dual], [&leg, &dual]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
 }
 
 #[test]
 fn typed_isometry_embeds_and_satisfies_the_identity_law() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: on a strictly-embedding fixture (every domain sector strictly
     // smaller than its codomain sibling in at least one sector) the isometry
@@ -636,17 +668,18 @@ fn typed_isometry_embeds_and_satisfies_the_identity_law() {
     .unwrap();
 
     let w: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isometry(&runtime, [&big], [&small]).unwrap();
-    let roundtrip = w.adjoint().unwrap().compose(&w).unwrap();
+        TensorMap::isometry(engine, &runtime, [&big], [&small]).unwrap();
+    let roundtrip = w.adjoint(engine).unwrap().compose(engine, &w).unwrap();
     // Explicit `D` for the cuda,cpu-faer feature set (see the ExternalZ3
     // identity-law test above).
     let id: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&small], [&small]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&small], [&small]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
 }
 
 #[test]
 fn typed_isometry_rejects_a_non_embeddable_pair() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let small = u1_typed_leg();
@@ -658,7 +691,7 @@ fn typed_isometry_rejects_a_non_embeddable_pair() {
 
     // Domain strictly larger than the codomain: not embeddable.
     let typed_error =
-        TensorMap::<symtn::sector::U1FusionRule, f64>::isometry(&runtime, [&big], [&small])
+        TensorMap::<symtn::sector::U1FusionRule, f64>::isometry(engine, &runtime, [&big], [&small])
             .unwrap_err();
 
     assert!(matches!(
@@ -670,14 +703,16 @@ fn typed_isometry_rejects_a_non_embeddable_pair() {
 
 #[test]
 fn typed_structural_constructors_reject_an_empty_leg_list() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the provider is inferred from the legs, so an empty construction
     // has nothing to infer it from.
     let runtime = runtime();
     let empty: [&GradedSpace<ExternalZ3Rule>; 0] = [];
 
-    assert!(TensorMap::<ExternalZ3Rule, f64>::zeros(&runtime, empty, empty).is_err());
+    assert!(TensorMap::<ExternalZ3Rule, f64>::zeros(engine, &runtime, empty, empty).is_err());
     assert!(TensorMap::<ExternalZ3Rule, f64>::rand_with_seed(
+        engine,
         &runtime,
         empty,
         empty,
@@ -685,14 +720,15 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
     )
     .is_err());
     assert!(matches!(
-        TensorMap::<ExternalZ3Rule, f64>::isomorphism(&runtime, empty, empty).unwrap_err(),
+        TensorMap::<ExternalZ3Rule, f64>::isomorphism(engine, &runtime, empty, empty).unwrap_err(),
         symtn::typed::Error::InvalidArgument(message) if message.contains("at least one leg")
     ));
-    assert!(TensorMap::<ExternalZ3Rule, f64>::isometry(&runtime, empty, empty).is_err());
+    assert!(TensorMap::<ExternalZ3Rule, f64>::isometry(engine, &runtime, empty, empty).is_err());
 }
 
 #[test]
 fn typed_rand_rejects_mismatched_providers_like_zeros() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: two providers with distinct rule identities are a rule mismatch on
     // the random constructor exactly as on `zeros`.
@@ -701,6 +737,7 @@ fn typed_rand_rejects_mismatched_providers_like_zeros() {
     let runtime = runtime();
 
     let error = TensorMap::<ExternalZ3Rule, f64>::rand_with_seed(
+        engine,
         &runtime,
         [&z3_leg(&first, false)],
         [&z3_leg(&second, true)],
@@ -712,6 +749,7 @@ fn typed_rand_rejects_mismatched_providers_like_zeros() {
 
 #[test]
 fn typed_isomorphism_rejects_embeddable_but_not_isomorphic_content() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the isomorphism gate is `domain ≅ codomain`, strictly stronger
     // than the isometry embedding — a domain that embeds but is smaller must
@@ -737,9 +775,13 @@ fn typed_isomorphism_rejects_embeddable_but_not_isomorphic_content() {
     )
     .unwrap();
 
-    let typed_error =
-        TensorMap::<symtn::sector::U1FusionRule, f64>::isomorphism(&runtime, [&big], [&small])
-            .unwrap_err();
+    let typed_error = TensorMap::<symtn::sector::U1FusionRule, f64>::isomorphism(
+        engine,
+        &runtime,
+        [&big],
+        [&small],
+    )
+    .unwrap_err();
     assert!(matches!(
         typed_error,
         symtn::typed::Error::Operation(operation)
@@ -749,6 +791,7 @@ fn typed_isomorphism_rejects_embeddable_but_not_isomorphic_content() {
 
 #[test]
 fn typed_isometry_rejects_a_larger_domain_degeneracy_with_identical_sector_sets() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the embedding check is sectorwise `deg_domain <= deg_codomain`,
     // not sector-set containment — identical sector sets with one domain
@@ -774,9 +817,13 @@ fn typed_isometry_rejects_a_larger_domain_degeneracy_with_identical_sector_sets(
     )
     .unwrap();
 
-    let typed_error =
-        TensorMap::<symtn::sector::U1FusionRule, f64>::isometry(&runtime, [&codomain], [&domain])
-            .unwrap_err();
+    let typed_error = TensorMap::<symtn::sector::U1FusionRule, f64>::isometry(
+        engine,
+        &runtime,
+        [&codomain],
+        [&domain],
+    )
+    .unwrap_err();
     assert!(matches!(
         typed_error,
         symtn::typed::Error::Operation(operation)
@@ -786,6 +833,7 @@ fn typed_isometry_rejects_a_larger_domain_degeneracy_with_identical_sector_sets(
 
 #[test]
 fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the norm-fuser shape carries an asymmetric dual arrangement and
     // still satisfies the defining isomorphism law.
@@ -811,15 +859,20 @@ fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
     )
     .unwrap();
     let typed: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&typed_fused], [&typed_dual, &typed_v]).unwrap();
-    let identity: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&typed_dual, &typed_v], [&typed_dual, &typed_v]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&typed_fused], [&typed_dual, &typed_v]).unwrap();
+    let identity: TensorMap<symtn::sector::U1FusionRule, f64> = TensorMap::isomorphism(
+        engine,
+        &runtime,
+        [&typed_dual, &typed_v],
+        [&typed_dual, &typed_v],
+    )
+    .unwrap();
 
     assert_eq!(
         typed
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .compose(&typed)
+            .compose(engine, &typed)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -829,20 +882,21 @@ fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
 
 #[test]
 fn typed_c64_unitary_satisfies_the_identity_law() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = fz2_typed_leg();
     let leg_dual = leg.try_dual().unwrap();
     let typed: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::isomorphism(&runtime, [&leg, &leg_dual], [&leg_dual, &leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg, &leg_dual], [&leg_dual, &leg]).unwrap();
     let identity: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::isomorphism(&runtime, [&leg_dual, &leg], [&leg_dual, &leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg_dual, &leg], [&leg_dual, &leg]).unwrap();
 
     assert_eq!(
         typed
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .compose(&typed)
+            .compose(engine, &typed)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -852,6 +906,7 @@ fn typed_c64_unitary_satisfies_the_identity_law() {
 
 #[test]
 fn typed_isometry_on_a_dual_domain_satisfies_the_identity_law() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
@@ -876,15 +931,15 @@ fn typed_isometry_on_a_dual_domain_satisfies_the_identity_law() {
     .unwrap();
 
     let typed: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isometry(&runtime, [&big], [&small]).unwrap();
+        TensorMap::isometry(engine, &runtime, [&big], [&small]).unwrap();
     let identity: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(&runtime, [&small], [&small]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&small], [&small]).unwrap();
 
     assert_eq!(
         typed
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .compose(&typed)
+            .compose(engine, &typed)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -894,6 +949,7 @@ fn typed_isometry_on_a_dual_domain_satisfies_the_identity_law() {
 
 #[test]
 fn typed_su2_isomorphism_satisfies_the_identity_law() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: nothing in the structural constructors is abelian-specific — a
     // simple-fusion SU(2) provider's isomorphism still satisfies `f† ∘ f =
@@ -903,12 +959,12 @@ fn typed_su2_isomorphism_satisfies_the_identity_law() {
     let leg = su2_leg(&provider, false);
 
     let f: TensorMap<ExternalSu2Rule, f64> =
-        TensorMap::isomorphism(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
-    let roundtrip = f.adjoint().unwrap().compose(&f).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg, &leg], [&leg, &leg]).unwrap();
+    let roundtrip = f.adjoint(engine).unwrap().compose(engine, &f).unwrap();
     // Explicit `D` for the cuda,cpu-faer feature set (see the ExternalZ3
     // identity-law test above).
     let id: TensorMap<ExternalSu2Rule, f64> =
-        TensorMap::isomorphism(&runtime, [&leg, &leg], [&leg, &leg]).unwrap();
+        TensorMap::isomorphism(engine, &runtime, [&leg, &leg], [&leg, &leg]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
 }
 
@@ -930,6 +986,7 @@ fn typed_leg_dims_include_quantum_dimensions() {
 
 #[test]
 fn typed_leg_dims_carry_an_external_provider_with_nontrivial_dimensions() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 2's external-provider leg: `ExternalSu2` reports quantum dimension
     // 2 for twice-spin 1, so the degeneracy-2 leg weighs 4. This pins an
@@ -938,13 +995,14 @@ fn typed_leg_dims_carry_an_external_provider_with_nontrivial_dimensions() {
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let tensor: TensorMap<ExternalSu2Rule, f64> =
-        TensorMap::zeros(&runtime, [&leg], [&leg]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
 
     assert_eq!(tensor.leg_dims().unwrap(), vec![4, 4]);
 }
 
 #[test]
 fn typed_scalar_reads_a_complex_full_contraction() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 4's c64 leg: a complex endomorphism traced to rank 0.
     let runtime = runtime();
@@ -958,22 +1016,27 @@ fn typed_scalar_reads_a_complex_full_contraction() {
     )
     .unwrap();
     let typed: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |sectors, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |sectors, indices| {
             complex(typed_fill_value(sectors, indices))
         })
         .unwrap();
 
-    let typed_value: Complex64 = typed.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
-    assert_eq!(typed_value, typed.tr().unwrap());
+    let typed_value: Complex64 = typed
+        .trace_pairs(engine, &[(0, 1)])
+        .unwrap()
+        .scalar(engine)
+        .unwrap();
+    assert_eq!(typed_value, typed.tr(engine).unwrap());
 }
 
 #[test]
 fn typed_scalar_on_a_tensor_with_legs_is_an_invalid_argument() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
-    let typed_error = typed.scalar().unwrap_err();
+    let typed_error = typed.scalar(engine).unwrap_err();
     assert!(matches!(
         typed_error,
         symtn::typed::Error::InvalidArgument(_)
@@ -982,6 +1045,7 @@ fn typed_scalar_on_a_tensor_with_legs_is_an_invalid_argument() {
 
 #[test]
 fn typed_to_c64_widens_dense_and_compact_values_exactly() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 6: widening adds an exactly zero imaginary component on dense and
     // compact diagonal payloads.
@@ -989,7 +1053,7 @@ fn typed_to_c64_widens_dense_and_compact_values_exactly() {
     let typed = z2_tensor(&runtime);
 
     let typed_wide: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
-        typed.convert::<Complex64>();
+        typed.convert::<Complex64>(engine).unwrap();
     assert!(typed_wide
         .dense_data()
         .unwrap()
@@ -998,21 +1062,22 @@ fn typed_to_c64_widens_dense_and_compact_values_exactly() {
         .all(|(&wide, &real)| wide == Complex64::new(real, 0.0)));
 
     let typed_s: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        typed.svd_compact(&[0, 1], &[2]).unwrap().s;
+        typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
     let typed_s_wide: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
-        typed_s.convert::<Complex64>();
+        typed_s.convert::<Complex64>(engine).unwrap();
     assert!(typed_s_wide
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(typed_s.materialize().unwrap().dense_data().unwrap())
+        .zip(typed_s.materialize(engine).unwrap().dense_data().unwrap())
         .all(|(&wide, &real)| wide == Complex64::new(real, 0.0)));
 }
 
 #[test]
 fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 6's law checks: `re(t) + i*im(t)` rebuilds `t` byte-exactly through
     // `to_c64` + `add`,
@@ -1021,15 +1086,14 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
 
-    let real_part: TensorMap<symtn::sector::Z2FusionRule, f64> = complex_typed.re();
-    let imag_part: TensorMap<symtn::sector::Z2FusionRule, f64> = complex_typed.im();
+    let real_part: TensorMap<symtn::sector::Z2FusionRule, f64> = complex_typed.re(engine).unwrap();
+    let imag_part: TensorMap<symtn::sector::Z2FusionRule, f64> = complex_typed.im(engine).unwrap();
+    let operand = Complex64::new(0.0, 1.0);
+    let imag_part_c64 = imag_part.convert::<Complex64>(engine).unwrap();
     let rebuilt: TensorMap<symtn::sector::Z2FusionRule, Complex64> = real_part
-        .convert::<Complex64>()
-        .axpby(
-            Complex64::new(1.0, 0.0),
-            &imag_part.convert::<Complex64>(),
-            Complex64::new(0.0, 1.0),
-        )
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .axpby(engine, Complex64::new(1.0, 0.0), &imag_part_c64, operand)
         .unwrap();
     assert_eq!(
         rebuilt.dense_data().unwrap(),
@@ -1037,22 +1101,29 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     );
 
     let real_typed = z2_tensor(&runtime);
-    let round_trip: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        real_typed.convert::<Complex64>().re();
+    let round_trip: TensorMap<symtn::sector::Z2FusionRule, f64> = real_typed
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .re(engine)
+        .unwrap();
     assert_eq!(
         round_trip.dense_data().unwrap(),
         real_typed.dense_data().unwrap()
     );
-    let vanished: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        real_typed.convert::<Complex64>().im();
+    let vanished: TensorMap<symtn::sector::Z2FusionRule, f64> = real_typed
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .im(engine)
+        .unwrap();
     assert_eq!(
         vanished.dense_data().unwrap(),
-        real_typed.zeros_like().unwrap().dense_data().unwrap()
+        real_typed.zeros_like(engine).unwrap().dense_data().unwrap()
     );
 }
 
 #[test]
 fn typed_re_im_keep_a_compact_spectrum_on_its_bond_space() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 6's diagonal leg: `re`/`im` of a complex compact spectrum factor
     // map spectrum-to-spectrum, and the law `re + i*im == t` holds on the
@@ -1060,27 +1131,27 @@ fn typed_re_im_keep_a_compact_spectrum_on_its_bond_space() {
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
     let s: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
-        complex_typed.svd_compact(&[0, 1], &[2]).unwrap().s;
+        complex_typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
 
-    let real_part: TensorMap<symtn::sector::Z2FusionRule, f64> = s.re();
-    let imag_part: TensorMap<symtn::sector::Z2FusionRule, f64> = s.im();
+    let real_part: TensorMap<symtn::sector::Z2FusionRule, f64> = s.re(engine).unwrap();
+    let imag_part: TensorMap<symtn::sector::Z2FusionRule, f64> = s.im(engine).unwrap();
     assert_same_legs(&real_part.codomain(), &s.codomain());
+    let operand = Complex64::new(0.0, 1.0);
+    let imag_part_c64 = imag_part.convert::<Complex64>(engine).unwrap();
     let rebuilt: TensorMap<symtn::sector::Z2FusionRule, Complex64> = real_part
-        .convert::<Complex64>()
-        .axpby(
-            Complex64::new(1.0, 0.0),
-            &imag_part.convert::<Complex64>(),
-            Complex64::new(0.0, 1.0),
-        )
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .axpby(engine, Complex64::new(1.0, 0.0), &imag_part_c64, operand)
         .unwrap();
     assert_eq!(
-        rebuilt.materialize().unwrap().dense_data().unwrap(),
-        s.materialize().unwrap().dense_data().unwrap()
+        rebuilt.materialize(engine).unwrap().dense_data().unwrap(),
+        s.materialize(engine).unwrap().dense_data().unwrap()
     );
 }
 
 #[test]
 fn typed_leg_dims_route_each_axis_to_its_own_leg() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Gate 2's axis-routing leg: every earlier fixture has homogeneous leg
     // dimensions, so a leg_dims that reads the wrong leg (e.g. domain[0] for
@@ -1098,12 +1169,13 @@ fn typed_leg_dims_route_each_axis_to_its_own_leg() {
     let b = GradedSpace::try_new(Arc::clone(&provider), z2_pairs(1, 1)).unwrap();
     let c = GradedSpace::try_new(Arc::clone(&provider), z2_pairs(3, 4)).unwrap();
     let typed: TensorMap<symtn::sector::Z2FusionRule, f64> =
-        TensorMap::zeros(&runtime, [&a, &b], [&c]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&a, &b], [&c]).unwrap();
     assert_eq!(typed.leg_dims().unwrap(), vec![5, 2, 7]);
 }
 
 #[test]
 fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `zeros` admits a runtime-rank multi-block layout through the
     // checked path and returns a zero buffer of exactly the layout's length.
@@ -1113,7 +1185,7 @@ fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::zeros(&runtime, [&leg, &leg], [&dual, &dual]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&leg, &leg], [&dual, &dual]).unwrap();
 
     assert!(tensor.subblock_count() >= 2);
     assert!(!tensor.dense_data().unwrap().is_empty());
@@ -1126,6 +1198,7 @@ fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
 
 #[test]
 fn id_writes_the_nonuniform_fused_diagonal() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the identity on a leg list whose per-sector degeneracies differ
     // from leg to leg — the case where the
@@ -1146,7 +1219,8 @@ fn id_writes_the_nonuniform_fused_diagonal() {
     let wide = typed_leg(2, 3);
     let narrow = typed_leg(1, 4);
     let typed =
-        TensorMap::<_, f64>::isomorphism(&runtime, [&wide, &narrow], [&wide, &narrow]).unwrap();
+        TensorMap::<_, f64>::isomorphism(engine, &runtime, [&wide, &narrow], [&wide, &narrow])
+            .unwrap();
 
     // Not the zero tensor, and not the all-ones one either: a genuine diagonal.
     // 14 even + 11 odd fused states: `2*1 + 3*4` and `2*4 + 3*1`.

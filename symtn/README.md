@@ -2,7 +2,7 @@
 
 `symtn` is the public facade crate of symtn; import it as `use symtn::…`.
 Ordinary applications import `Runtime`, `RuntimeBuilder`, `GradedSpace`,
-`TensorMap`, `LinalgBackend`, and `Truncation` from `symtn::typed`, and the
+`TensorMap`, `CpuEngine`, and `Truncation` from `symtn::typed`, and the
 built-in symmetries such as `U1FusionRule` from `symtn::sector`. Every public
 item has exactly one path.
 

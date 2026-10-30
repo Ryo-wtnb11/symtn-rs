@@ -77,6 +77,7 @@ where
 {
     fn add_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         zero_strides: &mut Vec<isize>,
         dst_data: &mut [T],
         src_data: &[T],
@@ -93,6 +94,7 @@ where
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Add);
         self.inner.add_strided_baked(
+            exec,
             zero_strides,
             dst_data,
             src_data,
@@ -111,6 +113,7 @@ where
 
     fn axpby_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -125,6 +128,7 @@ where
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Axpby);
         self.inner.axpby_strided_baked(
+            exec,
             dst_data,
             src_data,
             shape,
@@ -141,6 +145,7 @@ where
 
     fn copy_scale_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -155,6 +160,7 @@ where
     ) -> Result<(), OperationError> {
         self.record(KernelCall::CopyScale { dst_offset });
         self.inner.copy_scale_strided_baked(
+            exec,
             dst_data,
             src_data,
             shape,
@@ -171,6 +177,7 @@ where
 
     fn scale_strided(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         shape: &[usize],
         dst_strides: &[isize],
@@ -179,11 +186,12 @@ where
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Scale { dst_offset });
         self.inner
-            .scale_strided(dst_data, shape, dst_strides, dst_offset, beta)
+            .scale_strided(exec, dst_data, shape, dst_strides, dst_offset, beta)
     }
 
     fn recoupling_src_times_u_transpose<C>(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         destination: &mut [T],
         source: &[T],
         recoupling_coefficients_dst_src: &[C],
@@ -197,6 +205,7 @@ where
     {
         self.record(KernelCall::Recoupling);
         self.inner.recoupling_src_times_u_transpose(
+            exec,
             destination,
             source,
             recoupling_coefficients_dst_src,

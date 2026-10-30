@@ -112,6 +112,7 @@ fn tree_transform_replay_dispatches_through_kernel_adapter() {
     let mut kernels = ObservedKernels::recording();
 
     tree_transform_structure_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut kernels,
         &mut TreeTransformWorkspace::default(),
         &structure,

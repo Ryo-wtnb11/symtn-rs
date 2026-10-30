@@ -57,7 +57,12 @@ where
     /// Non-unit NoBraiding legs are invalid. Checked-Generic pivotal failures
     /// retain their typed provider error, and no result is published until all
     /// selected twist values have been staged successfully.
-    pub fn twist(&self, legs: &[usize], direction: Direction) -> Result<Self, FacadeError<R>> {
+    pub fn twist(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[usize],
+        direction: Direction,
+    ) -> Result<Self, FacadeError<R>> {
         let inverse = direction.is_inverse();
         let rank = self.rank();
         let name = if inverse { "inverse twist" } else { "twist" };
@@ -106,15 +111,20 @@ where
             // the provider after all fallible twist values had been staged.
             return Ok(self
                 .parent_of(view)
-                .twist_owned(&axes, !inverse)?
+                .twist_owned(engine, &axes, !inverse)?
                 .lazy_adjoint_on(&view.logical_space)?);
         }
-        self.twist_owned(legs, inverse)
+        self.twist_owned(engine, legs, inverse)
     }
 
     /// The twist of an owned tensor on its own space: unless every twist value
     /// is one, one scaled copy of the compact spectrum or the dense payload.
-    fn twist_owned(&self, legs: &[usize], inverse: bool) -> Result<Self, FacadeError<R>> {
+    fn twist_owned(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[usize],
+        inverse: bool,
+    ) -> Result<Self, FacadeError<R>> {
         let nout = self.codomain_rank();
         let space = self.logical_space();
         let Some(theta) = <R::Mode as TypedTensorTwistDispatch<R, D>>::twist_values(
@@ -133,6 +143,7 @@ where
         }
         let name = if inverse { "inverse twist" } else { "twist" };
         Ok(S::scale_blocks(
+            engine,
             EXEC,
             self,
             &twist_block_factor(&theta, nout, legs, inverse),
@@ -172,6 +183,7 @@ pub trait TwistExec<R, D>: TypedStorage<R, D> {
     /// scaled by `factor_of(block key)`; `operation` names the call in a
     /// capability error.
     fn scale_blocks<C: TwistCoefficient<D>>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         factor_of: &dyn Fn(&BlockKey) -> C,
@@ -181,6 +193,7 @@ pub trait TwistExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> TwistExec<R, D> for Vec<D> {
     fn scale_blocks<C: TwistCoefficient<D>>(
+        _engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D>,
         factor_of: &dyn Fn(&BlockKey) -> C,
@@ -241,7 +254,14 @@ where
     /// [`Error::Core`] from the layout derivation of the toggled hom space.
     /// Checked-Generic admission and pivotal failures retain their typed
     /// [`GenericTensorError`] variants.
-    pub fn flip(&self, legs: &[usize], direction: Direction) -> Result<Self, FacadeError<R>> {
+    pub fn flip(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[usize],
+        direction: Direction,
+    ) -> Result<Self, FacadeError<R>> {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         let inverse = direction.is_inverse();
         let rank = self.rank();
         let name = if inverse { "inverse flip" } else { "flip" };

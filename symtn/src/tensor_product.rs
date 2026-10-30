@@ -872,6 +872,7 @@ mod tests {
     use std::convert::Infallible;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use symtn_dense::Engine;
 
     use crate::typed::ContractSpec;
     use symtn_matrixalgebra::SectorSpectrum;
@@ -1455,6 +1456,7 @@ mod tests {
         }
         let mut dense = vec![f64::NAN; expected.len()];
         symtn_operations::tree_transform_structure_overwrite_with_strided_kernel_raw(
+            symtn_operations::host_pool::Exec::serial(),
             &mut symtn_operations::StridedHostKernelAdapter::default(),
             &mut symtn_operations::TreeTransformWorkspace::default(),
             &compiled,
@@ -1542,6 +1544,7 @@ mod tests {
 
     #[test]
     fn external_multiplicity_free_provider_matches_direct_transform() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let provider = Arc::new(ExternalZ2::<0>);
         let leg = SectorLeg::new([(SectorId::new(0), 2)], false);
         let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
@@ -1561,6 +1564,7 @@ mod tests {
         direct
             .tree_context_mut()
             .tree_transform_dyn_into(
+                engine,
                 provider.as_ref(),
                 operation.clone(),
                 expected_destination.space().structure(),
@@ -1575,7 +1579,13 @@ mod tests {
         let mut context = Ctx::<f64, RuleIdentity>::default();
         let (actual_destination, actual_data) = context
             .tree_context_mut()
-            .tree_transform_owned_multiplicity_free_in(&source, &source_data, &operation, 1.0)
+            .tree_transform_owned_multiplicity_free_in(
+                engine,
+                &source,
+                &source_data,
+                &operation,
+                1.0,
+            )
             .unwrap();
 
         assert_eq!(actual_destination.space(), expected_destination.space());
@@ -1584,6 +1594,7 @@ mod tests {
 
     #[test]
     fn external_multiplicity_free_provider_contracts_direct_with_output_order() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let provider = Arc::new(ExternalZ2::<0>);
         let lhs_codomain = SectorLeg::new([(SectorId::new(0), 2)], false);
         let contracted = SectorLeg::new([(SectorId::new(0), 3)], false);
@@ -1621,6 +1632,7 @@ mod tests {
         let mut data = vec![0.0; destination.space().required_len().unwrap()];
         context
             .tensorcontract_planned_into(
+                engine,
                 &destination,
                 &mut data,
                 (FusionOperand::direct(lhs.space()), &lhs_data),
@@ -1646,7 +1658,9 @@ mod tests {
 
     /// A rank-3 Z2 tensor map built through the typed facade, so the gate
     /// below measures the whole typed route, not this module in isolation.
-    fn typed_z2_facade_tensor() -> (
+    fn typed_z2_facade_tensor(
+        engine: &mut dyn Engine,
+    ) -> (
         crate::typed::Runtime,
         crate::typed::TensorMap<Z2FusionRule, f64>,
     ) {
@@ -1660,6 +1674,7 @@ mod tests {
         )
         .unwrap();
         let tensor = crate::typed::TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             [&leg, &leg],
             [&leg],
@@ -1682,10 +1697,11 @@ mod tests {
 
     #[test]
     fn typed_ordered_contract_is_one_fused_seam_call_and_no_permute_transform() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What (#580 group 6, gate 1): a typed `contract` with a
         // non-identity output order runs the fused contraction seam exactly
         // once and never a separate permute transform.
-        let (_runtime, tensor) = typed_z2_facade_tensor();
+        let (_runtime, tensor) = typed_z2_facade_tensor(engine);
 
         // Negative control: the counters can see the sequential shape at all.
         // A contract followed by a public permute is one fused call plus one
@@ -1699,9 +1715,9 @@ mod tests {
         };
         let (fused, transforms) = seam_calls(|| {
             tensor
-                .contract(&tensor, &default)
+                .contract(engine, &tensor, &default)
                 .unwrap()
-                .permute(&[1, 0], &[3, 2])
+                .permute(engine, &[1, 0], &[3, 2])
                 .unwrap()
         });
         assert_eq!((fused, transforms), (1, 1));
@@ -1712,7 +1728,8 @@ mod tests {
             domain: &[3, 2],
             ..default
         };
-        let (fused, transforms) = seam_calls(|| tensor.contract(&tensor, &ordered).unwrap());
+        let (fused, transforms) =
+            seam_calls(|| tensor.contract(engine, &tensor, &ordered).unwrap());
         assert_eq!(
             (fused, transforms),
             (1, 0),
@@ -1722,11 +1739,12 @@ mod tests {
 
     #[test]
     fn typed_split_moving_contract_is_one_fused_seam_call_and_no_permute_transform() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What (#1549 gate b): a `ContractSpec` that moves open legs across
         // the codomain/domain split runs the fused contraction seam once and
         // no separate permute transform, where the composition it is defined
         // by (default-split contract, then permute) runs one of each.
-        let (_runtime, tensor) = typed_z2_facade_tensor();
+        let (_runtime, tensor) = typed_z2_facade_tensor(engine);
         let default = ContractSpec {
             lhs: &[2],
             rhs: &[0],
@@ -1740,9 +1758,9 @@ mod tests {
         ] {
             let (fused, transforms) = seam_calls(|| {
                 tensor
-                    .contract(&tensor, &default)
+                    .contract(engine, &tensor, &default)
                     .unwrap()
-                    .permute(codomain, domain)
+                    .permute(engine, codomain, domain)
                     .unwrap()
             });
             assert_eq!((fused, transforms), (1, 1), "{codomain:?} <- {domain:?}");
@@ -1751,7 +1769,8 @@ mod tests {
                 domain,
                 ..default
             };
-            let (fused, transforms) = seam_calls(|| tensor.contract(&tensor, &spec).unwrap());
+            let (fused, transforms) =
+                seam_calls(|| tensor.contract(engine, &tensor, &spec).unwrap());
             assert_eq!(
                 (fused, transforms),
                 (1, 0),

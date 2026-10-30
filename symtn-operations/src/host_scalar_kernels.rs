@@ -3,8 +3,8 @@ use core::ops::{Add, Mul};
 use num_traits::{One, Zero};
 
 use strided_kernel::{
-    axpy_conj_raw, axpy_raw, copy_scale_conj_raw, copy_scale_raw, CopyPlan, MaybeSendSync,
-    RawStridedMut, RawStridedRef, RAW_FUSED_RANK_LIMIT,
+    axpy_conj_raw, axpy_raw, copy_scale_conj_raw, copy_scale_raw, CopyPlan, RawStridedMut,
+    RawStridedRef, RAW_FUSED_RANK_LIMIT,
 };
 
 use smallvec::SmallVec;
@@ -23,6 +23,7 @@ use crate::{ConjugateValue, OperationError};
 /// call these primitives instead of embedding raw strided loops directly.
 #[allow(clippy::too_many_arguments)]
 pub fn tensoradd_raw_strided_kernel<T>(
+    exec: crate::host_pool::Exec<'_>,
     zero_strides: &mut Vec<isize>,
     dst_data: &mut [T],
     src_data: &[T],
@@ -43,10 +44,12 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if source_conjugate {
         return tensoradd_raw_strided_conjugating_kernel(
+            exec,
             zero_strides,
             dst_data,
             src_data,
@@ -61,6 +64,7 @@ where
     }
     zero_strides.clear();
     axpby_raw_strided_kernel(
+        exec,
         dst_data,
         src_data,
         shape,
@@ -75,6 +79,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensoradd_raw_strided_kernel_trusted<T>(
+    exec: crate::host_pool::Exec<'_>,
     zero_strides: &mut Vec<isize>,
     dst_data: &mut [T],
     src_data: &[T],
@@ -95,10 +100,12 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if source_conjugate {
         return tensoradd_raw_strided_conjugating_kernel_trusted(
+            exec,
             zero_strides,
             dst_data,
             src_data,
@@ -113,6 +120,7 @@ where
     }
     zero_strides.clear();
     axpby_raw_strided_kernel_trusted(
+        exec,
         dst_data,
         src_data,
         shape,
@@ -275,6 +283,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn tensoradd_raw_strided_conjugating_kernel<T>(
+    exec: crate::host_pool::Exec<'_>,
     zero_strides: &mut Vec<isize>,
     dst_data: &mut [T],
     src_data: &[T],
@@ -294,7 +303,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + MaybeSendSync,
+        + Send
+        + Sync,
 {
     validate_raw_strided_views(
         dst_data,
@@ -306,6 +316,7 @@ where
         src_offset,
     )?;
     raw_strided_combine_loop(
+        exec,
         dst_data,
         src_data,
         shape,
@@ -322,6 +333,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn tensoradd_raw_strided_conjugating_kernel_trusted<T>(
+    exec: crate::host_pool::Exec<'_>,
     zero_strides: &mut Vec<isize>,
     dst_data: &mut [T],
     src_data: &[T],
@@ -341,7 +353,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + MaybeSendSync,
+        + Send
+        + Sync,
 {
     #[cfg(debug_assertions)]
     validate_raw_strided_views(
@@ -354,6 +367,7 @@ where
         src_offset,
     )?;
     raw_strided_combine_loop(
+        exec,
         dst_data,
         src_data,
         shape,
@@ -406,6 +420,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn axpby_raw_strided_kernel<T>(
+    exec: crate::host_pool::Exec<'_>,
     dst_data: &mut [T],
     src_data: &[T],
     shape: &[usize],
@@ -424,7 +439,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     validate_raw_strided_views(
         dst_data,
@@ -436,6 +452,7 @@ where
         src_offset,
     )?;
     raw_strided_combine_loop(
+        exec,
         dst_data,
         src_data,
         shape,
@@ -458,6 +475,7 @@ where
 /// writes); it is never undefined behavior.
 #[allow(clippy::too_many_arguments)]
 pub fn axpby_raw_strided_kernel_trusted<T>(
+    exec: crate::host_pool::Exec<'_>,
     dst_data: &mut [T],
     src_data: &[T],
     shape: &[usize],
@@ -476,7 +494,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     #[cfg(debug_assertions)]
     validate_raw_strided_views(
@@ -489,6 +508,7 @@ where
         src_offset,
     )?;
     raw_strided_combine_loop(
+        exec,
         dst_data,
         src_data,
         shape,
@@ -913,6 +933,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn raw_strided_combine_loop<T>(
+    mut exec: crate::host_pool::Exec<'_>,
     dst_data: &mut [T],
     src_data: &[T],
     shape: &[usize],
@@ -924,12 +945,13 @@ fn raw_strided_combine_loop<T>(
     action: RawStridedAction<T>,
 ) -> Result<(), OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     if crate::strided::element_count(shape)? == 0 {
         return Ok(());
     }
     if raw_rank_within_strided_limit_routed(
+        exec.reborrow(),
         dst_data,
         src_data,
         shape,
@@ -961,6 +983,7 @@ where
         );
     }
     combine_fused_layout(
+        exec.reborrow(),
         dst_data,
         src_data,
         shape,
@@ -981,6 +1004,7 @@ where
 /// `false` with [`combine_fused_layout`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn raw_rank_within_strided_limit_routed<T>(
+    exec: crate::host_pool::Exec<'_>,
     dst_data: &mut [T],
     src_data: &[T],
     shape: &[usize],
@@ -992,7 +1016,7 @@ pub(crate) fn raw_rank_within_strided_limit_routed<T>(
     action: RawStridedAction<T>,
 ) -> Result<bool, OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     if shape.len() > RAW_FUSED_RANK_LIMIT {
         return Ok(false);
@@ -1007,6 +1031,7 @@ where
         src_offset,
         source_conjugate,
         action,
+        exec,
     )
 }
 
@@ -1023,6 +1048,7 @@ where
 /// action nor destination separation, so it is not offered again.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn combine_fused_layout<T>(
+    exec: crate::host_pool::Exec<'_>,
     dst_data: &mut [T],
     src_data: &[T],
     shape: &[usize],
@@ -1036,7 +1062,7 @@ pub(crate) fn combine_fused_layout<T>(
     index: &mut SmallVec<[usize; FUSED_LAYOUT_INLINE_RANK]>,
 ) -> Result<(), OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     normalize_fused_layout(shape, raw_dst_strides, raw_src_strides, layout)?;
     let (dims, dst_strides, src_strides) =
@@ -1052,6 +1078,7 @@ where
             src_offset,
             source_conjugate,
             action,
+            exec,
         )?
     {
         return Ok(());
@@ -1170,9 +1197,10 @@ pub(crate) fn strided_raw_action<T>(
     src_offset: isize,
     source_conjugate: bool,
     action: RawStridedAction<T>,
+    exec: crate::host_pool::Exec<'_>,
 ) -> Result<bool, OperationError>
 where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + MaybeSendSync,
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
     match action {
         RawStridedAction::Copy => {}
@@ -1188,24 +1216,22 @@ where
     let mut dst =
         RawStridedMut::new(dst_data, shape, dst_strides, dst_offset).map_err(strided_error)?;
     let (dst, src) = (&mut dst, &src);
-    crate::host_pool::strided(shape.iter().product(), || {
-        match (action, source_conjugate) {
-            (RawStridedAction::Copy, conjugate) => {
-                let plan = CopyPlan::compile(shape, dst_strides, src_strides)?;
-                if conjugate {
-                    plan.execute_conj(dst, src)
-                } else {
-                    plan.execute(dst, src)
-                }
+    match (action, source_conjugate) {
+        (RawStridedAction::Copy, conjugate) => {
+            let plan = CopyPlan::compile(shape, dst_strides, src_strides).map_err(strided_error)?;
+            if conjugate {
+                plan.execute_conj(dst, src, exec)
+            } else {
+                plan.execute(dst, src, exec)
             }
-            (RawStridedAction::CopyScale { alpha }, false) => copy_scale_raw(dst, src, alpha),
-            (RawStridedAction::CopyScale { alpha }, true) => copy_scale_conj_raw(dst, src, alpha),
-            (RawStridedAction::Axpy { alpha }, false) => axpy_raw(dst, src, alpha),
-            (RawStridedAction::Axpy { alpha }, true) => axpy_conj_raw(dst, src, alpha),
-            (RawStridedAction::Axpby { .. }, _) => return Ok(false),
         }
-        .map(|()| true)
-    })
+        (RawStridedAction::CopyScale { alpha }, false) => copy_scale_raw(dst, src, alpha),
+        (RawStridedAction::CopyScale { alpha }, true) => copy_scale_conj_raw(dst, src, alpha),
+        (RawStridedAction::Axpy { alpha }, false) => axpy_raw(dst, src, alpha),
+        (RawStridedAction::Axpy { alpha }, true) => axpy_conj_raw(dst, src, alpha),
+        (RawStridedAction::Axpby { .. }, _) => return Ok(false),
+    }
+    .map(|()| true)
     .map_err(strided_error)
 }
 
@@ -1876,6 +1902,7 @@ mod tests {
     /// `[Inf -Inf; NaN 2.0]`.
     #[test]
     fn tensoradd_raw_zero_alpha_matches_tensoroperations() {
+        let mut exec = strided_kernel::Exec::serial();
         let src = [f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1.0];
         let initial = [1.0, 2.0, -0.0, f64::NAN];
         for (alpha, beta, want) in [
@@ -1886,6 +1913,7 @@ mod tests {
         ] {
             let mut dst = initial;
             tensoradd_raw_strided_kernel(
+                exec.reborrow(),
                 &mut Vec::new(),
                 &mut dst,
                 &src,
@@ -1920,6 +1948,7 @@ mod tests {
         ];
         let mut dst = [Complex64::new(f64::NAN, 1.0); 2];
         tensoradd_raw_strided_kernel(
+            strided_kernel::Exec::serial(),
             &mut Vec::new(),
             &mut dst,
             &src,
@@ -2160,8 +2189,11 @@ mod tests {
         ]
     }
 
-    fn assert_strided_matches_column_major_loop<T>(make: impl Fn(f64, f64) -> T, scales: &[T])
-    where
+    fn assert_strided_matches_column_major_loop<T>(
+        mut exec: crate::host_pool::Exec<'_>,
+        make: impl Fn(f64, f64) -> T,
+        scales: &[T],
+    ) where
         T: BitPattern
             + Add<T, Output = T>
             + Mul<T, Output = T>
@@ -2169,7 +2201,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + MaybeSendSync
+            + Send
+            + Sync
             + core::fmt::Debug,
     {
         let shapes: Vec<Vec<usize>> = (0..=RAW_FUSED_RANK_LIMIT)
@@ -2214,6 +2247,7 @@ mod tests {
                             src_offset,
                             conjugate,
                             action,
+                            exec.reborrow(),
                         )
                         .unwrap();
                         assert!(routed, "shape {shape:?} {action:?}");
@@ -2242,8 +2276,14 @@ mod tests {
     /// arithmetic). `Copy` of `inf + 0i` stays `inf + 0i` (no multiply).
     #[test]
     fn strided_raw_actions_match_column_major_loop_bitwise() {
-        assert_strided_matches_column_major_loop(|re, _| re, &[-0.5, 3.0, f64::from_bits(1)]);
+        let mut exec = strided_kernel::Exec::serial();
         assert_strided_matches_column_major_loop(
+            exec.reborrow(),
+            |re, _| re,
+            &[-0.5, 3.0, f64::from_bits(1)],
+        );
+        assert_strided_matches_column_major_loop(
+            exec.reborrow(),
             Complex64::new,
             &[
                 Complex64::new(-0.5, 0.25),
@@ -2254,6 +2294,7 @@ mod tests {
         let mut dst = [Complex64::zero()];
         let src = [Complex64::new(f64::INFINITY, 0.0)];
         tensoradd_raw_strided_kernel(
+            exec.reborrow(),
             &mut Vec::new(),
             &mut dst,
             &src,
@@ -2277,6 +2318,7 @@ mod tests {
     /// `β = 1` (so a `-0.0` component of `C` becomes `+0.0`).
     #[test]
     fn zero_alpha_keeps_tensorkit_rule_on_strided_route() {
+        let mut exec = strided_kernel::Exec::serial();
         let shape = [2, 3, 2];
         let dst_strides = [3, 1, 6];
         let src_strides = [1, 2, 6];
@@ -2308,12 +2350,14 @@ mod tests {
                     0,
                     conjugate,
                     raw_strided_action(alpha, beta),
+                    exec.reborrow(),
                 )
                 .unwrap());
                 assert_eq!(bit_pairs(&gated), bit_pairs(&initial));
 
                 let mut raw = initial.clone();
                 tensoradd_raw_strided_kernel(
+                    exec.reborrow(),
                     &mut Vec::new(),
                     &mut raw,
                     &src,
@@ -2332,6 +2376,7 @@ mod tests {
                 let mut checked = initial.clone();
                 crate::kernel_adapter::StridedHostKernelAdapter::default()
                     .tensoradd_strided_checked(
+                        exec.reborrow(),
                         &mut checked,
                         &src,
                         &shape,
@@ -2356,6 +2401,7 @@ mod tests {
     /// is why such layouts stay on symtn's loop.
     #[test]
     fn aliasing_destination_keeps_column_major_accumulation() {
+        let mut exec = strided_kernel::Exec::serial();
         let shape = [2, 3];
         let dst_strides = [2, 1];
         let src_strides = [1, 2];
@@ -2394,6 +2440,7 @@ mod tests {
             );
             let mut actual = initial;
             tensoradd_raw_strided_kernel(
+                exec.reborrow(),
                 &mut Vec::new(),
                 &mut actual,
                 &src,
@@ -2440,6 +2487,7 @@ mod tests {
     /// allocation-free at any rank; the result is unchanged.
     #[test]
     fn rank_above_fused_limit_keeps_symtn_loop() {
+        let mut exec = strided_kernel::Exec::serial();
         let shape = [2usize; RAW_FUSED_RANK_LIMIT + 1];
         let strides: Vec<isize> = (0..shape.len()).map(|axis| 1 << axis).collect();
         let reversed: Vec<isize> = strides.iter().rev().copied().collect();
@@ -2455,9 +2503,11 @@ mod tests {
             0,
             false,
             RawStridedAction::Copy,
+            exec.reborrow(),
         )
         .unwrap());
         tensoradd_raw_strided_kernel(
+            exec.reborrow(),
             &mut Vec::new(),
             &mut dst,
             &src,
@@ -2557,8 +2607,12 @@ mod tests {
         (strides, offset, stride as usize)
     }
 
-    fn assert_fused_rank_matches_naive<T>(make: impl Fn(f64, f64) -> T, alpha: T, beta: T)
-    where
+    fn assert_fused_rank_matches_naive<T>(
+        mut exec: crate::host_pool::Exec<'_>,
+        make: impl Fn(f64, f64) -> T,
+        alpha: T,
+        beta: T,
+    ) where
         T: BitPattern
             + Add<T, Output = T>
             + Mul<T, Output = T>
@@ -2566,7 +2620,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + MaybeSendSync
+            + Send
+            + Sync
             + core::fmt::Debug,
     {
         let mut rng = Rng(0x2230_9e37_79b9_7f4a);
@@ -2636,6 +2691,7 @@ mod tests {
                     );
                     let mut validated = initial.clone();
                     tensoradd_raw_strided_kernel(
+                        exec.reborrow(),
                         &mut Vec::new(),
                         &mut validated,
                         &src,
@@ -2658,6 +2714,7 @@ mod tests {
                     if !conjugate {
                         let mut trusted = initial.clone();
                         axpby_raw_strided_kernel_trusted(
+                            exec.reborrow(),
                             &mut trusted,
                             &src,
                             &shape,
@@ -2693,14 +2750,17 @@ mod tests {
     /// the call to Strided or to the fused span walk.
     #[test]
     fn fused_rank_gate_matches_naive_oracle_bitwise() {
-        assert_fused_rank_matches_naive(|re, _| re, -0.5, 0.25);
-        assert_fused_rank_matches_naive(|re, _| re as f32, -0.5f32, 0.25);
+        let mut exec = strided_kernel::Exec::serial();
+        assert_fused_rank_matches_naive(exec.reborrow(), |re, _| re, -0.5, 0.25);
+        assert_fused_rank_matches_naive(exec.reborrow(), |re, _| re as f32, -0.5f32, 0.25);
         assert_fused_rank_matches_naive(
+            exec.reborrow(),
             Complex64::new,
             Complex64::new(-0.5, 0.25),
             Complex64::new(0.0, -1.0),
         );
         assert_fused_rank_matches_naive(
+            exec.reborrow(),
             |re, im| num_complex::Complex32::new(re as f32, im as f32),
             num_complex::Complex32::new(-0.5, 0.25),
             num_complex::Complex32::new(0.0, -1.0),
@@ -2752,6 +2812,7 @@ mod tests {
     /// naive column-major result.
     #[test]
     fn raw_rank_twelve_normalizes_to_strided_limit() {
+        let mut exec = strided_kernel::Exec::serial();
         let (shape, dst_strides, src_strides) = raw_rank_twelve_fusing_to_eight();
         assert_eq!(shape.len(), 12);
         let mut layout = FusedLayoutScratch::default();
@@ -2783,6 +2844,7 @@ mod tests {
             );
             let mut actual = initial.clone();
             tensoradd_raw_strided_kernel(
+                exec.reborrow(),
                 &mut Vec::new(),
                 &mut actual,
                 &src,

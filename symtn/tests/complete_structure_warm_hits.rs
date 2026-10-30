@@ -46,7 +46,7 @@ fn bits(data: &[f64]) -> Vec<u64> {
 }
 
 macro_rules! warm_ops {
-    ($runtime:expr, $label:literal, $provider:expr, $sectors:expr) => {{
+    ($engine:ident, $runtime:expr, $label:literal, $provider:expr, $sectors:expr) => {{
         let sectors: Vec<_> = $sectors;
         let leg = GradedSpace::try_new(
             std::sync::Arc::new($provider),
@@ -54,32 +54,41 @@ macro_rules! warm_ops {
         )
         .unwrap();
         let a =
-            TensorMap::<_, f64>::rand_with_seed($runtime, [&leg, &leg], [&leg, &leg], 1).unwrap();
+            TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [&leg, &leg], [&leg, &leg], 1)
+                .unwrap();
         let square =
-            TensorMap::<_, f64>::rand_with_seed($runtime, [&leg, &leg], [&leg, &leg], 2).unwrap();
-        let matrix = TensorMap::<_, f64>::rand_with_seed($runtime, [&leg], [&leg], 3).unwrap();
+            TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [&leg, &leg], [&leg, &leg], 2)
+                .unwrap();
+        let matrix =
+            TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [&leg], [&leg], 3).unwrap();
         let selection =
             LegSelection::try_new(&leg, sectors.iter().map(|s| (s.clone(), 0..1))).unwrap();
         assert_warm_hits(concat!($label, " permute"), || {
-            bits(a.permute(&[1, 2], &[3, 0]).unwrap().dense_data().unwrap())
+            bits(
+                a.permute($engine, &[1, 2], &[3, 0])
+                    .unwrap()
+                    .dense_data()
+                    .unwrap(),
+            )
         });
         assert_warm_hits(concat!($label, " repartition"), || {
-            bits(a.repartition(3).unwrap().dense_data().unwrap())
+            bits(a.repartition($engine, 3).unwrap().dense_data().unwrap())
         });
         assert_warm_hits(concat!($label, " restrict_leg"), || {
             bits(
-                a.restrict_leg(&[(0, &selection)])
+                a.restrict_leg($engine, &[(0, &selection)])
                     .unwrap()
                     .dense_data()
                     .unwrap(),
             )
         });
         assert_warm_hits(concat!($label, " compose"), || {
-            bits(a.compose(&square).unwrap().dense_data().unwrap())
+            bits(a.compose($engine, &square).unwrap().dense_data().unwrap())
         });
         assert_warm_hits(concat!($label, " contract"), || {
             bits(
                 a.contract(
+                    $engine,
                     &matrix,
                     &ContractSpec {
                         lhs: &[0],
@@ -98,22 +107,26 @@ macro_rules! warm_ops {
 
 #[test]
 fn warm_eager_calls_hit_complete_structure_cache() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     symtn::cache::clear();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     warm_ops!(
+        engine,
         &runtime,
         "U1",
         U1FusionRule,
         (-1..=1).map(U1Irrep::new).collect()
     );
     warm_ops!(
+        engine,
         &runtime,
         "SU2",
         SU2FusionRule,
         (0..3).map(SU2Irrep::from_twice_spin).collect()
     );
     warm_ops!(
+        engine,
         &runtime,
         "fZ2xU1",
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(

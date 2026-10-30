@@ -110,6 +110,7 @@ where
     /// The patterns are [`Self::diagonal_contract_pattern`]'s.
     pub(super) fn try_contract_diagonal(
         &self,
+        engine: &mut dyn Engine,
         other: &Self,
         lhs_axes: &[usize],
         rhs_axes: &[usize],
@@ -135,7 +136,7 @@ where
                 };
                 match layout {
                     None => Ok(Some(product)),
-                    Some(operation) => product.tree_transform(operation).map(Some),
+                    Some(operation) => product.tree_transform(engine, operation).map(Some),
                 }
             }
             DiagonalContractPattern::Scaled {
@@ -147,7 +148,7 @@ where
                 let completed = scaled.scaled_axis(Some(axis), spectrum)?;
                 let completed = match layout {
                     None => completed,
-                    Some(operation) => completed.tree_transform(operation)?,
+                    Some(operation) => completed.tree_transform(engine, operation)?,
                 };
                 if !rebind {
                     return Ok(Some(completed));
@@ -196,6 +197,7 @@ where
     ///   excludes the fermionic twist).
     pub(super) fn try_contract_diagonal_into(
         &self,
+        engine: &mut dyn Engine,
         other: &Self,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
@@ -244,7 +246,6 @@ where
                         destination.logical_space().space(),
                         scaled.logical_space().space(),
                     )?;
-                    let _host_pool = self.runtime.enter_host_pool();
                     let source = scaled.logical_dense_data()?;
                     symtn_matrixalgebra::seam::axpby_axis_by_spectrum_into(
                         scaled.logical_space().space(),
@@ -264,6 +265,7 @@ where
         };
         let probe_operation = operation.clone();
         tensor.tree_transform_into(
+            engine,
             destination,
             alpha,
             beta,
@@ -424,7 +426,6 @@ where
         axis: Option<usize>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
     ) -> Result<Self, Error> {
-        let _host_pool = self.runtime.enter_host_pool();
         let mut data = self.logical_dense_data()?.into_owned();
         symtn_matrixalgebra::seam::scale_axis_by_spectrum_mapped(
             self.logical_space().space(),
@@ -550,6 +551,7 @@ where
 /// that structure's dense replay of the densified spectrum, as on the dense
 /// route.
 pub(super) fn transform_rank_one_diagonal<R, D>(
+    engine: &mut dyn Engine,
     tensor: &TensorMap<R, D>,
     operation: &TreeTransformOperation,
 ) -> Result<Option<TensorMap<R, D>>, FacadeError<R>>
@@ -573,7 +575,7 @@ where
         destination,
         output,
     } = <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_bond_spectrum(
-        tensor, spectrum, operation, braid,
+        engine, tensor, spectrum, operation, braid,
     )?;
     let data = match (output, braid) {
         (BondOutput::Spectrum(spectrum), false) => {

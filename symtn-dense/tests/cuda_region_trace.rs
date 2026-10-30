@@ -303,7 +303,9 @@ fn traces_match_the_unmerged_oracle<D: TraceScalar>(ctx: &mut CudaDenseContext) 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_trace_matches_the_unmerged_host_oracle_at_every_dtype() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     traces_match_the_unmerged_oracle::<f64>(&mut ctx);
     traces_match_the_unmerged_oracle::<Complex64>(&mut ctx);
     traces_match_the_unmerged_oracle::<f32>(&mut ctx);
@@ -315,7 +317,9 @@ fn device_trace_matches_the_unmerged_host_oracle_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_zero_scale_adds_nothing_even_over_a_nan_diagonal() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let geometry = Geometry::new(&[2], &[3], &[0, 1, 2], &[0]);
     let mut src: Vec<f64> = (0..geometry.src_len()).map(f64::sample).collect();
     let dst: Vec<f64> = (0..geometry.dst_len())
@@ -350,7 +354,9 @@ fn a_zero_scale_adds_nothing_even_over_a_nan_diagonal() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_scale_applies_per_element_before_the_sum() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let src_region = CudaRegion::new(vec![2], vec![3], 0).unwrap();
     let dst_region = CudaRegion::new(vec![], vec![], 0).unwrap();
     let src = CudaDenseStorage::upload(&ctx, &[1e308, 0.0, 0.0, 1e308]).unwrap();
@@ -392,7 +398,9 @@ fn the_scale_applies_per_element_before_the_sum() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_reserved_template_makes_every_trace_upload_free_and_rejections_do_nothing() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let geometry = Geometry::new(&[2, 3], &[4, 2], &[2, 0, 3, 1, 5, 4], &[1, 0]);
     let src: Vec<f64> = (0..geometry.src_len()).map(f64::sample).collect();
     let src_dev = CudaDenseStorage::upload(&ctx, &src).unwrap();

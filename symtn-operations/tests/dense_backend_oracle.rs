@@ -42,6 +42,7 @@ where
         + DenseRecouplingScalar
         + ConjugateValue,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let structure = fixture.compile();
     let dst_structure = fixture.dst_structure();
     let src_structure = fixture.src_structure();
@@ -55,6 +56,7 @@ where
     if overwrite {
         dense_backend
             .tree_transform_structure_overwrite_into_raw(
+                engine,
                 &mut TreeTransformWorkspace::default(),
                 &structure,
                 &dst_structure,
@@ -66,6 +68,7 @@ where
             )
             .unwrap();
         tree_transform_structure_overwrite_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut StridedHostKernelAdapter::default(),
             &mut TreeTransformWorkspace::default(),
             &structure,
@@ -79,6 +82,7 @@ where
     } else {
         dense_backend
             .tree_transform_structure_into_raw(
+                engine,
                 &mut TreeTransformWorkspace::default(),
                 &structure,
                 &dst_structure,
@@ -90,6 +94,7 @@ where
             )
             .unwrap();
         tree_transform_structure_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut StridedHostKernelAdapter::default(),
             &mut TreeTransformWorkspace::default(),
             &structure,

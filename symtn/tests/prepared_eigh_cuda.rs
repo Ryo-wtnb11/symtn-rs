@@ -38,19 +38,27 @@ use prepared::{fz2u1_legs, members, su2_legs, u1_legs};
 
 use crate::fixtures;
 
-use fixtures::{codomain_axes, delta, domain_axes, plans};
+use fixtures::{codomain_axes, delta, domain_axes};
 
 /// Checks every member of one device execute against device eager (and at
 /// `B = 1` bit for bit), and against Host eager through the oracle.
-fn check_device_batch<R>(label: &str, inputs: &[TensorMap<R, f64>])
-where
+fn check_device_batch<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    label: &str,
+    inputs: &[TensorMap<R, f64>],
+) where
     R: DeviceRule,
     <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
-    let device: Vec<_> = inputs.iter().map(|t| t.to_cuda().unwrap()).collect();
-    let stack = StackedTensorMap::pack(inputs).unwrap().to_cuda().unwrap();
+    let device: Vec<_> = inputs.iter().map(|t| t.to_cuda(cuda).unwrap()).collect();
+    let stack = StackedTensorMap::pack(inputs)
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap();
     let plan = EighFullPlan::new(
+        engine,
         &stack,
         &codomain_axes(&inputs[0]),
         &domain_axes(&inputs[0]),
@@ -58,9 +66,9 @@ where
     )
     .unwrap();
     let mut workspace = plan.workspace().unwrap();
-    let output = plan.execute(&stack, &mut workspace).unwrap();
-    let d_stack = output.d.to_host().unwrap();
-    let v_stack = output.v.to_host().unwrap();
+    let output = plan.execute(cuda, &stack, &mut workspace).unwrap();
+    let d_stack = output.d.to_host(cuda).unwrap();
+    let v_stack = output.v.to_host(cuda).unwrap();
     for (member, (input, device_input)) in inputs.iter().zip(&device).enumerate() {
         let what = format!("{label} member {member}/{}", inputs.len());
         let Eigh {
@@ -68,14 +76,18 @@ where
             v: eager_v,
         } = device_input
             .eigh_full(
+                engine,
                 &codomain_axes(device_input),
                 &domain_axes(device_input),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
-        let (eager_d, eager_v) = (eager_d.to_host().unwrap(), eager_v.to_host().unwrap());
-        let d = d_stack.member(member).unwrap();
-        let v = v_stack.member(member).unwrap();
+        let (eager_d, eager_v) = (
+            eager_d.to_host(cuda).unwrap(),
+            eager_v.to_host(cuda).unwrap(),
+        );
+        let d = d_stack.member(engine, member).unwrap();
+        let v = v_stack.member(engine, member).unwrap();
         assert!(
             d.structure_signature() == eager_d.structure_signature(),
             "{what}: d space"
@@ -109,6 +121,7 @@ where
             v: host_v,
         } = input
             .eigh_full(
+                engine,
                 &codomain_axes(input),
                 &domain_axes(input),
                 HermitianTol::DEFAULT,
@@ -125,31 +138,39 @@ where
     }
 }
 
-fn equivalence<R>(label: &str, leg: GradedSpace<R>)
-where
+fn equivalence<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    label: &str,
+    leg: GradedSpace<R>,
+) where
     R: DeviceRule,
     <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for count in [1, 2, 17] {
         let inputs = hermitian_members(&runtime, &[&leg, &leg], count, 3);
         assert!(inputs[0].subblock_count() > 3, "{label}: several blocks");
-        check_device_batch(&format!("{label} B={count}"), &inputs);
+        check_device_batch(engine, cuda, &format!("{label} B={count}"), &inputs);
     }
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_members_equal_device_eager_and_the_oracle() {
-    equivalence("u1", u1_legs().0);
-    equivalence("su2", su2_legs().0);
-    equivalence("fz2u1", fz2u1_legs().0);
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    equivalence(engine, cuda, "u1", u1_legs().0);
+    equivalence(engine, cuda, "su2", su2_legs().0);
+    equivalence(engine, cuda, "fz2u1", fz2u1_legs().0);
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = u1_legs().0;
     let j = SU2Irrep::from_twice_spin;
     let su2 =
@@ -159,6 +180,7 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
         assert!(has_plus_minus_tie(
             &pm[0]
                 .eigh_full(
+                    engine,
                     &codomain_axes(&pm[0]),
                     &domain_axes(&pm[0]),
                     HermitianTol::DEFAULT
@@ -166,11 +188,12 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
                 .unwrap()
                 .d
         ));
-        check_device_batch(&format!("u1 ±λ B={count}"), &pm);
+        check_device_batch(engine, cuda, &format!("u1 ±λ B={count}"), &pm);
         let degenerate = single_leg(&runtime, &su2, count, degenerate_entry);
         assert!(has_degenerate_group(
             &degenerate[0]
                 .eigh_full(
+                    engine,
                     &codomain_axes(&degenerate[0]),
                     &domain_axes(&degenerate[0]),
                     HermitianTol::DEFAULT
@@ -178,23 +201,28 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
                 .unwrap()
                 .d
         ));
-        check_device_batch(&format!("su2 degenerate B={count}"), &degenerate);
+        check_device_batch(
+            engine,
+            cuda,
+            &format!("su2 degenerate B={count}"),
+            &degenerate,
+        );
     }
 }
 
 /// Per call, independent of `B`: one solver call per coupled sector, one
 /// gather plus one copy per coupled sector (every route of this fixture is
 /// layout-aligned) and one diagonal copy into `d` per coupled sector, no
-/// GEMM, the same downloads and upload count, and warm calls miss and evict
-/// no plan. No step submits a contraction, so the ledger reservation (which
-/// counts the selector and admission plans) is zero and even the cold call
-/// misses no contraction plan. A warm call uploads no dense `d`: its bytes
+/// GEMM, and the same downloads and upload count. A warm call uploads no
+/// dense `d`: its bytes
 /// are at most the `B · Σ n` eigenvalues, the index tables and the
 /// normalizers.
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn submissions_transfers_and_the_ledger_do_not_depend_on_b() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+fn submissions_and_transfers_do_not_depend_on_b() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let (leg, _) = su2_legs();
     let mut per_b = BTreeSet::new();
     for count in [1, 2, 17] {
@@ -205,9 +233,12 @@ fn submissions_transfers_and_the_ledger_do_not_depend_on_b() {
             .collect();
         let sectors = sizes.len() as u64;
         let sum_n: usize = sizes.iter().sum();
-        let stack = StackedTensorMap::pack(&inputs).unwrap().to_cuda().unwrap();
-        let reserved = plans(&runtime).reserved_entries;
+        let stack = StackedTensorMap::pack(&inputs)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
         let plan = EighFullPlan::new(
+            engine,
             &stack,
             &codomain_axes(&inputs[0]),
             &domain_axes(&inputs[0]),
@@ -215,41 +246,20 @@ fn submissions_transfers_and_the_ledger_do_not_depend_on_b() {
         )
         .unwrap();
         let mut workspace = plan.workspace().unwrap();
-        assert_eq!(
-            plans(&runtime).reserved_entries,
-            reserved,
-            "no ledger reservation"
-        );
 
-        let cold_plans = plans(&runtime);
         let before = cuda_transfer_stats();
-        plan.execute(&stack, &mut workspace).unwrap();
+        plan.execute(cuda, &stack, &mut workspace).unwrap();
         let cold = delta(cuda_transfer_stats(), before);
         let retained = workspace.retained_bytes();
         assert!(retained > 0, "B={count}: workspace owns capacity");
-        assert_eq!(
-            plans(&runtime).misses,
-            cold_plans.misses,
-            "B={count}: no contraction plan"
-        );
 
-        let warm_plans = plans(&runtime);
         let before = cuda_transfer_stats();
-        plan.execute(&stack, &mut workspace).unwrap();
+        plan.execute(cuda, &stack, &mut workspace).unwrap();
         let warm = delta(cuda_transfer_stats(), before);
         assert_eq!(
             workspace.retained_bytes(),
             retained,
             "B={count}: warm capacity"
-        );
-        let after = plans(&runtime);
-        assert_eq!(
-            after.misses, warm_plans.misses,
-            "B={count}: warm plan misses"
-        );
-        assert_eq!(
-            after.evictions, warm_plans.evictions,
-            "B={count}: warm evictions"
         );
         assert_eq!(warm.solver_calls, sectors, "B={count}: solver calls");
         assert_eq!(warm.gemm_calls, 0, "B={count}: no GEMM");
@@ -302,15 +312,21 @@ fn rejected(result: Result<(), BatchError>) -> Vec<(usize, MemberFault)> {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn non_hermitian_members_are_named_before_any_solver_launch() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let (leg, _) = u1_legs();
     for count in [3, 17] {
         let mut inputs = hermitian_members(&runtime, &[&leg, &leg], count, 1);
         let x = members::<_, f64>(&runtime, &[&leg, &leg], &[&leg, &leg], 1, 4).remove(0);
         inputs[1] = x.clone();
         inputs[count - 1] = x;
-        let stack = StackedTensorMap::pack(&inputs).unwrap().to_cuda().unwrap();
+        let stack = StackedTensorMap::pack(&inputs)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
         let plan = EighFullPlan::new(
+            engine,
             &stack,
             &codomain_axes(&inputs[0]),
             &domain_axes(&inputs[0]),
@@ -319,7 +335,7 @@ fn non_hermitian_members_are_named_before_any_solver_launch() {
         .unwrap();
         let mut ws = plan.workspace().unwrap();
         let before = cuda_transfer_stats();
-        let got = rejected(plan.execute(&stack, &mut ws).map(|_| ()));
+        let got = rejected(plan.execute(cuda, &stack, &mut ws).map(|_| ()));
         let counts = delta(cuda_transfer_stats(), before);
         let fault = MemberFault::NotHermitian;
         assert_eq!(got, vec![(1, fault), (count - 1, fault)]);
@@ -335,19 +351,21 @@ fn non_hermitian_members_are_named_before_any_solver_launch() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let (leg, _) = u1_legs();
     let h = hermitian_members(&runtime, &[&leg, &leg], 1, 5).remove(0);
     let x = members::<_, f64>(&runtime, &[&leg, &leg], &[&leg, &leg], 1, 9).remove(0);
-    let skewed = h.axpby(1.0, &x, 2f64.powi(-30)).unwrap();
-    let admitted = h.axpby(1.0, &x, 2f64.powi(-60)).unwrap();
+    let skewed = h.axpby(engine, 1.0, &x, 2f64.powi(-30)).unwrap();
+    let admitted = h.axpby(engine, 1.0, &x, 2f64.powi(-60)).unwrap();
     let mut inputs = Vec::new();
     for exponent in [0, -1000, 1000, -1060] {
         let s = 2f64.powi(exponent);
         inputs.extend([
-            h.scale(s).unwrap(),
-            skewed.scale(s).unwrap(),
-            admitted.scale(s).unwrap(),
+            h.scale(engine, s).unwrap(),
+            skewed.scale(engine, s).unwrap(),
+            admitted.scale(engine, s).unwrap(),
         ]);
     }
     let expected: Vec<_> = inputs
@@ -355,9 +373,10 @@ fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
         .enumerate()
         .filter(|(_, input)| {
             input
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap()
                 .eigh_full(
+                    cuda,
                     &codomain_axes(input),
                     &domain_axes(input),
                     HermitianTol::DEFAULT,
@@ -370,8 +389,12 @@ fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
         expected.len() >= 3 && expected.len() < inputs.len(),
         "{expected:?}"
     );
-    let stack = StackedTensorMap::pack(&inputs).unwrap().to_cuda().unwrap();
+    let stack = StackedTensorMap::pack(&inputs)
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap();
     let plan = EighFullPlan::new(
+        engine,
         &stack,
         &codomain_axes(&inputs[0]),
         &domain_axes(&inputs[0]),
@@ -380,7 +403,7 @@ fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
     .unwrap();
     let mut ws = plan.workspace().unwrap();
     assert_eq!(
-        rejected(plan.execute(&stack, &mut ws).map(|_| ())),
+        rejected(plan.execute(cuda, &stack, &mut ws).map(|_| ())),
         expected
     );
 }
@@ -388,12 +411,18 @@ fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn non_finite_entries_and_eigenvalues_reject_their_members() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let (leg, _) = u1_legs();
     let mut inputs = single_leg(&runtime, &leg, 5, |_, _, _| 1.0);
-    inputs[1] = inputs[1].scale(f64::NAN).unwrap();
-    let stack = StackedTensorMap::pack(&inputs).unwrap().to_cuda().unwrap();
+    inputs[1] = inputs[1].scale(engine, f64::NAN).unwrap();
+    let stack = StackedTensorMap::pack(&inputs)
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap();
     let plan = EighFullPlan::new(
+        engine,
         &stack,
         &codomain_axes(&inputs[0]),
         &domain_axes(&inputs[0]),
@@ -402,22 +431,23 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
     .unwrap();
     let mut ws = plan.workspace().unwrap();
     assert_eq!(
-        rejected(plan.execute(&stack, &mut ws).map(|_| ())),
+        rejected(plan.execute(cuda, &stack, &mut ws).map(|_| ())),
         vec![(1, MemberFault::NotHermitian)]
     );
 
     // Finite, admitted, but `2M` overflows in the solver.
     let huge = f64::MAX / 1.5;
     let mut inputs = single_leg(&runtime, &leg, 5, |_, _, _| 1.0);
-    inputs[0] = inputs[0].scale(huge).unwrap();
-    inputs[3] = inputs[3].scale(huge).unwrap();
+    inputs[0] = inputs[0].scale(engine, huge).unwrap();
+    inputs[3] = inputs[3].scale(engine, huge).unwrap();
     let eager: Vec<bool> = inputs
         .iter()
         .map(|input| {
             input
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap()
                 .eigh_full(
+                    cuda,
                     &codomain_axes(input),
                     &domain_axes(input),
                     HermitianTol::DEFAULT,
@@ -430,8 +460,12 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
         [true, false, false, true, false],
         "eager rejects the overflow"
     );
-    let stack = StackedTensorMap::pack(&inputs).unwrap().to_cuda().unwrap();
+    let stack = StackedTensorMap::pack(&inputs)
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap();
     let plan = EighFullPlan::new(
+        engine,
         &stack,
         &codomain_axes(&inputs[0]),
         &domain_axes(&inputs[0]),
@@ -441,7 +475,7 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
     let mut ws = plan.workspace().unwrap();
     let fault = MemberFault::NonFiniteEigenvalue;
     assert_eq!(
-        rejected(plan.execute(&stack, &mut ws).map(|_| ())),
+        rejected(plan.execute(cuda, &stack, &mut ws).map(|_| ())),
         vec![(0, fault), (3, fault)]
     );
 }
@@ -449,12 +483,17 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn complex_device_payloads_are_unsupported() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let (leg, _) = u1_legs();
     let complex = members::<_, Complex64>(&runtime, &[&leg], &[&leg], 2, 1);
-    let stack = StackedTensorMap::pack(&complex).unwrap().to_cuda().unwrap();
+    let stack = StackedTensorMap::pack(&complex)
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap();
     assert!(matches!(
-        EighFullPlan::new(&stack, &codomain_axes(&complex[0]), &domain_axes(&complex[0]), HermitianTol::DEFAULT),
+        EighFullPlan::new(engine, &stack, &codomain_axes(&complex[0]), &domain_axes(&complex[0]), HermitianTol::DEFAULT),
         Err(Error::Operation(error)) if matches!(
             *error,
             symtn::typed::OperationError::UnsupportedTensorContractScope { message }
@@ -466,15 +505,17 @@ fn complex_device_payloads_are_unsupported() {
 /// Every member's `d` is exactly zero off its diagonal and carries the
 /// member's spectra on it.
 fn assert_diagonal_only<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     what: &str,
     output: &symtn::typed::EighStackOutput<'_, R, f64, symtn::typed::CudaStorage<f64>>,
 ) where
     R: DeviceRule,
     <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
-    let d = output.d.to_host().unwrap();
+    let d = output.d.to_host(cuda).unwrap();
     for member in 0..d.len() {
-        let matrices = sector_matrices(&d.member(member).unwrap());
+        let matrices = sector_matrices(&d.member(engine, member).unwrap());
         for entry in &output.spectra[member] {
             let m = &matrices[&format!("{:?}", entry.sector)];
             for j in 0..m.cols {
@@ -498,82 +539,99 @@ fn assert_diagonal_only<R>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_failed_batch_leaves_no_observable_output_and_the_next_call_is_whole() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let (leg, _) = u1_legs();
     let good = single_leg(&runtime, &leg, 4, |member, i, j| {
         1.0 + (i + j + member) as f64 / 4.0 + f64::from(u8::from(i == j))
     });
     let mut overflowing = good.clone();
-    overflowing[2] = overflowing[2].scale(f64::MAX / 1.5).unwrap();
+    overflowing[2] = overflowing[2].scale(engine, f64::MAX / 1.5).unwrap();
     let mut skewed = good.clone();
     skewed[1] = members::<_, f64>(&runtime, &[&leg], &[&leg], 1, 3).remove(0);
-    let stack =
-        |inputs: &[TensorMap<_, f64>]| StackedTensorMap::pack(inputs).unwrap().to_cuda().unwrap();
+    let stack = |cuda: &mut dyn symtn::typed::Engine, inputs: &[TensorMap<_, f64>]| {
+        StackedTensorMap::pack(inputs)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap()
+    };
     let plan = EighFullPlan::new(
-        &stack(&good),
+        engine,
+        &stack(cuda, &good),
         &codomain_axes(&good[0]),
         &domain_axes(&good[0]),
         HermitianTol::DEFAULT,
     )
     .unwrap();
     let mut ws = plan.workspace().unwrap();
-    let check = |what: &str,
+    let check = |engine: &mut dyn symtn::typed::Engine,
+                 cuda: &mut dyn symtn::typed::Engine,
+                 what: &str,
                  ws: &mut EighFullWorkspace<_, f64, symtn::typed::CudaStorage<f64>>,
                  inputs: &[TensorMap<_, f64>]| {
-        let output = plan.execute(&stack(inputs), ws).unwrap();
-        assert_diagonal_only(what, &output);
-        let d = output.d.to_host().unwrap();
-        let v = output.v.to_host().unwrap();
+        let stacked = stack(cuda, inputs);
+        let output = plan.execute(cuda, &stacked, ws).unwrap();
+        assert_diagonal_only(engine, cuda, what, &output);
+        let d = output.d.to_host(cuda).unwrap();
+        let v = output.v.to_host(cuda).unwrap();
         for (member, input) in inputs.iter().enumerate() {
             let Eigh {
                 d: host_d,
                 v: host_v,
             } = input
                 .eigh_full(
+                    engine,
                     &codomain_axes(input),
                     &domain_axes(input),
                     HermitianTol::DEFAULT,
                 )
                 .unwrap();
-            let (d, v) = (d.member(member).unwrap(), v.member(member).unwrap());
+            let (d, v) = (
+                d.member(engine, member).unwrap(),
+                v.member(engine, member).unwrap(),
+            );
             check_member(what, input, &d, &v, (&host_d, &host_v), f64::EPSILON);
             if inputs.len() == 1 {
                 let Eigh { v: eager_v, .. } = input
-                    .to_cuda()
+                    .to_cuda(cuda)
                     .unwrap()
                     .eigh_full(
+                        cuda,
                         &codomain_axes(input),
                         &domain_axes(input),
                         HermitianTol::DEFAULT,
                     )
                     .unwrap();
                 assert!(
-                    v.dense_data().unwrap() == eager_v.to_host().unwrap().dense_data().unwrap(),
+                    v.dense_data().unwrap() == eager_v.to_host(cuda).unwrap().dense_data().unwrap(),
                     "{what}: B = 1 bits"
                 );
             }
         }
     };
-    check("first", &mut ws, &good);
+    check(engine, cuda, "first", &mut ws, &good);
+    let overflowing_stack = stack(cuda, &overflowing);
     assert!(matches!(
-        plan.execute(&stack(&overflowing), &mut ws).map(|_| ()),
+        plan.execute(cuda, &overflowing_stack, &mut ws).map(|_| ()),
         Err(BatchError::MemberRejected { .. })
     ));
     assert!(
         ws.take_output().is_none(),
         "no output after a non-finite rejection"
     );
-    check("after non-finite", &mut ws, &good);
+    check(engine, cuda, "after non-finite", &mut ws, &good);
+    let skewed_stack = stack(cuda, &skewed);
     assert!(matches!(
-        plan.execute(&stack(&skewed), &mut ws).map(|_| ()),
+        plan.execute(cuda, &skewed_stack, &mut ws).map(|_| ()),
         Err(BatchError::MemberRejected { .. })
     ));
     assert!(
         ws.take_output().is_none(),
         "no output after a non-Hermitian rejection"
     );
-    check("after non-Hermitian", &mut ws, &good);
+    check(engine, cuda, "after non-Hermitian", &mut ws, &good);
     assert!(ws.take_output().is_some());
-    check("after take_output", &mut ws, &good);
-    check("B change", &mut ws, &good[..1]);
+    check(engine, cuda, "after take_output", &mut ws, &good);
+    check(engine, cuda, "B change", &mut ws, &good[..1]);
 }

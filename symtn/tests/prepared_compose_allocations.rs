@@ -34,6 +34,7 @@ fn allocations(f: impl FnOnce()) -> (usize, usize, std::time::Duration) {
 
 #[test]
 fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
@@ -45,7 +46,7 @@ fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
     // both stay within the one per-submission allocation of Tenferro's
     // grouped validator. The cold call's count is the control that shows the
     // counter sees this thread's allocations.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let count = 5;
     let lhs =
@@ -59,23 +60,25 @@ fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
         f64::NAN,
     ))
     .unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut ws = plan.workspace().unwrap();
 
     let cold = allocations(|| {
-        plan.execute(&lhs, &rhs, &mut ws).unwrap();
+        plan.execute(engine, &lhs, &rhs, &mut ws).unwrap();
     });
     assert!(
         cold.0 > 0,
         "the cold call allocates its output and job list"
     );
-    plan.execute_into(&lhs, &rhs, &mut dst, &mut ws).unwrap();
+    plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
+        .unwrap();
 
     let warm = allocations(|| {
-        plan.execute(&lhs, &rhs, &mut ws).unwrap();
+        plan.execute(engine, &lhs, &rhs, &mut ws).unwrap();
     });
     let warm_into = allocations(|| {
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut ws).unwrap();
+        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
+            .unwrap();
     });
     assert!(warm.0 <= 1, "warm execute allocations: {warm:?}");
     assert_eq!(
@@ -85,7 +88,7 @@ fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
     );
     assert!(cold.0 > warm.0 + 2, "cold {cold:?} against warm {warm:?}");
 
-    let plan_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let plan_runtime = Runtime::builder().build().unwrap();
     let plan_lhs = StackedTensorMap::pack(&members::<_, f64>(
         &plan_runtime,
         &[&v, &v],
@@ -96,13 +99,15 @@ fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
     .unwrap();
     let plan_rhs =
         StackedTensorMap::pack(&members::<_, f64>(&plan_runtime, &[&w], &[&v], count, 2)).unwrap();
-    let plan = ComposePlan::new(&plan_lhs, &plan_rhs).unwrap();
+    let plan = ComposePlan::new(engine, &plan_lhs, &plan_rhs).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let plan_cold = allocations(|| {
-        plan.execute(&plan_lhs, &plan_rhs, &mut workspace).unwrap();
+        plan.execute(engine, &plan_lhs, &plan_rhs, &mut workspace)
+            .unwrap();
     });
     let plan_warm = allocations(|| {
-        plan.execute(&plan_lhs, &plan_rhs, &mut workspace).unwrap();
+        plan.execute(engine, &plan_lhs, &plan_rhs, &mut workspace)
+            .unwrap();
     });
     assert_eq!((plan_warm.0, plan_warm.1), (warm.0, warm.1));
     eprintln!(

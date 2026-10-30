@@ -30,6 +30,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::__network::{network_reuse_class, NetworkReuseClass};
@@ -123,11 +124,11 @@ macro_rules! entries {
 /// The lazy adjoint of `$source` through every tree transform: each result
 /// stays a lazy adjoint, leaves its input lazy, and equals oracle (i).
 macro_rules! transform_rows {
-    ($source:expr, $key:expr) => {{
+    ($engine:ident, $source:expr, $key:expr) => {{
         let key = $key;
         let entries = |t: &TensorMap<_, _>| entries!(t, key);
-        let lazy = $source.adjoint().unwrap();
-        let eager = lazy.materialize().unwrap();
+        let lazy = $source.adjoint($engine).unwrap();
+        let eager = lazy.materialize($engine).unwrap();
         let mut rows: Rows = Vec::new();
         macro_rules! row {
             ($name:expr, |$t:ident| $op:expr) => {{
@@ -155,15 +156,15 @@ macro_rules! transform_rows {
                     "{}",
                     $name
                 );
-                let actual = entries(&actual.materialize().unwrap());
+                let actual = entries(&actual.materialize($engine).unwrap());
                 assert_close($name, &actual, &entries(&expected));
                 rows.push(($name, actual));
             }};
         }
-        row!("permute", |t| t.permute(&[2, 0], &[1]));
-        row!("braid", |t| t.braid(&[2, 0], &[1], &[17, 3, 11]));
-        row!("transpose", |t| t.transpose(&[2, 1], &[0]));
-        row!("repartition", |t| t.repartition(2));
+        row!("permute", |t| t.permute($engine, &[2, 0], &[1]));
+        row!("braid", |t| t.braid($engine, &[2, 0], &[1], &[17, 3, 11]));
+        row!("transpose", |t| t.transpose($engine, &[2, 1], &[0]));
+        row!("repartition", |t| t.repartition($engine, 2));
         rows
     }};
 }
@@ -173,11 +174,11 @@ macro_rules! transform_rows {
 /// core, a non-core contracted order and a permuted output: each equals
 /// oracle (i) and leaves its lazy inputs lazy.
 macro_rules! contract_rows {
-    ($source:expr, $key:expr) => {{
+    ($engine:ident, $source:expr, $key:expr) => {{
         let key = $key;
         let t = &$source;
-        let lazy = t.adjoint().unwrap();
-        let eager = lazy.materialize().unwrap();
+        let lazy = t.adjoint($engine).unwrap();
+        let eager = lazy.materialize($engine).unwrap();
         let mut rows: Rows = Vec::new();
         macro_rules! row {
             ($name:expr, |$a:ident| $op:expr) => {{
@@ -210,43 +211,79 @@ macro_rules! contract_rows {
             codomain,
             domain,
         };
-        row!("a·t core (t'·t)", |a| a
-            .contract(t, &spec(&[1, 2], &[0, 1], &[0], &[1])));
-        row!("t·a core", |a| t
-            .contract(a, &spec(&[2], &[0], &[0, 1], &[2, 3])));
-        row!("a·a", |a| a
-            .contract(a, &spec(&[1], &[0], &[0, 1], &[2, 3])));
+        row!("a·t core (t'·t)", |a| a.contract(
+            $engine,
+            t,
+            &spec(&[1, 2], &[0, 1], &[0], &[1])
+        ));
+        row!("t·a core", |a| t.contract(
+            $engine,
+            a,
+            &spec(&[2], &[0], &[0, 1], &[2, 3])
+        ));
+        row!("a·a", |a| a.contract(
+            $engine,
+            a,
+            &spec(&[1], &[0], &[0, 1], &[2, 3])
+        ));
         // Both operands conjugate and bend: each `a` contracts its codomain
         // leg against the other's domain leg.
-        row!("a·a mixed legs", |a| a
-            .contract(a, &spec(&[0, 1], &[1, 0], &[1], &[0])));
-        row!("a·t reversed contracted order", |a| a
-            .contract(t, &spec(&[2, 1], &[1, 0], &[0], &[1])));
-        row!("a·t permuted output", |a| a
-            .contract(t, &spec(&[1, 2], &[0, 1], &[], &[1, 0])));
-        row!("t·a permuted output", |a| t
-            .contract(a, &spec(&[2], &[0], &[3, 0], &[2, 1])));
-        row!("a·t mixed legs", |a| a
-            .contract(t, &spec(&[0, 1], &[2, 0], &[0], &[1])));
-        row!("t·a mixed legs", |a| t
-            .contract(a, &spec(&[2, 0], &[0, 1], &[1], &[0])));
+        row!("a·a mixed legs", |a| a.contract(
+            $engine,
+            a,
+            &spec(&[0, 1], &[1, 0], &[1], &[0])
+        ));
+        row!("a·t reversed contracted order", |a| a.contract(
+            $engine,
+            t,
+            &spec(&[2, 1], &[1, 0], &[0], &[1])
+        ));
+        row!("a·t permuted output", |a| a.contract(
+            $engine,
+            t,
+            &spec(&[1, 2], &[0, 1], &[], &[1, 0])
+        ));
+        row!("t·a permuted output", |a| t.contract(
+            $engine,
+            a,
+            &spec(&[2], &[0], &[3, 0], &[2, 1])
+        ));
+        row!("a·t mixed legs", |a| a.contract(
+            $engine,
+            t,
+            &spec(&[0, 1], &[2, 0], &[0], &[1])
+        ));
+        row!("t·a mixed legs", |a| t.contract(
+            $engine,
+            a,
+            &spec(&[2, 0], &[0, 1], &[1], &[0])
+        ));
         // #2147: `a` is a core operand as is (identity transform) while `t`
         // is permuted, so the DynamicTree core reads `a`'s parent with a
         // GEMM adjoint op instead of copying it.
-        let u = t.permute(&[0], &[1, 2]).unwrap();
-        let w = t.permute(&[2, 0], &[1]).unwrap();
-        row!("a·u identity adjoint, transformed u", |a| a
-            .contract(&u, &spec(&[1, 2], &[0, 1], &[0], &[1])));
-        row!("w·a identity adjoint, transformed w", |a| w
-            .contract(a, &spec(&[0], &[0], &[0, 1], &[2, 3])));
+        let u = t.permute($engine, &[0], &[1, 2]).unwrap();
+        let w = t.permute($engine, &[2, 0], &[1]).unwrap();
+        row!("a·u identity adjoint, transformed u", |a| a.contract(
+            $engine,
+            &u,
+            &spec(&[1, 2], &[0, 1], &[0], &[1])
+        ));
+        row!("w·a identity adjoint, transformed w", |a| w.contract(
+            $engine,
+            a,
+            &spec(&[0], &[0], &[0, 1], &[2, 3])
+        ));
         // #2159: m1 (keep `a`'s contracted order: `a` free, `t` permuted)
         // and m2 (keep `t`'s: `a` permuted) both cost |t| under TensorKit
         // `contract_memcost`, and the tie goes to m1; charging the identity
         // adjoint as a copy took m2 instead.
-        row!("a·t identity adjoint, reversed t order", |a| a
-            .contract(t, &spec(&[1, 2], &[1, 0], &[0], &[1])));
-        row!("a∘t", |a| a.compose(t));
-        row!("t∘a", |a| t.compose(a));
+        row!("a·t identity adjoint, reversed t order", |a| a.contract(
+            $engine,
+            t,
+            &spec(&[1, 2], &[1, 0], &[0], &[1])
+        ));
+        row!("a∘t", |a| a.compose($engine, t));
+        row!("t∘a", |a| t.compose($engine, a));
         rows
     }};
 }
@@ -260,7 +297,9 @@ fn sun_spin(sector: &Vec<i64>) -> usize {
     sector[0] as usize
 }
 
-fn su2_sources() -> (
+fn su2_sources(
+    engine: &mut dyn Engine,
+) -> (
     TensorMap<SU2FusionRule, f64>,
     TensorMap<LieGroupFusionRule, f64>,
 ) {
@@ -276,11 +315,12 @@ fn su2_sources() -> (
     )
     .unwrap();
     (
-        TensorMap::from_subblock_fn(&runtime, [&mf, &mf], [&mf], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&mf, &mf], [&mf], |trees, index| {
             value(&twice(trees, su2_spin), index)
         })
         .unwrap(),
         TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             [&checked, &checked],
             [&checked],
@@ -302,28 +342,46 @@ fn assert_modes_agree(mf: Rows, checked: Rows) {
 
 #[test]
 fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_f64() {
-    let (mf, checked) = su2_sources();
-    let mf = transform_rows!(mf, |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin));
-    let checked = transform_rows!(checked, |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin));
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let (mf, checked) = su2_sources(engine);
+    let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
+        t, su2_spin
+    ));
+    let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+        t, sun_spin
+    ));
     assert_modes_agree(mf, checked);
 }
 
 #[test]
 fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_c64() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // `1 + 2i` makes the conjugation visible.
     let phase = Complex64::new(1.0, 2.0);
-    let (mf, checked) = su2_sources();
+    let (mf, checked) = su2_sources(engine);
     let (mf, checked) = (
-        mf.convert::<Complex64>().scale(phase).unwrap(),
-        checked.convert::<Complex64>().scale(phase).unwrap(),
+        mf.convert::<Complex64>(engine)
+            .unwrap()
+            .scale(engine, phase)
+            .unwrap(),
+        checked
+            .convert::<Complex64>(engine)
+            .unwrap()
+            .scale(engine, phase)
+            .unwrap(),
     );
-    let mf = transform_rows!(mf, |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin));
-    let checked = transform_rows!(checked, |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin));
+    let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
+        t, su2_spin
+    ));
+    let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+        t, sun_spin
+    ));
     assert_modes_agree(mf, checked);
 }
 
 #[test]
 fn su3_adjoint_transforms_with_outer_multiplicity_stay_lazy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
@@ -331,44 +389,63 @@ fn su3_adjoint_transforms_with_outer_multiplicity_stay_lazy() {
     )
     .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &v], [&v], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v], |trees, index| {
             value(&format!("{trees:?}"), index)
         })
         .unwrap();
     let key = |t: &BlockFusionTrees<Vec<i64>>| format!("{t:?}");
-    let f64_rows = transform_rows!(source, key);
+    let f64_rows = transform_rows!(engine, source, key);
     let c64 = source
-        .convert::<Complex64>()
-        .scale(Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(1.0, 2.0))
         .unwrap();
-    let c64_rows = transform_rows!(c64, key);
+    let c64_rows = transform_rows!(engine, c64, key);
     assert_eq!(f64_rows.len(), c64_rows.len());
     assert!(f64_rows.iter().all(|(_, entries)| !entries.is_empty()));
 }
 
 #[test]
 fn su2_adjoint_operands_contract_and_agree_across_modes_f64() {
-    let (mf, checked) = su2_sources();
-    let mf = contract_rows!(mf, |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin));
-    let checked = contract_rows!(checked, |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin));
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let (mf, checked) = su2_sources(engine);
+    let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
+        t, su2_spin
+    ));
+    let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+        t, sun_spin
+    ));
     assert_modes_agree(mf, checked);
 }
 
 #[test]
 fn su2_adjoint_operands_contract_and_agree_across_modes_c64() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let phase = Complex64::new(1.0, 2.0);
-    let (mf, checked) = su2_sources();
+    let (mf, checked) = su2_sources(engine);
     let (mf, checked) = (
-        mf.convert::<Complex64>().scale(phase).unwrap(),
-        checked.convert::<Complex64>().scale(phase).unwrap(),
+        mf.convert::<Complex64>(engine)
+            .unwrap()
+            .scale(engine, phase)
+            .unwrap(),
+        checked
+            .convert::<Complex64>(engine)
+            .unwrap()
+            .scale(engine, phase)
+            .unwrap(),
     );
-    let mf = contract_rows!(mf, |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin));
-    let checked = contract_rows!(checked, |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin));
+    let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
+        t, su2_spin
+    ));
+    let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+        t, sun_spin
+    ));
     assert_modes_agree(mf, checked);
 }
 
 #[test]
 fn su3_adjoint_operands_with_outer_multiplicity_contract() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
@@ -376,22 +453,24 @@ fn su3_adjoint_operands_with_outer_multiplicity_contract() {
     )
     .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &v], [&v], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v], |trees, index| {
             value(&format!("{trees:?}"), index)
         })
         .unwrap();
     let key = |t: &BlockFusionTrees<Vec<i64>>| format!("{t:?}");
-    let f64_rows = contract_rows!(source, key);
+    let f64_rows = contract_rows!(engine, source, key);
     let c64 = source
-        .convert::<Complex64>()
-        .scale(Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(1.0, 2.0))
         .unwrap();
-    let c64_rows = contract_rows!(c64, key);
+    let c64_rows = contract_rows!(engine, c64, key);
     assert_eq!(f64_rows.len(), c64_rows.len());
 }
 
 #[test]
 fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
@@ -400,17 +479,18 @@ fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
     .unwrap();
     let dual = v.try_dual().unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &dual], [&v], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &dual], [&v], |trees, index| {
             value(&format!("{trees:?}"), index)
         })
         .unwrap();
     let key = |t: &BlockFusionTrees<Vec<i64>>| format!("{t:?}");
-    let f64_rows = transform_rows!(source, key);
+    let f64_rows = transform_rows!(engine, source, key);
     let c64 = source
-        .convert::<Complex64>()
-        .scale(Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(1.0, 2.0))
         .unwrap();
-    let c64_rows = transform_rows!(c64, key);
+    let c64_rows = transform_rows!(engine, c64, key);
     assert_eq!(f64_rows.len(), c64_rows.len());
     assert!(f64_rows.iter().all(|(_, entries)| !entries.is_empty()));
 }

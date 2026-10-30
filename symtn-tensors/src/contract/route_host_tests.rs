@@ -65,8 +65,10 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     Context::<f64>::default()
         .compile_storage_contract_resolution(
+            engine,
             &case.dst(),
             FusionOperand::direct(case.lhs.space()),
             FusionOperand::direct(case.rhs.space()),
@@ -85,7 +87,9 @@ pub(super) fn run_members(
     rhs: &[f64],
     members: usize,
 ) -> Result<(), crate::OperationError> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     crate::contract::route_host::execute_dynamic_tree_execution_artifact_members_host(
+        engine,
         &mut DenseTreeTransformOperations::default(),
         &mut DenseTreeTransformOperations::default(),
         &mut crate::contract::backend::TensorContractWorkspace::default(),
@@ -107,7 +111,7 @@ fn close(found: f64, want: f64) -> bool {
 /// Member replays of the planner's artifact at B = 1, 2, 1 on one workspace
 /// into NaN-poisoned destinations; `check(member output, lhs, rhs, what)`
 /// compares each member with the contraction of its own operands.
-fn check_members<R>(name: &str, case: &Case<R>, check: impl Fn(&[f64], &[f64], &[f64], &str))
+fn check_members<R>(name: &str, case: &Case<R>, mut check: impl FnMut(&[f64], &[f64], &[f64], &str))
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
@@ -153,6 +157,7 @@ where
 
 #[test]
 fn dynamic_tree_member_replays_match_each_members_contraction() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: on one workspace across B = 1, 2, 1, each member of a
     // DynamicTree replay (identity output with and without an inactive
     // core block, source and output transforms, twisted fermionic sources)
@@ -187,6 +192,7 @@ fn dynamic_tree_member_replays_match_each_members_contraction() {
         let mut eager = vec![0.0; len];
         Context::<f64>::default()
             .tensorcontract_prelowered_into(
+                engine,
                 &fermionic.dst(),
                 &mut eager,
                 FusionOperand::direct(fermionic.lhs.space()),
@@ -298,6 +304,7 @@ fn a_warm_eager_contraction_converts_no_coefficient_pack() {
         R: MultiplicityFreeRigidSymbols<Scalar = f64>
             + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let resolution = planned_resolution(case);
         let crate::contract::resolution::ContractRoute::DynamicTree(artifact) = &resolution.route
         else {
@@ -312,10 +319,11 @@ fn a_warm_eager_contraction_converts_no_coefficient_pack() {
         // Values are checked by oracle elsewhere; here every warm replay must
         // give the cold replay's bits.
         let expected = std::cell::RefCell::new(None::<Vec<u64>>);
-        let run = |context: &mut Context<f64>| {
+        let mut run = |context: &mut Context<f64>| {
             let mut out = vec![f64::NAN; len];
             context
                 .tensorcontract_prelowered_into(
+                    engine,
                     &dst,
                     &mut out,
                     FusionOperand::direct(case.lhs.space()),
@@ -420,6 +428,7 @@ fn a_failed_one_member_replay_rezeroes_on_retry() {
 
 #[test]
 fn member_replays_outside_the_overwrite_contract_are_unsupported_before_writes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use crate::contract::route_host::{
         execute_dynamic_tree_route_host, EagerTreeStage, HostRouteScratch,
     };
@@ -465,6 +474,7 @@ fn member_replays_outside_the_overwrite_contract_are_unsupported_before_writes()
     ] {
         let mut out = vec![f64::NAN; 2 * len];
         let error = execute_dynamic_tree_route_host(
+            engine,
             &mut EagerTreeStage {
                 backend: &mut tree_backend,
                 workspaces: &mut tree_workspaces,

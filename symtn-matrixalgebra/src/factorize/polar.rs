@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 /// Left polar factors `W` (phase) and `P` (magnitude) of the compact diagonal
 /// `spectrum` on `space`, in fusion mode `M`; both stay compact on the input
@@ -34,6 +35,7 @@ where
 /// columns; otherwise this returns [`OperationError::InvalidArgument`] before
 /// entering the dense SVD.
 pub(crate) fn left_polar<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<LeftPolar<BoundTensorMap<R, D>>, OperationError>
@@ -42,7 +44,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let LeftPolar { w, p } = left_polar_dyn(dense, &input.dynamic())?;
+    let LeftPolar { w, p } = left_polar_dyn(engine, dense, &input.dynamic())?;
     Ok(LeftPolar {
         w: typed_from_bound_factor(w)?,
         p: typed_from_bound_factor(p)?,
@@ -52,6 +54,7 @@ where
 #[cfg(test)]
 /// Multiplicity-free dynamic-rank [`left_polar`].
 pub(crate) fn left_polar_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<LeftPolar<BoundDynFactor<R, D>>, OperationError>
@@ -62,6 +65,7 @@ where
 {
     let authority = MfAuthority(input.space());
     polar_dense(
+        engine,
         dense,
         &authority,
         input,
@@ -78,6 +82,7 @@ where
 /// otherwise this returns [`OperationError::InvalidArgument`] before entering
 /// the dense SVD.
 pub(crate) fn right_polar<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<RightPolar<BoundTensorMap<R, D>>, OperationError>
@@ -86,7 +91,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let RightPolar { p, wh } = right_polar_dyn(dense, &input.dynamic())?;
+    let RightPolar { p, wh } = right_polar_dyn(engine, dense, &input.dynamic())?;
     Ok(RightPolar {
         p: typed_from_bound_factor(p)?,
         wh: typed_from_bound_factor(wh)?,
@@ -96,6 +101,7 @@ where
 #[cfg(test)]
 /// Multiplicity-free dynamic-rank [`right_polar`].
 pub(crate) fn right_polar_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<RightPolar<BoundDynFactor<R, D>>, OperationError>
@@ -106,6 +112,7 @@ where
 {
     let authority = MfAuthority(input.space());
     polar_dense(
+        engine,
         dense,
         &authority,
         input,
@@ -117,6 +124,7 @@ where
 
 #[cfg(test)]
 pub(crate) fn left_polar_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<LeftPolar<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -127,6 +135,7 @@ where
 {
     let authority = CheckedAuthority(input.space().provider_arc());
     polar_dense(
+        engine,
         dense,
         &authority,
         input,
@@ -138,6 +147,7 @@ where
 
 #[cfg(test)]
 pub(crate) fn right_polar_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<RightPolar<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -148,6 +158,7 @@ where
 {
     let authority = CheckedAuthority(input.space().provider_arc());
     polar_dense(
+        engine,
         dense,
         &authority,
         input,
@@ -163,6 +174,7 @@ type PolarOutputs<R, D> = (FactorOutput<R, D>, FactorOutput<R, D>);
 /// Polar factors of `source` in fusion mode `M`, as `(W, P)`. A compact
 /// diagonal's phases and magnitudes stay compact on the input space.
 fn polar_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
     direction: PolarDirection,
@@ -183,6 +195,7 @@ where
         },
         |dense, input| {
             polar_dense(
+                engine,
                 dense,
                 &M::authority(input.space()),
                 input,
@@ -198,6 +211,7 @@ where
 /// (MatrixAlgebraKit `left_polar!` via `PolarViaSVD`).
 #[doc(hidden)]
 pub fn left_polar_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<LeftPolar<FactorOutput<R, D>>, M::Error>
@@ -207,7 +221,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    polar_from_source::<M, _, _, _, _>(lease, source, PolarDirection::Left)
+    polar_from_source::<M, _, _, _, _>(engine, lease, source, PolarDirection::Left)
         .map(|(w, p)| LeftPolar { w, p })
 }
 
@@ -215,6 +229,7 @@ where
 /// (MatrixAlgebraKit `right_polar!` via `PolarViaSVD`).
 #[doc(hidden)]
 pub fn right_polar_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<RightPolar<FactorOutput<R, D>>, M::Error>
@@ -224,7 +239,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    polar_from_source::<M, _, _, _, _>(lease, source, PolarDirection::Right)
+    polar_from_source::<M, _, _, _, _>(engine, lease, source, PolarDirection::Right)
         .map(|(wh, p)| RightPolar { p, wh })
 }
 
@@ -233,6 +248,7 @@ where
 /// returned `p`. Direction errors name the requested left polar.
 #[doc(hidden)]
 pub fn left_polar_adjoint_from_parent<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     parent: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<RightPolar<BoundDynFactor<R, D>>, M::Error>
@@ -245,6 +261,7 @@ where
     lease
         .run(|dense| {
             polar_dense(
+                engine,
                 dense,
                 &M::authority(parent.space()),
                 parent,
@@ -260,6 +277,7 @@ where
 /// w^H`. Direction errors name the requested right polar.
 #[doc(hidden)]
 pub fn right_polar_adjoint_from_parent<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     parent: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<LeftPolar<BoundDynFactor<R, D>>, M::Error>
@@ -272,6 +290,7 @@ where
     lease
         .run(|dense| {
             polar_dense(
+                engine,
                 dense,
                 &M::authority(parent.space()),
                 parent,
@@ -292,6 +311,7 @@ where
 /// input whose tree order differs from the output lands by tree extent).
 /// One scope spans the per-sector SVDs and products.
 fn polar_dense<A, E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     authority: &A,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -367,22 +387,28 @@ where
     // cutoff, so only the sector in flight needs its SVD (TensorKit/MAK's
     // working set is the largest block); the outputs are still published
     // only after every sector succeeded.
-    let (w_data, p_data) = in_linalg_scope(dense, |dense| {
+    let (w_data, p_data) = in_linalg_scope(engine, dense, |dense, engine| {
         // Why zeroed rather than uninitialized: the GEMM destinations are
         // safe initialized views, and every region is then overwritten once.
         let mut w_data = vec![D::zero(); w_len];
         let mut p_data = vec![D::zero(); p_len];
         let mut scratch = Vec::new();
+        // Built once: a GEMM configuration owns its axis lists.
+        let w_config = DenseDotConfig::matmul();
+        let p_config = match direction {
+            PolarDirection::Left => DenseDotConfig::matmul().with_conjugation(true, false),
+            PolarDirection::Right => DenseDotConfig::matmul().with_conjugation(false, true),
+        };
         for (index, (w, p)) in w_landings.iter().zip(&p_landings).enumerate() {
             let matrix = matrices.get(index)?;
             let mut stage =
-                compact_svd_numerical_stage(dense, matrix.data, matrix.rows, matrix.cols)?;
+                compact_svd_numerical_stage(engine, dense, matrix.data, matrix.rows, matrix.cols)?;
             // `W` reads the unscaled factors, so it precedes `P`.
             w.write(&mut w_data, &w_regions[w.output], &mut scratch, |w| {
-                polar_isometry(dense, &stage, w)
+                polar_isometry(engine, dense, &stage, &w_config, w)
             })?;
             p.write(&mut p_data, &p_regions[p.output], &mut scratch, |p| {
-                polar_positive(dense, &mut stage, direction, p)
+                polar_positive(engine, dense, &mut stage, direction, &p_config, p)
             })?;
         }
         Ok((w_data, p_data))
@@ -407,8 +433,10 @@ pub(super) fn project_hermitian_col_major<D: FactorScalar>(matrix: &mut [D], n: 
 
 /// `W = U Vh` into the column-major `rows x cols` destination `w`.
 fn polar_isometry<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     stage: &CompactSvdNumericalStage<D>,
+    config: &DenseDotConfig,
     w: &mut [D],
 ) -> Result<(), OperationError>
 where
@@ -434,20 +462,24 @@ where
     let vt_view = DenseView::new(vt, &vt_shape, &vt_strides, 0).map_err(OperationError::Dense)?;
     dense
         .dot_general_into(
+            engine,
             D::dense_write(w_view),
             D::dense_read(u_view),
             D::dense_read(vt_view),
-            &DenseDotConfig::matmul(),
+            config,
         )
         .map_err(OperationError::Dense)
 }
 
 /// `P` into the column-major square destination `p`; the `sqrt(S)` scaling
 /// is applied in place to the staged factor, which is not read again.
+/// `config` is the matmul conjugating the `direction`'s adjoint operand.
 fn polar_positive<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     stage: &mut CompactSvdNumericalStage<D>,
     direction: PolarDirection,
+    config: &DenseDotConfig,
     p: &mut [D],
 ) -> Result<(), OperationError>
 where
@@ -502,10 +534,11 @@ where
             let x = DenseView::new(x, &x_shape, &x_strides, 0).map_err(OperationError::Dense)?;
             dense
                 .dot_general_into(
+                    engine,
                     D::dense_write(p_view),
                     D::dense_read(xh),
                     D::dense_read(x),
-                    &DenseDotConfig::matmul().with_conjugation(true, false),
+                    config,
                 )
                 .map_err(OperationError::Dense)?;
         }
@@ -519,10 +552,11 @@ where
             let xh = DenseView::new(x, &xh_shape, &xh_strides, 0).map_err(OperationError::Dense)?;
             dense
                 .dot_general_into(
+                    engine,
                     D::dense_write(p_view),
                     D::dense_read(x_view),
                     D::dense_read(xh),
-                    &DenseDotConfig::matmul().with_conjugation(false, true),
+                    config,
                 )
                 .map_err(OperationError::Dense)?;
         }

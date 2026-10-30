@@ -38,6 +38,7 @@ fn mf_optimizers_fall_back_on_all_dim1_gram_topology() {
             "upstream fixed the dim-1 {driver} bug; drop the fallback?"
         );
 
+        let engine = &mut symtn::typed::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         configure_plan_cache(
             &rt,
@@ -48,9 +49,9 @@ fn mf_optimizers_fall_back_on_all_dim1_gram_topology() {
         );
         let v = GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 1)])
             .unwrap();
-        let cne = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &v], [&v], 1).unwrap();
-        let sne = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &v], [&v], 2).unwrap();
-        let ev = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &v], [&v, &v], 3).unwrap();
+        let cne = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v], 1).unwrap();
+        let sne = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v], 2).unwrap();
+        let ev = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 3).unwrap();
         let out = net(
             &[
                 op(&["n3", "n4"], &["o3"]),
@@ -63,7 +64,7 @@ fn mf_optimizers_fall_back_on_all_dim1_gram_topology() {
             &["o1", "o2"],
             &["o3", "o4"],
         )
-        .contract(&[&cne, &cne, &ev, &ev, &sne, &sne]);
+        .contract(engine, &[&cne, &cne, &ev, &ev, &sne, &sne]);
         assert!(out.is_ok(), "{driver}: {:?}", out.err());
     }
 }

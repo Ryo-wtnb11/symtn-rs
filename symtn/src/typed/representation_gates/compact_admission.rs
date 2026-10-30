@@ -72,13 +72,13 @@ macro_rules! row {
 
 /// One row per op of the matrix, for compact input `$t`.
 macro_rules! matrix {
-    ($t:expr, $rcond:expr) => {{
+    ($engine:ident, $t:expr, $rcond:expr) => {{
         let t = &$t;
         let flag = |value: bool| Route::Failed(format!("fresh bond: {value}"));
         vec![
             (
                 "svd_vals",
-                row!(t.svd_vals(&[0], &[1]), |values: Vec<
+                row!(t.svd_vals($engine, &[0], &[1]), |values: Vec<
                     SectorSpectrum<_, f64>,
                 >| {
                     Route::Compact(sorted(
@@ -91,47 +91,50 @@ macro_rules! matrix {
             ),
             (
                 "svd_compact.s",
-                row!(t.svd_compact(&[0], &[1]), |f: Svd<_>| route(&f.s)),
+                row!(t.svd_compact($engine, &[0], &[1]), |f: Svd<_>| route(&f.s)),
             ),
             (
                 "svd_compact.bond",
-                row!(t.svd_compact(&[0], &[1]), |f: Svd<_>| flag(on_fresh_bond(
-                    &f.s
-                ))),
+                row!(t.svd_compact($engine, &[0], &[1]), |f: Svd<_>| flag(
+                    on_fresh_bond(&f.s)
+                )),
             ),
             (
                 "svd_full.s",
-                row!(t.svd_full(&[0], &[1]), |f: Svd<_>| route(&f.s)),
+                row!(t.svd_full($engine, &[0], &[1]), |f: Svd<_>| route(&f.s)),
             ),
             (
                 "svd_full.bond",
-                row!(t.svd_full(&[0], &[1]), |f: Svd<_>| flag(on_fresh_bond(
-                    &f.s
-                ))),
+                row!(t.svd_full($engine, &[0], &[1]), |f: Svd<_>| flag(
+                    on_fresh_bond(&f.s)
+                )),
             ),
             (
                 "eig_full.d",
-                row!(t.eig_full(&[0], &[1]), |f: Eig<_>| route(&f.d)),
+                row!(t.eig_full($engine, &[0], &[1]), |f: Eig<_>| route(&f.d)),
             ),
             (
                 "eig_full.bond",
-                row!(t.eig_full(&[0], &[1]), |f: Eig<_>| flag(on_fresh_bond(
-                    &f.d
-                ))),
+                row!(t.eig_full($engine, &[0], &[1]), |f: Eig<_>| flag(
+                    on_fresh_bond(&f.d)
+                )),
             ),
             (
                 "eigh_full.d",
                 row!(
-                    t.eigh_full(&[0], &[1], HermitianTol::DEFAULT),
+                    t.eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT),
                     |f: Eigh<_>| route(&f.d)
                 ),
             ),
-            ("inv", row!(t.inv(&[0], &[1]), |x| route(&x))),
-            ("pinv", row!(t.pinv(&[0], &[1], $rcond), |x| route(&x))),
-            ("exp", row!(t.exp(&[0], &[1]), |x| route(&x))),
+            ("inv", row!(t.inv($engine, &[0], &[1]), |x| route(&x))),
+            (
+                "pinv",
+                row!(t.pinv($engine, &[0], &[1], $rcond), |x| route(&x)),
+            ),
+            ("exp", row!(t.exp($engine, &[0], &[1]), |x| route(&x))),
             (
                 "solve",
-                row!(t.solve(&[0], &[1], t, &[0], &[1]), |x| route(&x)),
+                row!(t.solve($engine, &[0], &[1], t, &[0], &[1]), |x| route(&x)),
             ),
         ]
     }};
@@ -218,12 +221,12 @@ where
 /// The matrix of one dtype's spectra, `(two values, three values)`, on the
 /// canonical and the expert layout of U(1), SU(2) and SU(3) bonds; every
 /// layout and rule must agree row by row. Returns the agreed rows.
-fn agreed_matrix<D>(two: [D; 2], three: [D; 3], rcond: f64) -> Rows
+fn agreed_matrix<D>(engine: &mut dyn Engine, two: [D; 2], three: [D; 3], rcond: f64) -> Rows
 where
     D: AdvancedLinalgScalar + FactorizationScalar,
     <D as FactorScalar>::Eig: TensorScalar,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let mut all: Vec<(&str, Rows)> = Vec::new();
 
     let u1 = Arc::new(U1FusionRule);
@@ -234,26 +237,26 @@ where
     .unwrap();
     for (name, bond) in [("u1", bond.clone()), ("u1 dual", bond.try_dual().unwrap())] {
         let t: TensorMap<_, D> =
-            TensorMap::diagonal(&runtime, &bond, spectra(&bond, two, three)).unwrap();
-        all.push((name, matrix!(t, rcond)));
+            TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
+        all.push((name, matrix!(engine, t, rcond)));
         let expert = expert_layout(
             &t,
             BoundDynamicFusionMapSpace::bind_multiplicity_free_checked,
         );
-        all.push((name, matrix!(expert, rcond)));
+        all.push((name, matrix!(engine, expert, rcond)));
     }
 
     let su2 = Arc::new(SU2FusionRule);
     let (zero, half) = (SU2Irrep::from_twice_spin(0), SU2Irrep::from_twice_spin(1));
     let bond = GradedSpace::try_new(Arc::clone(&su2), [(zero, 2), (half, 3)]).unwrap();
     let t: TensorMap<_, D> =
-        TensorMap::diagonal(&runtime, &bond, spectra(&bond, two, three)).unwrap();
-    all.push(("su2", matrix!(t, rcond)));
+        TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
+    all.push(("su2", matrix!(engine, t, rcond)));
     let expert = expert_layout(
         &t,
         BoundDynamicFusionMapSpace::bind_multiplicity_free_checked,
     );
-    all.push(("su2 expert", matrix!(expert, rcond)));
+    all.push(("su2 expert", matrix!(engine, expert, rcond)));
 
     let su3 =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
@@ -263,11 +266,11 @@ where
         ("su3 dual", bond.try_dual().unwrap()),
     ] {
         let t: TensorMap<_, D> =
-            TensorMap::diagonal(&runtime, &bond, spectra(&bond, two, three)).unwrap();
+            TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
         // Why no expert layout here: `bind_generic` needs a `FusionRule`, which
         // the checked fusion-symbols provider is not; the checked expert-layout
         // admission is pinned at the seam with a generic spy provider.
-        all.push((name, matrix!(t, rcond)));
+        all.push((name, matrix!(engine, t, rcond)));
     }
 
     let (reference_name, reference) = all[0].clone();
@@ -297,7 +300,8 @@ fn compact<D: FactorScalar>(values: &[&[D]]) -> Route {
 
 #[test]
 fn finite_compact_diagonals_route_alike_on_every_rule_and_layout() {
-    let rows = agreed_matrix([3.0_f64, -0.5], [2.0, 0.25, -1.5], 0.0);
+    let engine = &mut crate::typed::CpuEngine::serial();
+    let rows = agreed_matrix(engine, [3.0_f64, -0.5], [2.0, 0.25, -1.5], 0.0);
     for op in ["svd_compact.s", "svd_full.s", "eig_full.d", "eigh_full.d"] {
         assert!(matches!(get(&rows, op), Route::Compact(_)), "{op}");
     }
@@ -323,6 +327,7 @@ fn finite_compact_diagonals_route_alike_on_every_rule_and_layout() {
 
     let c = Complex64::new;
     let rows = agreed_matrix(
+        engine,
         [c(3.0, 1.0), c(-0.5, 0.0)],
         [c(2.0, 0.0), c(0.0, 0.25), c(-1.5, 0.5)],
         0.0,
@@ -334,9 +339,10 @@ fn finite_compact_diagonals_route_alike_on_every_rule_and_layout() {
 
 #[test]
 fn retained_subnormals_stay_compact_with_ieee_reciprocals() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // MF semantics (#1800, TensorKit `pinv(::DiagonalTensorMap)`): a
     // retained subnormal is inverted to `Inf`, not sent to a dense SVD.
-    let rows = agreed_matrix([5e-324_f64, 1.0], [2.0, 1e-310, -1.0], 0.0);
+    let rows = agreed_matrix(engine, [5e-324_f64, 1.0], [2.0, 1e-310, -1.0], 0.0);
     assert_eq!(
         get(&rows, "pinv"),
         &compact::<f64>(&[&[f64::INFINITY, 1.0], &[0.5, f64::INFINITY, -1.0]])
@@ -350,7 +356,8 @@ fn retained_subnormals_stay_compact_with_ieee_reciprocals() {
 
 #[test]
 fn nonfinite_compact_values_fail_or_map_through_alike() {
-    let rows = agreed_matrix([f64::NAN, 1.0], [2.0, 1.0, f64::INFINITY], 0.5);
+    let engine = &mut crate::typed::CpuEngine::serial();
+    let rows = agreed_matrix(engine, [f64::NAN, 1.0], [2.0, 1.0, f64::INFINITY], 0.5);
     let failed = |message: &str| Route::Failed(message.to_string());
     assert_eq!(
         get(&rows, "svd_compact.s"),
@@ -377,12 +384,14 @@ fn nonfinite_compact_values_fail_or_map_through_alike() {
 
 #[test]
 fn pinv_cutoff_compares_unrounded_magnitudes() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // `|1 + 2i| = √5` rounds up in f32; with the cutoff at exactly √5 the
     // unrounded magnitude sits on it and is cut (strict `>`), as are the
     // ones below it.
     let root5 = Complex64::new(1.0, 2.0).norm();
     let one = Complex32::new(1.0, 0.0);
     let rows = agreed_matrix(
+        engine,
         [Complex32::new(4.0, 0.0), Complex32::new(1.0, 2.0)],
         [one; 3],
         root5 / 4.0,

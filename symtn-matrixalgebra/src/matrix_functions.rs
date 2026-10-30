@@ -7,7 +7,7 @@ use std::hash::Hash;
 
 #[cfg(test)]
 use symtn_core::MultiplicityFreeRigidSymbols;
-use symtn_dense::{DenseDotConfig, DenseExecutor, DenseView, DenseViewMut};
+use symtn_dense::{DenseDotConfig, DenseExecutor, DenseView, DenseViewMut, Engine};
 use symtn_tensors::OperationError;
 #[cfg(test)]
 use symtn_tensors::{
@@ -28,6 +28,7 @@ use crate::factorize::{typed_from_bound_factor, BoundTensorMap, BoundTensorMapRe
 /// Matrix exponential of any endomorphism (TensorKit `exp!`, which checks only
 /// `domain == codomain`); see [`exp_direct_into_dyn`] for the two routes.
 pub(crate) fn exp<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<BoundTensorMap<R, D>, OperationError>
@@ -36,7 +37,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let out = exp_into_mf(dense, &input.dynamic())?;
+    let out = exp_into_mf(engine, dense, &input.dynamic())?;
     typed_from_bound_factor(out)
 }
 
@@ -64,6 +65,7 @@ where
 ///   input is never Hermitian, so it always reaches that route.
 #[doc(hidden)]
 pub fn exp_direct_into_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: symtn_tensors::BoundDynamicFusionMapSpace<R>,
@@ -79,16 +81,17 @@ where
     // failure is never mistaken for non-hermiticity.
     let spectral = is_hermitian_endomorphism_dyn(input)?;
     map_square_sectors_dyn_into(
+        engine,
         dense,
         input,
         output_space,
         |order| ExpWorkspace::new(order, spectral),
-        |dense, workspace, source, order, output| match workspace {
+        |dense, engine, workspace, source, order, output| match workspace {
             ExpWorkspace::Spectral { scaled } => {
-                exp_spectral_sector(dense, scaled, source, order, output)
+                exp_spectral_sector(engine, dense, scaled, source, order, output)
             }
             ExpWorkspace::Pade(workspace) => {
-                exp_pade13_sector(dense, workspace, source, order, output)
+                exp_pade13_sector(engine, dense, workspace, source, order, output)
             }
         },
     )
@@ -123,6 +126,7 @@ impl<D: FactorScalar> ExpWorkspace<D> {
 /// `exp!`'s `copytri!(…, 'U', true)` (`dense.jl:680`). The eigenvector order
 /// and phase gauge cancel in `V exp(D) Vᴴ`, so neither is applied.
 fn exp_spectral_sector<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     scaled: &mut [D],
     source: &[D],
@@ -133,7 +137,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let (values, vectors) = compact_eigh_owned(dense, &source[..order * order], order)?;
+    let (values, vectors) = compact_eigh_owned(engine, dense, &source[..order * order], order)?;
     validate_real_eigenvalues(&values)?;
     // Fold exp(D) into a column scaling of V rather than a diagonal GEMM
     // operand (issue #46).
@@ -154,6 +158,7 @@ where
         DenseViewMut::new(output, &shape, &strides, 0).map_err(OperationError::Dense)?;
     dense
         .dot_general_into(
+            engine,
             D::dense_write(destination),
             D::dense_read(lhs),
             D::dense_read(rhs),
@@ -285,6 +290,7 @@ impl<D: FactorScalar> Pade13Workspace<D> {
 ///   [`symtn_dense::DenseError::Unsupported`] when the selected executor has no
 ///   dense solve. Nothing is published unless every sector succeeded.
 fn exp_pade13_sector<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     workspace: &mut Pade13Workspace<D>,
     source: &[D],
@@ -364,9 +370,9 @@ where
         *value = *value * scale;
     }
 
-    gemm(dense, power2, scaled, scaled, order)?;
-    gemm(dense, power4, power2, power2, order)?;
-    gemm(dense, power6, power2, power4, order)?;
+    gemm(engine, dense, power2, scaled, scaled, order)?;
+    gemm(engine, dense, power4, power2, power2, order)?;
+    gemm(engine, dense, power6, power2, power4, order)?;
 
     let b = &PADE13_B;
     combine(
@@ -378,7 +384,7 @@ where
         ],
         order,
     );
-    gemm(dense, accumulator, power6, inner, order)?;
+    gemm(engine, dense, accumulator, power6, inner, order)?;
     add_terms(
         accumulator,
         &[
@@ -389,7 +395,7 @@ where
         b[1],
         order,
     );
-    gemm(dense, odd, scaled, accumulator, order)?;
+    gemm(engine, dense, odd, scaled, accumulator, order)?;
 
     combine(
         inner,
@@ -400,7 +406,7 @@ where
         ],
         order,
     );
-    gemm(dense, even, power6, inner, order)?;
+    gemm(engine, dense, even, power6, inner, order)?;
     add_terms(
         even,
         &[
@@ -419,10 +425,10 @@ where
         inner[index] = even[index] + odd[index];
         accumulator[index] = even[index] + minus_one * odd[index];
     }
-    solve(dense, accumulator, inner, image, order)?;
+    solve(engine, dense, accumulator, inner, image, order)?;
 
     for _ in 0..squarings {
-        gemm(dense, square, image, image, order)?;
+        gemm(engine, dense, square, image, image, order)?;
         std::mem::swap(image, square);
     }
 
@@ -772,6 +778,7 @@ fn add_terms<D: FactorScalar>(
 
 /// `destination = lhs * rhs` on column-major `order x order` blocks.
 fn gemm<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     destination: &mut [D],
     lhs: &[D],
@@ -793,6 +800,7 @@ where
         .map_err(OperationError::Dense)?;
     dense
         .matmul_into(
+            engine,
             D::dense_write(destination),
             D::dense_read(lhs),
             D::dense_read(rhs),
@@ -802,6 +810,7 @@ where
 
 /// Solves `matrix * solution = rhs` on column-major `order x order` blocks.
 fn solve<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     rhs: &[D],
@@ -823,6 +832,7 @@ where
         .map_err(OperationError::Dense)?;
     dense
         .solve_into(
+            engine,
             D::dense_read(matrix),
             D::dense_read(rhs),
             D::dense_write(solution),
@@ -838,6 +848,7 @@ where
 /// effective-rank tensor. It is the Moore-Penrose inverse of the original
 /// tensor only when the cutoff discards no genuinely nonzero singular value.
 pub(crate) fn pinv<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
     rcond: f64,
@@ -847,7 +858,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let out = pinv_into_mf(dense, &input.dynamic(), rcond)?;
+    let out = pinv_into_mf(engine, dense, &input.dynamic(), rcond)?;
     typed_from_bound_factor(out)
 }
 
@@ -866,6 +877,7 @@ fn validate_pinv_rcond(rcond: f64) -> Result<(), OperationError> {
 /// The context parameter is retained for source compatibility. Inverse itself
 /// is context-free and performs one dense solve per nonempty coupled sector.
 pub(crate) fn inv<E, RuleKey, BT, BC, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     context: &mut TensorContractFusionExecutionContext<D, RuleKey, BT, BC>,
     input: &BoundTensorMapRef<'_, R, D>,
@@ -879,7 +891,7 @@ where
     D: FactorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
     let _ = context;
-    let out = inv_into_mf(dense, &input.dynamic())?;
+    let out = inv_into_mf(engine, dense, &input.dynamic())?;
     typed_from_bound_factor(out)
 }
 
@@ -898,6 +910,7 @@ where
 /// sector intersection rather than an error.
 #[doc(hidden)]
 pub fn inv_direct_into_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: symtn_tensors::BoundDynamicFusionMapSpace<R>,
@@ -906,7 +919,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    inverse_by_sector_dyn_into(dense, input, output_space)
+    inverse_by_sector_dyn_into(engine, dense, input, output_space)
 }
 
 /// Context-free pseudo-inverse into a caller-admitted swapped output space, in
@@ -919,6 +932,7 @@ where
 /// space on its provider, which this seam validates.
 #[doc(hidden)]
 pub fn pinv_direct_into_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     output_space: symtn_tensors::BoundDynamicFusionMapSpace<R>,
@@ -929,13 +943,14 @@ where
     D: FactorScalar,
 {
     validate_pinv_rcond(rcond)?;
-    pinv_by_sector_dyn_into(dense, input, output_space, rcond)
+    pinv_by_sector_dyn_into(engine, dense, input, output_space, rcond)
 }
 
 /// Context-free pseudo-inverse of the logical adjoint of `parent`, read in
 /// place, into a caller-admitted output space (`parent`'s hom space).
 #[doc(hidden)]
 pub fn pinv_adjoint_parent_direct_into_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     output_space: symtn_tensors::BoundDynamicFusionMapSpace<R>,
@@ -946,7 +961,7 @@ where
     D: FactorScalar,
 {
     validate_pinv_rcond(rcond)?;
-    pinv_adjoint_by_sector_dyn_into(dense, parent, output_space, rcond)
+    pinv_adjoint_by_sector_dyn_into(engine, dense, parent, output_space, rcond)
 }
 
 /// Context-free dynamic-rank left solve into a caller-admitted output space.
@@ -966,6 +981,7 @@ where
 /// stored sector intersection rather than an error.
 #[doc(hidden)]
 pub fn solve_left_direct_into_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     divisor: &BoundDynamicTensorRef<'_, R, D>,
     rhs: &BoundDynamicTensorRef<'_, R, D>,
@@ -975,7 +991,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    solve_left_by_sector_dyn_into(dense, divisor, rhs, output_space)
+    solve_left_by_sector_dyn_into(engine, dense, divisor, rhs, output_space)
 }
 
 // Test fixtures: each seam into the multiplicity-free layout derived from the
@@ -1000,6 +1016,7 @@ fn swapped(homspace: &symtn_core::FusionTreeHomSpace) -> symtn_core::FusionTreeH
 
 #[cfg(test)]
 pub(crate) fn exp_into_mf<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
@@ -1009,11 +1026,12 @@ where
     D: FactorScalar,
 {
     let output = mf_output(input, input.space().space().homspace().clone())?;
-    exp_direct_into_dyn(dense, input, output)
+    exp_direct_into_dyn(engine, dense, input, output)
 }
 
 #[cfg(test)]
 pub(crate) fn inv_into_mf<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
@@ -1023,11 +1041,12 @@ where
     D: FactorScalar,
 {
     let output = mf_output(input, swapped(input.space().space().homspace()))?;
-    inv_direct_into_dyn(dense, input, output)
+    inv_direct_into_dyn(engine, dense, input, output)
 }
 
 #[cfg(test)]
 pub(crate) fn pinv_into_mf<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     rcond: f64,
@@ -1038,11 +1057,12 @@ where
     D: FactorScalar,
 {
     let output = mf_output(input, swapped(input.space().space().homspace()))?;
-    pinv_direct_into_dyn(dense, input, output, rcond)
+    pinv_direct_into_dyn(engine, dense, input, output, rcond)
 }
 
 #[cfg(test)]
 pub(crate) fn pinv_adjoint_parent_into_mf<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     rcond: f64,
@@ -1053,11 +1073,12 @@ where
     D: FactorScalar,
 {
     let output = mf_output(parent, parent.space().space().homspace().clone())?;
-    pinv_adjoint_parent_direct_into_dyn(dense, parent, output, rcond)
+    pinv_adjoint_parent_direct_into_dyn(engine, dense, parent, output, rcond)
 }
 
 #[cfg(test)]
 pub(crate) fn solve_left_into_mf<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     divisor: &BoundDynamicTensorRef<'_, R, D>,
     rhs: &BoundDynamicTensorRef<'_, R, D>,
@@ -1074,5 +1095,5 @@ where
             rhs.space().space().homspace().domain().clone(),
         ),
     )?;
-    solve_left_direct_into_dyn(dense, divisor, rhs, output)
+    solve_left_direct_into_dyn(engine, dense, divisor, rhs, output)
 }

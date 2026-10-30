@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeFusionRule,
@@ -39,7 +40,7 @@ fn product_sectors() -> Vec<SectorId> {
         .collect()
 }
 
-fn assert_replay_allocates_nothing<R>(rule: &R, sectors: &[SectorId])
+fn assert_replay_allocates_nothing<R>(engine: &mut dyn Engine, rule: &R, sectors: &[SectorId])
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + MultiplicityFreeFusionRule
@@ -89,6 +90,7 @@ where
         let dst_structure = Arc::clone(dst_space.structure());
         context
             .tensorcontract_planned_into(
+                engine,
                 &dst_bound,
                 &mut expected,
                 (FusionOperand::direct(lhs_bound.space()), &lhs_data),
@@ -103,6 +105,7 @@ where
         let mut actual = expected.clone();
         let prepared = context
             .plan_contract::<HostEagerExecutor, R>(
+                engine,
                 &dst_bound,
                 FusionOperand::direct(lhs_bound.space()),
                 FusionOperand::direct(rhs_bound.space()),
@@ -111,9 +114,10 @@ where
                 &output_axes,
             )
             .unwrap();
-        let replay = |context: &mut TensorContractFusionExecutionContext<f64, R::Key>,
-                      dst: &mut [f64]| {
+        let mut replay = |context: &mut TensorContractFusionExecutionContext<f64, R::Key>,
+                          dst: &mut [f64]| {
             context.execute_contract_resolution_host(
+                engine,
                 &prepared,
                 (&dst_structure, dst),
                 (lhs_space.structure(), &lhs_data),
@@ -137,13 +141,16 @@ where
 
 #[test]
 fn warmed_prepared_rank4_fusion_replay_allocates_nothing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_replay_allocates_nothing(&U1FusionRule, &u1_sectors());
+    assert_replay_allocates_nothing(engine, &U1FusionRule, &u1_sectors());
     assert_replay_allocates_nothing(
+        engine,
         &FermionParityFusionRule,
         &[SectorId::new(0), SectorId::new(1)],
     );
     assert_replay_allocates_nothing(
+        engine,
         &symtn_core::SU2FusionRule,
         &[
             SU2Irrep::from_twice_spin(0).sector_id(),
@@ -152,6 +159,7 @@ fn warmed_prepared_rank4_fusion_replay_allocates_nothing() {
         ],
     );
     assert_replay_allocates_nothing(
+        engine,
         &ProductFusionRule::<U1FusionRule, FermionParityFusionRule>::try_new(
             U1FusionRule,
             FermionParityFusionRule,

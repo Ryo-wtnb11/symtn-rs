@@ -39,6 +39,7 @@ use report::{cause, report};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
@@ -299,7 +300,7 @@ fn close(actual: Complex64, expected: Complex64) -> bool {
 /// directions, asserting against the hand oracle and the dense route, and
 /// returns the twisted spectra in a fixed order for the cross-mode check.
 macro_rules! twist_rows {
-    ($rule:expr, $odd_twist:expr, $D:ty, $conv:expr) => {{
+    ($engine:ident, $rule:expr, $odd_twist:expr, $D:ty, $conv:expr) => {{
         let runtime = host_runtime();
         let conv = $conv;
         let odd_twist: f64 = $odd_twist;
@@ -315,12 +316,12 @@ macro_rules! twist_rows {
                 values: (0..k).map(|i| conv(value(p, i))).collect::<Vec<$D>>(),
             })
             .collect::<Vec<_>>();
-        let compact = TensorMap::<_, $D>::diagonal(&runtime, &leg, spectrum).unwrap();
-        let dense_twin = compact.materialize().unwrap();
+        let compact = TensorMap::<_, $D>::diagonal($engine, &runtime, &leg, spectrum).unwrap();
+        let dense_twin = compact.materialize($engine).unwrap();
         let mut out = Vec::new();
         for legs in LEG_SETS {
             for direction in [Direction::Forward, Direction::Inverse] {
-                let twisted = compact.twist(legs, direction).unwrap();
+                let twisted = compact.twist($engine, legs, direction).unwrap();
                 assert!(
                     twisted.dense_data().is_err(),
                     "twist {legs:?} {direction:?} densified a compact diagonal"
@@ -328,7 +329,7 @@ macro_rules! twist_rows {
                 // TensorKit `twist!`: `inv && (θ = θ')`; a real θ is its own
                 // conjugate.
                 let power = legs.len() as i32;
-                let got = twisted.diagview().unwrap();
+                let got = twisted.diagview($engine).unwrap();
                 assert_eq!(got.len(), SECTORS.len());
                 for (entry, &(p, k)) in got.iter().zip(&SECTORS) {
                     assert_eq!(entry.sector, Z2Irrep::new(p));
@@ -342,8 +343,8 @@ macro_rules! twist_rows {
                         );
                     }
                 }
-                let dense = dense_twin.twist(legs, direction).unwrap();
-                let materialized = twisted.materialize().unwrap();
+                let dense = dense_twin.twist($engine, legs, direction).unwrap();
+                let materialized = twisted.materialize($engine).unwrap();
                 let (lhs, rhs) = (
                     materialized.dense_data().unwrap(),
                     dense.dense_data().unwrap(),
@@ -361,13 +362,15 @@ macro_rules! twist_rows {
 
 #[test]
 fn compact_twist_stays_compact_and_agrees_across_modes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a fermionic compact twist is one mode-free arm: both modes,
     // including the checked Generic fZ2 twin, keep the spectrum and give
     // identical values.
     let real = |x: f64| x;
-    let mf = twist_rows!(FermionParityFusionRule, -1.0, f64, real);
+    let mf = twist_rows!(engine, FermionParityFusionRule, -1.0, f64, real);
     let checked = twist_rows!(
+        engine,
         CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0),
         -1.0,
         f64,
@@ -376,8 +379,9 @@ fn compact_twist_stays_compact_and_agrees_across_modes() {
     assert_eq!(mf, checked);
 
     let complex = |x: f64| Complex64::new(x, 0.5 * x - 0.25);
-    let mf = twist_rows!(FermionParityFusionRule, -1.0, Complex64, complex);
+    let mf = twist_rows!(engine, FermionParityFusionRule, -1.0, Complex64, complex);
     let checked = twist_rows!(
+        engine,
         CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0),
         -1.0,
         Complex64,
@@ -388,12 +392,14 @@ fn compact_twist_stays_compact_and_agrees_across_modes() {
 
 #[test]
 fn checked_anyonic_compact_twist_scales_by_theta_powers() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a non-unit real θ, which only the checked mode can express here,
     // scales the spectrum by θ^{|legs|}, so a two-leg twist is not the
     // identity on the bond.
     let real = |x: f64| x;
     twist_rows!(
+        engine,
         CheckedZ2::new(BraidingStyleKind::Anyonic, 0.6),
         0.6,
         f64,
@@ -401,6 +407,7 @@ fn checked_anyonic_compact_twist_scales_by_theta_powers() {
     );
     let complex = |x: f64| Complex64::new(-0.5 * x, x);
     twist_rows!(
+        engine,
         CheckedZ2::new(BraidingStyleKind::Anyonic, 0.6),
         0.6,
         Complex64,
@@ -410,6 +417,7 @@ fn checked_anyonic_compact_twist_scales_by_theta_powers() {
 
 #[test]
 fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact arm reuses the staged twist values; it adds no
     // provider query beyond the dense route's.
@@ -427,11 +435,11 @@ fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
             values: (0..k).map(|i| value(p, i)).collect::<Vec<f64>>(),
         })
         .collect::<Vec<_>>();
-    let compact = TensorMap::<_, f64>::diagonal(&runtime, &leg, spectrum).unwrap();
-    let dense = compact.materialize().unwrap();
-    let queries = |tensor: &TensorMap<CheckedZ2, f64>| {
+    let compact = TensorMap::<_, f64>::diagonal(engine, &runtime, &leg, spectrum).unwrap();
+    let dense = compact.materialize(engine).unwrap();
+    let mut queries = |tensor: &TensorMap<CheckedZ2, f64>| {
         rule.twist_queries.store(0, Ordering::Relaxed);
-        black_box(tensor.twist(&[0, 1], Direction::Forward).unwrap());
+        black_box(tensor.twist(engine, &[0, 1], Direction::Forward).unwrap());
         rule.twist_queries.load(Ordering::Relaxed)
     };
     let (compact_queries, dense_queries) = (queries(&compact), queries(&dense));
@@ -442,6 +450,7 @@ fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: SU(2) is bosonic, so twist returns the compact receiver as is in
     // both modes.
@@ -461,6 +470,7 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     .unwrap();
     let values = |twice: usize, k: usize| (0..k).map(|i| 0.5 + (twice * 4 + i) as f64).collect();
     let mf = TensorMap::<_, f64>::diagonal(
+        engine,
         &runtime,
         &mf_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
@@ -470,6 +480,7 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     )
     .unwrap();
     let checked = TensorMap::<_, f64>::diagonal(
+        engine,
         &runtime,
         &checked_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
@@ -479,18 +490,18 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     )
     .unwrap();
     for legs in LEG_SETS {
-        let mf_twisted = mf.twist(legs, Direction::Forward).unwrap();
-        let checked_twisted = checked.twist(legs, Direction::Forward).unwrap();
+        let mf_twisted = mf.twist(engine, legs, Direction::Forward).unwrap();
+        let checked_twisted = checked.twist(engine, legs, Direction::Forward).unwrap();
         assert!(mf_twisted.dense_data().is_err());
         assert!(checked_twisted.dense_data().is_err());
         let mf_values: Vec<_> = mf_twisted
-            .diagview()
+            .diagview(engine)
             .unwrap()
             .into_iter()
             .map(|e| e.values)
             .collect();
         let checked_values: Vec<_> = checked_twisted
-            .diagview()
+            .diagview(engine)
             .unwrap()
             .into_iter()
             .map(|e| e.values)
@@ -514,9 +525,11 @@ where
     R: TypedSectorAdmission<Sector = Z2Irrep>,
     R::Mode: symtn::typed::TypedTensorConstructionDispatch<R, f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(Arc::new(rule), [(Z2Irrep::ODD, k)]).unwrap();
     TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -532,9 +545,11 @@ where
     R: TypedSectorAdmission,
     R::Mode: symtn::typed::TypedTensorTwistDispatch<R, f64>,
 {
-    black_box(tensor.twist(&[0], Direction::Forward).unwrap());
-    let (twisted, allocs) =
-        counting_alloc::measure(|| black_box(tensor.twist(&[0], Direction::Forward).unwrap()));
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    black_box(tensor.twist(engine, &[0], Direction::Forward).unwrap());
+    let (twisted, allocs) = counting_alloc::measure(|| {
+        black_box(tensor.twist(engine, &[0], Direction::Forward).unwrap())
+    });
     assert!(twisted.dense_data().is_err(), "the twist densified");
     allocs.bytes
 }
@@ -617,6 +632,7 @@ where
     R::Mode: TypedTensorConstructionDispatch<R, D>,
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let spectrum = |shift: f64| {
         leg.sectors()
             .unwrap()
@@ -645,10 +661,10 @@ where
         conv(0.25 + 0.375 * sectors - 0.3125 * offsets)
     };
     BondFixture {
-        d: TensorMap::diagonal(runtime, leg, spectrum(1.5)).unwrap(),
-        e: TensorMap::diagonal(runtime, leg, spectrum(-0.5)).unwrap(),
-        a: TensorMap::from_subblock_fn(runtime, [leg, open], [leg], fill).unwrap(),
-        b: TensorMap::from_subblock_fn(runtime, [leg], [open, leg], fill).unwrap(),
+        d: TensorMap::diagonal(engine, runtime, leg, spectrum(1.5)).unwrap(),
+        e: TensorMap::diagonal(engine, runtime, leg, spectrum(-0.5)).unwrap(),
+        a: TensorMap::from_subblock_fn(engine, runtime, [leg, open], [leg], fill).unwrap(),
+        b: TensorMap::from_subblock_fn(engine, runtime, [leg], [open, leg], fill).unwrap(),
     }
 }
 
@@ -786,21 +802,26 @@ where
     D: TensorScalar + std::fmt::Debug,
     Complex64: From<D>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dense = BondFixture {
-        d: fixture.d.materialize().unwrap(),
-        e: fixture.e.materialize().unwrap(),
+        d: fixture.d.materialize(engine).unwrap(),
+        e: fixture.e.materialize(engine).unwrap(),
         a: fixture.a.clone(),
         b: fixture.b.clone(),
     };
-    let run = |operands: &BondFixture<R, D>, lhs, rhs, spec: &Option<ContractSpec<'_>>| {
+    let run = |engine: &mut dyn Engine,
+               operands: &BondFixture<R, D>,
+               lhs,
+               rhs,
+               spec: &Option<ContractSpec<'_>>| {
         let (lhs, rhs) = (pick(operands, lhs), pick(operands, rhs));
         match spec {
-            None => lhs.compose(rhs),
-            Some(spec) => lhs.contract(rhs, spec),
+            None => lhs.compose(engine, rhs),
+            Some(spec) => lhs.contract(engine, rhs, spec),
         }
     };
-    let image = |tensor: &TensorMap<R, D>| -> Vec<Complex64> {
-        let dense = tensor.materialize().unwrap();
+    let image = |engine: &mut dyn Engine, tensor: &TensorMap<R, D>| -> Vec<Complex64> {
+        let dense = tensor.materialize(engine).unwrap();
         dense
             .dense_data()
             .unwrap()
@@ -812,14 +833,14 @@ where
         .iter()
         .map(|(what, compact, lhs, rhs, spec)| {
             match (
-                run(fixture, *lhs, *rhs, spec),
-                run(&dense, *lhs, *rhs, spec),
+                run(engine, fixture, *lhs, *rhs, spec),
+                run(engine, &dense, *lhs, *rhs, spec),
             ) {
                 (Ok(got), Ok(want)) => {
                     assert_eq!(got.dense_data().is_err(), *compact, "{what}: storage form");
                     assert_eq!(got.codomain(), want.codomain(), "{what}: codomain");
                     assert_eq!(got.domain(), want.domain(), "{what}: domain");
-                    let (got, want) = (image(&got), image(&want));
+                    let (got, want) = (image(engine, &got), image(engine, &want));
                     assert_eq!(got.len(), want.len(), "{what}");
                     for (&x, &y) in got.iter().zip(&want) {
                         assert!(close(x, y), "{what}: {x} != dense {y}");
@@ -837,7 +858,7 @@ where
                         "{what}: only the U15 boundary may separate the storages: {rejection:?}"
                     );
                     assert_eq!(got.dense_data().is_err(), *compact, "{what}: storage form");
-                    Some(image(&got))
+                    Some(image(engine, &got))
                 }
                 (Err(got), Err(want)) => {
                     assert_eq!(report(&got), report(&want), "{what}");
@@ -980,6 +1001,7 @@ fn multiplicity_free_u1_compact_compose_and_contract_match_the_dense_route() {
 
 #[test]
 fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol coefficient lane takes the compact arms
     // (#1866); compose stays compact for `D * D` and scales for
@@ -994,10 +1016,10 @@ fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
     let tau = |sector: &TableSector| f64::from(u8::from(*sector == TableSector::new(2)));
     let fixture = bond_fixture(&leg, tau, |x: f64| Complex64::new(x, 0.5 - x));
     bond_rows(&fixture, &COMPOSE_CASES);
-    let dense = fixture.d.materialize().unwrap();
+    let dense = fixture.d.materialize(engine).unwrap();
     for (what, _, lhs, rhs, spec) in CONTRACT_CASES {
         let spec = spec.unwrap();
-        let compact = pick(&fixture, lhs).contract(pick(&fixture, rhs), &spec);
+        let compact = pick(&fixture, lhs).contract(engine, pick(&fixture, rhs), &spec);
         let swap = |code| {
             if code == 'd' {
                 &dense
@@ -1005,7 +1027,7 @@ fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
                 pick(&fixture, code)
             }
         };
-        let materialized = swap(lhs).contract(swap(rhs), &spec);
+        let materialized = swap(lhs).contract(engine, swap(rhs), &spec);
         assert_eq!(
             format!("{}", compact.unwrap_err()),
             format!("{}", materialized.unwrap_err()),
@@ -1050,6 +1072,7 @@ fn su2_compact_compose_and_contract_agree_across_modes() {
 
 #[test]
 fn declined_compact_arms_report_the_dense_route_error() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a pair the arms cannot answer — providers with different rule
     // identities, or a dense leg that is not the bond — falls through to the
@@ -1077,20 +1100,23 @@ fn declined_compact_arms_report_the_dense_route_error() {
         real,
     );
     let (d, foreign_d) = (&fixture.d, &foreign.d);
-    let (dense_d, dense_foreign) = (d.materialize().unwrap(), foreign_d.materialize().unwrap());
+    let (dense_d, dense_foreign) = (
+        d.materialize(engine).unwrap(),
+        foreign_d.materialize(engine).unwrap(),
+    );
     assert_same_error!(
-        d.compose(foreign_d),
-        dense_d.compose(&dense_foreign),
+        d.compose(engine, foreign_d),
+        dense_d.compose(engine, &dense_foreign),
         "D * D'"
     );
     assert_same_error!(
-        fixture.a.compose(foreign_d),
-        fixture.a.compose(&dense_foreign),
+        fixture.a.compose(engine, foreign_d),
+        fixture.a.compose(engine, &dense_foreign),
         "t * D'"
     );
     assert_same_error!(
-        d.contract(&foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
-        dense_d.contract(&foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
+        d.contract(engine, &foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
+        dense_d.contract(engine, &foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
         "D . t'"
     );
 
@@ -1117,31 +1143,39 @@ where
     R: TypedSectorAdmission<Sector = Z2Irrep>,
     R::Mode: TypedTensorContractDispatch<R, f64> + TypedTensorConstructionDispatch<R, f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let other = GradedSpace::try_new(
         Arc::new(rule()),
         [(Z2Irrep::new(0), 1), (Z2Irrep::new(1), 4)],
     )
     .unwrap();
-    let t =
-        TensorMap::<_, f64>::from_subblock_fn(&host_runtime(), [&other], [&other], |_, index| {
-            index[0] as f64 - 0.5 * index[1] as f64
-        })
-        .unwrap();
+    let t = TensorMap::<_, f64>::from_subblock_fn(
+        engine,
+        &host_runtime(),
+        [&other],
+        [&other],
+        |_, index| index[0] as f64 - 0.5 * index[1] as f64,
+    )
+    .unwrap();
     let fixture = bond_fixture(&z2_leg(rule()), parity, |x: f64| x);
-    let dense = fixture.d.materialize().unwrap();
+    let dense = fixture.d.materialize(engine).unwrap();
     let message = |result: Result<TensorMap<R, f64>, _>| format!("{}", result.unwrap_err());
     let one_leg = spec(&[1], &[0], &[0], &[1]);
     [
-        (message(t.compose(&fixture.d)), message(t.compose(&dense))),
         (
-            message(fixture.d.contract(&t, &one_leg)),
-            message(dense.contract(&t, &one_leg)),
+            message(t.compose(engine, &fixture.d)),
+            message(t.compose(engine, &dense)),
+        ),
+        (
+            message(fixture.d.contract(engine, &t, &one_leg)),
+            message(dense.contract(engine, &t, &one_leg)),
         ),
     ]
 }
 
 #[test]
 fn checked_compose_and_identity_order_contract_arms_query_no_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compose arms and an arm whose output needs no reordering read
     // only the stored spectrum and the admitted rule identity, so they succeed
@@ -1157,8 +1191,8 @@ fn checked_compose_and_identity_order_contract_arms_query_no_provider() {
     {
         let (lhs, rhs) = (pick(&fixture, lhs), pick(&fixture, rhs));
         let result = match spec {
-            None => lhs.compose(rhs),
-            Some(spec) => lhs.contract(rhs, &spec),
+            None => lhs.compose(engine, rhs),
+            Some(spec) => lhs.contract(engine, rhs, &spec),
         };
         let result = result.unwrap_or_else(|error| panic!("{what}: {error}"));
         assert_eq!(result.dense_data().is_err(), compact, "{what}");
@@ -1168,6 +1202,7 @@ fn checked_compose_and_identity_order_contract_arms_query_no_provider() {
 
 #[test]
 fn checked_reordered_contract_arm_failure_is_typed_and_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the reordered `t · D` arm lays its result out with one checked
     // permute staging. A provider failing there is reported as the typed
@@ -1202,7 +1237,7 @@ fn checked_reordered_contract_arm_failure_is_typed_and_nonpublishing() {
         |x: f64| x,
     );
     let source = fixture.a.dense_data().unwrap().to_vec();
-    let spectrum = symtn::expert::diagonal_spectrum(&fixture.d).unwrap();
+    let spectrum = symtn::expert::diagonal_spectrum(engine, &fixture.d).unwrap();
     let published = || {
         [
             StructureCacheKind::DegeneracyStructure,
@@ -1222,7 +1257,7 @@ fn checked_reordered_contract_arm_failure_is_typed_and_nonpublishing() {
         .store(true, Ordering::Relaxed);
     let result = fixture
         .a
-        .contract(&fixture.d, &spec(&[2], &[0], &[0], &[1, 2]));
+        .contract(engine, &fixture.d, &spec(&[2], &[0], &[0], &[1, 2]));
     fixture
         .d
         .provider()
@@ -1240,7 +1275,7 @@ fn checked_reordered_contract_arm_failure_is_typed_and_nonpublishing() {
     assert_eq!(published(), before);
     assert_eq!(fixture.a.dense_data().unwrap(), source);
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&fixture.d).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, &fixture.d).unwrap(),
         spectrum
     );
 }
@@ -1253,8 +1288,10 @@ where
     R: TypedSectorAdmission,
     R::Mode: TypedTensorContractDispatch<R, f64>,
 {
-    black_box(tensor.compose(tensor).unwrap());
-    let (square, allocs) = counting_alloc::measure(|| black_box(tensor.compose(tensor).unwrap()));
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    black_box(tensor.compose(engine, tensor).unwrap());
+    let (square, allocs) =
+        counting_alloc::measure(|| black_box(tensor.compose(engine, tensor).unwrap()));
     (allocs.bytes, square.dense_data().is_err())
 }
 
@@ -1344,10 +1381,11 @@ where
     R::Mode: TypedTensorTransformDispatch<R, D>,
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     match op {
-        "permute" => tensor.permute(&[1], &[0]),
-        "transpose" => tensor.transpose(&[1], &[0]),
-        _ => tensor.braid(&[1], &[0], &[0, 1]),
+        "permute" => tensor.permute(engine, &[1], &[0]),
+        "transpose" => tensor.transpose(engine, &[1], &[0]),
+        _ => tensor.braid(engine, &[1], &[0], &[0, 1]),
     }
 }
 
@@ -1362,7 +1400,8 @@ where
     <R::Mode as TypedTensorModeDispatch<R>>::FacadeError: std::fmt::Debug,
     D: TensorScalar + std::fmt::Debug,
 {
-    let dense = d.materialize().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let dense = d.materialize(engine).unwrap();
     let dual = leg.try_dual().unwrap();
     ops.iter()
         .map(|&op| {
@@ -1377,7 +1416,12 @@ where
             assert_eq!(got.domain()[0], dual, "{op}: domain is dual(codomain)");
             assert_eq!(got.codomain(), want.codomain(), "{op}");
             assert_eq!(got.domain(), want.domain(), "{op}");
-            let image = got.materialize().unwrap().dense_data().unwrap().to_vec();
+            let image = got
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .to_vec();
             assert_eq!(
                 image,
                 want.dense_data().unwrap(),
@@ -1415,9 +1459,10 @@ where
     D: TensorScalar + std::fmt::Debug,
     Complex64: From<D>,
 {
-    let source = d.diagview().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = d.diagview(engine).unwrap();
     for op in ["permute", "transpose"] {
-        let swapped = transform(d, op).unwrap().diagview().unwrap();
+        let swapped = transform(d, op).unwrap().diagview(engine).unwrap();
         assert_eq!(swapped.len(), source.len(), "{op}");
         for (got, want) in swapped.iter().zip(&source) {
             assert_eq!(got.sector, want.sector, "{op}: Z2 is self-dual");
@@ -1444,8 +1489,10 @@ where
     R::Mode: TypedTensorConstructionDispatch<R, D>,
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = z2_leg(rule);
     let d = TensorMap::diagonal(
+        engine,
         &host_runtime(),
         &leg,
         SECTORS.iter().map(|&(p, k)| SectorSpectrum {
@@ -1459,6 +1506,7 @@ where
 
 #[test]
 fn compact_swap_and_braid_agree_across_modes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the rank-(1,1) swap and braid of a compact diagonal are one
     // mode-free arm: both modes keep it compact on
@@ -1486,8 +1534,10 @@ fn compact_swap_and_braid_agree_across_modes() {
         rows!(false, Z2FusionRule, bosonic(), real),
         rows!(true, FermionParityFusionRule, fermionic(), real),
     ] {
-        let swapped = checked.permute(&[1], &[0]).unwrap();
-        let root = swapped.map_diagonal(|x: f64| x.abs().sqrt()).unwrap();
+        let swapped = checked.permute(engine, &[1], &[0]).unwrap();
+        let root = swapped
+            .map_diagonal(engine, |x: f64| x.abs().sqrt())
+            .unwrap();
         assert!(root.dense_data().is_err());
     }
     rows!(false, Z2FusionRule, bosonic(), complex);
@@ -1496,6 +1546,7 @@ fn compact_swap_and_braid_agree_across_modes() {
 
 #[test]
 fn checked_anyonic_compact_swap_and_braid_match_the_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a checked-only anyonic rule with a non-sign R takes the same arm;
     // the result is the dense route's, whether the dense route answers or
@@ -1504,7 +1555,7 @@ fn checked_anyonic_compact_swap_and_braid_match_the_dense_route() {
         CheckedZ2::new(BraidingStyleKind::Anyonic, 0.6).with_odd_r(0.8),
         |x: f64| x,
     );
-    let dense = d.materialize().unwrap();
+    let dense = d.materialize(engine).unwrap();
     for op in TRANSFORMS {
         match (transform(&d, op), transform(&dense, op)) {
             (Ok(_), Ok(_)) => {
@@ -1518,6 +1569,7 @@ fn checked_anyonic_compact_swap_and_braid_match_the_dense_route() {
 
 #[test]
 fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: U(1) charges ±1 trade places under duality, so each swapped
     // spectrum sits on the dual charge with coefficient 1.
@@ -1530,6 +1582,7 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
     for complex in [false, true] {
         let conv = |x: f64| Complex64::new(x, if complex { 1.0 - x } else { 0.0 });
         let d = TensorMap::diagonal(
+            engine,
             &host_runtime(),
             &leg,
             [(-1, 2), (1, 3)].map(|(charge, k)| SectorSpectrum {
@@ -1541,9 +1594,9 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
         )
         .unwrap();
         transform_rows(&d, &leg, &TRANSFORMS);
-        let source = d.diagview().unwrap();
+        let source = d.diagview(engine).unwrap();
         for op in ["permute", "transpose"] {
-            for entry in transform(&d, op).unwrap().diagview().unwrap() {
+            for entry in transform(&d, op).unwrap().diagview(engine).unwrap() {
                 let partner = source
                     .iter()
                     .find(|s| s.sector == U1Irrep::new(-entry.sector.charge()))
@@ -1557,6 +1610,7 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su2_compact_swap_and_braid_agree_across_modes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row. TensorKit's swap coefficient is 1 on
     // j = 0, 1/2 and 1 (up to its rounding); both modes keep the spectrum and
@@ -1579,6 +1633,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
     )
     .unwrap();
     let mf = TensorMap::<_, f64>::diagonal(
+        engine,
         &host_runtime(),
         &mf_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
@@ -1588,6 +1643,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
     )
     .unwrap();
     let checked = TensorMap::<_, f64>::diagonal(
+        engine,
         &host_runtime(),
         &checked_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
@@ -1601,8 +1657,8 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
         &transform_rows(&checked, &checked_leg, &TRANSFORMS),
     );
     for op in ["permute", "transpose"] {
-        let mf_swapped = transform(&mf, op).unwrap().diagview().unwrap();
-        let checked_swapped = transform(&checked, op).unwrap().diagview().unwrap();
+        let mf_swapped = transform(&mf, op).unwrap().diagview(engine).unwrap();
+        let checked_swapped = transform(&checked, op).unwrap().diagview(engine).unwrap();
         for (index, &(twice, k)) in su2.iter().enumerate() {
             let mf_entry = mf_swapped
                 .iter()
@@ -1630,6 +1686,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: non-self-dual SU(3) irreps on a dual leg (`[1,0]^2 + [0,1]`
     // dualized): the swapped spectrum moves to the destination's dual labels,
@@ -1645,6 +1702,7 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
     for complex in [false, true] {
         let conv = |x: f64| Complex64::new(x, if complex { 0.5 * x } else { 0.0 });
         let d = TensorMap::diagonal(
+            engine,
             &host_runtime(),
             &leg,
             [
@@ -1665,6 +1723,7 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
 
 #[test]
 fn fibonacci_complex_symbol_compact_transpose_and_braid_take_the_arm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol coefficient lane takes the same arm (#1866
     // X6): transpose stays compact and the braid is read from the spectrum.
@@ -1684,16 +1743,20 @@ fn fibonacci_complex_symbol_compact_transpose_and_braid_take_the_arm() {
     .d;
     transform_rows(&d, &leg, &["transpose", "braid"]);
     assert_eq!(
-        format!("{}", d.permute(&[1], &[0]).unwrap_err()),
+        format!("{}", d.permute(engine, &[1], &[0]).unwrap_err()),
         format!(
             "{}",
-            d.materialize().unwrap().permute(&[1], &[0]).unwrap_err()
+            d.materialize(engine)
+                .unwrap()
+                .permute(engine, &[1], &[0])
+                .unwrap_err()
         ),
     );
 }
 
 #[test]
 fn checked_compact_braid_decline_replays_in_one_staging() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: an R symbol beyond f32 (1e100 overflows, 1e-100 underflows)
     // declines the spectrum read; the arm replays the densified spectrum with
@@ -1706,22 +1769,25 @@ fn checked_compact_braid_decline_replays_in_one_staging() {
                 .with_odd_r(odd_r)
                 .with_salt(salt)
         };
-        let ledger = |tensor: &TensorMap<CheckedZ2, f32>| {
+        let ledger = |engine: &mut dyn Engine, tensor: &TensorMap<CheckedZ2, f32>| {
             let provider = tensor.provider();
             let mut counts = Vec::new();
             let mut result = None;
             for _ in 0..2 {
                 provider.queries.store(0, Ordering::Relaxed);
-                result = Some(tensor.braid(&[1], &[0], &[0, 1]).unwrap());
+                result = Some(tensor.braid(engine, &[1], &[0], &[0, 1]).unwrap());
                 counts.push(provider.queries.load(Ordering::Relaxed));
             }
             (counts, result.unwrap())
         };
         let values = |x: f64| x as f32;
         let (compact, _) = z2_diagonal(rule(salt), values);
-        let dense = z2_diagonal(rule(salt + 1), values).0.materialize().unwrap();
-        let (compact_counts, got) = ledger(&compact);
-        let (dense_counts, want) = ledger(&dense);
+        let dense = z2_diagonal(rule(salt + 1), values)
+            .0
+            .materialize(engine)
+            .unwrap();
+        let (compact_counts, got) = ledger(engine, &compact);
+        let (dense_counts, want) = ledger(engine, &dense);
         assert!(compact_counts[0] > 0);
         assert_eq!(
             compact_counts, dense_counts,
@@ -1744,25 +1810,29 @@ fn checked_compact_braid_decline_replays_in_one_staging() {
 
 #[test]
 fn checked_compact_swap_queries_the_provider_like_the_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the swap arm stages, resolves and commits with the dense route's
     // own staging, so cold and warm provider queries are the dense route's.
     let rule = |salt| CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0).with_salt(salt);
-    let ledger = |tensor: &TensorMap<CheckedZ2, f64>| {
+    let ledger = |engine: &mut dyn Engine, tensor: &TensorMap<CheckedZ2, f64>| {
         let provider = tensor.provider();
         (0..2)
             .map(|_| {
                 provider.queries.store(0, Ordering::Relaxed);
-                black_box(tensor.permute(&[1], &[0]).unwrap());
+                black_box(tensor.permute(engine, &[1], &[0]).unwrap());
                 provider.queries.load(Ordering::Relaxed)
             })
             .collect::<Vec<_>>()
     };
     let (compact, _) = z2_diagonal(rule(5), |x: f64| x);
-    let dense = z2_diagonal(rule(6), |x: f64| x).0.materialize().unwrap();
-    let compact_counts = ledger(&compact);
+    let dense = z2_diagonal(rule(6), |x: f64| x)
+        .0
+        .materialize(engine)
+        .unwrap();
+    let compact_counts = ledger(engine, &compact);
     assert!(compact_counts[0] > 0);
-    assert_eq!(compact_counts, ledger(&dense));
+    assert_eq!(compact_counts, ledger(engine, &dense));
 }
 
 fn warmed_swap_bytes<R>(tensor: &TensorMap<R, f64>) -> (u64, bool)
@@ -1771,9 +1841,10 @@ where
     R::Mode: TypedTensorTransformDispatch<R, f64>,
     <R::Mode as TypedTensorModeDispatch<R>>::FacadeError: std::fmt::Debug,
 {
-    black_box(tensor.permute(&[1], &[0]).unwrap());
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    black_box(tensor.permute(engine, &[1], &[0]).unwrap());
     let (swapped, allocs) =
-        counting_alloc::measure(|| black_box(tensor.permute(&[1], &[0]).unwrap()));
+        counting_alloc::measure(|| black_box(tensor.permute(engine, &[1], &[0]).unwrap()));
     (allocs.bytes, swapped.dense_data().is_err())
 }
 
@@ -1825,10 +1896,17 @@ where
     D: TensorScalar,
     Complex64: From<D>,
 {
-    let trace = |t: &TensorMap<R, D>| {
-        Complex64::from(t.trace_pairs(&[pair]).unwrap().dense_data().unwrap()[0])
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let trace = |engine: &mut dyn Engine, t: &TensorMap<R, D>| {
+        Complex64::from(
+            t.trace_pairs(engine, &[pair])
+                .unwrap()
+                .dense_data()
+                .unwrap()[0],
+        )
     };
-    (trace(d), trace(&d.materialize().unwrap()))
+    let dense = d.materialize(engine).unwrap();
+    (trace(engine, d), trace(engine, &dense))
 }
 
 #[test]
@@ -1889,6 +1967,7 @@ fn compact_full_trace_agrees_across_modes() {
 
 #[test]
 fn checked_anyonic_compact_full_trace_matches_the_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a checked-only non-sign θ(odd) = 0.6 enters the compiled
     // coefficient; the compact trace is the dense route's on either pair
@@ -1899,8 +1978,8 @@ fn checked_anyonic_compact_full_trace_matches_the_dense_route() {
     );
     for pair in [(0, 1), (1, 0)] {
         match (
-            d.trace_pairs(&[pair]),
-            d.materialize().unwrap().trace_pairs(&[pair]),
+            d.trace_pairs(engine, &[pair]),
+            d.materialize(engine).unwrap().trace_pairs(engine, &[pair]),
         ) {
             (Ok(compact), Ok(dense)) => {
                 let (compact, dense) = (
@@ -1921,6 +2000,7 @@ fn checked_anyonic_compact_full_trace_matches_the_dense_route() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su2_compact_full_trace_agrees_across_modes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row; SU(2) is bosonic, so the hand trace is
     // `Σ_j (2j + 1) Σ_i s_j[i]`.
@@ -1945,6 +2025,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
     )
     .unwrap();
     let mf = TensorMap::<_, f64>::diagonal(
+        engine,
         &host_runtime(),
         &mf_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
@@ -1954,6 +2035,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
     )
     .unwrap();
     let checked = TensorMap::<_, f64>::diagonal(
+        engine,
         &host_runtime(),
         &checked_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
@@ -1978,29 +2060,34 @@ fn su2_compact_full_trace_agrees_across_modes() {
 
 #[test]
 fn checked_compact_full_trace_queries_the_provider_like_the_dense_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the trace arm only reads the dense route's compiled terms, so
     // cold and warm provider queries are the dense route's.
     let rule = |salt| CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0).with_salt(salt);
-    let ledger = |tensor: &TensorMap<CheckedZ2, f64>| {
+    let ledger = |engine: &mut dyn Engine, tensor: &TensorMap<CheckedZ2, f64>| {
         let provider = tensor.provider();
         (0..2)
             .map(|_| {
                 provider.queries.store(0, Ordering::Relaxed);
-                black_box(tensor.trace_pairs(&[(0, 1)]).unwrap());
+                black_box(tensor.trace_pairs(engine, &[(0, 1)]).unwrap());
                 provider.queries.load(Ordering::Relaxed)
             })
             .collect::<Vec<_>>()
     };
     let (compact, _) = z2_diagonal(rule(7), |x: f64| x);
-    let dense = z2_diagonal(rule(8), |x: f64| x).0.materialize().unwrap();
-    let compact_counts = ledger(&compact);
+    let dense = z2_diagonal(rule(8), |x: f64| x)
+        .0
+        .materialize(engine)
+        .unwrap();
+    let compact_counts = ledger(engine, &compact);
     assert!(compact_counts[0] > 0);
-    assert_eq!(compact_counts, ledger(&dense));
+    assert_eq!(compact_counts, ledger(engine, &dense));
 }
 
 #[test]
 fn checked_compact_full_trace_failure_is_typed_and_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a provider failing during the trace compile fails the compact
     // trace with the dense route's typed error, and nothing is published.
@@ -2030,8 +2117,8 @@ fn checked_compact_full_trace_failure_is_typed_and_nonpublishing() {
         CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0).with_salt(9),
         |x: f64| x,
     );
-    let dense = compact.materialize().unwrap();
-    let spectrum = symtn::expert::diagonal_spectrum(&compact).unwrap();
+    let dense = compact.materialize(engine).unwrap();
+    let spectrum = symtn::expert::diagonal_spectrum(engine, &compact).unwrap();
     symtn_core::clear_structure_caches();
     let published = || {
         StructureCacheKind::ALL.map(|kind| {
@@ -2042,8 +2129,8 @@ fn checked_compact_full_trace_failure_is_typed_and_nonpublishing() {
     let before = published();
     let provider = compact.provider();
     provider.fail_queries.store(true, Ordering::Relaxed);
-    let result = compact.trace_pairs(&[(0, 1)]);
-    let dense_result = dense.trace_pairs(&[(0, 1)]);
+    let result = compact.trace_pairs(engine, &[(0, 1)]);
+    let dense_result = dense.trace_pairs(engine, &[(0, 1)]);
     provider.fail_queries.store(false, Ordering::Relaxed);
     assert!(
         matches!(
@@ -2060,7 +2147,7 @@ fn checked_compact_full_trace_failure_is_typed_and_nonpublishing() {
     );
     assert_eq!(published(), before);
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&compact).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, &compact).unwrap(),
         spectrum
     );
 }
@@ -2071,8 +2158,9 @@ where
     R::Mode: symtn::typed::TypedTensorTraceDispatch<R, f64>,
     <R::Mode as TypedTensorModeDispatch<R>>::FacadeError: std::fmt::Debug,
 {
-    black_box(tensor.trace_pairs(&[(0, 1)]).unwrap());
-    counting_alloc::measure(|| black_box(tensor.trace_pairs(&[(0, 1)]).unwrap()))
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    black_box(tensor.trace_pairs(engine, &[(0, 1)]).unwrap());
+    counting_alloc::measure(|| black_box(tensor.trace_pairs(engine, &[(0, 1)]).unwrap()))
         .1
         .bytes
 }
@@ -2124,16 +2212,19 @@ fn compact_full_trace_allocates_no_spectrum_sized_buffer_in_both_modes() {
 #[test]
 #[ignore = "needs a CUDA device"]
 fn cuda_column_matches_the_host_for_every_compact_row() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule};
     fn assert_same<D: TensorScalar + Copy>(
+        engine: &mut dyn symtn::typed::Engine,
         what: &str,
         host: &TensorMap<impl TypedSectorAdmission, D>,
         device: &[D],
     ) where
         Complex64: From<D>,
     {
-        let host = host.materialize().unwrap();
+        let host = host.materialize(engine).unwrap();
         let host = host.dense_data().unwrap();
         assert_eq!(host.len(), device.len(), "{what}");
         for (&x, &y) in host.iter().zip(device) {
@@ -2145,8 +2236,8 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
         ($row:expr, $leg:expr, $label:expr, $conv:expr) => {{
             let row: &str = $row;
             let leg = $leg;
-            let host = bond_fixture_on(&fixtures::cuda_runtime(), &leg, &leg, $label, $conv);
-            let device = [&host.d, &host.e, &host.a, &host.b].map(|t| t.to_cuda().unwrap());
+            let host = bond_fixture_on(&fixtures::host_runtime(), &leg, &leg, $label, $conv);
+            let device = [&host.d, &host.e, &host.a, &host.b].map(|t| t.to_cuda(cuda).unwrap());
             let pick_device = |code: char| match code {
                 'd' => &device[0],
                 'e' => &device[1],
@@ -2156,14 +2247,15 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
             for op in TRANSFORMS {
                 let expected = transform(&host.d, op).unwrap();
                 let actual = match op {
-                    "permute" => device[0].permute(&[1], &[0]),
-                    "transpose" => device[0].transpose(&[1], &[0]),
-                    _ => device[0].braid(&[1], &[0], &[0, 1]),
+                    "permute" => device[0].permute(cuda, &[1], &[0]),
+                    "transpose" => device[0].transpose(cuda, &[1], &[0]),
+                    _ => device[0].braid(cuda, &[1], &[0], &[0, 1]),
                 }
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap();
                 assert_same(
+                    engine,
                     &format!("{row} {op}"),
                     &expected,
                     actual.dense_data().unwrap(),
@@ -2171,9 +2263,14 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
             }
             for legs in LEG_SETS {
                 for direction in [Direction::Forward, Direction::Inverse] {
-                    let expected = host.d.twist(legs, direction).unwrap();
-                    let actual = device[0].twist(legs, direction).unwrap().to_host().unwrap();
+                    let expected = host.d.twist(engine, legs, direction).unwrap();
+                    let actual = device[0]
+                        .twist(cuda, legs, direction)
+                        .unwrap()
+                        .to_host(cuda)
+                        .unwrap();
                     assert_same(
+                        engine,
                         &format!("{row} twist {legs:?} {direction:?}"),
                         &expected,
                         actual.dense_data().unwrap(),
@@ -2184,17 +2281,21 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
                 let (host_lhs, host_rhs) = (pick(&host, lhs), pick(&host, rhs));
                 let (device_lhs, device_rhs) = (pick_device(lhs), pick_device(rhs));
                 let (expected, actual) = match spec {
-                    None => (host_lhs.compose(host_rhs), device_lhs.compose(device_rhs)),
+                    None => (
+                        host_lhs.compose(engine, host_rhs),
+                        device_lhs.compose(cuda, device_rhs),
+                    ),
                     Some(spec) => (
-                        host_lhs.contract(host_rhs, &spec),
-                        device_lhs.contract(device_rhs, &spec),
+                        host_lhs.contract(engine, host_rhs, &spec),
+                        device_lhs.contract(cuda, device_rhs, &spec),
                     ),
                 };
                 match (expected, actual) {
                     (Ok(expected), Ok(actual)) => assert_same(
+                        engine,
                         &format!("{row} {what}"),
                         &expected,
-                        actual.to_host().unwrap().dense_data().unwrap(),
+                        actual.to_host(cuda).unwrap().dense_data().unwrap(),
                     ),
                     (Err(_), Err(_)) => {}
                     (expected, actual) => panic!(
@@ -2232,6 +2333,7 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
 /// Lives here for the `CheckedZ2` rule, whose braiding is a parameter.
 #[test]
 fn checked_transform_into_reports_the_same_error_cold_and_warm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     for (salt, braiding, expected) in [
@@ -2241,26 +2343,29 @@ fn checked_transform_into_reports_the_same_error_cold_and_warm() {
         (0x72, BraidingStyleKind::Bosonic, "SpaceMismatch"),
     ] {
         let leg = z2_leg(CheckedZ2::new(braiding, 0.6).with_salt(salt));
-        let source =
-            TensorMap::<_, f64>::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, index| {
-                index.iter().sum::<usize>() as f64 + 1.0
-            })
-            .unwrap();
+        let source = TensorMap::<_, f64>::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg, &leg],
+            [&leg],
+            |_, index| index.iter().sum::<usize>() as f64 + 1.0,
+        )
+        .unwrap();
         // `[W, W] <- [W]`, where the result is `[W] <- [W, W]`.
-        let mut wrong = source.axpby(0.0, &source, 0.0).unwrap();
-        let mut into = || {
+        let mut wrong = source.axpby(engine, 0.0, &source, 0.0).unwrap();
+        let mut into = |engine: &mut dyn Engine| {
             format!(
                 "{:?}",
                 source
-                    .permute_into(&[0], &[1, 2], &mut wrong, 1.0, 0.0)
+                    .permute_into(engine, &[0], &[1, 2], &mut wrong, 1.0, 0.0)
                     .unwrap_err()
             )
         };
-        let cold = into();
+        let cold = into(engine);
         // Warms the destination memo of these axes; a braid is admitted
         // where the permute is not.
-        drop(source.braid(&[0], &[1, 2], &[0, 1, 2]).unwrap());
-        let warm = into();
+        drop(source.braid(engine, &[0], &[1, 2], &[0, 1, 2]).unwrap());
+        let warm = into(engine);
         assert!(cold.contains(expected), "{braiding:?}: {cold}");
         assert_eq!(warm, cold, "{braiding:?}");
     }
@@ -2287,10 +2392,11 @@ where
     R::Mode: TypedTensorTransformDispatch<R, D>,
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     match op {
-        "identity" => tensor.permute(&[0], &[1]),
-        "repartition (0, 2)" => tensor.repartition(0),
-        "repartition (2, 0)" => tensor.repartition(2),
+        "identity" => tensor.permute(engine, &[0], &[1]),
+        "repartition (0, 2)" => tensor.repartition(engine, 0),
+        "repartition (2, 0)" => tensor.repartition(engine, 2),
         _ => transform(tensor, op),
     }
 }
@@ -2307,12 +2413,13 @@ where
     R::Mode: TypedTensorTransformDispatch<R, D>,
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     match op {
-        "identity" => tensor.permute_into(&[0], &[1], destination, alpha, beta),
-        "permute" => tensor.permute_into(&[1], &[0], destination, alpha, beta),
-        "transpose" => tensor.transpose_into(&[1], &[0], destination, alpha, beta),
-        "braid" => tensor.braid_into(&[1], &[0], &[0, 1], destination, alpha, beta),
-        _ => tensor.repartition_into(destination, alpha, beta),
+        "identity" => tensor.permute_into(engine, &[0], &[1], destination, alpha, beta),
+        "permute" => tensor.permute_into(engine, &[1], &[0], destination, alpha, beta),
+        "transpose" => tensor.transpose_into(engine, &[1], &[0], destination, alpha, beta),
+        "braid" => tensor.braid_into(engine, &[1], &[0], &[0, 1], destination, alpha, beta),
+        _ => tensor.repartition_into(engine, destination, alpha, beta),
     }
 }
 
@@ -2324,8 +2431,10 @@ where
     <R::Mode as TypedTensorModeDispatch<R>>::FacadeError: std::fmt::Debug,
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let eager = bond_eager(tensor, op).unwrap();
     TensorMap::from_subblock_fn(
+        engine,
         tensor.runtime(),
         &eager.codomain(),
         &eager.domain(),
@@ -2389,6 +2498,7 @@ fn compact_transform_into_allocates_no_dense_source_in_both_modes() {
 
 #[test]
 fn compact_braid_into_decline_replays_the_densified_source() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a braid coefficient beyond f32 declines the diagonal read, so the
     // `_into` replays the densified spectrum through the structure it staged:
@@ -2400,6 +2510,7 @@ fn compact_braid_into_decline_replays_the_densified_source() {
             .with_salt(salt);
         let leg = GradedSpace::try_new(Arc::new(rule), [(Z2Irrep::ODD, K)]).unwrap();
         let compact = TensorMap::<_, f32>::diagonal(
+            engine,
             &host_runtime(),
             &leg,
             [SectorSpectrum {
@@ -2409,9 +2520,9 @@ fn compact_braid_into_decline_replays_the_densified_source() {
         )
         .unwrap();
         let want = compact
-            .materialize()
+            .materialize(engine)
             .unwrap()
-            .braid(&[1], &[0], &[0, 1])
+            .braid(engine, &[1], &[0], &[0, 1])
             .unwrap();
         let mut destination = bond_destination(&compact, "braid");
         bond_into(&compact, "braid", &mut destination, 1.0, 0.0).unwrap();
@@ -2437,17 +2548,19 @@ fn compact_braid_into_decline_replays_the_densified_source() {
 
 #[test]
 fn checked_compact_transform_into_queries_the_provider_like_eager() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact `_into` stages and resolves with the eager compact
     // arm's own staging, so cold and warm provider queries are eager's.
-    let ledger =
+    let mut ledger =
         |tensor: &TensorMap<CheckedZ2, f64>, leg: &GradedSpace<CheckedZ2>, op: &str, into: bool| {
             let provider = tensor.provider();
             // Built on the swapped legs directly: deriving them through the eager
             // op would warm the very caches the cold count reads.
             let dual = leg.try_dual().unwrap();
             let mut destination = into.then(|| {
-                TensorMap::from_subblock_fn(tensor.runtime(), [&dual], [&dual], |_, _| 0.0).unwrap()
+                TensorMap::from_subblock_fn(engine, tensor.runtime(), [&dual], [&dual], |_, _| 0.0)
+                    .unwrap()
             });
             (0..2)
                 .map(|_| {
@@ -2494,19 +2607,24 @@ fn z2_legs_on(legs: Vec<GradedSpace<CheckedZ2>>, salt: u8) -> Vec<GradedSpace<Ch
 
 /// The lazy adjoint `[W] ← [W, W]` of a checked fZ2 tensor on rule `salt`.
 fn lazy_z2(runtime: &Runtime, salt: u8) -> TensorMap<CheckedZ2, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = z2_leg(checked_fermionic(salt));
-    TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], |_, index| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], |_, index| {
         index.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap()
-    .adjoint()
+    .adjoint(engine)
     .unwrap()
 }
 
 /// A zero destination for `lazy.permute(&[1, 0], &[2])` on rule `salt`.
 fn lazy_z2_destination(runtime: &Runtime, salt: u8) -> TensorMap<CheckedZ2, f64> {
-    let shape = lazy_z2(runtime, 0xff).permute(&[1, 0], &[2]).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let shape = lazy_z2(runtime, 0xff)
+        .permute(engine, &[1, 0], &[2])
+        .unwrap();
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         &z2_legs_on(shape.codomain(), salt),
         &z2_legs_on(shape.domain(), salt),
@@ -2517,13 +2635,14 @@ fn lazy_z2_destination(runtime: &Runtime, salt: u8) -> TensorMap<CheckedZ2, f64>
 
 #[test]
 fn checked_lazy_transform_into_queries_no_more_than_eager() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: eager transforms the parent and re-derives the adjoint result
+    // What: eager transforms the mut parent and re-derives the adjoint result
     // space; the `_into` reads the parent's storage through the logical
     // source, with no result space to derive. Cold it asks the provider at
     // most what eager asks; warm neither asks anything.
     let runtime = host_runtime();
-    let ledger = |salt: u8, into: bool| {
+    let mut ledger = |salt: u8, into: bool| {
         let lazy = lazy_z2(&runtime, salt);
         let mut destination = lazy_z2_destination(&runtime, salt);
         let provider = lazy.provider();
@@ -2531,10 +2650,10 @@ fn checked_lazy_transform_into_queries_no_more_than_eager() {
             .map(|_| {
                 provider.queries.store(0, Ordering::Relaxed);
                 if into {
-                    lazy.permute_into(&[1, 0], &[2], &mut destination, 1.0, 0.0)
+                    lazy.permute_into(engine, &[1, 0], &[2], &mut destination, 1.0, 0.0)
                         .unwrap();
                 } else {
-                    drop(black_box(lazy.permute(&[1, 0], &[2]).unwrap()));
+                    drop(black_box(lazy.permute(engine, &[1, 0], &[2]).unwrap()));
                 }
                 assert!(lazy.dense_data().is_err(), "the lazy source materialized");
                 provider.queries.load(Ordering::Relaxed)
@@ -2551,6 +2670,7 @@ fn checked_lazy_transform_into_queries_no_more_than_eager() {
 
 #[test]
 fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a provider failing in the staging of a compact or lazy-adjoint
     // source's `_into` is the typed plan error, leaves the destination bit
@@ -2592,7 +2712,7 @@ fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() 
     let (compact, leg) = z2_diagonal(checked_fermionic(0xc0), |x: f64| x);
     let dual = leg.try_dual().unwrap();
     let mut compact_destination =
-        TensorMap::from_subblock_fn(compact.runtime(), [&dual], [&dual], |_, index| {
+        TensorMap::from_subblock_fn(engine, compact.runtime(), [&dual], [&dual], |_, index| {
             index[0] as f64 + 0.25
         })
         .unwrap();
@@ -2634,10 +2754,10 @@ fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() 
         "compact braid",
         compact.provider(),
         compact_destination,
-        |d| compact.braid_into(&[1], &[0], &[0, 1], d, 1.0, 0.5)
+        |d| compact.braid_into(engine, &[1], &[0], &[0, 1], d, 1.0, 0.5)
     );
     fails_then_publishes!("lazy permute", lazy.provider(), lazy_destination, |d| lazy
-        .permute_into(&[1, 0], &[2], d, 1.0, 0.5));
+        .permute_into(engine, &[1, 0], &[2], d, 1.0, 0.5));
 }
 
 // ---- contraction `_into` ----
@@ -2650,6 +2770,7 @@ fn contract_destination(
     fixture: &BondFixture<CheckedZ2, f64>,
     case: BondCase,
 ) -> TensorMap<CheckedZ2, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (_, _, lhs, rhs, spec) = case;
     let scratch = bond_fixture(
         &z2_leg(CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0).with_salt(0xff)),
@@ -2657,7 +2778,7 @@ fn contract_destination(
         |x: f64| x,
     );
     let shape = pick(&scratch, lhs)
-        .contract(pick(&scratch, rhs), &spec.unwrap())
+        .contract(engine, pick(&scratch, rhs), &spec.unwrap())
         .unwrap();
     let leg = &fixture.d.codomain()[0];
     let on = |legs: Vec<GradedSpace<CheckedZ2>>| {
@@ -2672,6 +2793,7 @@ fn contract_destination(
             .collect::<Vec<_>>()
     };
     TensorMap::from_subblock_fn(
+        engine,
         fixture.d.runtime(),
         &on(shape.codomain()),
         &on(shape.domain()),
@@ -2682,12 +2804,13 @@ fn contract_destination(
 
 #[test]
 fn checked_contract_into_queries_the_provider_like_eager() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the dense `contract_into` runs eager's staging and planning, and
     // the compact one eager's arm (the braiding gate, plus one permute
     // staging when reordered), so cold and warm provider queries equal
     // eager's on every pattern both take alike.
-    let ledger = |salt: u8, case: usize, into: bool| {
+    let mut ledger = |salt: u8, case: usize, into: bool| {
         let rule = CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0).with_salt(salt);
         let fixture = bond_fixture(&z2_leg(rule), parity, |x: f64| x);
         let (what, _, lhs, rhs, spec) = DENSE_AND_ARM_CASES[case];
@@ -2698,10 +2821,10 @@ fn checked_contract_into_queries_the_provider_like_eager() {
             .map(|_| {
                 provider.queries.store(0, Ordering::Relaxed);
                 if into {
-                    lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5)
+                    lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5)
                         .unwrap_or_else(|error| panic!("{what}: {error}"));
                 } else {
-                    drop(black_box(lhs.contract(rhs, &spec).unwrap()));
+                    drop(black_box(lhs.contract(engine, rhs, &spec).unwrap()));
                 }
                 provider.queries.load(Ordering::Relaxed)
             })
@@ -2754,6 +2877,7 @@ const DENSE_AND_ARM_CASES: [BondCase; 12] = [
 
 #[test]
 fn checked_contract_into_failure_is_typed_and_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a provider failing in the staging of a dense `contract_into`, or
     // in the permute staging of a reordered compact arm, is the typed plan
@@ -2811,7 +2935,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
         let (before, original) = (published(), bits(&destination));
 
         provider.fail_queries.store(true, Ordering::Relaxed);
-        let result = lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5);
+        let result = lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5);
         provider.fail_queries.store(false, Ordering::Relaxed);
         assert!(
             matches!(
@@ -2826,7 +2950,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(published(), before, "{what}: the failure published");
 
         let shared = destination.clone();
-        let result = lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5);
+        let result = lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5);
         assert!(
             matches!(
                 result,
@@ -2838,7 +2962,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(bits(&destination), original, "{what}: shared");
         assert_eq!(published(), before, "{what}: the shared call published");
 
-        lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5)
+        lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5)
             .unwrap();
         assert_ne!(published(), before, "{what}: the success published nothing");
     }
@@ -2846,6 +2970,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_contract_into_reports_the_same_error_cold_and_warm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: staging (where the checked dense route refuses a fermionic rule)
     // runs before the destination match, and no contraction staging step is
@@ -2856,9 +2981,10 @@ fn checked_contract_into_reports_the_same_error_cold_and_warm() {
     let case = DENSE_AND_ARM_CASES[1];
     let (_, _, lhs, rhs, spec) = case;
     let (lhs, rhs, spec) = (pick(&fixture, lhs), pick(&fixture, rhs), spec.unwrap());
-    let eager = lhs.contract(rhs, &spec).unwrap_err().to_string();
+    let eager = lhs.contract(engine, rhs, &spec).unwrap_err().to_string();
     let mut right = contract_destination(&fixture, case);
     let mut wrong = TensorMap::from_subblock_fn(
+        engine,
         fixture.a.runtime(),
         &fixture.a.codomain(),
         &fixture.a.domain(),
@@ -2868,11 +2994,11 @@ fn checked_contract_into_reports_the_same_error_cold_and_warm() {
     for pass in ["cold", "warm"] {
         for destination in [&mut right, &mut wrong] {
             let error = lhs
-                .contract_into(rhs, &spec, destination, 1.0, 0.5)
+                .contract_into(engine, rhs, &spec, destination, 1.0, 0.5)
                 .unwrap_err();
             assert_eq!(error.to_string(), eager, "{pass}");
         }
-        drop(black_box(lhs.contract(rhs, &spec)));
+        drop(black_box(lhs.contract(engine, rhs, &spec)));
     }
 }
 
@@ -2886,12 +3012,18 @@ where
     D: TensorScalar + std::fmt::Debug,
     Complex64: From<D>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for (what, _, lhs, rhs, spec) in CONTRACT_CASES {
         let (lhs, rhs, spec) = (pick(fixture, lhs), pick(fixture, rhs), spec.unwrap());
-        let eager = lhs.contract(rhs, &spec).unwrap().materialize().unwrap();
+        let eager = lhs
+            .contract(engine, rhs, &spec)
+            .unwrap()
+            .materialize(engine)
+            .unwrap();
         for beta in [0.0, 0.5, 1.0] {
             let mut next = 0.0;
             let mut destination = TensorMap::from_subblock_fn(
+                engine,
                 fixture.d.runtime(),
                 &eager.codomain(),
                 &eager.domain(),
@@ -2907,8 +3039,15 @@ where
                 .iter()
                 .map(|&x| Complex64::from(x))
                 .collect();
-            lhs.contract_into(rhs, &spec, &mut destination, alpha, D::from_real(beta))
-                .unwrap();
+            lhs.contract_into(
+                engine,
+                rhs,
+                &spec,
+                &mut destination,
+                alpha,
+                D::from_real(beta),
+            )
+            .unwrap();
             let alpha = Complex64::from(alpha);
             for ((&got, &e), &b) in destination
                 .dense_data()
@@ -2978,16 +3117,18 @@ fn compact_contract_into_is_alpha_eager_plus_beta_destination_in_every_mode() {
 const TRACE_INTO_SOURCES: [&str; 3] = ["dense", "lazy", "compact"];
 
 fn trace_into_source(runtime: &Runtime, salt: u8, kind: &str) -> TensorMap<CheckedZ2, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if kind == "compact" {
         return z2_diagonal(checked_fermionic(salt), |x: f64| x).0;
     }
     let leg = z2_leg(checked_fermionic(salt));
-    let dense = TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg, &leg], |_, index| {
-        index.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap();
+    let dense =
+        TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg, &leg], |_, index| {
+            index.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap();
     if kind == "lazy" {
-        dense.adjoint().unwrap()
+        dense.adjoint(engine).unwrap()
     } else {
         dense
     }
@@ -3005,23 +3146,25 @@ fn trace_into_pairs(kind: &str) -> &'static [(usize, usize)] {
 /// that source: `[W] ← [W]` on the legs directly; the scalar one as the full
 /// trace of a differently shaped dense `[W₁] ← [W₁]`.
 fn trace_into_destination(runtime: &Runtime, salt: u8, kind: &str) -> TensorMap<CheckedZ2, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if kind == "compact" {
         let leg = GradedSpace::try_new(
             Arc::new(checked_fermionic(salt)),
             [(Z2Irrep::new(0), 1), (Z2Irrep::new(1), 1)],
         )
         .unwrap();
-        return TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, _| 1.0)
+        return TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| 1.0)
             .unwrap()
-            .trace_pairs(&[(0, 1)])
+            .trace_pairs(engine, &[(0, 1)])
             .unwrap();
     }
     let leg = z2_leg(checked_fermionic(salt));
-    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, _| 0.0).unwrap()
+    TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| 0.0).unwrap()
 }
 
 #[test]
 fn checked_trace_pairs_into_queries_the_provider_like_eager() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `trace_pairs_into` runs eager's staging and compiled terms (the
     // compact read included) and compares the destination provider-free, so
@@ -3029,7 +3172,7 @@ fn checked_trace_pairs_into_queries_the_provider_like_eager() {
     let runtime = host_runtime();
     let mut cold = Vec::new();
     for (case, kind) in TRACE_INTO_SOURCES.into_iter().enumerate() {
-        let ledger = |salt: u8, into: bool| {
+        let mut ledger = |salt: u8, into: bool| {
             let source = trace_into_source(&runtime, salt, kind);
             let mut destination = trace_into_destination(source.runtime(), salt, kind);
             let pairs = trace_into_pairs(kind);
@@ -3039,10 +3182,10 @@ fn checked_trace_pairs_into_queries_the_provider_like_eager() {
                     provider.queries.store(0, Ordering::Relaxed);
                     if into {
                         source
-                            .trace_pairs_into(pairs, &mut destination, 1.0, 0.5)
+                            .trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5)
                             .unwrap();
                     } else {
-                        drop(black_box(source.trace_pairs(pairs).unwrap()));
+                        drop(black_box(source.trace_pairs(engine, pairs).unwrap()));
                     }
                     provider.queries.load(Ordering::Relaxed)
                 })
@@ -3060,6 +3203,7 @@ fn checked_trace_pairs_into_queries_the_provider_like_eager() {
 
 #[test]
 fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a provider failing in the staging of `trace_pairs_into` is the
     // typed plan error, leaves the destination bit for bit and publishes
@@ -3119,7 +3263,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         let (before, original) = (published(), bits(&destination));
 
         provider.fail_queries.store(true, Ordering::Relaxed);
-        let result = source.trace_pairs_into(pairs, &mut destination, 1.0, 0.5);
+        let result = source.trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5);
         provider.fail_queries.store(false, Ordering::Relaxed);
         assert!(
             matches!(
@@ -3134,7 +3278,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(published(), before, "{kind}: the failure published");
 
         let shared = destination.clone();
-        let result = source.trace_pairs_into(pairs, &mut destination, 1.0, 0.5);
+        let result = source.trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5);
         assert!(
             matches!(
                 result,
@@ -3147,7 +3291,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(published(), before, "{kind}: the shared call published");
 
         source
-            .trace_pairs_into(pairs, &mut destination, 1.0, 0.5)
+            .trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5)
             .unwrap();
         assert_ne!(published(), before, "{kind}: the success published nothing");
     }
@@ -3155,6 +3299,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
 
 #[test]
 fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the HomSpace comparison and the pair duality are staging, which
     // runs in full on every call, so a non-dual pair reports eager's
@@ -3165,23 +3310,25 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
     let dual = leg.try_dual().unwrap();
     // `(0, 2)` joins `W` with `W'`: the untraced legs are those of a valid
     // trace, the pair is not dual.
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&dual, &leg], |_, index| {
-        index.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap();
-    let eager = report(&source.trace_pairs(&[(0, 2)]).unwrap_err());
-    let mut right = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 0.0).unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&dual, &leg], |_, index| {
+            index.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap();
+    let eager = report(&source.trace_pairs(engine, &[(0, 2)]).unwrap_err());
+    let mut right =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 0.0).unwrap();
     let mut wrong =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, _| 0.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, _| 0.0).unwrap();
     let mut seen = Vec::new();
     for pass in ["cold", "warm"] {
         let right_error = report(
             &source
-                .trace_pairs_into(&[(0, 2)], &mut right, 1.0, 0.5)
+                .trace_pairs_into(engine, &[(0, 2)], &mut right, 1.0, 0.5)
                 .unwrap_err(),
         );
         let wrong_error = source
-            .trace_pairs_into(&[(0, 2)], &mut wrong, 1.0, 0.5)
+            .trace_pairs_into(engine, &[(0, 2)], &mut wrong, 1.0, 0.5)
             .unwrap_err();
         assert!(
             matches!(
@@ -3194,7 +3341,7 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
         assert_eq!(right_error, eager, "{pass}");
         seen.push((right_error, wrong_error));
         // Warms the source's trace structures on a valid pair.
-        drop(black_box(source.trace_pairs(&[(1, 3)]).unwrap()));
+        drop(black_box(source.trace_pairs(engine, &[(1, 3)]).unwrap()));
     }
     assert_eq!(seen[0], seen[1]);
 }

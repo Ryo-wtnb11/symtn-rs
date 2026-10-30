@@ -11,7 +11,6 @@
 //! feature (the same split `symtn-dense`'s `cuda_region` makes).
 
 use core::any::TypeId;
-use std::collections::HashSet;
 use std::sync::Weak;
 
 use symtn_dense::DenseGemmBatchJob;
@@ -85,21 +84,6 @@ pub(crate) struct DeviceTransformPlan {
     pub(crate) workspace_destination_len: usize,
     /// Longest inactive layout, so the zero template is sized once.
     pub(crate) max_zero_len: usize,
-    /// Distinct cuTENSOR operand signatures this plan submits.
-    pub(crate) plan_signatures: PlanSignatures,
-}
-
-/// Distinct cuTENSOR plan signatures of one structure, split by when they are
-/// submitted.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct PlanSignatures {
-    /// Submitted by a nonzero-scale replay: moves, packs, scatters, GEMMs and
-    /// the inactive-layout zero fills.
-    pub(crate) submitted: usize,
-    /// The zero fills over written destinations a zero caller scale (#1438)
-    /// submits instead of the moves and scatters, less those that coincide
-    /// with a `submitted` signature.
-    pub(crate) zero_fill: usize,
 }
 
 fn unsupported(message: &'static str) -> OperationError {
@@ -266,8 +250,6 @@ pub(crate) fn compile_device_plan<C: Copy>(
         });
     }
 
-    let plan_signatures =
-        distinct_plan_signatures(&moves, &recouplings, &zeros, task.storage_conjugate())?;
     Ok(DeviceTransformPlan {
         moves,
         recouplings,
@@ -275,7 +257,6 @@ pub(crate) fn compile_device_plan<C: Copy>(
         workspace_source_len: recoupling_plan.source_len(),
         workspace_destination_len: recoupling_plan.destination_len(),
         max_zero_len,
-        plan_signatures,
     })
 }
 
@@ -330,96 +311,6 @@ fn column_move<C: Copy>(
         // coefficients are the recoupling matrix the GEMM applies.
         coefficient: None,
     }))
-}
-
-/// Distinct cuTENSOR contraction signatures this plan submits.
-///
-/// One plan is built per `(dims, destination strides, source strides,
-/// source conjugation)` triple; a zero fill reads a packed template of the
-/// fill's own extents, so its source strides are the packed ones.
-///
-/// Exact per operand operator: Tenferro's contraction plan key is (dtype, the
-/// three operand layouts, their alignments, the operand operators, workspace
-/// preference). Alignment is the constant `size_of::<D>()` for every view, so
-/// offsets do not multiply keys, and the accumulation scalars are not in the
-/// key at all. Conjugation *is* in the key, and a structure submits two values
-/// of it once `storage_conjugate` is set: the Single blocks and the pack
-/// columns read the conjugated source, while the scatter columns and the zero
-/// fills read the workspace and the zero template unconjugated. A pack and a
-/// scatter that normalise to the same triple — two contiguous columns are both
-/// `([N], [1], [1])` — are therefore two plans, and counting them once would
-/// under-raise the cap by exactly the amount a conjugated transform needs.
-///
-/// A zero caller scale writes each Single and scatter destination with a zero
-/// fill instead of its move (#1438). Those fills' signatures are returned
-/// apart, as the delta over the ones a nonzero-scale replay submits, so a
-/// workload that never replays with a zero scale does not reserve them.
-///
-/// The per-executor *sum* of these counts over-counts signatures two structures
-/// share, which is the safe direction for a cap.
-/// `(dims, destination strides, source strides, source conjugation)` — the
-/// operand facts a cuTENSOR plan is keyed on, for the region moves this plan
-/// submits.
-type RegionSignature<'a> = (&'a [usize], &'a [usize], Vec<usize>, bool);
-
-fn distinct_plan_signatures(
-    moves: &[DeviceMoveSpec],
-    recouplings: &[DeviceRecouplingSpec],
-    zeros: &[DeviceRegionSpec],
-    storage_conjugate: bool,
-) -> Result<PlanSignatures, OperationError> {
-    let mut seen: HashSet<RegionSignature<'_>> = HashSet::new();
-    let conjugated = moves
-        .iter()
-        .chain(recouplings.iter().flat_map(|entry| entry.packs.iter()));
-    for entry in conjugated {
-        seen.insert((
-            entry.dims.as_slice(),
-            entry.dst_strides.as_slice(),
-            entry.src_strides.clone(),
-            storage_conjugate,
-        ));
-    }
-    for entry in recouplings.iter().flat_map(|entry| entry.scatters.iter()) {
-        seen.insert((
-            entry.dims.as_slice(),
-            entry.dst_strides.as_slice(),
-            entry.src_strides.clone(),
-            false,
-        ));
-    }
-    for zero in zeros {
-        seen.insert((
-            zero.dims.as_slice(),
-            zero.strides.as_slice(),
-            crate::strided::column_major_strides_usize(&zero.dims)?,
-            false,
-        ));
-    }
-    let submitted = seen.len();
-    let written = moves
-        .iter()
-        .chain(recouplings.iter().flat_map(|entry| entry.scatters.iter()));
-    for entry in written {
-        seen.insert((
-            entry.dims.as_slice(),
-            entry.dst_strides.as_slice(),
-            crate::strided::column_major_strides_usize(&entry.dims)?,
-            false,
-        ));
-    }
-    let zero_fill = seen.len() - submitted;
-    // A recoupling GEMM is a contraction of three dense column-major operands,
-    // so its plan key is its `(rows, contracted, cols)` shape; jobs of equal
-    // shape share one plan.
-    let gemms: HashSet<(usize, usize, usize)> = recouplings
-        .iter()
-        .map(|entry| (entry.job.rows, entry.job.contracted, entry.job.cols))
-        .collect();
-    Ok(PlanSignatures {
-        submitted: submitted.saturating_add(gemms.len()),
-        zero_fill,
-    })
 }
 
 /// Identity of device state prepared for one completed structure.
@@ -537,11 +428,6 @@ impl<V: SharedPayload> PreparedDeviceCache<V> {
         self.touch(index)
     }
 
-    /// The entry at `index`, mutably, without changing the recency order.
-    pub(crate) fn value_mut(&mut self, index: usize) -> Option<&mut V> {
-        self.entries.get_mut(index).map(|entry| &mut entry.value)
-    }
-
     /// Drops every entry whose structure no longer exists.
     pub(crate) fn purge_dead(&mut self) {
         let mut index = 0;
@@ -598,11 +484,6 @@ impl<V: SharedPayload> PreparedDeviceCache<V> {
         }
     }
 
-    /// Every live value, for callers that aggregate over the whole cache.
-    pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
-        self.entries.iter().map(|entry| &entry.value)
-    }
-
     /// Every value prepared on context `context`.
     pub(crate) fn values_on(&self, context: u64) -> impl Iterator<Item = &V> {
         self.entries
@@ -650,15 +531,6 @@ mod tests {
         assert_ne!(entry.dst_strides, entry.src_strides);
         assert_eq!(entry.coefficient, Some(0));
         assert!(plan.zeros.is_empty());
-        // The transposing move is submitted; the zero fill a zero caller scale
-        // writes over its destination instead (#1438) is a separate signature.
-        assert_eq!(
-            plan.plan_signatures,
-            PlanSignatures {
-                submitted: 1,
-                zero_fill: 1
-            }
-        );
     }
 
     #[test]
@@ -866,102 +738,6 @@ mod tests {
     }
 
     #[test]
-    fn equal_layouts_share_one_plan_signature_and_distinct_ones_do_not() {
-        // What: the signature count is what the plan-cache cap is raised to, so
-        // it must collapse repeated layouts and separate genuinely distinct
-        // ones — including a zero fill, which reads a packed template.
-        let same = DeviceMoveSpec {
-            dims: vec![4],
-            dst_strides: vec![1],
-            src_strides: vec![1],
-            dst_offset: 0,
-            src_offset: 8,
-            coefficient: Some(1),
-        };
-        let mut twin = same.clone();
-        twin.dst_offset = 16;
-        let other = DeviceMoveSpec {
-            dims: vec![2, 2],
-            dst_strides: vec![2, 1],
-            src_strides: vec![1, 2],
-            dst_offset: 0,
-            src_offset: 0,
-            coefficient: Some(0),
-        };
-        let zero = DeviceRegionSpec {
-            dims: vec![4],
-            strides: vec![1],
-            offset: 32,
-        };
-
-        let count = |moves: &[DeviceMoveSpec], zeros: &[DeviceRegionSpec]| {
-            let signatures = distinct_plan_signatures(moves, &[], zeros, false).unwrap();
-            (signatures.submitted, signatures.zero_fill)
-        };
-        // `same` is a packed copy, so its zero fill is its own signature.
-        assert_eq!(count(&[same.clone(), twin], &[]), (1, 0));
-        // `other` reads a packed source, so its fill is its own signature too.
-        assert_eq!(count(&[same.clone(), other.clone()], &[]), (2, 0));
-        // `gather` reads a strided source into a packed destination: its fill
-        // reads a packed template, a signature no nonzero-scale replay submits.
-        let gather = DeviceMoveSpec {
-            dst_strides: vec![1, 2],
-            src_strides: vec![2, 1],
-            ..other.clone()
-        };
-        assert_eq!(count(&[same.clone(), other, gather], &[]), (3, 1));
-        // The fill's source is packed [1], identical to `same`'s source.
-        assert_eq!(count(&[same], &[zero]), (1, 0));
-    }
-
-    #[test]
-    fn a_conjugated_structure_counts_its_pack_and_scatter_plans_separately() {
-        // What: with `storage_conjugate`, a pack reads the source conjugated
-        // and a scatter reads the workspace plain. Two contiguous columns
-        // normalise to the same ([N], [1], [1]) triple, so counting them once
-        // would leave the cuTENSOR cap one plan short of what the replay
-        // submits — exactly the entry a warm replay would then evict.
-        let column = |dst_offset, src_offset| DeviceMoveSpec {
-            dims: vec![4],
-            dst_strides: vec![1],
-            src_strides: vec![1],
-            dst_offset,
-            src_offset,
-            coefficient: None,
-        };
-        let recoupling = DeviceRecouplingSpec {
-            packs: vec![column(0, 0), column(4, 8)],
-            scatters: vec![column(0, 0), column(8, 4)],
-            job: DenseGemmBatchJob {
-                dst_offset: 0,
-                lhs_offset: 0,
-                rhs_offset: 0,
-                rows: 4,
-                contracted: 2,
-                cols: 2,
-            },
-            matrix_offset: 0,
-        };
-
-        // Unconjugated: one column plan shared by both directions, plus the GEMM.
-        assert_eq!(
-            distinct_plan_signatures(&[], std::slice::from_ref(&recoupling), &[], false).unwrap(),
-            PlanSignatures {
-                submitted: 2,
-                zero_fill: 0
-            }
-        );
-        // Conjugated: the packs are their own plan.
-        assert_eq!(
-            distinct_plan_signatures(&[], &[recoupling], &[], true).unwrap(),
-            PlanSignatures {
-                submitted: 3,
-                zero_fill: 0
-            }
-        );
-    }
-
-    #[test]
     fn the_cache_keys_on_structure_identity_dtype_and_context() {
         // What: nothing but the exact triple hits, so a second structure, a
         // second dtype or a second context prepares its own device state.
@@ -1015,7 +791,10 @@ mod tests {
 
         assert_eq!(cache.entry_count(), 1);
         assert_eq!(cache.retained_bytes(), 16);
-        assert_eq!(cache.values().copied().collect::<Vec<_>>(), vec!["live"]);
+        assert_eq!(
+            cache.values_on(1).copied().collect::<Vec<_>>(),
+            vec!["live"]
+        );
     }
 
     #[test]

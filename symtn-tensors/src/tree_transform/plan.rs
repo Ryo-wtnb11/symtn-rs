@@ -2,6 +2,7 @@ use core::ops::{Add, Mul};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::{borrow::Cow, collections::hash_map::Entry, sync::Arc};
+use symtn_dense::Engine;
 
 use num_traits::Zero;
 #[cfg(test)]
@@ -608,7 +609,7 @@ pub(crate) fn build_multiplicity_free_tree_pair_plan_after_capability_with_threa
     operation: &TreeTransformOperation,
     dst_structure: &BlockStructure,
     src_structure: &BlockStructure,
-    threads: usize,
+    engine: &mut dyn Engine,
     reuse: Option<&CoefficientGroupReuse<R::Scalar>>,
 ) -> Result<ComposedPlan<R::Scalar>, OperationError>
 where
@@ -632,7 +633,7 @@ where
     build_tree_pair_transform_group_plan_validated_reusing(
         &source_proof,
         operation.clone(),
-        threads,
+        engine,
         reuse,
     )
 }
@@ -641,14 +642,14 @@ where
 pub(crate) fn build_tree_pair_transform_group_plan_validated_with_threads<R>(
     source_proof: &LocallyValidatedFusionTreeBlockStructure<'_, '_, R>,
     operation: TreeTransformOperation,
-    threads: usize,
+    engine: &mut dyn Engine,
 ) -> Result<TreeTransformGroupPlan<R::Scalar>, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar:
         'static + Clone + Add<Output = R::Scalar> + Mul<Output = R::Scalar> + Zero + Send + Sync,
 {
-    build_tree_pair_transform_group_plan_validated_reusing(source_proof, operation, threads, None)
+    build_tree_pair_transform_group_plan_validated_reusing(source_proof, operation, engine, None)
         .map(ComposedPlan::into_owned)
 }
 
@@ -659,7 +660,7 @@ where
 fn build_tree_pair_transform_group_plan_validated_reusing<R>(
     source_proof: &LocallyValidatedFusionTreeBlockStructure<'_, '_, R>,
     operation: TreeTransformOperation,
-    threads: usize,
+    engine: &mut dyn Engine,
     reuse: Option<&CoefficientGroupReuse<R::Scalar>>,
 ) -> Result<ComposedPlan<R::Scalar>, OperationError>
 where
@@ -674,7 +675,7 @@ where
         build_multiplicity_free_tree_pair_transform_group_plan_validated_with_threads(
             source_proof,
             operation,
-            threads,
+            engine,
             reuse,
         )
     }
@@ -1438,8 +1439,8 @@ mod generic_preflight_tests {
 }
 
 fn execute_staged_groups<I, O, F>(
+    engine: &mut dyn Engine,
     inputs: Vec<I>,
-    threads: usize,
     build: F,
 ) -> Result<Vec<O>, OperationError>
 where
@@ -1447,34 +1448,56 @@ where
     O: Send,
     F: Fn(I) -> Result<O, OperationError> + Send + Sync,
 {
-    // The requested degree is a cap within the operation's Host pool.
-    let threads = if threads <= 1 || inputs.len() <= 1 {
+    // The caller engine's width bounds this compile's fan-out.
+    let threads = if inputs.len() <= 1 {
         1
     } else {
-        threads.min(symtn_operations::host_pool::current_threads())
+        symtn_operations::host_pool::threads(engine)
     };
     if threads <= 1 {
         return inputs.into_iter().map(build).collect();
     }
 
-    use rayon::prelude::*;
+    use std::sync::Mutex;
+    use symtn_operations::host_pool::fork;
 
-    let batches = symtn_operations::host_pool::install_region(
+    // One input and one result slot per batch: each job takes its input and
+    // stores its result, so the fold below sees the batches in source order
+    // whatever ran first.
+    let inputs: Vec<Mutex<Option<Vec<I>>>> = partition_staged_groups(inputs, threads)
+        .into_iter()
+        .map(|batch| Mutex::new(Some(batch)))
+        .collect();
+    type Slot<O> = Mutex<Option<Result<Vec<O>, OperationError>>>;
+    let results: Vec<Slot<O>> = inputs.iter().map(|_| Mutex::new(None)).collect();
+    symtn_operations::host_pool::region(
+        engine,
         symtn_operations::host_pool::HostPoolSite::PlanCompile,
-        || {
-            partition_staged_groups(inputs, threads)
-                .into_par_iter()
-                .map(|batch| batch.into_iter().map(&build).collect::<Result<Vec<_>, _>>())
-                .collect::<Vec<_>>()
+        |exec| {
+            fork(exec, inputs.len(), |job, _child| {
+                let batch = inputs[job].lock().unwrap_or_else(|p| p.into_inner()).take();
+                if let Some(batch) = batch {
+                    let result = batch.into_iter().map(&build).collect();
+                    *results[job].lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
+                }
+            });
         },
-    );
+    )?;
+    let batches = results.into_iter().map(|slot| {
+        // INVARIANT: `fork` runs every job before returning.
+        slot.into_inner()
+            .unwrap_or_else(|p| p.into_inner())
+            .expect("every staged batch ran")
+    });
     flatten_ordered_batch_results(batches)
 }
 
-fn flatten_ordered_batch_results<O, E>(batches: Vec<Result<Vec<O>, E>>) -> Result<Vec<O>, E> {
+fn flatten_ordered_batch_results<O, E>(
+    batches: impl IntoIterator<Item = Result<Vec<O>, E>>,
+) -> Result<Vec<O>, E> {
     let mut outputs = Vec::new();
-    // Why not collect the parallel iterator directly into `Result<Vec<_>, _>`:
-    // Rayon deliberately leaves the winning error nondeterministic when
+    // Why not stop at the first failing job as it finishes: jobs finish in
+    // scheduling order, so the winning error would be nondeterministic when
     // several batches fail. Folding ordered batch results here preserves the
     // serial source-group error precedence without publishing partial state.
     for batch in batches {
@@ -1803,7 +1826,7 @@ where
 fn build_multiplicity_free_tree_pair_transform_group_plan_validated_with_threads<R>(
     source_proof: &LocallyValidatedFusionTreeBlockStructure<'_, '_, R>,
     operation: TreeTransformOperation,
-    threads: usize,
+    engine: &mut dyn Engine,
     reuse: Option<&CoefficientGroupReuse<R::Scalar>>,
 ) -> Result<ComposedPlan<R::Scalar>, OperationError>
 where
@@ -1825,7 +1848,7 @@ where
         )
     });
     build_groups_reusing(reuse.zip(groups.as_deref()), all_groups.len(), |missing| {
-        build_multiplicity_free_tree_pair_groups(source_proof, &operation, threads, missing)
+        build_multiplicity_free_tree_pair_groups(source_proof, &operation, engine, missing)
     })
 }
 
@@ -1833,7 +1856,7 @@ where
 fn build_multiplicity_free_tree_pair_groups<R>(
     source_proof: &LocallyValidatedFusionTreeBlockStructure<'_, '_, R>,
     operation: &TreeTransformOperation,
-    threads: usize,
+    engine: &mut dyn Engine,
     group_indices: Vec<usize>,
 ) -> Result<Vec<Vec<TreeTransformGroupBlockSpec<R::Scalar>>>, OperationError>
 where
@@ -1863,7 +1886,7 @@ where
         staged_groups.push((group, source_split));
     }
 
-    execute_staged_groups(staged_groups, threads, |(group, source_split)| {
+    execute_staged_groups(engine, staged_groups, |(group, source_split)| {
         let prepared = primary_prepared
             .as_ref()
             .filter(|(split, _)| *split == source_split)
@@ -1897,7 +1920,7 @@ pub(crate) fn build_oriented_tree_pair_transform_group_plan_capability_validated
     basis_order: OrientedBasisOrder,
     logical_rank: usize,
     storage_projection: &FxHashMap<&FusionTreePairKey, usize>,
-    threads: usize,
+    engine: &mut dyn Engine,
     reuse: Option<&CoefficientGroupReuse<R::Scalar>>,
 ) -> Result<ComposedPlan<R::Scalar>, OperationError>
 where
@@ -2016,7 +2039,7 @@ where
             &source_axes,
             logical_keys,
             staged_groups,
-            threads,
+            engine,
         )
     })
 }
@@ -2031,7 +2054,7 @@ fn build_oriented_tree_pair_groups<R>(
     source_axes: &Arc<[usize]>,
     logical_keys: &[FusionTreePairKey],
     staged_groups: Vec<&OrientedGroup<'_>>,
-    threads: usize,
+    engine: &mut dyn Engine,
 ) -> Result<Vec<Vec<TreeTransformGroupBlockSpec<R::Scalar>>>, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
@@ -2049,7 +2072,7 @@ where
         )?;
     }
 
-    execute_staged_groups(staged_groups, threads, |group| {
+    execute_staged_groups(engine, staged_groups, |group| {
         let storage_indices = group.storage_indices.as_ref();
         let source_split = group.source_split;
         let prepared = primary_prepared

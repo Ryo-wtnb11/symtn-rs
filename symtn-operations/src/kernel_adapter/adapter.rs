@@ -57,6 +57,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
     #[allow(clippy::too_many_arguments)]
     fn add_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         zero_strides: &mut Vec<isize>,
         dst_data: &mut [T],
         src_data: &[T],
@@ -82,6 +83,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
     #[allow(clippy::too_many_arguments)]
     fn axpby_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -104,6 +106,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
     #[allow(clippy::too_many_arguments)]
     fn copy_scale_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -133,6 +136,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
     #[allow(clippy::too_many_arguments)]
     fn transform_strided_baked<C>(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         zero_strides: &mut Vec<isize>,
         dst_data: &mut [T],
         src_data: &[T],
@@ -154,6 +158,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
         let alpha = scale.into_data();
         match beta {
             Some(beta) => self.add_strided_baked(
+                exec,
                 zero_strides,
                 dst_data,
                 src_data,
@@ -169,6 +174,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
                 index,
             ),
             None => self.copy_scale_strided_baked(
+                exec,
                 dst_data,
                 src_data,
                 shape,
@@ -188,6 +194,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
     /// primitive).
     fn scale_strided(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         shape: &[usize],
         dst_strides: &[isize],
@@ -206,6 +213,7 @@ pub trait HostKernelAdapter<T>: sealed::Sealed {
     #[allow(clippy::too_many_arguments)]
     fn recoupling_src_times_u_transpose<C>(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         destination: &mut [T],
         source: &[T],
         recoupling_coefficients_dst_src: &[C],
@@ -252,6 +260,7 @@ impl StridedHostKernelAdapter {
     #[allow(clippy::too_many_arguments)]
     pub fn tensoradd_strided_checked<T>(
         &mut self,
+        mut exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -271,7 +280,8 @@ impl StridedHostKernelAdapter {
             + Zero
             + One
             + ConjugateValue
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         validate_raw_strided_bounds(dst_data.len(), shape, dst_strides, dst_offset)?;
         validate_raw_strided_bounds(src_data.len(), shape, src_strides, src_offset)?;
@@ -282,6 +292,7 @@ impl StridedHostKernelAdapter {
         }
         let action = raw_strided_action(alpha, beta);
         if raw_rank_within_strided_limit_routed(
+            exec.reborrow(),
             dst_data,
             src_data,
             shape,
@@ -296,6 +307,7 @@ impl StridedHostKernelAdapter {
         }
         let StridedKernelScratch { layout, index } = &mut self.scratch;
         combine_fused_layout(
+            exec.reborrow(),
             dst_data,
             src_data,
             shape,
@@ -392,7 +404,8 @@ impl StridedHostKernelAdapter {
             + One
             + ConjugateValue
             + RecouplingCoefficientAction<C>
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         macro_rules! run {
@@ -485,10 +498,12 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     fn add_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         zero_strides: &mut Vec<isize>,
         dst_data: &mut [T],
         src_data: &[T],
@@ -542,6 +557,7 @@ where
             return Ok(());
         }
         tensoradd_raw_strided_kernel_trusted(
+            exec,
             zero_strides,
             dst_data,
             src_data,
@@ -558,6 +574,7 @@ where
 
     fn axpby_strided_baked(
         &mut self,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -607,6 +624,7 @@ where
             return run!(move |value: T| alpha * value);
         }
         axpby_raw_strided_kernel_trusted(
+            exec,
             dst_data,
             src_data,
             shape,
@@ -621,6 +639,7 @@ where
 
     fn copy_scale_strided_baked(
         &mut self,
+        _exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -668,6 +687,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn transform_strided_baked<C>(
         &mut self,
+        _exec: crate::host_pool::Exec<'_>,
         zero_strides: &mut Vec<isize>,
         dst_data: &mut [T],
         src_data: &[T],
@@ -706,6 +726,7 @@ where
 
     fn scale_strided(
         &mut self,
+        _exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         shape: &[usize],
         dst_strides: &[isize],
@@ -718,6 +739,7 @@ where
     #[cfg(any(test, feature = "testing"))]
     fn recoupling_src_times_u_transpose<C>(
         &mut self,
+        _exec: crate::host_pool::Exec<'_>,
         destination: &mut [T],
         source: &[T],
         recoupling_coefficients_dst_src: &[C],

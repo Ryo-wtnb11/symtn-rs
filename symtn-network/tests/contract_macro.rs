@@ -9,6 +9,7 @@
 //! discriminates.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
@@ -37,18 +38,23 @@ struct Svd<T> {
 
 /// `[i; k] := (svd.u)[i; s] * conj(w.first()?)[k; s]`: a parenthesized
 /// field chain and a general expression whose `?` is the caller's.
-fn parenthesized<T: symtn_network::NetworkOperand>(svd: &Svd<T>, w: &[T]) -> Option<T> {
-    contract!([i; k] := (svd.u)[i; s] * conj(w.first()?)[k; s]).ok()
+fn parenthesized<T: symtn_network::NetworkOperand>(
+    engine: &mut dyn Engine,
+    svd: &Svd<T>,
+    w: &[T],
+) -> Option<T> {
+    contract!(engine, [i; k] := (svd.u)[i; s] * conj(w.first()?)[k; s]).ok()
 }
 
 macro_rules! forms {
     ($name:ident, $d:ty, $space:expr) => {
         #[test]
         fn $name() {
-            let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+            let engine = &mut symtn::typed::CpuEngine::serial();
+            let runtime = Runtime::builder().build().unwrap();
             let v = $space;
-            let rand = |codomain: &[&_], domain: &[&_], seed| {
-                TensorMap::<_, $d>::rand_with_seed(
+            let rand = |engine: &mut dyn Engine, codomain: &[&_], domain: &[&_], seed| {
+                TensorMap::<_, $d>::rand_with_seed(engine,
                     &runtime,
                     codomain.iter().copied(),
                     domain.iter().copied(),
@@ -56,12 +62,12 @@ macro_rules! forms {
                 )
                 .unwrap()
             };
-            let a = rand(&[&v], &[&v], 1);
-            let b = rand(&[&v], &[&v], 2);
+            let a = rand(engine, &[&v], &[&v], 1);
+            let b = rand(engine, &[&v], &[&v], 2);
 
             // `:=` with `;` on every list.
             let before = counts(&runtime);
-            let c = contract!([i; k] := a[i; j] * b[j; k]).unwrap();
+            let c = contract!(engine, [i; k] := a[i; j] * b[j; k]).unwrap();
             assert_cache(&runtime, before, false);
             let before = counts(&runtime);
             let expected = Network::new(
@@ -72,7 +78,7 @@ macro_rules! forms {
                 Some(1),
             )
             .unwrap()
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap();
             assert_cache(&runtime, before, true);
             assert_eq!((c.codomain(), c.domain()), (expected.codomain(), expected.domain()));
@@ -82,21 +88,21 @@ macro_rules! forms {
             // same operand.
             let tup = ((a.clone(),),);
             let before = counts(&runtime);
-            let nested = contract!([i; k] := tup.0.0[i; j] * b[j; k]).unwrap();
+            let nested = contract!(engine, [i; k] := tup.0.0[i; j] * b[j; k]).unwrap();
             assert_cache(&runtime, before, true);
             assert_eq!(nested.dense_data().unwrap(), expected.dense_data().unwrap());
 
             // An output without `;`: every output leg in the codomain;
             // labels separated by spaces build the same network.
-            let x = rand(&[&v], &[&v], 3);
-            let y = rand(&[&v], &[&v, &v], 4);
+            let x = rand(engine, &[&v], &[&v], 3);
+            let y = rand(engine, &[&v], &[&v, &v], 4);
             let before = counts(&runtime);
-            let t = contract!([a, b, c] := x[a; i] * y[i; b, c]).unwrap();
+            let t = contract!(engine, [a, b, c] := x[a; i] * y[i; b, c]).unwrap();
             assert_cache(&runtime, before, false);
             let before = counts(&runtime);
-            let spaced = contract!([a b c] := x[a; i] * y[i; b c]).unwrap();
+            let spaced = contract!(engine, [a b c] := x[a; i] * y[i; b c]).unwrap();
             assert_cache(&runtime, before, true);
-            let all_codomain = |output_split| {
+            let all_codomain = |engine: &mut dyn Engine, output_split| {
                 Network::new(
                     [vec!["a", "i"], vec!["i", "b", "c"]],
                     [false, false],
@@ -105,25 +111,25 @@ macro_rules! forms {
                     output_split,
                 )
                 .unwrap()
-                .contract(&[&x, &y])
+                .contract(engine, &[&x, &y])
                 .unwrap()
             };
             let before = counts(&runtime);
-            let expected = all_codomain(None);
+            let expected = all_codomain(engine, None);
             assert_cache(&runtime, before, true);
             assert_eq!((t.codomain_rank(), t.domain_rank()), (3, 0));
             assert_eq!(t.dense_data().unwrap(), expected.dense_data().unwrap());
             assert_eq!(spaced.dense_data().unwrap(), expected.dense_data().unwrap());
             // Negative control: an explicit output split is another network.
             let before = counts(&runtime);
-            all_codomain(Some(3));
+            all_codomain(engine, Some(3));
             assert_cache(&runtime, before, false);
 
             // No left-hand side: the scalar, through the rank-0 tensor.
-            let psi = rand(&[&v], &[&v, &v], 5);
-            let h = rand(&[&v], &[&v], 6);
+            let psi = rand(engine, &[&v], &[&v, &v], 5);
+            let h = rand(engine, &[&v], &[&v], 6);
             let before = counts(&runtime);
-            let e: $d = contract!(conj(psi)[p; l, r] * h[p; q] * psi[q; l, r]).unwrap();
+            let e: $d = contract!(engine, conj(psi)[p; l, r] * h[p; q] * psi[q; l, r]).unwrap();
             assert_cache(&runtime, before, false);
             let before = counts(&runtime);
             let expected = Network::new(
@@ -134,27 +140,27 @@ macro_rules! forms {
                 None,
             )
             .unwrap()
-            .contract(&[&psi, &h, &psi])
+            .contract(engine, &[&psi, &h, &psi])
             .unwrap();
             assert_cache(&runtime, before, true);
-            assert_eq!(e, expected.scalar().unwrap());
+            assert_eq!(e, expected.scalar(engine).unwrap());
 
             // `[] :=` keeps the rank-0 tensor; its network is the scalar's.
             let before = counts(&runtime);
-            let rank0 = contract!([] := conj(psi)[p; l, r] * h[p; q] * psi[q; l, r]).unwrap();
+            let rank0 = contract!(engine, [] := conj(psi)[p; l, r] * h[p; q] * psi[q; l, r]).unwrap();
             assert_cache(&runtime, before, true);
             assert_eq!(rank0.rank(), 0);
-            assert_eq!(rank0.scalar().unwrap(), e);
+            assert_eq!(rank0.scalar(engine).unwrap(), e);
 
             // Operand expressions: a parenthesized field chain, a bare field
             // chain, and a `?` expression yielding a reference.
             let svd = Svd { u: a.clone() };
             let w = vec![b.clone()];
             let before = counts(&runtime);
-            let d = parenthesized(&svd, &w).unwrap();
+            let d = parenthesized(engine, &svd, &w).unwrap();
             assert_cache(&runtime, before, false);
             let before = counts(&runtime);
-            let bare = contract!([i; k] := svd.u[i; s] * conj(w[0])[k; s]).unwrap();
+            let bare = contract!(engine, [i; k] := svd.u[i; s] * conj(w[0])[k; s]).unwrap();
             assert_cache(&runtime, before, true);
             let before = counts(&runtime);
             let expected = Network::new(
@@ -165,7 +171,7 @@ macro_rules! forms {
                 Some(1),
             )
             .unwrap()
-            .contract(&[&a, &b])
+            .contract(engine, &[&a, &b])
             .unwrap();
             assert_cache(&runtime, before, true);
             assert_eq!(d.dense_data().unwrap(), expected.dense_data().unwrap());
@@ -175,14 +181,14 @@ macro_rules! forms {
             // lookup: a misplaced `;`, and a list without `;` (all codomain)
             // on a tensor with a domain leg.
             let before = counts(&runtime);
-            let misplaced = contract!([i, k] := a[i, j;] * b[j; k]).unwrap_err();
+            let misplaced = contract!(engine, [i, k] := a[i, j;] * b[j; k]).unwrap_err();
             assert!(
                 misplaced
                     .to_string()
                     .contains("operand 0 puts 2 label(s) before `;` but the tensor's codomain rank is 1"),
                 "{misplaced}"
             );
-            let unsplit = contract!([i; k] := a[i; j] * b[j, k]).unwrap_err();
+            let unsplit = contract!(engine, [i; k] := a[i; j] * b[j, k]).unwrap_err();
             assert!(
                 unsplit
                     .to_string()

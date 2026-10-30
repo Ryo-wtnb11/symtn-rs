@@ -26,6 +26,7 @@ macro_rules! pin {
     ($name:ident, $rule:expr, $labels:expr, $D:ty, $scalar:expr) => {
         #[test]
         fn $name() {
+            let engine = &mut symtn::typed::CpuEngine::serial();
             let runtime = host_runtime();
             let scalar = $scalar;
             let labels: Vec<_> = $labels;
@@ -52,45 +53,50 @@ macro_rules! pin {
                         .collect::<Vec<$D>>(),
                 })
                 .collect();
-            let compact = TensorMap::<_, $D>::diagonal(&runtime, &bond, spectrum).unwrap();
-            let twin = TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, idx| {
-                let position = sectors.iter().position(|s| s == trees.coupled()).unwrap();
-                if idx[0] == idx[1] {
-                    diag(position, idx[0])
-                } else {
-                    scalar(0.0, 0.0)
-                }
-            })
-            .unwrap();
+            let compact = TensorMap::<_, $D>::diagonal(engine, &runtime, &bond, spectrum).unwrap();
+            let twin =
+                TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |trees, idx| {
+                    let position = sectors.iter().position(|s| s == trees.coupled()).unwrap();
+                    if idx[0] == idx[1] {
+                        diag(position, idx[0])
+                    } else {
+                        scalar(0.0, 0.0)
+                    }
+                })
+                .unwrap();
             // Parent weight is arbitrary; the lazy operand is its adjoint.
-            let lazy = TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, idx| {
-                let position = sectors.iter().position(|s| s == trees.coupled()).unwrap();
-                scalar(
-                    0.7 * idx[0] as f64 + 0.2 * idx[1] as f64 - 0.01 * position as f64,
-                    0.3 * idx[1] as f64 - 0.1,
-                )
-            })
-            .unwrap()
-            .adjoint()
-            .unwrap();
+            let lazy =
+                TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |trees, idx| {
+                    let position = sectors.iter().position(|s| s == trees.coupled()).unwrap();
+                    scalar(
+                        0.7 * idx[0] as f64 + 0.2 * idx[1] as f64 - 0.01 * position as f64,
+                        0.3 * idx[1] as f64 - 0.1,
+                    )
+                })
+                .unwrap()
+                .adjoint(engine)
+                .unwrap();
             let (alpha, beta) = (scalar(0.75, 0.25), scalar(-1.25, 0.5));
             for (what, got, want) in [
                 (
                     "compact.axpby(lazy)",
-                    compact.axpby(alpha, &lazy, beta).unwrap(),
-                    twin.axpby(alpha, &lazy, beta).unwrap(),
+                    compact.axpby(engine, alpha, &lazy, beta).unwrap(),
+                    twin.axpby(engine, alpha, &lazy, beta).unwrap(),
                 ),
                 (
                     "lazy.axpby(compact)",
-                    lazy.axpby(beta, &compact, alpha).unwrap(),
-                    lazy.axpby(beta, &twin, alpha).unwrap(),
+                    lazy.axpby(engine, beta, &compact, alpha).unwrap(),
+                    lazy.axpby(engine, beta, &twin, alpha).unwrap(),
                 ),
             ] {
                 let gap = got
-                    .axpby(scalar(1.0, 0.0), &want, scalar(-1.0, 0.0))
+                    .axpby(engine, scalar(1.0, 0.0), &want, scalar(-1.0, 0.0))
                     .unwrap();
-                let scale = f64::from(want.norm(2.0).unwrap()).max(1.0);
-                assert!(f64::from(gap.norm(2.0).unwrap()) <= 1e-12 * scale, "{what}");
+                let scale = f64::from(want.norm(engine, 2.0).unwrap()).max(1.0);
+                assert!(
+                    f64::from(gap.norm(engine, 2.0).unwrap()) <= 1e-12 * scale,
+                    "{what}"
+                );
             }
         }
     };

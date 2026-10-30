@@ -82,6 +82,7 @@ fn expert_layout_transformers_are_rebuilt_per_call_and_never_published() {
 
 #[test]
 fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Composed-coefficient hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -142,6 +143,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     crate::probe::take_coefficient_group_activity();
     let miss = planning
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &miss_operation,
             dst.structure(),
@@ -161,6 +163,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     let tree_pair_lowering_calls_rec = probe::record();
     let rebuilt = planning
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &hit_operation,
             dst.structure(),
@@ -193,11 +196,12 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     assert_eq!(coefficient_bits(&direct), coefficient_bits(&miss));
     assert_eq!(coefficient_bits(&miss), coefficient_bits(&hit));
 
-    let replay = |structure: &TreeTransformStructure<f64>| {
+    let mut replay = |structure: &TreeTransformStructure<f64>| {
         let mut output = dst.clone();
         let mut backend = DenseTreeTransformOperations::default();
         let mut workspace = TreeTransformWorkspace::default();
         replay_into(
+            engine,
             &mut backend,
             &mut workspace,
             structure,
@@ -227,6 +231,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
 
 #[test]
 fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -294,6 +299,7 @@ fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -310,6 +316,7 @@ fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
 
 #[test]
 fn all_codomain_plan_replays_su2_recoupling() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -349,6 +356,7 @@ fn all_codomain_plan_replays_su2_recoupling() {
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -365,6 +373,7 @@ fn all_codomain_plan_replays_su2_recoupling() {
     src.data_mut().copy_from_slice(&[3.0, -4.0]);
     dst.data_mut().copy_from_slice(&[1.0, 2.0]);
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -382,6 +391,7 @@ fn all_codomain_plan_replays_su2_recoupling() {
 
 #[test]
 fn tree_pair_and_all_codomain_transforms_agree_on_an_all_codomain_source() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -433,6 +443,7 @@ fn tree_pair_and_all_codomain_transforms_agree_on_an_all_codomain_source() {
     dst.data_mut().copy_from_slice(&[0.0, 0.0]);
     let structure = uncached_all_codomain_structure(&SU2FusionRule, operation, &dst, &src).unwrap();
     replay_into(
+        engine,
         &mut DenseTreeTransformOperations::default(),
         &mut TreeTransformWorkspace::default(),
         &structure,

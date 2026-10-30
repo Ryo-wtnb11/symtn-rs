@@ -30,17 +30,18 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     /// )?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 7)?;
-    /// let adjoint = t.adjoint()?;
-    /// let mut owned = adjoint.materialize()?;
-    /// assert_eq!(owned.dense_data()?, adjoint.materialize()?.dense_data()?);
-    /// owned.scale_assign(2.0)?;
-    /// assert_ne!(owned.dense_data()?, adjoint.materialize()?.dense_data()?);
+    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 7)?;
+    /// let adjoint = t.adjoint(engine)?;
+    /// let mut owned = adjoint.materialize(engine)?;
+    /// assert_eq!(owned.dense_data()?, adjoint.materialize(engine)?.dense_data()?);
+    /// owned.scale_assign(engine, 2.0)?;
+    /// assert_ne!(owned.dense_data()?, adjoint.materialize(engine)?.dense_data()?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
@@ -81,7 +82,7 @@ where
     /// [`Error::Operation`] only if an engine-internal layout invariant is
     /// broken. On CUDA also [`Error::PlacementMismatch`] for a payload on
     /// another device, and CUDA backend errors.
-    pub fn materialize(&self) -> Result<Self, Error> {
+    pub fn materialize(&self, engine: &mut dyn Engine) -> Result<Self, Error> {
         fn dense<D, S>(data: &TypedData<D, S>) -> Result<&S, Error> {
             match data {
                 TypedData::Dense(storage) => Ok(storage),
@@ -121,7 +122,7 @@ where
                 )
             }
         };
-        let storage = S::materialize(EXEC, self, source, map.as_ref())?;
+        let storage = S::materialize(engine, EXEC, self, source, map.as_ref())?;
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::dense(
@@ -141,6 +142,7 @@ pub trait MaterializeExec<R, D>: TypedStorage<R, D> {
     /// `source` without a `map`, else lazy adjoint `t`'s parent `source`
     /// written block by block as `map` names.
     fn materialize(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         source: &Self,
@@ -150,17 +152,15 @@ pub trait MaterializeExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> MaterializeExec<R, D> for Vec<D> {
     fn materialize(
+        _engine: &mut dyn Engine,
         _: ExecToken,
-        t: &TensorMap<R, D>,
+        _t: &TensorMap<R, D>,
         source: &Self,
         map: Option<&symtn_tensors::AdjointBlockMap<'_>>,
     ) -> Result<Self, Error> {
         let Some(map) = map else {
             return Ok(source.clone());
         };
-        let _host_pool = t.runtime.enter_host_pool();
-        #[cfg(test)]
-        probe::hit_materialization_pool();
         Ok(symtn_tensors::materialize_adjoint_data_dyn(
             map.parent_space(),
             map.adjoint_space(),
@@ -181,14 +181,14 @@ where
     /// Infallible for the reason [`TypedTensorBody::materialized_dense_data`]
     /// is: the diagonal fill is total on a bond space this module built from
     /// that same spectrum.
-    pub(super) fn shareable_dense_payload(&self) -> Arc<TypedData<D>> {
+    pub(super) fn shareable_dense_payload(&self, engine: &mut dyn Engine) -> Arc<TypedData<D>> {
         if let Some(body) = self.owned_body() {
             if matches!(body.data.as_ref(), TypedData::Dense(_)) {
                 return Arc::clone(&body.data);
             }
         }
         let materialized = self
-            .materialize()
+            .materialize(engine)
             .expect("a pre-admitted typed tensor must materialize");
         Arc::clone(
             &materialized
@@ -201,9 +201,12 @@ where
     /// Builds an operation-local logical tensor: a full receiver-sized
     /// logical payload, released with the operation. Prefer an oriented
     /// kernel or algebraic redirect when one implements the same semantics.
-    pub(super) fn materialized_tensor_uncached(&self) -> Result<Self, Error> {
+    pub(super) fn materialized_tensor_uncached(
+        &self,
+        engine: &mut dyn Engine,
+    ) -> Result<Self, Error> {
         match &self.repr {
-            TypedTensorRepr::Adjoint(_) => self.materialize(),
+            TypedTensorRepr::Adjoint(_) => self.materialize(engine),
             TypedTensorRepr::Owned(_) => Ok(self.clone()),
         }
     }
@@ -227,13 +230,14 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1)?;
+    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
     /// assert_eq!(t.dense_data()?.len(), 4);
-    /// let adjoint = t.adjoint()?;
+    /// let adjoint = t.adjoint(engine)?;
     /// assert!(matches!(adjoint.dense_data(), Err(Error::Unsupported { .. })));
-    /// assert_eq!(adjoint.materialize()?.dense_data()?.len(), 4);
+    /// assert_eq!(adjoint.materialize(engine)?.dense_data()?.len(), 4);
     /// # Ok::<(), Error>(())
     /// ```
     ///
@@ -270,8 +274,6 @@ where
             TypedData::Diagonal(spectrum) => {
                 #[cfg(test)]
                 probe::hit(probe::Event::DiagonalMaterialization);
-                #[cfg(test)]
-                probe::hit_materialization_pool();
                 std::borrow::Cow::Owned(
                     symtn_matrixalgebra::seam::diagonal_bond_data(
                         self.space.space(),
@@ -316,6 +318,7 @@ where
     /// degeneracy. All validation precedes checked layout admission, and the
     /// supplied dual flag is preserved.
     pub fn diagonal<I>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         bond: &GradedSpace<R>,
         spectra: I,
@@ -323,6 +326,8 @@ where
     where
         I: IntoIterator<Item = SectorSpectrum<R::Sector, D>>,
     {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         let spectra: Vec<_> = spectra.into_iter().collect();
         let mut labels: Vec<_> = spectra.iter().map(|entry| &entry.sector).collect();
         labels.sort_unstable();
@@ -459,7 +464,12 @@ where
     /// and for a multiplicity-free provider [`Error::FusionAlgebra`]. No
     /// partial spectrum is returned. In a truncated factorization this is the
     /// step where a decode failure surfaces, before `find_truncated`.
-    pub fn diagview(&self) -> Result<Vec<SectorSpectrum<R::Sector, D>>, FacadeError<R>> {
+    pub fn diagview(
+        &self,
+        engine: &mut dyn Engine,
+    ) -> Result<Vec<SectorSpectrum<R::Sector, D>>, FacadeError<R>> {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         let body = self.owned_body().ok_or_else(|| {
             FacadeError::<R>::from(Error::InvalidArgument(
                 "diagview requires an owned tensor, not a lazy adjoint".to_string(),
@@ -569,7 +579,7 @@ where
     /// non-finite tolerances are rejected before every shortcut.
     ///
     /// Scale `tol` to the payload dtype, as [`FactorizationScalar`] describes.
-    pub(crate) fn is_diagonal(&self, tol: f64) -> Result<bool, Error> {
+    pub(crate) fn is_diagonal(&self, engine: &mut dyn Engine, tol: f64) -> Result<bool, Error> {
         if !tol.is_finite() || tol < 0.0 {
             return Err(Error::InvalidArgument(
                 "diagonal tolerance must be finite and nonnegative".into(),
@@ -581,7 +591,7 @@ where
         if self.rank() != 2 || self.codomain_rank() != 1 || self.domain_rank() != 1 {
             return Ok(false);
         }
-        let materialized = self.materialized_tensor_uncached()?;
+        let materialized = self.materialized_tensor_uncached(engine)?;
         let data_payload = materialized
             .owned_body()
             .expect("uncached materialization is owned")

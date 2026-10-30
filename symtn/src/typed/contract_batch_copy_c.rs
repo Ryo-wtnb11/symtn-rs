@@ -26,6 +26,7 @@ mod tests {
     impl Rank2Gemm<f64> for CoreCount {
         fn matmul_rank2(
             &mut self,
+            _engine: &mut dyn Engine,
             _: &mut [f64],
             _: &[f64],
             _: &[f64],
@@ -40,6 +41,7 @@ mod tests {
 
         fn matmul_rank2_batch(
             &mut self,
+            _engine: &mut dyn Engine,
             _: &mut [f64],
             _: &[f64],
             _: &[f64],
@@ -66,7 +68,10 @@ mod tests {
     #[test]
     #[ignore = "requires a real CUDA device"]
     fn cuda_copy_c_inactive_temporary_stays_zero_without_refill() {
-        let runtime = Runtime::builder().cuda(0).build().unwrap();
+        let cpu = &mut crate::typed::CpuEngine::serial();
+        let cuda = &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
+            .unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let v = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [
@@ -81,26 +86,25 @@ mod tests {
             [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
         )
         .unwrap();
-        let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 55).unwrap();
-        let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 56).unwrap();
+        let a = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &v], [&w], 55).unwrap();
+        let b = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&w], [&v], 56).unwrap();
         let spec = ContractSpec {
             lhs: &[2],
             rhs: &[0],
             codomain: &[1, 0],
             domain: &[2],
         };
-        let pack = |tensors: &[TensorMap<_, f64>]| {
+        let pack = |cuda: &mut dyn Engine, tensors: &[TensorMap<_, f64>]| {
             StackedTensorMap::pack(&tensors.iter().collect::<Vec<_>>())
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap()
         };
-        let plan = ContractPlan::new(
-            &pack(std::slice::from_ref(&a)),
-            &pack(std::slice::from_ref(&b)),
-            &spec,
-        )
-        .unwrap();
+        let (a_stack, b_stack) = (
+            pack(cuda, std::slice::from_ref(&a)),
+            pack(cuda, std::slice::from_ref(&b)),
+        );
+        let plan = ContractPlan::new(cuda, &a_stack, &b_stack, &spec).unwrap();
         assert!(plan.copy_c().is_some());
         assert_eq!(
             plan.resolution
@@ -113,30 +117,30 @@ mod tests {
         let mut first_submissions = None;
         for (call, count) in [2, 1, 2].into_iter().enumerate() {
             let lhs: Vec<_> = (0..count)
-                .map(|i| a.scale(1.0 + (call * 2 + i) as f64 / 8.0).unwrap())
+                .map(|i| a.scale(cpu, 1.0 + (call * 2 + i) as f64 / 8.0).unwrap())
                 .collect();
             let rhs: Vec<_> = (0..count)
-                .map(|i| b.scale(1.0 - (call + i) as f64 / 16.0).unwrap())
+                .map(|i| b.scale(cpu, 1.0 - (call + i) as f64 / 16.0).unwrap())
                 .collect();
             let expected: Vec<_> = lhs
                 .iter()
                 .zip(&rhs)
-                .map(|(l, r)| l.contract(r, &spec).unwrap())
+                .map(|(l, r)| l.contract(cpu, r, &spec).unwrap())
                 .collect();
-            let (lhs, rhs) = (pack(&lhs), pack(&rhs));
+            let (lhs, rhs) = (pack(cuda, &lhs), pack(cuda, &rhs));
             let before = symtn_dense::cuda_transfer_stats();
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
             let after = symtn_dense::cuda_transfer_stats();
             let submitted = after.gemm_calls - before.gemm_calls;
             let first = *first_submissions.get_or_insert(submitted);
             assert_eq!(submitted, first, "call {call}: no temporary refill");
             let poisoned: Vec<_> = expected
                 .iter()
-                .map(|e| e.scale(f64::NAN).unwrap())
+                .map(|e| e.scale(cpu, f64::NAN).unwrap())
                 .collect();
-            let mut dst = pack(&poisoned);
+            let mut dst = pack(cuda, &poisoned);
             let before = symtn_dense::cuda_transfer_stats();
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap();
             let after = symtn_dense::cuda_transfer_stats();
             assert_eq!(
@@ -144,10 +148,10 @@ mod tests {
                 first,
                 "call {call}: no temporary refill"
             );
-            let actual = dst.to_host().unwrap();
+            let actual = dst.to_host(cuda).unwrap();
             for (i, expected) in expected.iter().enumerate() {
                 for (&value, &reference) in actual
-                    .member(i)
+                    .member(cpu, i)
                     .unwrap()
                     .dense_data()
                     .unwrap()
@@ -165,13 +169,15 @@ mod tests {
 
     #[test]
     fn labeled_copy_c_routes_are_admitted_at_every_payload_precision() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         macro_rules! cases {
             ($v:expr, $c:expr, $dtype:ty) => {{
                 let v = $v;
                 let c = $c;
-                let tensor = |out: [&GradedSpace<_>; 2], input: [&GradedSpace<_>; 2], seed| {
-                    TensorMap::<_, $dtype>::rand_with_seed(&runtime, out, input, seed).unwrap()
+                let mut tensor = |out: [&GradedSpace<_>; 2], input: [&GradedSpace<_>; 2], seed| {
+                    TensorMap::<_, $dtype>::rand_with_seed(engine, &runtime, out, input, seed)
+                        .unwrap()
                 };
                 let a = tensor([v, v], [v, v], 61);
                 let b = tensor([v, v], [v, v], 62);
@@ -205,11 +211,11 @@ mod tests {
                     for members in [1, 2, 17] {
                         let left = StackedTensorMap::pack(&vec![&lhs; members]).unwrap();
                         let right = StackedTensorMap::pack(&vec![&rhs; members]).unwrap();
-                        let plan = ContractPlan::new(&left, &right, &spec).unwrap();
+                        let plan = ContractPlan::new(engine, &left, &right, &spec).unwrap();
                         plan.copy_c()
                             .unwrap_or_else(|| panic!("{name} did not choose CopyC"));
                         let mut workspace = plan.workspace().unwrap();
-                        plan.execute(&left, &right, &mut workspace).unwrap();
+                        plan.execute(engine, &left, &right, &mut workspace).unwrap();
                     }
                 }
             }};
@@ -252,7 +258,8 @@ mod tests {
 
     #[test]
     fn su2_copy_c_orientations_are_unconjugated_scaled_single_tasks() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let v = GradedSpace::try_new(
             Arc::new(SU2FusionRule),
             [
@@ -262,8 +269,10 @@ mod tests {
             ],
         )
         .unwrap();
-        let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 61).unwrap();
-        let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 62).unwrap();
+        let a =
+            TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 61).unwrap();
+        let b =
+            TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 62).unwrap();
         for (lhs_axes, rhs_axes, codomain, domain) in [
             ([3, 2], [1, 0], [1, 0], [3, 2]),
             ([0, 1], [2, 3], [3, 2], [1, 0]),
@@ -276,7 +285,7 @@ mod tests {
             };
             let lhs = StackedTensorMap::pack(&[&a]).unwrap();
             let rhs = StackedTensorMap::pack(&[&b]).unwrap();
-            let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+            let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
             let transform = plan.copy_c().expect("route must choose CopyC").transform();
             assert!(!transform.storage_conjugate());
             let coefficients: Vec<_> = transform
@@ -306,7 +315,8 @@ mod tests {
     /// `symtn-tensors` (`route_host_core_tests`).
     #[test]
     fn copy_c_core_and_transform_primitives_submit_member_expanded_batches() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let v = GradedSpace::try_new(
             Arc::new(SU2FusionRule),
             [
@@ -316,8 +326,10 @@ mod tests {
             ],
         )
         .unwrap();
-        let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 61).unwrap();
-        let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 62).unwrap();
+        let a =
+            TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 61).unwrap();
+        let b =
+            TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 62).unwrap();
         let spec = ContractSpec {
             lhs: &[3, 2],
             rhs: &[1, 0],
@@ -329,7 +341,7 @@ mod tests {
         for members in [1, 2, 17] {
             let lhs = StackedTensorMap::pack(&vec![&a; members]).unwrap();
             let rhs = StackedTensorMap::pack(&vec![&b; members]).unwrap();
-            let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+            let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
             let copy = plan.copy_c().expect("C1p must choose CopyC");
             assert!(
                 copy.transform().blocks().iter().any(|block| match *block {
@@ -349,6 +361,7 @@ mod tests {
             let mut core = CoreCount::default();
             replay
                 .execute_host(
+                    engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut core,
                     &mut StackedStorageViewMut::new::<f64>(
@@ -374,6 +387,7 @@ mod tests {
             let transform_counts = Arc::new(SpyCounts::default());
             let mut transform = SpyExecutor::counting(&transform_counts);
             tree_transform_members_overwrite_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut transform,
                 &mut TreeTransformWorkspace::default(),

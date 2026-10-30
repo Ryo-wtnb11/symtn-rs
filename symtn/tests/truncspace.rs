@@ -38,9 +38,10 @@ fn typed_leg(entries: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
 }
 
 fn typed_source(seed: u64) -> TensorMap<SU2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = typed_leg(&[(0, 4), (1, 4), (2, 4)]);
     let mut state = seed;
-    TensorMap::from_subblock_fn(&host_runtime(), [&leg], [&leg], move |_, _| {
+    TensorMap::from_subblock_fn(engine, &host_runtime(), [&leg], [&leg], move |_, _| {
         fill(&mut state)
     })
     .unwrap()
@@ -61,10 +62,11 @@ where
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec,
 {
-    let Svd { u, s, .. } = source.svd_compact(&[0], &[1])?;
-    let found = s.domain()[0].find_truncated(&s.diagview()?, truncation)?;
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let Svd { u, s, .. } = source.svd_compact(engine, &[0], &[1])?;
+    let found = s.domain()[0].find_truncated(&s.diagview(engine)?, truncation)?;
     Ok((
-        u.restrict_leg(&[(u.codomain_rank(), &found.selection)])?,
+        u.restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])?,
         found.error,
     ))
 }
@@ -81,11 +83,12 @@ fn typed_u1_leg(entries: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
 
 #[test]
 fn typed_truncspace_clamps_a_request_longer_than_the_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let source = typed_source(0x5eed_1000);
     let greedy = typed_leg(&[(0, 99), (1, 99), (2, 99)]);
     let (clamped, clamped_error) =
         truncated_svd(&source, &Truncation::space(greedy.truncspace())).unwrap();
-    let full = source.svd_compact(&[0], &[1]).unwrap();
+    let full = source.svd_compact(engine, &[0], &[1]).unwrap();
     let clamped_bond = &clamped.domain()[0];
     let full_bond = &full.u.domain()[0];
 
@@ -99,8 +102,10 @@ fn typed_truncspace_clamps_a_request_longer_than_the_spectrum() {
 
 #[test]
 fn typed_truncspace_follows_stored_sectors_not_the_dual_flag() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = typed_u1_leg(&[(-1, 3), (0, 3), (1, 3)]);
     let source = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
         &host_runtime(),
         [&leg],
         [&leg],

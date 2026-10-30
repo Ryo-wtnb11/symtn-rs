@@ -81,8 +81,10 @@ fn typed_space() -> GradedSpace<U1FusionRule> {
 }
 
 fn typed_real(runtime: &Runtime, scale: f64) -> TensorMap<U1FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = typed_space();
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         [&leg],
         [&leg],
@@ -94,8 +96,10 @@ fn typed_real(runtime: &Runtime, scale: f64) -> TensorMap<U1FusionRule, f64> {
 }
 
 fn typed_complex(runtime: &Runtime, scale: f64) -> TensorMap<U1FusionRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = typed_space();
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         [&leg],
         [&leg],
@@ -111,6 +115,7 @@ fn typed_complex(runtime: &Runtime, scale: f64) -> TensorMap<U1FusionRule, Compl
 
 #[test]
 fn general_exp_matches_the_tensorkit_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
 
     // (scale, norm(t), norm(exp(t))) from the Julia session quoted above.
@@ -121,15 +126,15 @@ fn general_exp_matches_the_tensorkit_oracle() {
         let typed = typed_real(&runtime, scale);
         numerics::assert_close(
             &format!("f64 scale {scale} typed input fixture"),
-            typed.norm(2.0).unwrap(),
+            typed.norm(engine, 2.0).unwrap(),
             input_norm,
             TERMS,
         );
 
-        let typed_exp = typed.exp(&[0], &[1]).unwrap();
+        let typed_exp = typed.exp(engine, &[0], &[1]).unwrap();
         numerics::assert_close(
             &format!("f64 scale {scale} exp"),
-            typed_exp.norm(2.0).unwrap(),
+            typed_exp.norm(engine, 2.0).unwrap(),
             exponential_norm,
             TERMS,
         );
@@ -139,15 +144,15 @@ fn general_exp_matches_the_tensorkit_oracle() {
     let typed = typed_complex(&runtime, 1.0);
     numerics::assert_close(
         "c64 typed input fixture",
-        typed.norm(2.0).unwrap(),
+        typed.norm(engine, 2.0).unwrap(),
         2.5678298230217673,
         TERMS,
     );
 
-    let typed_exp = typed.exp(&[0], &[1]).unwrap();
+    let typed_exp = typed.exp(engine, &[0], &[1]).unwrap();
     numerics::assert_close(
         "c64 exp",
-        typed_exp.norm(2.0).unwrap(),
+        typed_exp.norm(engine, 2.0).unwrap(),
         3.1806015158373815,
         TERMS,
     );
@@ -159,6 +164,7 @@ const BALANCE_FIXTURE: [f64; 4] = [0.0, 1e-16, 1e16, 0.0];
 
 #[test]
 fn general_exp_balances_a_badly_scaled_block_like_julia() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: Julia's `exp!` runs `LAPACK.gebal!('B', A)` *before* the Padé
     // evaluation and undoes it afterwards (stdlib v1.11 `dense.jl:677-782`), so
     // TensorKit parity requires balancing here too. Unbalanced, this block has
@@ -168,12 +174,12 @@ fn general_exp_balances_a_badly_scaled_block_like_julia() {
     // balancing shows up in the values.
     let runtime = host_runtime();
     let space = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let tensor = TensorMap::from_subblock_fn(&runtime, [&space], [&space], |_, indices| {
+    let tensor = TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         BALANCE_FIXTURE[indices[0] + 2 * indices[1]]
     })
     .unwrap();
 
-    let exponential = tensor.exp(&[0], &[1]).unwrap();
+    let exponential = tensor.exp(engine, &[0], &[1]).unwrap();
 
     let expected = [
         1.0_f64.cosh(),

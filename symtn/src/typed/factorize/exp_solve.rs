@@ -9,7 +9,7 @@ where
 {
     /// The one body of the exponential: a compact diagonal exponentiates its
     /// entries, everything else takes the dense route.
-    pub(super) fn factor_exp(&self) -> Result<Self, FacadeError<R>> {
+    pub(super) fn factor_exp(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
         // TensorKit `exp!`: `domain == codomain` before anything else.
         symtn_matrixalgebra::seam::EndomorphismFamily::Exp
             .require_endomorphism(self.logical_space().space().homspace())
@@ -34,14 +34,15 @@ where
         let output = <R::Mode as symtn_matrixalgebra::seam::FactorMode<R>>::authority(space)
             .same_homspace_output(space)
             .map_err(R::Mode::map_root_error)?;
-        let _host_pool = self.runtime.enter_host_pool();
         let local = matches!(&self.repr, TypedTensorRepr::Adjoint(_))
-            .then(|| self.materialized_tensor_uncached())
+            .then(|| self.materialized_tensor_uncached(engine))
             .transpose()?;
         let (space, data) = local.as_ref().unwrap_or(self).dense_operand()?;
         let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
         let factor = RuntimeDense(&self.runtime)
-            .run(|dense| symtn_matrixalgebra::seam::exp_direct_into_dyn(dense, &input, output))
+            .run(|dense| {
+                symtn_matrixalgebra::seam::exp_direct_into_dyn(engine, dense, &input, output)
+            })
             .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
@@ -56,7 +57,11 @@ where
     /// `domain(self) <- domain(rhs)`. A nonsingular compact divisor scales
     /// `rhs` by its reciprocal spectrum; every other divisor is solved
     /// densely into the final output.
-    pub(super) fn factor_solve(&self, rhs: &Self) -> Result<Self, FacadeError<R>> {
+    pub(super) fn factor_solve(
+        &self,
+        engine: &mut dyn Engine,
+        rhs: &Self,
+    ) -> Result<Self, FacadeError<R>> {
         if self.logical_space().space().homspace().codomain()
             != rhs.logical_space().space().homspace().codomain()
         {
@@ -71,7 +76,7 @@ where
             // route materializes both operands.
             rhs.refuse_borrowed_view("solve")?;
             let output = self.factor_output_space(self.solve_homspace(rhs))?;
-            return self.dense_solve(rhs, output);
+            return self.dense_solve(engine, rhs, output);
         };
         self.admit_compact(spectrum)?;
         reject_singular_compact_divisor(spectrum)?;
@@ -97,13 +102,13 @@ where
     /// the sector solves into `output`.
     fn dense_solve(
         &self,
+        engine: &mut dyn Engine,
         rhs: &Self,
         output: BoundDynamicFusionMapSpace<R>,
     ) -> Result<Self, FacadeError<R>> {
-        let _host_pool = self.runtime.enter_host_pool();
-        let materialize = |tensor: &Self| {
+        let mut materialize = |tensor: &Self| {
             matches!(&tensor.repr, TypedTensorRepr::Adjoint(_))
-                .then(|| tensor.materialized_tensor_uncached())
+                .then(|| tensor.materialized_tensor_uncached(engine))
                 .transpose()
         };
         let (divisor_local, rhs_local) = (materialize(self)?, materialize(rhs)?);
@@ -115,7 +120,9 @@ where
         let rhs = BoundDynamicTensorRef::try_new(rhs_space, &rhs_data).map_err(Error::from)?;
         let factor = RuntimeDense(&self.runtime)
             .run(|dense| {
-                symtn_matrixalgebra::seam::solve_left_direct_into_dyn(dense, &divisor, &rhs, output)
+                symtn_matrixalgebra::seam::solve_left_direct_into_dyn(
+                    engine, dense, &divisor, &rhs, output,
+                )
             })
             .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
@@ -165,7 +172,6 @@ where
             }
         }
         let output = self.factor_output_space(self.solve_homspace(rhs))?;
-        let _host_pool = self.runtime.enter_host_pool();
         // The scaled payload is the result's own buffer: a dense `rhs` laid
         // out as the output is copied, anything else is read into it.
         let mut data = match &rhs.repr {

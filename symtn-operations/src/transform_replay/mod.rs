@@ -4,10 +4,12 @@ use core::ops::Add;
 use core::ops::Mul;
 use std::sync::{Arc, Weak};
 
+#[cfg(not(test))]
+use crate::host_pool::join as pool_join;
+use crate::host_pool::Exec;
 #[cfg(test)]
 use allocation_oracle::join as pool_join;
-#[cfg(not(test))]
-use rayon::join as pool_join;
+use symtn_dense::Engine;
 
 use num_traits::{One, Zero};
 #[cfg(any(test, feature = "testing"))]
@@ -126,7 +128,6 @@ mod allocation_oracle {
     }
 
     pub(super) fn with_session<R>(action: impl FnOnce() -> R) -> (R, usize) {
-        assert!(rayon::current_thread_index().is_none());
         assert!(!is_measured());
         assert!(!SESSION_ACTIVE.with(Cell::get));
         let restore = RestoreSession(SESSION_ACTIVE.with(|active| active.replace(true)));
@@ -158,28 +159,33 @@ mod allocation_oracle {
         JOINS.load(Ordering::Relaxed)
     }
 
-    pub(super) fn join<A, B, RA, RB>(left: A, right: B) -> (RA, RB)
+    pub(super) fn join<A, B, RA, RB>(
+        exec: crate::host_pool::Exec<'_>,
+        left: A,
+        right: B,
+    ) -> (RA, RB)
     where
-        A: FnOnce() -> RA + Send,
-        B: FnOnce() -> RB + Send,
-        RA: Send,
-        RB: Send,
+        A: FnOnce(crate::host_pool::Exec<'_>) -> RA + Send + Sync,
+        B: FnOnce(crate::host_pool::Exec<'_>) -> RB + Send + Sync,
+        RA: Send + Sync,
+        RB: Send + Sync,
     {
         let measured = is_measured();
         if measured {
             JOINS.fetch_add(1, Ordering::Relaxed);
         }
         let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(false)));
-        let result = rayon::join(
-            || {
+        let result = crate::host_pool::join(
+            exec,
+            |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
-                let result = left();
+                let result = left(exec);
                 drop(restore);
                 result
             },
-            || {
+            |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
-                let result = right();
+                let result = right(exec);
                 drop(restore);
                 result
             },
@@ -449,18 +455,31 @@ impl<T> ReportsPlacement for HostTreeTransformWorkspace<T> {
 #[cfg(test)]
 mod allocation_oracle_tests {
     use super::{allocation_oracle, replay_join};
+    use crate::host_pool::TestPool;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    /// A two-worker engine, so joins really fork. Built and warmed before
+    /// any measured scope: building an engine and its first fork allocate.
+    fn two_slots() -> TestPool {
+        let mut engine = crate::host_pool::test_pool(2);
+        engine.with_exec(|exec| allocation_oracle::join(exec, |_| (), |_| ()));
+        engine
+    }
 
     #[test]
     fn allocation_oracle_inherits_and_restores_join_scopes() {
+        let mut engine = two_slots();
         assert!(!allocation_oracle::is_measured());
         let (_, allocations) = allocation_oracle::with_session(|| {
             allocation_oracle::with_measurement(|| {
                 assert!(allocation_oracle::is_measured());
-                allocation_oracle::join(
-                    || assert!(allocation_oracle::is_measured()),
-                    || assert!(allocation_oracle::is_measured()),
-                );
+                engine.with_exec(|exec| {
+                    allocation_oracle::join(
+                        exec,
+                        |_| assert!(allocation_oracle::is_measured()),
+                        |_| assert!(allocation_oracle::is_measured()),
+                    )
+                });
                 assert!(allocation_oracle::is_measured());
             })
         });
@@ -470,27 +489,36 @@ mod allocation_oracle_tests {
 
     #[test]
     fn allocation_oracle_leaves_inactive_joins_unmeasured() {
-        allocation_oracle::join(
-            || assert!(!allocation_oracle::is_measured()),
-            || assert!(!allocation_oracle::is_measured()),
-        );
+        let mut engine = two_slots();
+        engine.with_exec(|exec| {
+            allocation_oracle::join(
+                exec,
+                |_| assert!(!allocation_oracle::is_measured()),
+                |_| assert!(!allocation_oracle::is_measured()),
+            )
+        });
         assert!(!allocation_oracle::is_measured());
     }
 
     #[test]
     fn allocation_oracle_restores_nested_worker_scopes() {
+        let mut engine = two_slots();
         let (_, allocations) = allocation_oracle::with_session(|| {
             allocation_oracle::with_measurement(|| {
-                allocation_oracle::join(
-                    || {
-                        allocation_oracle::join(
-                            || assert!(allocation_oracle::is_measured()),
-                            || assert!(allocation_oracle::is_measured()),
-                        );
-                        assert!(allocation_oracle::is_measured());
-                    },
-                    || assert!(allocation_oracle::is_measured()),
-                );
+                engine.with_exec(|exec| {
+                    allocation_oracle::join(
+                        exec,
+                        |exec| {
+                            allocation_oracle::join(
+                                exec,
+                                |_| assert!(allocation_oracle::is_measured()),
+                                |_| assert!(allocation_oracle::is_measured()),
+                            );
+                            assert!(allocation_oracle::is_measured());
+                        },
+                        |_| assert!(allocation_oracle::is_measured()),
+                    )
+                });
                 assert!(allocation_oracle::is_measured());
             })
         });
@@ -527,28 +555,18 @@ mod allocation_oracle_tests {
     }
 
     #[test]
-    fn allocation_oracle_rejects_worker_sessions() {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .build()
-            .unwrap();
-        let worker_session = pool
-            .install(|| catch_unwind(AssertUnwindSafe(|| allocation_oracle::with_session(|| ()))));
-        assert!(worker_session.is_err());
-
-        let (_, allocations) = allocation_oracle::with_session(|| ());
-        assert_eq!(allocations, 0);
-    }
-
-    #[test]
     fn allocation_oracle_restores_after_a_panicking_replay_join() {
+        let mut engine = two_slots();
         let panic = catch_unwind(AssertUnwindSafe(|| {
             allocation_oracle::with_session(|| {
                 allocation_oracle::with_measurement(|| {
-                    replay_join(
-                        || panic!("expected replay join panic"),
-                        || assert!(allocation_oracle::is_measured()),
-                    );
+                    engine.with_exec(|exec| {
+                        replay_join(
+                            exec,
+                            |_| panic!("expected replay join panic"),
+                            |_| assert!(allocation_oracle::is_measured()),
+                        )
+                    });
                 })
             });
         }));

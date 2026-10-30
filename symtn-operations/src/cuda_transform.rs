@@ -28,17 +28,16 @@ use core::any::TypeId;
 use std::sync::{Arc, Weak};
 
 use symtn_core::{BlockStructure, Placement, TensorStorage};
-pub use symtn_dense::DEFAULT_PLAN_CACHE_BUDGET_BYTES;
 use symtn_dense::{
     cuda_copy_strided_into, cuda_matmul_region_into, cuda_region_axpby, cuda_region_scale,
-    cuda_region_zero, plan_cache_entries_for, CudaDenseContext, CudaDenseStorage, CudaRegion,
-    CudaRegionBeta, CudaRegionCoefficient, CudaScalar, DenseError,
+    cuda_region_zero, CudaDenseContext, CudaDenseStorage, CudaRegion, CudaRegionBeta,
+    CudaRegionCoefficient, CudaScalar, DenseError,
 };
 
 use crate::cuda::CudaStorage;
 use crate::cuda_transform_plan::{
-    compile_device_plan, DeviceMoveSpec, DeviceTransformPlan, PlanSignatures, PreparedDeviceCache,
-    SharedPayload, StructureKey, DEFAULT_STRUCTURE_CACHE_ENTRIES,
+    compile_device_plan, DeviceMoveSpec, DeviceTransformPlan, PreparedDeviceCache, SharedPayload,
+    StructureKey, DEFAULT_STRUCTURE_CACHE_ENTRIES,
 };
 use crate::fusion_replay::{FusionScaleBlockLayout, FusionStridedBlockLayout};
 use crate::opaque_admission::{
@@ -193,19 +192,18 @@ pub struct CudaSingleMemberRegions {
 
 impl CudaSingleMemberRegions {
     /// Checks the entire completed task class before the temporary core runs.
-    pub fn admit(structure: &TreeTransformStructure<f64>) -> Result<usize, OperationError> {
+    pub fn admit(structure: &TreeTransformStructure<f64>) -> Result<(), OperationError> {
         Self::admit_scaled(structure, &[])
     }
 
     /// [`Self::admit`] with each move writing destination block offset `b`
     /// scaled by θ_b from `destination_scales` (strictly increasing offsets),
     /// the fermionic source twist folded as in
-    /// [`CudaTreeTransformExecutor::replay_with_destination_scales`]. Returns
-    /// the zero-fill and scaled-move plan entries a replay needs.
+    /// [`CudaTreeTransformExecutor::replay_with_destination_scales`].
     pub fn admit_scaled(
         structure: &TreeTransformStructure<f64>,
         destination_scales: &[(usize, f64)],
-    ) -> Result<usize, OperationError> {
+    ) -> Result<(), OperationError> {
         if destination_scales
             .windows(2)
             .any(|pair| pair[0].0 >= pair[1].0)
@@ -229,17 +227,14 @@ impl CudaSingleMemberRegions {
             });
         }
         let device = compile_device_plan(task)?;
-        let mut scaled = 0;
         for entry in &device.moves {
-            let coefficient = scaled_coefficient(task, entry, destination_scales)?;
-            if coefficient == 0.0 {
+            if scaled_coefficient(task, entry, destination_scales)? == 0.0 {
                 return Err(OperationError::UnsupportedTensorContractScope {
                     message: "CUDA member transform requires unconjugated nonzero Single tasks",
                 });
             }
-            scaled += usize::from(coefficient != 1.0);
         }
-        Ok(device.zeros.len() + scaled)
+        Ok(())
     }
 
     /// Validates every source, destination and inactive output region for B members.
@@ -543,12 +538,6 @@ struct PreparedStructure {
     /// The largest Single or scatter destination, the zero template a zero
     /// caller scale needs to write zeros over every written layout.
     max_write_len: usize,
-    plan_signatures: PlanSignatures,
-    /// Whether an Overwrite replay has zero-filled the written destinations on
-    /// this entry's context, so `plan_signatures.zero_fill` is reserved too.
-    /// Set by the first such replay, never cleared: the entry leaves the ledger
-    /// whole when it is evicted or cleared.
-    zero_fills_reserved: bool,
     /// Whether some Single block's coefficient is zero in the payload dtype,
     /// so every Overwrite replay zero-fills its destination, whatever the scale.
     zero_coefficient_moves: bool,
@@ -605,19 +594,19 @@ struct DeviceWorkspace {
 ///
 /// It owns the per-structure device state that makes a warm replay free of
 /// host↔device traffic: one uploaded coefficient-and-recoupling-matrix vector
-/// per (structure, payload dtype, context), bounded by a byte budget and an
+/// per (structure, payload dtype, engine), bounded by a byte budget and an
 /// entry count and purged when the structure itself is dropped, plus the pack/
-/// scatter workspace, grown monotonically per (payload dtype, context). Neither
+/// scatter workspace, grown monotonically per (payload dtype, engine). Neither
 /// is a semantic cache — the vector is a dtype conversion of data the structure
 /// already owns and the workspace is fully rewritten before it is read — so
 /// dropping them changes nothing but the cost of the next replay.
 ///
-/// One executor belongs next to one device execution context. Entries of other
-/// contexts can never be read back, because the context identity is part of
-/// every key. Because a replay needs `&mut self` and `&mut CudaDenseContext`
-/// at once, its owner is the runtime's device state beside the
-/// `CudaDenseContext`, inside the same device mutex the device lease takes; it
-/// is deliberately not global and not owned by any structure.
+/// Entries of another engine can never be read back, because the engine
+/// identity ([`CudaDenseContext::identity`], its allocation domain) is part of
+/// every key. The owner is the caller of one device operation, beside the
+/// `CudaDenseContext` it borrows the engine through: a replay needs `&mut
+/// self` and `&mut CudaDenseContext` at once. It is deliberately not global
+/// and not owned by any structure.
 pub struct CudaTreeTransformExecutor {
     prepared: PreparedDeviceCache<PreparedStructure>,
     /// One transform workspace per (payload dtype, context) actually replayed;
@@ -627,27 +616,6 @@ pub struct CudaTreeTransformExecutor {
     workspaces: Vec<DeviceWorkspace>,
     coefficient_budget_bytes: usize,
     structure_entries: usize,
-    plan_cache_budget_bytes: usize,
-    required_plan_entries: usize,
-    /// Plan entries this executor holds on each context it has prepared or
-    /// reserved on, what it owes back to that context's ledger.
-    plan_reservations: Vec<PlanReservation>,
-}
-
-/// One context's share of an executor's plan-entry reservation.
-///
-/// Kept per context because the prepared-structure cache is keyed by context
-/// and one executor may serve several: a reservation can only be moved on the
-/// context that granted it, and a structure evicted by another context's
-/// insert is released at this context's next refresh or clear.
-#[derive(Debug)]
-struct PlanReservation {
-    context: u64,
-    /// Granted for the structures prepared on this context.
-    structures: usize,
-    /// High-water reservation for submissions through this context that have
-    /// no prepared structure (the device trace).
-    additional: usize,
 }
 
 /// Default device budget for uploaded coefficient vectors: 16 MiB, i.e. two
@@ -658,10 +626,7 @@ pub const DEFAULT_COEFFICIENT_BUDGET_BYTES: usize = 16 * 1024 * 1024;
 
 impl Default for CudaTreeTransformExecutor {
     fn default() -> Self {
-        Self::new(
-            DEFAULT_COEFFICIENT_BUDGET_BYTES,
-            DEFAULT_PLAN_CACHE_BUDGET_BYTES,
-        )
+        Self::new(DEFAULT_COEFFICIENT_BUDGET_BYTES)
     }
 }
 
@@ -670,12 +635,8 @@ impl CudaTreeTransformExecutor {
     /// (the host completed-transformer cache is byte-bounded only, so this is
     /// a device-side bound of its own). Use [`Self::with_structure_entries`]
     /// for another bound.
-    pub fn new(coefficient_budget_bytes: usize, plan_cache_budget_bytes: usize) -> Self {
-        Self::with_structure_entries(
-            coefficient_budget_bytes,
-            plan_cache_budget_bytes,
-            DEFAULT_STRUCTURE_CACHE_ENTRIES,
-        )
+    pub fn new(coefficient_budget_bytes: usize) -> Self {
+        Self::with_structure_entries(coefficient_budget_bytes, DEFAULT_STRUCTURE_CACHE_ENTRIES)
     }
 
     /// An executor whose prepared-structure cache keeps at most
@@ -686,7 +647,6 @@ impl CudaTreeTransformExecutor {
     /// a memory decision, never a correctness one.
     pub fn with_structure_entries(
         coefficient_budget_bytes: usize,
-        plan_cache_budget_bytes: usize,
         structure_entries: usize,
     ) -> Self {
         Self {
@@ -694,9 +654,6 @@ impl CudaTreeTransformExecutor {
             workspaces: Vec::new(),
             coefficient_budget_bytes,
             structure_entries,
-            plan_cache_budget_bytes,
-            required_plan_entries: 0,
-            plan_reservations: Vec::new(),
         }
     }
 
@@ -733,84 +690,13 @@ impl CudaTreeTransformExecutor {
         self.prepared.entry_count()
     }
 
-    /// Distinct cuTENSOR operand signatures the currently prepared structures
-    /// submit together, i.e. the plan-cache size a thrash-free warm replay of
-    /// all of them needs.
-    ///
-    /// A nonzero caller scale's value does not enter it: it swaps the buffer
-    /// the 1x1 coefficient operand is read from, but not that operand's view
-    /// metadata (`[1, 1]` extents and strides) nor its alignment, which is
-    /// `size_of::<D>()` for every view, and the accumulation scalars are not in
-    /// a contraction plan key at all. A zero scale does: it zero-fills the
-    /// written destinations instead (#1438), and a structure's fill signatures
-    /// are added from its first such replay on.
-    pub fn required_plan_entries(&self) -> usize {
-        self.required_plan_entries
-    }
-
-    /// Reserves plan entries for `signatures` distinct operand signatures a
-    /// caller submits through `ctx` without a prepared structure (the device
-    /// trace), under this executor's plan-cache budget.
-    ///
-    /// The reservation is a high-water mark: only growth over the largest
-    /// count reserved before is added, so repeated calls do not accumulate.
-    /// It is returned by [`Self::clear`].
-    pub fn reserve_plan_entries_for_additional(
-        &mut self,
-        ctx: &mut CudaDenseContext,
-        signatures: usize,
-    ) -> Result<(), OperationError> {
-        let target = plan_cache_entries_for(signatures, self.plan_cache_budget_bytes);
-        let reservation = self.plan_reservation(ctx.identity());
-        if target > reservation.additional {
-            let granted = ctx
-                .reserve_plan_entries(target - reservation.additional)
-                .map_err(OperationError::Dense)?;
-            reservation.additional += granted;
-        }
-        Ok(())
-    }
-
-    /// Drops every prepared structure and returns every plan entry this
-    /// executor reserved on `ctx`. The next replay re-prepares whatever it
-    /// needs, so this is a memory decision, never a correctness one.
-    ///
-    /// Reservations on other contexts stay recorded, since only their own
-    /// context can take them back; their structures are gone, so each is
-    /// released at that context's next refresh or clear.
-    pub fn clear(&mut self, ctx: &mut CudaDenseContext) {
+    /// Drops every prepared structure and workspace. The next replay
+    /// re-prepares whatever it needs, so this is a memory decision, never a
+    /// correctness one.
+    pub fn clear(&mut self) {
         self.prepared =
             PreparedDeviceCache::new(self.coefficient_budget_bytes, self.structure_entries);
         self.workspaces.clear();
-        self.required_plan_entries = 0;
-        let context = ctx.identity();
-        if let Some(index) = self
-            .plan_reservations
-            .iter()
-            .position(|reservation| reservation.context == context)
-        {
-            let reservation = self.plan_reservations.swap_remove(index);
-            ctx.release_plan_entries(reservation.structures + reservation.additional);
-        }
-    }
-
-    fn plan_reservation(&mut self, context: u64) -> &mut PlanReservation {
-        let index = match self
-            .plan_reservations
-            .iter()
-            .position(|reservation| reservation.context == context)
-        {
-            Some(index) => index,
-            None => {
-                self.plan_reservations.push(PlanReservation {
-                    context,
-                    structures: 0,
-                    additional: 0,
-                });
-                self.plan_reservations.len() - 1
-            }
-        };
-        &mut self.plan_reservations[index]
     }
 
     /// Replays `structure` from `src` into `dst` on `ctx`'s device.
@@ -1051,26 +937,6 @@ impl CudaTreeTransformExecutor {
                     })?
             }
         };
-        // Before any submission, so the fills below find their plans covered.
-        // A scaling fill has the zero fill's region signature.
-        if !matches!(beta, CudaRegionBeta::Accumulate) {
-            if let Some(entry) = self.prepared.value_mut(index) {
-                if !entry.zero_fills_reserved && (alpha == D::ZERO || entry.zero_coefficient_moves)
-                {
-                    // Set before the refresh because the refresh sums the
-                    // flag; undone on failure so the next such replay retries
-                    // instead of submitting unreserved fills.
-                    entry.zero_fills_reserved = true;
-                    if let Err(error) = self.refresh_plan_cache(ctx) {
-                        if let Some(entry) = self.prepared.value_mut(index) {
-                            entry.zero_fills_reserved = false;
-                        }
-                        return Err(error);
-                    }
-                }
-            }
-        }
-
         let Self {
             prepared,
             workspaces,
@@ -1313,7 +1179,7 @@ impl CudaTreeTransformExecutor {
             }
         };
         self.prepared.insert(key.clone(), prepared, device_bytes);
-        self.refresh_plan_cache(ctx)
+        Ok(())
     }
 
     /// Makes this (dtype, context)'s transform workspace hold at least
@@ -1370,46 +1236,6 @@ impl CudaTreeTransformExecutor {
         match resident {
             Some(index) => self.workspaces[index] = grown,
             None => self.workspaces.push(grown),
-        }
-        Ok(())
-    }
-
-    /// Moves this executor's plan-entry reservation on `ctx` to what the
-    /// structures prepared on `ctx` need together, under this executor's byte
-    /// budget.
-    ///
-    /// Counting is structural — the distinct baked fused signatures of a
-    /// structure, computed once on the host when it is prepared — not a timing
-    /// heuristic. The change is a signed delta against what the executor holds
-    /// on `ctx`, so a total that falls (an insert evicted a structure) is
-    /// released, and a shortfall left by an exhausted budget is requested again
-    /// next time.
-    fn refresh_plan_cache(&mut self, ctx: &mut CudaDenseContext) -> Result<(), OperationError> {
-        let signatures = |values: &mut dyn Iterator<Item = &PreparedStructure>| {
-            values.fold(0usize, |total, prepared| {
-                let zero_fill = if prepared.zero_fills_reserved {
-                    prepared.plan_signatures.zero_fill
-                } else {
-                    0
-                };
-                total
-                    .saturating_add(prepared.plan_signatures.submitted)
-                    .saturating_add(zero_fill)
-            })
-        };
-        self.required_plan_entries = signatures(&mut self.prepared.values());
-        let context = ctx.identity();
-        let required = signatures(&mut self.prepared.values_on(context));
-        let target = plan_cache_entries_for(required, self.plan_cache_budget_bytes);
-        let reservation = self.plan_reservation(context);
-        if target > reservation.structures {
-            let granted = ctx
-                .reserve_plan_entries(target - reservation.structures)
-                .map_err(OperationError::Dense)?;
-            reservation.structures += granted;
-        } else {
-            ctx.release_plan_entries(reservation.structures - target);
-            reservation.structures = target;
         }
         Ok(())
     }
@@ -1480,8 +1306,6 @@ fn prepared_structure(
         zeros,
         max_zero_len: plan.max_zero_len,
         max_write_len,
-        plan_signatures: plan.plan_signatures,
-        zero_fills_reserved: false,
         zero_coefficient_moves: false,
         coefficients: None,
         coefficient_identity: Weak::new(),

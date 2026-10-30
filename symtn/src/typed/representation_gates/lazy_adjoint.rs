@@ -3,14 +3,16 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let fundamental = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)]).unwrap();
     let antifundamental = GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 1], 3)]).unwrap();
     let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&fundamental, &fundamental],
         [&antifundamental],
@@ -22,27 +24,30 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
         },
     )
     .unwrap();
-    let lazy = source.adjoint().unwrap();
-    let eager = lazy.materialized_tensor_uncached().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let eager = lazy.materialized_tensor_uncached(engine).unwrap();
     let adjoint = probe::record();
 
     let outputs = [
         (
-            lazy.permute(&[0, 2], &[1]).unwrap(),
-            eager.permute(&[0, 2], &[1]).unwrap(),
+            lazy.permute(engine, &[0, 2], &[1]).unwrap(),
+            eager.permute(engine, &[0, 2], &[1]).unwrap(),
         ),
         (
-            lazy.braid(&[0, 2], &[1], &[0, 1, 2]).unwrap(),
-            eager.braid(&[0, 2], &[1], &[0, 1, 2]).unwrap(),
-        ),
-        (lazy.repartition(2).unwrap(), eager.repartition(2).unwrap()),
-        (
-            lazy.transpose(&[2, 1], &[0]).unwrap(),
-            eager.transpose(&[2, 1], &[0]).unwrap(),
+            lazy.braid(engine, &[0, 2], &[1], &[0, 1, 2]).unwrap(),
+            eager.braid(engine, &[0, 2], &[1], &[0, 1, 2]).unwrap(),
         ),
         (
-            lazy.transpose(&[0, 2], &[1]).unwrap(),
-            eager.transpose(&[0, 2], &[1]).unwrap(),
+            lazy.repartition(engine, 2).unwrap(),
+            eager.repartition(engine, 2).unwrap(),
+        ),
+        (
+            lazy.transpose(engine, &[2, 1], &[0]).unwrap(),
+            eager.transpose(engine, &[2, 1], &[0]).unwrap(),
+        ),
+        (
+            lazy.transpose(engine, &[0, 2], &[1]).unwrap(),
+            eager.transpose(engine, &[0, 2], &[1]).unwrap(),
         ),
     ];
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
@@ -57,9 +62,9 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
             actual.logical_space().space(),
             expected.logical_space().space()
         );
-        assert!(actual.norm(2.0).unwrap().is_finite());
-        assert!(actual.qr_compact(&[0, 1], &[2]).is_ok());
-        let actual = actual.materialize().unwrap();
+        assert!(actual.norm(engine, 2.0).unwrap().is_finite());
+        assert!(actual.qr_compact(engine, &[0, 1], &[2]).is_ok());
+        let actual = actual.materialize(engine).unwrap();
         assert_eq!(
             actual.dense_data().unwrap().len(),
             expected.dense_data().unwrap().len()
@@ -75,7 +80,8 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
 
 #[test]
 fn coupled_block_reads_do_not_materialize_a_lazy_adjoint() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -83,11 +89,11 @@ fn coupled_block_reads_do_not_materialize_a_lazy_adjoint() {
     )
     .unwrap();
     let source: TensorMap<_, num_complex::Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, index| {
             num_complex::Complex64::new(index[0] as f64, index[2] as f64 + 1.0)
         })
         .unwrap();
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let clone = lazy.clone();
     let mut entries = 0;
     for (sector, block) in lazy.blocks().unwrap() {
@@ -105,7 +111,8 @@ fn coupled_block_reads_do_not_materialize_a_lazy_adjoint() {
 
 #[test]
 fn generic_lazy_adjoint_keeps_parent_storage_and_refuses_a_dense_borrow() {
-    let source = u1_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_lazy_fixture(engine);
     let parent: Arc<TypedTensorBody<_, _, NonCloneHost>> = Arc::new(TypedTensorBody::dense(
         source.logical_space().clone(),
         NonCloneHost(source.dense_data().unwrap().to_vec()),
@@ -132,7 +139,7 @@ fn generic_lazy_adjoint_keeps_parent_storage_and_refuses_a_dense_borrow() {
     assert!(Arc::ptr_eq(&parent, &view.parent));
 }
 
-fn assert_lazy_involution<R, D>(source: &TensorMap<R, D>)
+fn assert_lazy_involution<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -143,7 +150,7 @@ where
         + SectorCodec,
     D: TensorScalar,
 {
-    let adjoint = source.adjoint().unwrap();
+    let adjoint = source.adjoint(engine).unwrap();
     let TypedTensorRepr::Adjoint(view) = &adjoint.repr else {
         panic!("dense adjoint must be lazy");
     };
@@ -160,7 +167,7 @@ where
     };
     assert!(Arc::ptr_eq(view, clone_view));
 
-    let restored = adjoint.adjoint().unwrap();
+    let restored = adjoint.adjoint(engine).unwrap();
     assert!(Arc::ptr_eq(owned(source), owned(&restored)));
     assert_eq!(
         source.dense_data().unwrap().as_ptr(),
@@ -170,21 +177,23 @@ where
 
 #[test]
 fn lazy_adjoint_representation_and_involution_cover_unique_simple_and_both_dtypes() {
-    let u1_f64 = u1_lazy_fixture();
-    let u1_c64 = u1_f64.convert::<Complex64>();
-    let su2_f64 = su2_lazy_fixture();
-    let su2_c64 = su2_f64.convert::<Complex64>();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let u1_f64 = u1_lazy_fixture(engine);
+    let u1_c64 = u1_f64.convert::<Complex64>(engine).unwrap();
+    let su2_f64 = su2_lazy_fixture(engine);
+    let su2_c64 = su2_f64.convert::<Complex64>(engine).unwrap();
 
-    assert_lazy_involution(&u1_f64);
-    assert_lazy_involution(&u1_c64);
-    assert_lazy_involution(&su2_f64);
-    assert_lazy_involution(&su2_c64);
+    assert_lazy_involution(engine, &u1_f64);
+    assert_lazy_involution(engine, &u1_c64);
+    assert_lazy_involution(engine, &su2_f64);
+    assert_lazy_involution(engine, &su2_c64);
 }
 
 #[test]
 fn lazy_adjoint_metadata_is_logical_and_cold() {
-    let source = u1_lazy_fixture();
-    let adjoint = source.adjoint().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_lazy_fixture(engine);
+    let adjoint = source.adjoint(engine).unwrap();
     assert_eq!((source.codomain_rank(), source.domain_rank()), (2, 1));
     assert_eq!((adjoint.codomain_rank(), adjoint.domain_rank()), (1, 2));
     assert_eq!(adjoint.rank(), 3);
@@ -240,16 +249,17 @@ fn lazy_adjoint_metadata_is_logical_and_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_inv_lazy_is_detached_and_keeps_receiver_cold() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
-    let lazy = source.adjoint().unwrap();
-    let inverse = lazy.inv(&[0], &[1]).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let inverse = lazy.inv(engine, &[0], &[1]).unwrap();
 
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
         unreachable!()
@@ -269,44 +279,56 @@ fn checked_generic_inv_lazy_is_detached_and_keeps_receiver_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // What: both null directions use the opposite operation on the owned
     // parent, detach the final adjoint, and never publish the lazy cache.
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
+    let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |trees, indices| {
             let row = indices[0] + 2 * indices[1];
             let column = indices[2] + 2 * indices[3];
             f64::from(row == column)
                 * trees.codomain_vertices()[0].get() as f64
                 * trees.domain_vertices()[0].get() as f64
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let body = Arc::clone(owned(&source));
     let payload = Arc::clone(&body.data);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let expected_left = source
-        .right_null(&[0, 1], &[2, 3])
+        .right_null(engine, &[0, 1], &[2, 3])
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .materialized_tensor_uncached()
+        .materialized_tensor_uncached(engine)
         .unwrap();
     let expected_right = source
-        .left_null(&[0, 1], &[2, 3])
+        .left_null(engine, &[0, 1], &[2, 3])
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .materialized_tensor_uncached()
+        .materialized_tensor_uncached(engine)
         .unwrap();
 
     for (actual, expected) in [
-        (lazy.left_null(&[0, 1], &[2, 3]).unwrap(), expected_left),
-        (lazy.right_null(&[0, 1], &[2, 3]).unwrap(), expected_right),
+        (
+            lazy.left_null(engine, &[0, 1], &[2, 3]).unwrap(),
+            expected_left,
+        ),
+        (
+            lazy.right_null(engine, &[0, 1], &[2, 3]).unwrap(),
+            expected_right,
+        ),
     ] {
         assert!(matches!(&actual.repr, TypedTensorRepr::Owned(_)));
         assert_eq!(
@@ -335,66 +357,67 @@ fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
             trees.codomain_vertices()[0].get() as f64 + 0.25 * indices.iter().sum::<usize>() as f64
         })
         .unwrap();
-    let lazy = source.adjoint().unwrap();
-    let materializations = |op: &dyn Fn()| {
+    let lazy = source.adjoint(engine).unwrap();
+    let materializations = |op: &mut dyn FnMut()| {
         let adjoint = probe::record();
         op();
         adjoint.get(Event::AdjointMaterialization)
     };
 
     assert_eq!(
-        materializations(&|| drop(lazy.svd_vals(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.svd_vals(engine, &[0], &[1, 2]).unwrap())),
         0
     );
     assert_eq!(
-        materializations(&|| drop(lazy.svd_compact(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.svd_compact(engine, &[0], &[1, 2]).unwrap())),
         0
     );
     assert_eq!(
-        materializations(&|| drop(lazy.svd_full(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.svd_full(engine, &[0], &[1, 2]).unwrap())),
         0
     );
     assert_eq!(
-        materializations(&|| drop(lazy.pinv(&[0], &[1, 2], 0.0).unwrap())),
+        materializations(&mut || drop(lazy.pinv(engine, &[0], &[1, 2], 0.0).unwrap())),
         0
     );
     assert_eq!(
-        materializations(&|| drop(lazy.qr_compact(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.qr_compact(engine, &[0], &[1, 2]).unwrap())),
         1
     );
     assert_eq!(
-        materializations(&|| drop(lazy.qr_full(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.qr_full(engine, &[0], &[1, 2]).unwrap())),
         1
     );
     assert_eq!(
-        materializations(&|| drop(lazy.lq_compact(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.lq_compact(engine, &[0], &[1, 2]).unwrap())),
         0
     );
     assert_eq!(
-        materializations(&|| drop(lazy.lq_full(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.lq_full(engine, &[0], &[1, 2]).unwrap())),
         0
     );
     assert_eq!(
-        materializations(&|| drop(lazy.left_null(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.left_null(engine, &[0], &[1, 2]).unwrap())),
         1
     );
     assert_eq!(
-        materializations(&|| drop(lazy.right_null(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.right_null(engine, &[0], &[1, 2]).unwrap())),
         1
     );
     assert_eq!(
-        materializations(&|| drop(lazy.right_polar(&[0], &[1, 2]).unwrap())),
+        materializations(&mut || drop(lazy.right_polar(engine, &[0], &[1, 2]).unwrap())),
         1
     );
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
@@ -405,22 +428,29 @@ fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| f64::from(ij == [0, 1]))
-            .unwrap();
-    let lazy = source.adjoint().unwrap();
-    let actual = lazy.exp(&[0], &[1]).unwrap();
-    let expected = source.exp(&[0], &[1]).unwrap().adjoint().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
+            f64::from(ij == [0, 1])
+        })
+        .unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let actual = lazy.exp(engine, &[0], &[1]).unwrap();
+    let expected = source
+        .exp(engine, &[0], &[1])
+        .unwrap()
+        .adjoint(engine)
+        .unwrap();
     assert!(matches!(actual.repr, TypedTensorRepr::Owned(_)));
     assert_eq!(
         actual.dense_data().unwrap(),
-        expected.materialize().unwrap().dense_data().unwrap()
+        expected.materialize(engine).unwrap().dense_data().unwrap()
     );
     assert!(std::ptr::eq(actual.provider(), provider.as_ref()));
     assert!(actual.runtime().same_runtime(source.runtime()));
@@ -431,30 +461,31 @@ fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_lazy_flip_stays_cold_and_keeps_logical_duality() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![2, 2], 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap();
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
-    let flipped = lazy.flip(&[1], Direction::Forward).unwrap();
+    let flipped = lazy.flip(engine, &[1], Direction::Forward).unwrap();
     assert_eq!(flipped.domain()[0].is_dual(), !lazy.domain()[0].is_dual());
 
     let expected = source
-        .flip(&[0], Direction::Inverse)
+        .flip(engine, &[0], Direction::Inverse)
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
     assert_eq!(
-        flipped.materialize().unwrap().dense_data().unwrap(),
-        expected.materialize().unwrap().dense_data().unwrap()
+        flipped.materialize(engine).unwrap().dense_data().unwrap(),
+        expected.materialize(engine).unwrap().dense_data().unwrap()
     );
     assert_eq!(flipped.codomain(), expected.codomain());
     assert_eq!(flipped.domain(), expected.domain());
@@ -464,30 +495,31 @@ fn checked_generic_lazy_flip_stays_cold_and_keeps_logical_duality() {
 
 #[test]
 fn inverse_twist_and_flip_keep_the_lazy_adjoint_materialization_boundary() {
-    let source = fz2_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = fz2_fixture(engine);
     let eager = eager_adjoint_oracle(&source);
 
-    let lazy_twist = source.adjoint().unwrap();
+    let lazy_twist = source.adjoint(engine).unwrap();
     assert_eq!(
         lazy_twist
-            .twist(&[0], Direction::Inverse)
+            .twist(engine, &[0], Direction::Inverse)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
         eager
-            .twist(&[0], Direction::Inverse)
+            .twist(engine, &[0], Direction::Inverse)
             .unwrap()
             .dense_data()
             .unwrap()
     );
 
-    let lazy_flip = source.adjoint().unwrap();
-    let actual = lazy_flip.flip(&[1], Direction::Inverse).unwrap();
-    let expected = eager.flip(&[1], Direction::Inverse).unwrap();
+    let lazy_flip = source.adjoint(engine).unwrap();
+    let actual = lazy_flip.flip(engine, &[1], Direction::Inverse).unwrap();
+    let expected = eager.flip(engine, &[1], Direction::Inverse).unwrap();
     assert_eq!(
-        actual.materialize().unwrap().dense_data().unwrap(),
+        actual.materialize(engine).unwrap().dense_data().unwrap(),
         expected.dense_data().unwrap()
     );
     assert_eq!(
@@ -498,101 +530,117 @@ fn inverse_twist_and_flip_keep_the_lazy_adjoint_materialization_boundary() {
 
 #[test]
 fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
-    let source = u1_matrix_fixture([(0, 2)], [(0, 2)]);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_matrix_fixture(engine, [(0, 2)], [(0, 2)]);
     let eager = eager_adjoint_oracle(&source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
-    assert_eq!(lazy.is_diagonal(0.0), eager.is_diagonal(0.0));
-    assert!(lazy.is_diagonal(-1.0).is_err());
     assert_eq!(
-        lazy.convert::<Complex64>()
-            .materialize()
+        lazy.is_diagonal(engine, 0.0),
+        eager.is_diagonal(engine, 0.0)
+    );
+    assert!(lazy.is_diagonal(engine, -1.0).is_err());
+    assert_eq!(
+        lazy.convert::<Complex64>(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec(),
         eager
-            .convert::<Complex64>()
-            .materialize()
+            .convert::<Complex64>(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec()
     );
     assert_eq!(
-        lazy.convert::<Complex64>()
-            .re()
-            .materialize()
+        lazy.convert::<Complex64>(engine)
+            .unwrap()
+            .re(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec(),
         eager
-            .convert::<Complex64>()
-            .re()
-            .materialize()
+            .convert::<Complex64>(engine)
+            .unwrap()
+            .re(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec()
     );
     assert_eq!(
-        lazy.convert::<Complex64>()
-            .im()
-            .materialize()
+        lazy.convert::<Complex64>(engine)
+            .unwrap()
+            .im(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec(),
         eager
-            .convert::<Complex64>()
-            .im()
-            .materialize()
+            .convert::<Complex64>(engine)
+            .unwrap()
+            .im(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec()
     );
     assert_eq!(
-        lazy.insert_unit(0, Side::Domain, Duality::Plain)
+        lazy.insert_unit(engine, 0, Side::Domain, Duality::Plain)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec(),
         eager
-            .insert_unit(0, Side::Domain, Duality::Plain)
+            .insert_unit(engine, 0, Side::Domain, Duality::Plain)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec()
     );
 
-    let scalar = source.trace_pairs(&[(0, 1)]).unwrap();
+    let scalar = source.trace_pairs(engine, &[(0, 1)]).unwrap();
     let scalar_eager = eager_adjoint_oracle(&scalar);
-    let scalar_lazy = scalar.adjoint().unwrap();
+    let scalar_lazy = scalar.adjoint(engine).unwrap();
     assert_eq!(
-        scalar_lazy.scalar().unwrap(),
-        scalar_eager.scalar().unwrap()
+        scalar_lazy.scalar(engine).unwrap(),
+        scalar_eager.scalar(engine).unwrap()
     );
 
     let complex = genuinely_complex(&source);
     let eager_complex = eager_adjoint_oracle(&complex);
-    let lazy_complex = complex.adjoint().unwrap();
+    let lazy_complex = complex.adjoint(engine).unwrap();
     assert_eq!(
         lazy_complex
-            .re()
-            .materialize()
+            .re(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec(),
         eager_complex
-            .re()
-            .materialize()
+            .re(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -600,15 +648,17 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
     );
     assert_eq!(
         lazy_complex
-            .im()
-            .materialize()
+            .im(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .to_vec(),
         eager_complex
-            .im()
-            .materialize()
+            .im(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -617,38 +667,61 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
 
     let clone = lazy.clone();
     assert_eq!(
-        lazy.materialize().unwrap().dense_data().unwrap().to_vec(),
-        eager.materialize().unwrap().dense_data().unwrap().to_vec()
+        lazy.materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec(),
+        eager
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec()
     );
     assert_eq!(
-        clone.materialize().unwrap().dense_data().unwrap().to_vec(),
-        eager.materialize().unwrap().dense_data().unwrap().to_vec()
+        clone
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec(),
+        eager
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec()
     );
     // Explicit materialization is not an implicit build.
 }
 
 #[test]
 fn lazy_otimes_orientations_and_deligne_inputs_stay_cold() {
-    let lhs = u1_lazy_fixture();
-    let rhs = lhs.scale(2.0).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let lhs = u1_lazy_fixture(engine);
+    let rhs = lhs.scale(engine, 2.0).unwrap();
     let eager_lhs = eager_adjoint_oracle(&lhs);
     let eager_rhs = eager_adjoint_oracle(&rhs);
-    let lazy_lhs = lhs.adjoint().unwrap();
-    let lazy_rhs = rhs.adjoint().unwrap();
+    let lazy_lhs = lhs.adjoint(engine).unwrap();
+    let lazy_rhs = rhs.adjoint(engine).unwrap();
 
     for (actual, expected) in [
-        (lhs.otimes(&rhs).unwrap(), lhs.otimes(&rhs).unwrap()),
         (
-            lhs.otimes(&lazy_rhs).unwrap(),
-            lhs.otimes(&eager_rhs).unwrap(),
+            lhs.otimes(engine, &rhs).unwrap(),
+            lhs.otimes(engine, &rhs).unwrap(),
         ),
         (
-            lazy_lhs.otimes(&rhs).unwrap(),
-            eager_lhs.otimes(&rhs).unwrap(),
+            lhs.otimes(engine, &lazy_rhs).unwrap(),
+            lhs.otimes(engine, &eager_rhs).unwrap(),
         ),
         (
-            lazy_lhs.otimes(&lazy_rhs).unwrap(),
-            eager_lhs.otimes(&eager_rhs).unwrap(),
+            lazy_lhs.otimes(engine, &rhs).unwrap(),
+            eager_lhs.otimes(engine, &rhs).unwrap(),
+        ),
+        (
+            lazy_lhs.otimes(engine, &lazy_rhs).unwrap(),
+            eager_lhs.otimes(engine, &eager_rhs).unwrap(),
         ),
     ] {
         assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
@@ -658,50 +731,52 @@ fn lazy_otimes_orientations_and_deligne_inputs_stay_cold() {
         ));
     }
 
-    let deligne_lhs = u1_matrix_fixture([(0, 2)], [(0, 2)]);
-    let deligne_rhs = deligne_lhs.scale(3.0).unwrap();
+    let deligne_lhs = u1_matrix_fixture(engine, [(0, 2)], [(0, 2)]);
+    let deligne_rhs = deligne_lhs.scale(engine, 3.0).unwrap();
     let eager_deligne_lhs = eager_adjoint_oracle(&deligne_lhs);
     let eager_deligne_rhs = eager_adjoint_oracle(&deligne_rhs);
-    let lazy_deligne_lhs = deligne_lhs.adjoint().unwrap();
-    let lazy_deligne_rhs = deligne_rhs.adjoint().unwrap();
+    let lazy_deligne_lhs = deligne_lhs.adjoint(engine).unwrap();
+    let lazy_deligne_rhs = deligne_rhs.adjoint(engine).unwrap();
     let product = Arc::new(ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap());
     let actual = lazy_deligne_lhs
-        .deligne_product(&lazy_deligne_rhs, Arc::clone(&product))
+        .deligne_product(engine, &lazy_deligne_rhs, Arc::clone(&product))
         .unwrap();
     let expected = eager_deligne_lhs
-        .deligne_product(&eager_deligne_rhs, product)
+        .deligne_product(engine, &eager_deligne_rhs, product)
         .unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
 }
 
 #[test]
 fn absorb_uses_operation_local_logical_payloads_without_warming_lazy_inputs() {
-    let destination_parent = genuinely_complex(&u1_lazy_fixture());
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let destination_parent = genuinely_complex(&u1_lazy_fixture(engine));
     let source_parent = destination_parent
-        .scale(num_complex::Complex64::new(2.0, -1.0))
+        .scale(engine, num_complex::Complex64::new(2.0, -1.0))
         .unwrap();
     let eager_destination = eager_adjoint_oracle(&destination_parent);
     let eager_source = eager_adjoint_oracle(&source_parent);
-    let expected = eager_destination.absorb(&eager_source).unwrap();
-    let lazy_destination = destination_parent.adjoint().unwrap();
-    let lazy_source = source_parent.adjoint().unwrap();
+    let expected = eager_destination.absorb(engine, &eager_source).unwrap();
+    let lazy_destination = destination_parent.adjoint(engine).unwrap();
+    let lazy_source = source_parent.adjoint(engine).unwrap();
 
-    let actual = lazy_destination.absorb(&lazy_source).unwrap();
-    assert_typed_map_close(&actual, &expected, 1e-12);
+    let actual = lazy_destination.absorb(engine, &lazy_source).unwrap();
+    assert_typed_map_close(engine, &actual, &expected, 1e-12);
 }
 
 fn assert_parent_native_transform<R, D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<R, D>,
     eager: &TensorMap<R, D>,
-    operation: impl Fn(&TensorMap<R, D>) -> Result<TensorMap<R, D>, FacadeError<R>>,
+    operation: impl Fn(&mut dyn Engine, &TensorMap<R, D>) -> Result<TensorMap<R, D>, FacadeError<R>>,
 ) where
     R: TypedSectorAdmission,
     R::Mode: TypedTensorTransformDispatch<R, D> + TypedAdjointSpace<R>,
     D: TensorScalar + core::fmt::Debug,
 {
-    let lazy = source.adjoint().unwrap();
-    let actual = operation(&lazy).unwrap();
-    let expected = operation(eager).unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let actual = operation(engine, &lazy).unwrap();
+    let expected = operation(engine, eager).unwrap();
     let TypedTensorRepr::Adjoint(_) = &actual.repr else {
         panic!("a transformed lazy adjoint must remain parent-backed");
     };
@@ -714,11 +789,16 @@ fn assert_parent_native_transform<R, D>(
         source.logical_space().provider_arc()
     ));
     assert_eq!(
-        actual.materialize().unwrap().dense_data().unwrap().len(),
+        actual
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len(),
         expected.dense_data().unwrap().len()
     );
     assert!(actual
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -730,44 +810,57 @@ fn assert_parent_native_transform<R, D>(
 }
 
 /// `eager` is an independently built `source^H`.
-fn assert_parent_native_transform_suite<R, D>(source: &TensorMap<R, D>, eager: &TensorMap<R, D>)
-where
+fn assert_parent_native_transform_suite<R, D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<R, D>,
+    eager: &TensorMap<R, D>,
+) where
     R: TypedSectorAdmission,
     R::Mode: TypedTensorTransformDispatch<R, D> + TypedAdjointSpace<R>,
     D: TensorScalar + core::fmt::Debug,
 {
-    assert_parent_native_transform(source, eager, |tensor| tensor.permute(&[2, 0], &[1]));
-    assert_parent_native_transform(source, eager, |tensor| {
-        tensor.braid(&[2, 0], &[1], &[17, 3, 11])
+    assert_parent_native_transform(engine, source, eager, |engine, tensor| {
+        tensor.permute(engine, &[2, 0], &[1])
     });
-    assert_parent_native_transform(source, eager, |tensor| tensor.transpose(&[2, 1], &[0]));
-    assert_parent_native_transform(source, eager, |tensor| tensor.repartition(2));
+    assert_parent_native_transform(engine, source, eager, |engine, tensor| {
+        tensor.braid(engine, &[2, 0], &[1], &[17, 3, 11])
+    });
+    assert_parent_native_transform(engine, source, eager, |engine, tensor| {
+        tensor.transpose(engine, &[2, 1], &[0])
+    });
+    assert_parent_native_transform(engine, source, eager, |engine, tensor| {
+        tensor.repartition(engine, 2)
+    });
 }
 
 #[test]
 fn nonidentity_adjoint_transforms_stay_parent_native_for_unique_simple_and_both_dtypes() {
-    let u1 = u1_lazy_fixture();
-    let su2 = su2_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let u1 = u1_lazy_fixture(engine);
+    let su2 = su2_lazy_fixture(engine);
     let u1_c64 = u1
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
     let su2_c64 = su2
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_parent_native_transform_suite(&u1, &eager_adjoint_oracle(&u1));
-    assert_parent_native_transform_suite(&u1_c64, &eager_adjoint_oracle(&u1_c64));
-    assert_parent_native_transform_suite(&su2, &eager_adjoint_oracle(&su2));
-    assert_parent_native_transform_suite(&su2_c64, &eager_adjoint_oracle(&su2_c64));
+    assert_parent_native_transform_suite(engine, &u1, &eager_adjoint_oracle(&u1));
+    assert_parent_native_transform_suite(engine, &u1_c64, &eager_adjoint_oracle(&u1_c64));
+    assert_parent_native_transform_suite(engine, &su2, &eager_adjoint_oracle(&su2));
+    assert_parent_native_transform_suite(engine, &su2_c64, &eager_adjoint_oracle(&su2_c64));
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_both_dtypes() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let su2 = GradedSpace::try_new(
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
         [(vec![0], 2), (vec![1], 3), (vec![2], 2)],
@@ -780,34 +873,44 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_bot
     )
     .unwrap();
     for leg in [su2, su3] {
-        let source: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, indices| {
+        let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg, &leg],
+            [&leg],
+            |trees, indices| {
                 indices.iter().sum::<usize>() as f64 + trees.coupled().iter().sum::<i64>() as f64
                     - 1.5
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         let source_c64 = source
-            .convert::<Complex64>()
-            .scale(num_complex::Complex64::new(1.0, 2.0))
+            .convert::<Complex64>(engine)
+            .unwrap()
+            .scale(engine, num_complex::Complex64::new(1.0, 2.0))
             .unwrap();
         // Oracle (i): TensorKit `copy(t')`, which no transform route reads.
         let eager = source
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialized_tensor_uncached()
+            .materialized_tensor_uncached(engine)
             .unwrap();
-        assert_parent_native_transform_suite(&source, &eager);
+        assert_parent_native_transform_suite(engine, &source, &eager);
         let eager_c64 = source_c64
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialized_tensor_uncached()
+            .materialized_tensor_uncached(engine)
             .unwrap();
-        assert_parent_native_transform_suite(&source_c64, &eager_c64);
+        assert_parent_native_transform_suite(engine, &source_c64, &eager_c64);
     }
 }
 
-fn assert_parent_native_elementwise<R, D>(source: &TensorMap<R, D>, alpha: D, beta: D)
-where
+fn assert_parent_native_elementwise<R, D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<R, D>,
+    alpha: D,
+    beta: D,
+) where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
             Error = FusionAlgebraError,
@@ -817,11 +920,11 @@ where
         + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(source);
 
-    let add = lazy.axpby(alpha, &eager, beta).unwrap();
-    let expected_add = eager.axpby(alpha, &eager, beta).unwrap();
+    let add = lazy.axpby(engine, alpha, &eager, beta).unwrap();
+    let expected_add = eager.axpby(engine, alpha, &eager, beta).unwrap();
     assert!(add
         .dense_data()
         .unwrap()
@@ -831,12 +934,12 @@ where
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
     // Two lazy adjoints stay lazy (A10, #1874): the parents are combined.
-    let add_both = lazy.axpby(alpha, &lazy, beta).unwrap();
+    let add_both = lazy.axpby(engine, alpha, &lazy, beta).unwrap();
     let TypedTensorRepr::Adjoint(_) = &add_both.repr else {
         panic!("adding two lazy adjoints must remain parent-backed");
     };
     assert!(add_both
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -845,7 +948,7 @@ where
         .all(|(&actual, &expected)| {
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
-    let add_rhs = eager.axpby(alpha, &lazy, beta).unwrap();
+    let add_rhs = eager.axpby(engine, alpha, &lazy, beta).unwrap();
     assert!(add_rhs
         .dense_data()
         .unwrap()
@@ -855,13 +958,13 @@ where
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
 
-    let scaled = lazy.scale(alpha).unwrap();
-    let expected_scaled = eager.scale(alpha).unwrap();
+    let scaled = lazy.scale(engine, alpha).unwrap();
+    let expected_scaled = eager.scale(engine, alpha).unwrap();
     let TypedTensorRepr::Adjoint(_) = &scaled.repr else {
         panic!("scaling a lazy adjoint must remain parent-backed");
     };
     assert!(scaled
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -874,57 +977,65 @@ where
     // Why an absolute bound and not `numerics`: the inner products reach
     // magnitude 520, where the `numerics` bound would exceed the `1e-12` this
     // gate has always held them to.
-    let eager_inner = eager.inner(&eager).unwrap().widen_complex();
+    let eager_inner = eager.inner(engine, &eager).unwrap().widen_complex();
     for (what, inner) in [
-        ("lazy.inner(&eager)", lazy.inner(&eager).unwrap()),
-        ("eager.inner(&lazy)", eager.inner(&lazy).unwrap()),
-        ("lazy.inner(&lazy)", lazy.inner(&lazy).unwrap()),
+        ("lazy.inner(&eager)", lazy.inner(engine, &eager).unwrap()),
+        ("eager.inner(&lazy)", eager.inner(engine, &lazy).unwrap()),
+        ("lazy.inner(&lazy)", lazy.inner(engine, &lazy).unwrap()),
     ] {
         assert!(
             (inner.widen_complex() - eager_inner).norm() < 1e-12,
             "{what}"
         );
     }
-    assert!((lazy.norm(2.0).unwrap() - eager.norm(2.0).unwrap()).abs() < 1e-12);
-    assert!((lazy.norm(f64::INFINITY).unwrap() - eager.norm(f64::INFINITY).unwrap()).abs() < 1e-12);
-    assert!((lazy.norm(1.5).unwrap() - eager.norm(1.5).unwrap()).abs() < 1e-12);
+    assert!((lazy.norm(engine, 2.0).unwrap() - eager.norm(engine, 2.0).unwrap()).abs() < 1e-12);
+    assert!(
+        (lazy.norm(engine, f64::INFINITY).unwrap() - eager.norm(engine, f64::INFINITY).unwrap())
+            .abs()
+            < 1e-12
+    );
+    assert!((lazy.norm(engine, 1.5).unwrap() - eager.norm(engine, 1.5).unwrap()).abs() < 1e-12);
+    let operand = D::from_real(1.0 / lazy.norm(engine, 2.0).unwrap());
 
-    let normalized = lazy
-        .scale(D::from_real(1.0 / lazy.norm(2.0).unwrap()))
-        .unwrap();
+    let normalized = lazy.scale(engine, operand).unwrap();
     let TypedTensorRepr::Adjoint(_) = &normalized.repr else {
         panic!("normalizing a lazy adjoint must remain parent-backed");
     };
-    assert!((normalized.norm(2.0).unwrap() - 1.0).abs() < 1e-12);
+    assert!((normalized.norm(engine, 2.0).unwrap() - 1.0).abs() < 1e-12);
 }
 
 #[test]
 fn adjoint_elementwise_and_reductions_stay_parent_native() {
-    let u1 = u1_lazy_fixture();
-    let su2 = su2_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let u1 = u1_lazy_fixture(engine);
+    let su2 = su2_lazy_fixture(engine);
     let u1_c64 = u1
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
     let su2_c64 = su2
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_parent_native_elementwise(&u1, 2.0, -0.5);
-    assert_parent_native_elementwise(&su2, 2.0, -0.5);
+    assert_parent_native_elementwise(engine, &u1, 2.0, -0.5);
+    assert_parent_native_elementwise(engine, &su2, 2.0, -0.5);
     assert_parent_native_elementwise(
+        engine,
         &u1_c64,
         num_complex::Complex64::new(0.5, 1.0),
         num_complex::Complex64::new(-0.25, 0.75),
     );
     assert_parent_native_elementwise(
+        engine,
         &su2_c64,
         num_complex::Complex64::new(0.5, 1.0),
         num_complex::Complex64::new(-0.25, 0.75),
     );
 }
 
-fn assert_parent_native_trace_pairs<R, D>(source: &TensorMap<R, D>)
+fn assert_parent_native_trace_pairs<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -935,10 +1046,10 @@ where
         + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(source);
-    let expected = eager.trace_pairs(&[(0, 1)]).unwrap();
-    let actual = lazy.trace_pairs(&[(0, 1)]).unwrap();
+    let expected = eager.trace_pairs(engine, &[(0, 1)]).unwrap();
+    let actual = lazy.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(
         actual.logical_space().space(),
         expected.logical_space().space()
@@ -956,16 +1067,17 @@ where
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
     assert!(
-        matches!(lazy.trace_pairs(&[(0, lazy.rank())]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
+        matches!(lazy.trace_pairs(engine, &[(0, lazy.rank())]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
     );
     assert!(
-        matches!(lazy.trace_pairs(&[(0, 0)]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
+        matches!(lazy.trace_pairs(engine, &[(0, 0)]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidAxisSet { tensor: "trace pairs", .. }))
     );
 }
 
 #[test]
 fn adjoint_trace_pairs_stays_parent_native() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let u1_provider = Arc::new(U1FusionRule);
     let u1_traced = GradedSpace::try_new(
         Arc::clone(&u1_provider),
@@ -976,6 +1088,7 @@ fn adjoint_trace_pairs_stays_parent_native() {
         .and_then(|space| space.try_dual())
         .unwrap();
     let u1 = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&u1_traced, &u1_open],
         [&u1_traced],
@@ -1001,6 +1114,7 @@ fn adjoint_trace_pairs_stays_parent_native() {
     .and_then(|space| space.try_dual())
     .unwrap();
     let su2 = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&su2_traced, &su2_open, &su2_open],
         [&su2_traced],
@@ -1010,26 +1124,28 @@ fn adjoint_trace_pairs_stays_parent_native() {
     assert!(su2.subblock_count() > 1);
     assert!(
         eager_adjoint_oracle(&su2)
-            .trace_pairs(&[(0, 1)])
+            .trace_pairs(engine, &[(0, 1)])
             .unwrap()
             .subblock_count()
             > 1
     );
     let u1_c64 = u1
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
     let su2_c64 = su2
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_parent_native_trace_pairs(&u1);
-    assert_parent_native_trace_pairs(&u1_c64);
-    assert_parent_native_trace_pairs(&su2);
-    assert_parent_native_trace_pairs(&su2_c64);
+    assert_parent_native_trace_pairs(engine, &u1);
+    assert_parent_native_trace_pairs(engine, &u1_c64);
+    assert_parent_native_trace_pairs(engine, &su2);
+    assert_parent_native_trace_pairs(engine, &su2_c64);
 }
 
-fn assert_parent_native_tr<R, D>(source: &TensorMap<R, D>)
+fn assert_parent_native_tr<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -1040,28 +1156,33 @@ where
         + SectorCodec,
     D: TensorScalar + core::fmt::Debug + numerics::Numeric,
 {
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(source);
     numerics::assert_close(
         "lazy.tr()",
-        lazy.tr().unwrap(),
-        eager.tr().unwrap(),
+        lazy.tr(engine).unwrap(),
+        eager.tr(engine).unwrap(),
         GATE_TERMS,
     );
 }
 
 #[test]
 fn adjoint_positive_trace_conjugates_the_parent_without_materializing() {
-    let u1_source = u1_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let u1_source = u1_lazy_fixture(engine);
     let u1_leg = u1_source.codomain().remove(0);
-    let u1 =
-        TensorMap::from_subblock_fn(u1_source.runtime(), [&u1_leg], [&u1_leg], |_, indices| {
-            (indices[0] + 2 * indices[1]) as f64 + 1.0
-        })
-        .unwrap();
-    let su2_source = su2_lazy_fixture();
+    let u1 = TensorMap::from_subblock_fn(
+        engine,
+        u1_source.runtime(),
+        [&u1_leg],
+        [&u1_leg],
+        |_, indices| (indices[0] + 2 * indices[1]) as f64 + 1.0,
+    )
+    .unwrap();
+    let su2_source = su2_lazy_fixture(engine);
     let su2_leg = su2_source.codomain().remove(0);
     let su2 = TensorMap::from_subblock_fn(
+        engine,
         su2_source.runtime(),
         [&su2_leg],
         [&su2_leg],
@@ -1069,21 +1190,25 @@ fn adjoint_positive_trace_conjugates_the_parent_without_materializing() {
     )
     .unwrap();
     let u1_c64 = u1
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
     let su2_c64 = su2
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_parent_native_tr(&u1);
-    assert_parent_native_tr(&u1_c64);
-    assert_parent_native_tr(&su2);
-    assert_parent_native_tr(&su2_c64);
+    assert_parent_native_tr(engine, &u1);
+    assert_parent_native_tr(engine, &u1_c64);
+    assert_parent_native_tr(engine, &su2);
+    assert_parent_native_tr(engine, &su2_c64);
 }
 
-fn assert_parent_native_contract_and_compose<R, D>(source: &TensorMap<R, D>)
-where
+fn assert_parent_native_contract_and_compose<R, D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<R, D>,
+) where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
             Error = FusionAlgebraError,
@@ -1093,7 +1218,7 @@ where
         + SectorCodec,
     D: TensorScalar + core::fmt::Debug,
 {
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(source);
     for (lhs, rhs, expected_lhs, expected_rhs) in [
         (&lazy, &eager, &eager, &eager),
@@ -1102,6 +1227,7 @@ where
     ] {
         let actual = lhs
             .contract(
+                engine,
                 rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -1113,6 +1239,7 @@ where
             .unwrap();
         let expected = expected_lhs
             .contract(
+                engine,
                 expected_rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -1139,8 +1266,8 @@ where
                 (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
             }));
 
-        let actual = lhs.compose(rhs).unwrap();
-        let expected = expected_lhs.compose(expected_rhs).unwrap();
+        let actual = lhs.compose(engine, rhs).unwrap();
+        let expected = expected_lhs.compose(engine, expected_rhs).unwrap();
         assert_eq!(
             actual.logical_space().space(),
             expected.logical_space().space()
@@ -1159,7 +1286,7 @@ where
             }));
     }
     assert!(matches!(lazy
-        .contract(
+        .contract(engine,
             &eager,
             &ContractSpec {
                 lhs: &[2],
@@ -1172,16 +1299,21 @@ where
 
 #[test]
 fn adjoint_contract_and_compose_stay_parent_native() {
-    let u1_source = u1_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let u1_source = u1_lazy_fixture(engine);
     let u1_leg = u1_source.codomain().remove(0);
-    let u1 =
-        TensorMap::from_subblock_fn(u1_source.runtime(), [&u1_leg], [&u1_leg], |_, indices| {
-            (indices[0] + 2 * indices[1]) as f64 + 1.0
-        })
-        .unwrap();
-    let su2_source = su2_lazy_fixture();
+    let u1 = TensorMap::from_subblock_fn(
+        engine,
+        u1_source.runtime(),
+        [&u1_leg],
+        [&u1_leg],
+        |_, indices| (indices[0] + 2 * indices[1]) as f64 + 1.0,
+    )
+    .unwrap();
+    let su2_source = su2_lazy_fixture(engine);
     let su2_leg = su2_source.codomain().remove(0);
     let su2 = TensorMap::from_subblock_fn(
+        engine,
         su2_source.runtime(),
         [&su2_leg],
         [&su2_leg],
@@ -1189,17 +1321,19 @@ fn adjoint_contract_and_compose_stay_parent_native() {
     )
     .unwrap();
     let u1_c64 = u1
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
     let su2_c64 = su2
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_parent_native_contract_and_compose(&u1);
-    assert_parent_native_contract_and_compose(&u1_c64);
-    assert_parent_native_contract_and_compose(&su2);
-    assert_parent_native_contract_and_compose(&su2_c64);
+    assert_parent_native_contract_and_compose(engine, &u1);
+    assert_parent_native_contract_and_compose(engine, &u1_c64);
+    assert_parent_native_contract_and_compose(engine, &su2);
+    assert_parent_native_contract_and_compose(engine, &su2_c64);
 }
 
 /// `t'·t`, `t'∘t`, `t·t'` and `t'·t'` of a checked SU(3) tensor `t` read
@@ -1209,12 +1343,13 @@ fn adjoint_contract_and_compose_stay_parent_native() {
 /// multiplicity two included.
 #[cfg(feature = "cgc-gen")]
 fn assert_checked_adjoint_contract_and_compose<D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<symtn_core::LieGroupFusionRule, D>,
 ) where
     D: TensorScalar + core::fmt::Debug,
 {
-    let lazy = source.adjoint().unwrap();
-    let eager = lazy.materialized_tensor_uncached().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let eager = lazy.materialized_tensor_uncached(engine).unwrap();
     let spec = |lhs, rhs, codomain, domain| ContractSpec {
         lhs,
         rhs,
@@ -1229,20 +1364,20 @@ fn assert_checked_adjoint_contract_and_compose<D>(
     let adjoint = probe::record();
     let outputs = [
         (
-            lazy.contract(source, &core).unwrap(),
-            eager.contract(source, &core).unwrap(),
+            lazy.contract(engine, source, &core).unwrap(),
+            eager.contract(engine, source, &core).unwrap(),
         ),
         (
-            lazy.compose(source).unwrap(),
-            eager.compose(source).unwrap(),
+            lazy.compose(engine, source).unwrap(),
+            eager.compose(engine, source).unwrap(),
         ),
         (
-            source.contract(&lazy, &flip).unwrap(),
-            source.contract(&eager, &flip).unwrap(),
+            source.contract(engine, &lazy, &flip).unwrap(),
+            source.contract(engine, &eager, &flip).unwrap(),
         ),
         (
-            lazy.contract(&lazy, &both).unwrap(),
-            eager.contract(&eager, &both).unwrap(),
+            lazy.contract(engine, &lazy, &both).unwrap(),
+            eager.contract(engine, &eager, &both).unwrap(),
         ),
     ];
     assert_eq!(adjoint.get(Event::AdjointMaterialization), 0);
@@ -1287,9 +1422,10 @@ fn assert_checked_adjoint_contract_and_compose<D>(
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_adjoint_contract_and_compose_read_the_parent() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     // `8 ⊗ 8 → 8` has outer multiplicity two.
     let leg = GradedSpace::try_new(
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
@@ -1297,29 +1433,32 @@ fn checked_generic_su3_adjoint_contract_and_compose_read_the_parent() {
     )
     .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
             indices.iter().sum::<usize>() as f64 + trees.coupled().iter().sum::<i64>() as f64 - 1.5
         })
         .unwrap();
-    assert_checked_adjoint_contract_and_compose(&source);
-    assert_checked_adjoint_contract_and_compose(
-        &source
-            .convert::<Complex64>()
-            .scale(num_complex::Complex64::new(1.0, 2.0))
-            .unwrap(),
-    );
+    assert_checked_adjoint_contract_and_compose(engine, &source);
+    let complex = source
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
+        .unwrap();
+    assert_checked_adjoint_contract_and_compose(engine, &complex);
 }
 
-fn assert_rank_three_su2_contract_and_compose<D>(source: &TensorMap<SU2FusionRule, D>)
-where
+fn assert_rank_three_su2_contract_and_compose<D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<SU2FusionRule, D>,
+) where
     D: TensorScalar + core::fmt::Debug,
 {
     assert!(source.subblock_count() > 1);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(source);
 
     let actual = lazy
         .contract(
+            engine,
             source,
             &ContractSpec {
                 lhs: &[2, 1],
@@ -1331,6 +1470,7 @@ where
         .unwrap();
     let expected = eager
         .contract(
+            engine,
             source,
             &ContractSpec {
                 lhs: &[2, 1],
@@ -1358,8 +1498,8 @@ where
             (actual.widen_complex() - expected.widen_complex()).norm() < 1e-12
         }));
 
-    let actual = lazy.compose(source).unwrap();
-    let expected = eager.compose(source).unwrap();
+    let actual = lazy.compose(engine, source).unwrap();
+    let expected = eager.compose(engine, source).unwrap();
     assert!(actual.subblock_count() > 1);
     assert_eq!(
         actual.logical_space().space(),
@@ -1381,24 +1521,28 @@ where
 
 #[test]
 fn rank_three_su2_adjoint_contract_and_compose_use_oriented_recoupling() {
-    let source = su2_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = su2_lazy_fixture(engine);
     let complex = source
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_rank_three_su2_contract_and_compose(&source);
-    assert_rank_three_su2_contract_and_compose(&complex);
+    assert_rank_three_su2_contract_and_compose(engine, &source);
+    assert_rank_three_su2_contract_and_compose(engine, &complex);
 }
 
 fn assert_fermionic_contract_and_compose_semantics<D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<FermionParityFusionRule, D>,
 ) where
     D: TensorScalar + core::fmt::Debug,
 {
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(source);
     let contract = lazy
         .contract(
+            engine,
             source,
             &ContractSpec {
                 lhs: &[1],
@@ -1410,6 +1554,7 @@ fn assert_fermionic_contract_and_compose_semantics<D>(
         .unwrap();
     let expected_contract = eager
         .contract(
+            engine,
             source,
             &ContractSpec {
                 lhs: &[1],
@@ -1419,8 +1564,8 @@ fn assert_fermionic_contract_and_compose_semantics<D>(
             },
         )
         .unwrap();
-    let compose = lazy.compose(source).unwrap();
-    let expected_compose = eager.compose(source).unwrap();
+    let compose = lazy.compose(engine, source).unwrap();
+    let expected_compose = eager.compose(engine, source).unwrap();
     assert!(contract
         .dense_data()
         .unwrap()
@@ -1457,23 +1602,25 @@ fn assert_fermionic_contract_and_compose_semantics<D>(
 
 #[test]
 fn fermionic_lazy_contract_keeps_the_supertrace_distinct_from_compose() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let leg = GradedSpace::try_new(provider, [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)])
         .and_then(|space| space.try_dual())
         .unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
         let sector = trees.codomain_uncoupled[0];
         let parity_weight = if sector == Z2Irrep::ODD { 3.0 } else { 1.0 };
         parity_weight * (indices[0] + 2 * indices[1] + 1) as f64
     })
     .unwrap();
     let complex = source
-        .convert::<Complex64>()
-        .scale(num_complex::Complex64::new(1.0, 2.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, num_complex::Complex64::new(1.0, 2.0))
         .unwrap();
-    assert_fermionic_contract_and_compose_semantics(&source);
-    assert_fermionic_contract_and_compose_semantics(&complex);
+    assert_fermionic_contract_and_compose_semantics(engine, &source);
+    assert_fermionic_contract_and_compose_semantics(engine, &complex);
 }
 
 fn assert_same_error(actual: Error, expected: Error) {
@@ -1486,10 +1633,11 @@ fn assert_same_error(actual: Error, expected: Error) {
 
 #[test]
 fn lazy_contract_preserves_validation_precedence_without_materializing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let source = {
-        let fixture = u1_lazy_fixture();
+        let fixture = u1_lazy_fixture(engine);
         let leg = fixture.codomain().remove(0);
-        TensorMap::from_subblock_fn(fixture.runtime(), [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(engine, fixture.runtime(), [&leg], [&leg], |_, indices| {
             (indices[0] + 2 * indices[1] + 1) as f64
         })
         .unwrap()
@@ -1509,10 +1657,10 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
             domain: &[],
         },
     ] {
-        let lazy = source.adjoint().unwrap();
+        let lazy = source.adjoint(engine).unwrap();
         assert_same_error(
-            lazy.contract(&eager, &spec).unwrap_err(),
-            eager.contract(&eager, &spec).unwrap_err(),
+            lazy.contract(engine, &eager, &spec).unwrap_err(),
+            eager.contract(engine, &eager, &spec).unwrap_err(),
         );
     }
 
@@ -1522,10 +1670,12 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
     )
     .unwrap();
     let bad =
-        TensorMap::from_subblock_fn(source.runtime(), [&bad_leg], [&bad_leg], |_, _| 1.0).unwrap();
-    let lazy = source.adjoint().unwrap();
+        TensorMap::from_subblock_fn(engine, source.runtime(), [&bad_leg], [&bad_leg], |_, _| 1.0)
+            .unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     assert_same_error(
         lazy.contract(
+            engine,
             &bad,
             &ContractSpec {
                 lhs: &[1],
@@ -1537,6 +1687,7 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
         .unwrap_err(),
         eager
             .contract(
+                engine,
                 &bad,
                 &ContractSpec {
                     lhs: &[1],
@@ -1548,14 +1699,20 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
             .unwrap_err(),
     );
 
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let source_leg = source.codomain().remove(0);
-    let other =
-        TensorMap::from_subblock_fn(&other_runtime, [&source_leg], [&source_leg], |_, _| 1.0)
-            .unwrap();
-    let lazy = source.adjoint().unwrap();
+    let other = TensorMap::from_subblock_fn(
+        engine,
+        &other_runtime,
+        [&source_leg],
+        [&source_leg],
+        |_, _| 1.0,
+    )
+    .unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     assert_same_error(
         lazy.contract(
+            engine,
             &other,
             &ContractSpec {
                 lhs: &[1],
@@ -1567,6 +1724,7 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
         .unwrap_err(),
         eager
             .contract(
+                engine,
                 &other,
                 &ContractSpec {
                     lhs: &[1],
@@ -1578,26 +1736,30 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
             .unwrap_err(),
     );
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
     let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2)]).unwrap();
     let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 2)]).unwrap();
     let z2_tensor =
-        TensorMap::from_subblock_fn(&runtime, [&z2_leg], [&z2_leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 1.0).unwrap();
     let z3_tensor =
-        TensorMap::from_subblock_fn(&runtime, [&z3_leg], [&z3_leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&z3_leg], [&z3_leg], |_, _| 1.0).unwrap();
     let eager = eager_adjoint_oracle(&z2_tensor);
-    let lazy = z2_tensor.adjoint().unwrap();
+    let lazy = z2_tensor.adjoint(engine).unwrap();
     assert_same_error(
-        lazy.contract(&z3_tensor, &RANK_TWO_COMPOSE).unwrap_err(),
-        eager.contract(&z3_tensor, &RANK_TWO_COMPOSE).unwrap_err(),
+        lazy.contract(engine, &z3_tensor, &RANK_TWO_COMPOSE)
+            .unwrap_err(),
+        eager
+            .contract(engine, &z3_tensor, &RANK_TWO_COMPOSE)
+            .unwrap_err(),
     );
 }
 
 #[test]
 fn lazy_binary_outputs_keep_the_lhs_provider_allocation() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let lhs_provider = Arc::new(U1FusionRule);
     let rhs_provider = Arc::new(U1FusionRule);
     assert!(!Arc::ptr_eq(&lhs_provider, &rhs_provider));
@@ -1611,21 +1773,24 @@ fn lazy_binary_outputs_keep_the_lhs_provider_allocation() {
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&lhs_leg], [&lhs_leg], |_, indices| {
-        (indices[0] + 2 * indices[1] + 1) as f64
-    })
-    .unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&rhs_leg], [&rhs_leg], |_, indices| {
-        (2 * indices[0] + indices[1] + 1) as f64
-    })
-    .unwrap();
-    let lazy = lhs.adjoint().unwrap();
+    let lhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&lhs_leg], [&lhs_leg], |_, indices| {
+            (indices[0] + 2 * indices[1] + 1) as f64
+        })
+        .unwrap();
+    let rhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&rhs_leg], [&rhs_leg], |_, indices| {
+            (2 * indices[0] + indices[1] + 1) as f64
+        })
+        .unwrap();
+    let lazy = lhs.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(&lhs);
-    let rhs_lazy = rhs.adjoint().unwrap();
+    let rhs_lazy = rhs.adjoint(engine).unwrap();
     let rhs_eager = eager_adjoint_oracle(&rhs);
     for (actual, expected) in [
         (
             lazy.contract(
+                engine,
                 &rhs_lazy,
                 &ContractSpec {
                     lhs: &[1],
@@ -1635,11 +1800,13 @@ fn lazy_binary_outputs_keep_the_lhs_provider_allocation() {
                 },
             )
             .unwrap(),
-            eager.contract(&rhs_eager, &RANK_TWO_COMPOSE).unwrap(),
+            eager
+                .contract(engine, &rhs_eager, &RANK_TWO_COMPOSE)
+                .unwrap(),
         ),
         (
-            lazy.compose(&rhs_lazy).unwrap(),
-            eager.compose(&rhs_eager).unwrap(),
+            lazy.compose(engine, &rhs_lazy).unwrap(),
+            eager.compose(engine, &rhs_eager).unwrap(),
         ),
     ] {
         assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
@@ -1656,16 +1823,17 @@ fn lazy_binary_outputs_keep_the_lhs_provider_allocation() {
 
 #[test]
 fn identity_transforms_preserve_the_cold_lazy_view() {
-    let adjoint = u1_lazy_fixture().adjoint().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let adjoint = u1_lazy_fixture(engine).adjoint(engine).unwrap();
     let TypedTensorRepr::Adjoint(view) = &adjoint.repr else {
         unreachable!()
     };
 
     let outputs = [
-        adjoint.permute(&[0], &[1, 2]).unwrap(),
-        adjoint.braid(&[0], &[1, 2], &[0, 1, 2]).unwrap(),
-        adjoint.transpose(&[0], &[1, 2]).unwrap(),
-        adjoint.repartition(1).unwrap(),
+        adjoint.permute(engine, &[0], &[1, 2]).unwrap(),
+        adjoint.braid(engine, &[0], &[1, 2], &[0, 1, 2]).unwrap(),
+        adjoint.transpose(engine, &[0], &[1, 2]).unwrap(),
+        adjoint.repartition(engine, 1).unwrap(),
     ];
     for output in &outputs {
         let TypedTensorRepr::Adjoint(output_view) = &output.repr else {
@@ -1673,24 +1841,24 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
         };
         assert!(Arc::ptr_eq(view, output_view));
     }
-    assert!(adjoint.braid(&[0], &[1, 2], &[]).is_err());
+    assert!(adjoint.braid(engine, &[0], &[1, 2], &[]).is_err());
     assert!(
-        matches!(adjoint.permute(&[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+        matches!(adjoint.permute(engine, &[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
     assert!(
-        matches!(adjoint.braid(&[0, 0], &[1], &[0, 1, 2]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+        matches!(adjoint.braid(engine, &[0, 0], &[1], &[0, 1, 2]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
     assert!(
-        matches!(adjoint.transpose(&[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+        matches!(adjoint.transpose(engine, &[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
-    assert!(adjoint.repartition(4).is_err());
+    assert!(adjoint.repartition(engine, 4).is_err());
 
-    let scalar = fixture().trace_pairs(&[(0, 1)]).unwrap();
-    let scalar_adjoint = scalar.adjoint().unwrap();
+    let scalar = fixture(engine).trace_pairs(engine, &[(0, 1)]).unwrap();
+    let scalar_adjoint = scalar.adjoint(engine).unwrap();
     let TypedTensorRepr::Adjoint(scalar_view) = &scalar_adjoint.repr else {
         unreachable!()
     };
-    let scalar_transpose = scalar_adjoint.transpose(&[], &[]).unwrap();
+    let scalar_transpose = scalar_adjoint.transpose(engine, &[], &[]).unwrap();
     let TypedTensorRepr::Adjoint(transpose_view) = &scalar_transpose.repr else {
         panic!("rank-zero transpose must preserve the lazy representation");
     };
@@ -1701,9 +1869,11 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "a lazy adjoint never holds a compact diagonal parent")]
 fn lazy_adjoint_constructor_rejects_a_compact_diagonal_parent() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let bond = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [SectorSpectrum {
@@ -1720,11 +1890,13 @@ fn lazy_adjoint_constructor_rejects_a_compact_diagonal_parent() {
 
 #[test]
 fn compact_adjoint_never_enters_the_lazy_representation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
     let real = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [SectorSpectrum {
@@ -1734,6 +1906,7 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
     )
     .unwrap();
     let complex = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [SectorSpectrum {
@@ -1746,8 +1919,8 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
     )
     .unwrap();
 
-    let real_adjoint = real.adjoint().unwrap();
-    let complex_adjoint = complex.adjoint().unwrap();
+    let real_adjoint = real.adjoint(engine).unwrap();
+    let complex_adjoint = complex.adjoint(engine).unwrap();
     assert!(matches!(&real_adjoint.repr, TypedTensorRepr::Owned(_)));
     assert!(matches!(&complex_adjoint.repr, TypedTensorRepr::Owned(_)));
     assert!(matches!(
@@ -1768,7 +1941,7 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
-    let complex_restored = complex_adjoint.adjoint().unwrap();
+    let complex_restored = complex_adjoint.adjoint(engine).unwrap();
     assert!(matches!(&complex_restored.repr, TypedTensorRepr::Owned(_)));
     assert!(matches!(
         owned(&complex_restored).data.as_ref(),
@@ -1786,6 +1959,7 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
 
 #[test]
 fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: `cat` of lazy adjoints on either side equals `cat` of the eager
     // adjoints, over two coupled sectors, without materializing an adjoint.
     let runtime = Runtime::builder().build().unwrap();
@@ -1803,9 +1977,10 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
     let common = leg([3, 2]);
     let left = leg([2, 1]);
     let right = leg([4, 2]);
-    let parent =
+    let mut parent =
         |codomain: &GradedSpace<U1FusionRule>, domain: &GradedSpace<U1FusionRule>, seed| {
             TensorMap::<U1FusionRule, num_complex::Complex64>::rand_with_seed(
+                engine,
                 &runtime,
                 [codomain],
                 [domain],
@@ -1827,13 +2002,13 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
         ),
     ] {
         let expected = eager_adjoint_oracle(&lhs)
-            .cat(&eager_adjoint_oracle(&rhs), side)
+            .cat(engine, &eager_adjoint_oracle(&rhs), side)
             .unwrap();
-        let lazy_lhs = lhs.adjoint().unwrap();
-        let lazy_rhs = rhs.adjoint().unwrap();
+        let lazy_lhs = lhs.adjoint(engine).unwrap();
+        let lazy_rhs = rhs.adjoint(engine).unwrap();
         let adjoint = probe::record();
 
-        let actual = lazy_lhs.cat(&lazy_rhs, side).unwrap();
+        let actual = lazy_lhs.cat(engine, &lazy_rhs, side).unwrap();
 
         assert_eq!(adjoint.get(Event::AdjointMaterialization), 0);
         assert_eq!(
@@ -1847,13 +2022,14 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut crate::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
     );
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
         Complex64::new(
             (1 + ij[0] + 4 * ij[1]) as f64,
             0.5 + ij[0] as f64 - 2.0 * ij[1] as f64,
@@ -1861,17 +2037,17 @@ fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
     })
     .unwrap();
     assert_eq!(source.subblock_count(), 2);
-    let direct = source.trace_pairs(&[(0, 1)]).unwrap();
+    let direct = source.trace_pairs(engine, &[(0, 1)]).unwrap();
     // Vacuum: 1+6. Fundamental: 3*(1+6+11), with the same
     // dimension weights on the imaginary diagonal components.
     let expected = Complex64::new(61.0, -4.5);
     assert!((direct.dense_data().unwrap()[0] - expected).norm() < 1e-12);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let TypedTensorRepr::Adjoint(view) = &lazy.repr else {
         panic!("expected lazy source")
     };
     let parent = Arc::clone(&view.parent);
-    let result = lazy.trace_pairs(&[(0, 1)]).unwrap();
+    let result = lazy.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert!((result.dense_data().unwrap()[0] - expected.conj()).norm() < 1e-12);
     assert!(Arc::ptr_eq(
         result.logical_space().provider_arc(),
@@ -1886,13 +2062,14 @@ fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_trace_nonselfdual_multiblock_real_matches_hand_weighted_trace() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut crate::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
     );
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2), (vec![2, 0], 3)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
         (1 + ij[0] + 4 * ij[1]) as f64
     })
     .unwrap();
@@ -1900,12 +2077,12 @@ fn checked_trace_nonselfdual_multiblock_real_matches_hand_weighted_trace() {
     // SU(3) fundamental and symmetric-square dimensions are 3 and 6:
     // 3*(1+6) + 6*(1+6+11) = 129. Off-diagonal values do not contribute.
     let expected = 129.0;
-    let direct = source.trace_pairs(&[(0, 1)]).unwrap();
+    let direct = source.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(direct.dense_data().unwrap().len(), 1);
     assert!((direct.dense_data().unwrap()[0] - expected).abs() < 1e-12);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     assert!(matches!(&lazy.repr, TypedTensorRepr::Adjoint(_)));
-    let result = lazy.trace_pairs(&[(0, 1)]).unwrap();
+    let result = lazy.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert!((result.dense_data().unwrap()[0] - expected).abs() < 1e-12);
     assert!(Arc::ptr_eq(
         result.logical_space().provider_arc(),

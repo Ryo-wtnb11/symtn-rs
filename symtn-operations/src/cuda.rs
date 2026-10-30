@@ -154,18 +154,18 @@ fn cuda_operand_is_supported(op: MatrixOp) -> bool {
 
 /// [`StorageGemm`] over CUDA storage: one tenferro dot-general per
 /// coupled-sector matrix, executed in place on device buffer regions.
-pub struct CudaStorageGemm<'a> {
-    ctx: &'a mut CudaDenseContext,
+pub struct CudaStorageGemm<'a, 'e> {
+    ctx: &'a mut CudaDenseContext<'e>,
 }
 
-impl<'a> CudaStorageGemm<'a> {
-    pub fn new(ctx: &'a mut CudaDenseContext) -> Self {
+impl<'a, 'e> CudaStorageGemm<'a, 'e> {
+    pub fn new(ctx: &'a mut CudaDenseContext<'e>) -> Self {
         Self { ctx }
     }
 }
 
 impl<D: CudaScalar> StorageGemm<D, CudaStorage<D>, CudaStorage<D>, CudaStorage<D>>
-    for CudaStorageGemm<'_>
+    for CudaStorageGemm<'_, '_>
 {
     fn supports_matmul_with_ops_scaled(&self, lhs_op: MatrixOp, rhs_op: MatrixOp) -> bool {
         cuda_operand_is_supported(lhs_op) && cuda_operand_is_supported(rhs_op)
@@ -267,12 +267,12 @@ impl<D: CudaScalar> StorageGemm<D, CudaStorage<D>, CudaStorage<D>, CudaStorage<D
 /// accepts the stacked views, so a stack never reaches
 /// [`CudaStorageGemm`], which would compute member 0 alone.
 #[doc(hidden)]
-pub struct CudaStackedStorageGemm<'a> {
-    ctx: &'a mut CudaDenseContext,
+pub struct CudaStackedStorageGemm<'a, 'e> {
+    ctx: &'a mut CudaDenseContext<'e>,
 }
 
-impl<'a> CudaStackedStorageGemm<'a> {
-    pub fn new(ctx: &'a mut CudaDenseContext) -> Self {
+impl<'a, 'e> CudaStackedStorageGemm<'a, 'e> {
+    pub fn new(ctx: &'a mut CudaDenseContext<'e>) -> Self {
         Self { ctx }
     }
 }
@@ -283,7 +283,7 @@ impl<D: CudaScalar>
         StackedStorageViewMut<'_, CudaStorage<D>>,
         StackedStorageView<'_, CudaStorage<D>>,
         StackedStorageView<'_, CudaStorage<D>>,
-    > for CudaStackedStorageGemm<'_>
+    > for CudaStackedStorageGemm<'_, '_>
 {
     fn supports_matmul_with_ops_scaled(&self, lhs_op: MatrixOp, rhs_op: MatrixOp) -> bool {
         lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity

@@ -54,9 +54,10 @@ fn su3_dim(labels: &[i64]) -> f64 {
 /// `x^H` as an owned tensor: checked-Generic `compose` takes owned operands
 /// only, and `add` is the owned copy that accepts a lazy adjoint.
 macro_rules! owned_adjoint {
-    ($x:expr, $one:expr) => {{
-        let adjoint = $x.adjoint().unwrap();
-        adjoint.axpby($one, &adjoint, $one - $one).unwrap()
+    ($engine:ident, $x:expr, $one:expr) => {{
+        let x = &$x;
+        let adjoint = x.adjoint($engine).unwrap();
+        adjoint.axpby($engine, $one, &adjoint, $one - $one).unwrap()
     }};
 }
 
@@ -78,11 +79,11 @@ macro_rules! assert_relation {
 
 /// `x^H x = 1` on the bond, with the identity spelled by its reduced blocks.
 macro_rules! assert_isometry {
-    ($gram:expr, $bond:expr, $one:expr, $terms:expr, $what:expr) => {{
+    ($engine:ident, $gram:expr, $bond:expr, $one:expr, $terms:expr, $what:expr) => {{
         let gram = $gram;
         let (one, zero) = ($one, $one - $one);
         let identity =
-            TensorMap::from_subblock_fn(gram.runtime(), [&$bond], [&$bond], |_, index| {
+            TensorMap::from_subblock_fn($engine, gram.runtime(), [&$bond], [&$bond], |_, index| {
                 if index[0] == index[1] {
                     one
                 } else {
@@ -111,30 +112,39 @@ fn su3_target(provider: &Arc<LieGroupFusionRule>) -> GradedSpace<LieGroupFusionR
 }
 
 macro_rules! assert_su3_svd_composition {
-    ($source:expr, $one:expr, $target:expr, $tag:expr) => {{
+    ($engine:ident, $source:expr, $one:expr, $target:expr, $tag:expr) => {{
         let source = $source;
-        let offers = singular_offers!(source, su3_dim);
+        let offers = singular_offers!($engine, source, su3_dim);
         let terms = source.dense_data().unwrap().len();
         for (name, truncation, policy) in policies!($target) {
             let case = format!("{} {name}", $tag);
-            let Svd { u, s, vh } = source.svd_compact(&[0, 1], &[2]).unwrap();
+            let Svd { u, s, vh } = source.svd_compact($engine, &[0, 1], &[2]).unwrap();
             assert!(
-                symtn::expert::diagonal_spectrum(&s).unwrap().is_some(),
+                symtn::expert::diagonal_spectrum($engine, &s)
+                    .unwrap()
+                    .is_some(),
                 "{case}: compact SVD must store s diagonally"
             );
-            let dense_s = s.materialize().unwrap();
-            assert!(symtn::expert::diagonal_spectrum(&dense_s)
+            let dense_s = s.materialize($engine).unwrap();
+            assert!(symtn::expert::diagonal_spectrum($engine, &dense_s)
                 .unwrap()
                 .is_none());
-            assert_eq!(s.diagview().unwrap(), dense_s.diagview().unwrap());
+            assert_eq!(
+                s.diagview($engine).unwrap(),
+                dense_s.diagview($engine).unwrap()
+            );
             let bond = s.domain()[0].clone();
             let found = bond
-                .find_truncated(&s.diagview().unwrap(), &truncation)
+                .find_truncated(&s.diagview($engine).unwrap(), &truncation)
                 .unwrap();
             let selection = &found.selection;
-            let got_u = u.restrict_leg(&[(u.codomain_rank(), selection)]).unwrap();
-            let got_s = s.restrict_leg(&[(0, selection), (1, selection)]).unwrap();
-            let got_vh = vh.restrict_leg(&[(0, selection)]).unwrap();
+            let got_u = u
+                .restrict_leg($engine, &[(u.codomain_rank(), selection)])
+                .unwrap();
+            let got_s = s
+                .restrict_leg($engine, &[(0, selection), (1, selection)])
+                .unwrap();
+            let got_vh = vh.restrict_leg($engine, &[(0, selection)]).unwrap();
             let kept = select(&offers, &policy);
 
             let kept_bond = got_s.domain()[0].clone();
@@ -144,32 +154,52 @@ macro_rules! assert_su3_svd_composition {
             assert_eq!(got_u.domain(), got_s.domain(), "{case}: u domain");
             assert_eq!(got_vh.codomain(), got_s.domain(), "{case}: vh codomain");
             assert_eq!(got_vh.domain(), source.domain(), "{case}: vh domain");
-            assert_canonical_layout!(got_u, format!("{case}: u"));
-            assert_canonical_layout!(got_s, format!("{case}: s"));
-            assert_canonical_layout!(got_vh, format!("{case}: vh"));
+            assert_canonical_layout!($engine, got_u, format!("{case}: u"));
+            assert_canonical_layout!($engine, got_s, format!("{case}: s"));
+            assert_canonical_layout!($engine, got_vh, format!("{case}: vh"));
 
-            assert_kept_magnitudes(&case, &got_s.diagview().unwrap(), &offers, &kept, terms);
+            assert_kept_magnitudes(
+                &case,
+                &got_s.diagview($engine).unwrap(),
+                &offers,
+                &kept,
+                terms,
+            );
             assert_relation!(
-                source.compose(&owned_adjoint!(got_vh, $one)).unwrap(),
-                got_u.compose(&got_s).unwrap(),
+                {
+                    let adjoint = owned_adjoint!($engine, got_vh, $one);
+                    source.compose($engine, &adjoint)
+                }
+                .unwrap(),
+                got_u.compose($engine, &got_s).unwrap(),
                 terms,
                 format!("{case}: t vh^H = u s")
             );
             assert_relation!(
-                owned_adjoint!(got_u, $one).compose(&source).unwrap(),
-                got_s.compose(&got_vh).unwrap(),
+                owned_adjoint!($engine, got_u, $one)
+                    .compose($engine, &source)
+                    .unwrap(),
+                got_s.compose($engine, &got_vh).unwrap(),
                 terms,
                 format!("{case}: u^H t = s vh")
             );
             assert_isometry!(
-                owned_adjoint!(got_u, $one).compose(&got_u).unwrap(),
+                $engine,
+                owned_adjoint!($engine, got_u, $one)
+                    .compose($engine, &got_u)
+                    .unwrap(),
                 kept_bond,
                 $one,
                 terms,
                 format!("{case}: u^H u")
             );
             assert_isometry!(
-                got_vh.compose(&owned_adjoint!(got_vh, $one)).unwrap(),
+                $engine,
+                {
+                    let adjoint = owned_adjoint!($engine, got_vh, $one);
+                    got_vh.compose($engine, &adjoint)
+                }
+                .unwrap(),
                 kept_bond,
                 $one,
                 terms,
@@ -187,21 +217,27 @@ macro_rules! assert_su3_svd_composition {
 }
 
 macro_rules! assert_su3_eigh_composition {
-    ($source:expr, $one:expr, $target:expr, $tag:expr) => {{
+    ($engine:ident, $source:expr, $one:expr, $target:expr, $tag:expr) => {{
         let source = $source;
         // A Hermitian block's singular values are its |lambda|.
-        let offers = singular_offers!(source, su3_dim);
+        let offers = singular_offers!($engine, source, su3_dim);
         let terms = source.dense_data().unwrap().len();
         for (name, truncation, policy) in policies!($target) {
             let case = format!("{} {name}", $tag);
-            let Eigh { d, v } = source.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+            let Eigh { d, v } = source
+                .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
+                .unwrap();
             let bond = d.domain()[0].clone();
             let found = bond
-                .find_truncated(&d.diagview().unwrap(), &truncation)
+                .find_truncated(&d.diagview($engine).unwrap(), &truncation)
                 .unwrap();
             let selection = &found.selection;
-            let got_d = d.restrict_leg(&[(0, selection), (1, selection)]).unwrap();
-            let got_v = v.restrict_leg(&[(v.codomain_rank(), selection)]).unwrap();
+            let got_d = d
+                .restrict_leg($engine, &[(0, selection), (1, selection)])
+                .unwrap();
+            let got_v = v
+                .restrict_leg($engine, &[(v.codomain_rank(), selection)])
+                .unwrap();
             let kept = select(&offers, &policy);
 
             let kept_bond = got_d.domain()[0].clone();
@@ -209,18 +245,27 @@ macro_rules! assert_su3_eigh_composition {
             assert_eq!(got_d.codomain(), got_d.domain(), "{case}: d is a bond map");
             assert_eq!(got_v.codomain(), source.codomain(), "{case}: v codomain");
             assert_eq!(got_v.domain(), got_d.domain(), "{case}: v domain");
-            assert_canonical_layout!(got_d, format!("{case}: d"));
-            assert_canonical_layout!(got_v, format!("{case}: v"));
+            assert_canonical_layout!($engine, got_d, format!("{case}: d"));
+            assert_canonical_layout!($engine, got_v, format!("{case}: v"));
 
-            assert_kept_magnitudes(&case, &got_d.diagview().unwrap(), &offers, &kept, terms);
+            assert_kept_magnitudes(
+                &case,
+                &got_d.diagview($engine).unwrap(),
+                &offers,
+                &kept,
+                terms,
+            );
             assert_relation!(
-                source.compose(&got_v).unwrap(),
-                got_v.compose(&got_d).unwrap(),
+                source.compose($engine, &got_v).unwrap(),
+                got_v.compose($engine, &got_d).unwrap(),
                 terms,
                 format!("{case}: t v = v d")
             );
             assert_isometry!(
-                owned_adjoint!(got_v, $one).compose(&got_v).unwrap(),
+                $engine,
+                owned_adjoint!($engine, got_v, $one)
+                    .compose($engine, &got_v)
+                    .unwrap(),
                 kept_bond,
                 $one,
                 terms,
@@ -240,10 +285,10 @@ macro_rules! assert_su3_eigh_composition {
 /// The general eigendecomposition on a triangular source, whose eigenvalues
 /// are its diagonal. `$complex` is the source lifted to the factor dtype.
 macro_rules! assert_su3_eig_composition {
-    ($source:expr, $complex:expr, $target:expr, $tag:expr) => {{
+    ($engine:ident, $source:expr, $complex:expr, $target:expr, $tag:expr) => {{
         let source = $source;
         let complex = $complex;
-        let references: Vec<(Vec<i64>, Vec<Complex64>)> = sector_matrices!(source)
+        let references: Vec<(Vec<i64>, Vec<Complex64>)> = sector_matrices!($engine, source)
             .iter()
             .map(|(sector, matrix)| (sector.clone(), triangular_eigenvalues(matrix)))
             .collect();
@@ -258,23 +303,27 @@ macro_rules! assert_su3_eig_composition {
         let terms = source.dense_data().unwrap().len();
         for (name, truncation, policy) in policies!($target) {
             let case = format!("{} {name}", $tag);
-            let Eig { d, v } = source.eig_full(&[0], &[1]).unwrap();
+            let Eig { d, v } = source.eig_full($engine, &[0], &[1]).unwrap();
             let bond = d.domain()[0].clone();
             let found = bond
-                .find_truncated(&d.diagview().unwrap(), &truncation)
+                .find_truncated(&d.diagview($engine).unwrap(), &truncation)
                 .unwrap();
             let selection = &found.selection;
-            let got_d = d.restrict_leg(&[(0, selection), (1, selection)]).unwrap();
-            let got_v = v.restrict_leg(&[(v.codomain_rank(), selection)]).unwrap();
+            let got_d = d
+                .restrict_leg($engine, &[(0, selection), (1, selection)])
+                .unwrap();
+            let got_v = v
+                .restrict_leg($engine, &[(v.codomain_rank(), selection)])
+                .unwrap();
             let kept = select(&offers, &policy);
 
             assert_kept_bond!(got_d.domain()[0], offers, kept, case);
             assert_eq!(got_d.codomain(), got_d.domain(), "{case}: d is a bond map");
             assert_eq!(got_v.codomain(), source.codomain(), "{case}: v codomain");
             assert_eq!(got_v.domain(), got_d.domain(), "{case}: v domain");
-            assert_canonical_layout!(got_d, format!("{case}: d"));
-            assert_canonical_layout!(got_v, format!("{case}: v"));
-            for entry in got_d.diagview().unwrap() {
+            assert_canonical_layout!($engine, got_d, format!("{case}: d"));
+            assert_canonical_layout!($engine, got_v, format!("{case}: v"));
+            for entry in got_d.diagview($engine).unwrap() {
                 let (_, reference) = references
                     .iter()
                     .find(|(sector, _)| *sector == entry.sector)
@@ -287,8 +336,8 @@ macro_rules! assert_su3_eig_composition {
                 );
             }
             assert_relation!(
-                complex.compose(&got_v).unwrap(),
-                got_v.compose(&got_d).unwrap(),
+                complex.compose($engine, &got_v).unwrap(),
+                got_v.compose($engine, &got_d).unwrap(),
                 terms,
                 format!("{case}: t v = v d")
             );
@@ -305,13 +354,17 @@ macro_rules! assert_su3_eig_composition {
 
 #[test]
 fn su3_svd_composition_matches_the_oracle_for_every_policy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let (provider, leg) = su3_legs();
     let mut state = 0x5150_2701u64;
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&host_runtime(), [&leg, &leg], [&leg], move |_, _| {
-            fill(&mut state)
-        })
-        .unwrap();
+    let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &host_runtime(),
+        [&leg, &leg],
+        [&leg],
+        move |_, _| fill(&mut state),
+    )
+    .unwrap();
     assert!(
         (0..source.subblock_count()).any(|index| source
             .subblock_fusion_trees(index)
@@ -321,46 +374,61 @@ fn su3_svd_composition_matches_the_oracle_for_every_policy() {
             .any(|vertex| vertex.get() == 2)),
         "the fixture must carry a Generic outer-multiplicity vertex mu = 2"
     );
-    assert_su3_svd_composition!(source, 1.0, su3_target(&provider), "su3 f64");
+    assert_su3_svd_composition!(engine, source, 1.0, su3_target(&provider), "su3 f64");
 }
 
 #[test]
 fn su3_complex_svd_composition_matches_the_oracle_for_every_policy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let (provider, leg) = su3_legs();
     let mut state = 0x5150_2703u64;
-    let source: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&host_runtime(), [&leg, &leg], [&leg], move |_, _| {
-            Complex64::new(fill(&mut state), fill(&mut state))
-        })
-        .unwrap();
-    assert_su3_svd_composition!(source, Complex64::ONE, su3_target(&provider), "su3 c64");
+    let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &host_runtime(),
+        [&leg, &leg],
+        [&leg],
+        move |_, _| Complex64::new(fill(&mut state), fill(&mut state)),
+    )
+    .unwrap();
+    assert_su3_svd_composition!(
+        engine,
+        source,
+        Complex64::ONE,
+        su3_target(&provider),
+        "su3 c64"
+    );
 }
 
 #[test]
 fn su3_eigh_composition_matches_the_oracle_for_every_policy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let (provider, leg) = su3_legs();
     let mut state = 0x5150_2702u64;
     let raw: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&host_runtime(), [&leg], [&leg], move |_, _| {
+        TensorMap::from_subblock_fn(engine, &host_runtime(), [&leg], [&leg], move |_, _| {
             fill(&mut state)
         })
         .unwrap();
-    let source = raw.axpby(1.0, &raw.adjoint().unwrap(), 1.0).unwrap();
-    assert_su3_eigh_composition!(source, 1.0, su3_target(&provider), "su3 eigh f64");
+    let raw_adjoint = &raw.adjoint(engine).unwrap();
+    let source = raw.axpby(engine, 1.0, raw_adjoint, 1.0).unwrap();
+    assert_su3_eigh_composition!(engine, source, 1.0, su3_target(&provider), "su3 eigh f64");
 }
 
 #[test]
 fn su3_complex_eigh_composition_matches_the_oracle_for_every_policy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let (provider, leg) = su3_legs();
     let mut state = 0x5150_2704u64;
     let raw: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&host_runtime(), [&leg], [&leg], move |_, _| {
+        TensorMap::from_subblock_fn(engine, &host_runtime(), [&leg], [&leg], move |_, _| {
             Complex64::new(fill(&mut state), fill(&mut state))
         })
         .unwrap();
     let one = Complex64::new(1.0, 0.0);
-    let source = raw.axpby(one, &raw.adjoint().unwrap(), one).unwrap();
+    let raw_adjoint = &raw.adjoint(engine).unwrap();
+    let source = raw.axpby(engine, one, raw_adjoint, one).unwrap();
     assert_su3_eigh_composition!(
+        engine,
         source,
         Complex64::ONE,
         su3_target(&provider),
@@ -370,9 +438,11 @@ fn su3_complex_eigh_composition_matches_the_oracle_for_every_policy() {
 
 #[test]
 fn su3_eig_composition_matches_the_oracle_for_every_policy() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let (provider, leg) = su3_legs();
     let mut state = 0x5150_2705u64;
     let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &host_runtime(),
         [&leg],
         [&leg],
@@ -383,8 +453,14 @@ fn su3_eig_composition_matches_the_oracle_for_every_policy() {
         },
     )
     .unwrap();
-    let complex = source.convert::<Complex64>();
-    assert_su3_eig_composition!(source, complex, su3_target(&provider), "su3 eig f64");
+    let complex = source.convert::<Complex64>(engine).unwrap();
+    assert_su3_eig_composition!(
+        engine,
+        source,
+        complex,
+        su3_target(&provider),
+        "su3 eig f64"
+    );
 }
 
 #[test]

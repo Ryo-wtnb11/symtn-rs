@@ -50,6 +50,7 @@ where
 
 #[test]
 fn bosonic_tensorcompose_matches_ordinary_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -76,6 +77,7 @@ fn bosonic_tensorcompose_matches_ordinary_contract() {
     let mut ordinary = vec![0.0; dst.required_len().unwrap()];
     context
         .tensorcontract_prelowered_into(
+            engine,
             &dst_bound,
             &mut ordinary,
             crate::FusionOperand::direct(source_bound.space()),
@@ -92,6 +94,7 @@ fn bosonic_tensorcompose_matches_ordinary_contract() {
     let mut composed = vec![0.0; dst.required_len().unwrap()];
     context
         .tensorcompose_planned_into(
+            engine,
             &dst_bound,
             &mut composed,
             (crate::FusionOperand::direct(&source), &lhs),
@@ -107,6 +110,7 @@ fn bosonic_tensorcompose_matches_ordinary_contract() {
 
 #[test]
 fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -149,6 +153,7 @@ fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoin
     let mut reference = vec![0.0; dst.required_len().unwrap()];
     context
         .tensorcompose_planned_into(
+            engine,
             &dst_bound,
             &mut reference,
             (
@@ -164,6 +169,7 @@ fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoin
     let mut lazy = vec![0.0; dst.required_len().unwrap()];
     context
         .tensorcompose_planned_into(
+            engine,
             &dst_bound,
             &mut lazy,
             (crate::FusionOperand::adjoint(&source), &lhs),
@@ -180,6 +186,7 @@ fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoin
 
 #[test]
 fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: both cold and cached composition plans reject malformed source or
     // destination extents before beta scaling or grouped GEMM changes output.
     let rule = FermionParityFusionRule;
@@ -201,6 +208,7 @@ fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
     let mut valid = vec![0.0; dst.required_len().unwrap()];
     context
         .tensorcompose_planned_into(
+            engine,
             &dst_bound,
             &mut valid,
             (operand, &lhs),
@@ -214,6 +222,7 @@ fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
     let before = destination.clone();
     let error = context
         .tensorcompose_planned_into(
+            engine,
             &dst_bound,
             &mut destination,
             (operand, &lhs[..lhs.len() - 1]),
@@ -229,6 +238,7 @@ fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
     let before = short_destination.clone();
     let error = context
         .tensorcompose_planned_into(
+            engine,
             &dst_bound,
             &mut short_destination,
             (operand, &lhs),
@@ -243,6 +253,7 @@ fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
 
 #[test]
 fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a dual odd RHS leg gives ordinary contraction its supertrace sign,
     // while composition retains and reuses a separate direct Core plan.
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -283,6 +294,7 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
     let mut contracted = vec![0.0; dst.required_len().unwrap()];
     context
         .tensorcontract_prelowered_into(
+            engine,
             &dst_bound,
             &mut contracted,
             crate::FusionOperand::direct(lhs_bound.space()),
@@ -296,20 +308,22 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
         .unwrap();
     assert_eq!(contracted, [-6.0]);
 
-    let compose = |context: &mut crate::TensorContractFusionExecutionContext<f64, RuleIdentity>| {
-        let mut output = vec![0.0; dst.required_len().unwrap()];
-        context
-            .tensorcompose_planned_into(
-                &dst_bound,
-                &mut output,
-                (crate::FusionOperand::direct(&lhs), &[2.0]),
-                (crate::FusionOperand::direct(&rhs), &[3.0]),
-                1.0,
-                crate::ContractDestinationInit::Axpby(0.0),
-            )
-            .unwrap();
-        output
-    };
+    let mut compose =
+        |context: &mut crate::TensorContractFusionExecutionContext<f64, RuleIdentity>| {
+            let mut output = vec![0.0; dst.required_len().unwrap()];
+            context
+                .tensorcompose_planned_into(
+                    engine,
+                    &dst_bound,
+                    &mut output,
+                    (crate::FusionOperand::direct(&lhs), &[2.0]),
+                    (crate::FusionOperand::direct(&rhs), &[3.0]),
+                    1.0,
+                    crate::ContractDestinationInit::Axpby(0.0),
+                )
+                .unwrap();
+            output
+        };
     assert_eq!(compose(&mut context), [6.0]);
     assert!(context.last_resolution_is_core());
     assert_eq!(compose(&mut context), [6.0]);

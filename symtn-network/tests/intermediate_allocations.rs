@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use symtn::typed::ContractSpec;
+use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64, Runtime, TensorScalar};
@@ -24,6 +25,7 @@ use symtn_network::{
 
 #[test]
 fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
@@ -31,13 +33,24 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
     let left = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 5)]).unwrap();
     let right = GradedSpace::try_new(provider, [(U1Irrep::new(0), 11)]).unwrap();
     let left_dual = left.try_dual().unwrap();
-    let a =
-        TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&left], [&bond], 750_001)
-            .unwrap();
-    let b =
-        TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&bond], [&right], 750_002)
-            .unwrap();
+    let a = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&left],
+        [&bond],
+        750_001,
+    )
+    .unwrap();
+    let b = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&bond],
+        [&right],
+        750_002,
+    )
+    .unwrap();
     let c = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
         &runtime,
         [&left_dual],
         [&right],
@@ -55,7 +68,7 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
                 &["c_out"],
                 &["d"],
             )
-            .contract(&[&a, &b, &c])
+            .contract(engine, &[&a, &b, &c])
             .unwrap(),
         );
     }
@@ -80,7 +93,7 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
             &["c_out"],
             &["d"],
         )
-        .contract(&[&a, &b, &c])
+        .contract(engine, &[&a, &b, &c])
         .unwrap();
         assert_eq!(output.dense_data().unwrap().len(), 11 * 11);
         drop(output);
@@ -459,7 +472,7 @@ type U1Legs<'a> = &'a [&'a GradedSpace<U1FusionRule>];
 /// `X[a,b|i]`, `Y[i|c]`, the audit probe `Z[d|c*,b]`, `W[b*,c|d]`,
 /// `P[d|j]`, `Q[j|c*,b]` over U(1) {-1,0,1}, seeded so every runtime gets the
 /// same values.
-fn temporary_order_fixture(runtime: &Runtime) -> (Vec<U1Tensor>, usize) {
+fn temporary_order_fixture(engine: &mut dyn Engine, runtime: &Runtime) -> (Vec<U1Tensor>, usize) {
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy: usize| {
         GradedSpace::try_new(
@@ -483,6 +496,7 @@ fn temporary_order_fixture(runtime: &Runtime) -> (Vec<U1Tensor>, usize) {
         .zip(146_900..)
         .map(|((codomain, domain), seed)| {
             U1Tensor::rand_with_seed(
+                engine,
                 runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
@@ -503,13 +517,15 @@ fn temporary_order_fixture(runtime: &Runtime) -> (Vec<U1Tensor>, usize) {
 /// the rhs layout, or the repartition into the lhs layout). A source copy of
 /// `T` in the consuming step adds more. It runs on a fresh runtime because the
 /// contraction scratch is retained across calls.
-fn temporary_contracted_order_worker() {
-    let (oracle_inputs, terms) = temporary_order_fixture(&Runtime::builder().build().unwrap());
+fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
+    let (oracle_inputs, terms) =
+        temporary_order_fixture(engine, &Runtime::builder().build().unwrap());
     let [x, y, z, w, p, q] = &oracle_inputs[..] else {
         unreachable!()
     };
     let t = x
         .contract(
+            engine,
             y,
             &ContractSpec {
                 lhs: &[2],
@@ -521,6 +537,7 @@ fn temporary_contracted_order_worker() {
         .unwrap();
     let s = p
         .contract(
+            engine,
             q,
             &ContractSpec {
                 lhs: &[1],
@@ -556,6 +573,7 @@ fn temporary_contracted_order_worker() {
             labels(&["d", "a"]),
             vec![step(0, 1, 3, &["a", "b", "c"]), step(2, 3, 4, &["d", "a"])],
             z.contract(
+                engine,
                 &t,
                 &ContractSpec {
                     lhs: &[1, 2],
@@ -573,6 +591,7 @@ fn temporary_contracted_order_worker() {
             labels(&["a", "d"]),
             vec![step(0, 1, 3, &["a", "b", "c"]), step(3, 2, 4, &["a", "d"])],
             t.contract(
+                engine,
                 w,
                 &ContractSpec {
                     lhs: &[1, 2],
@@ -594,6 +613,7 @@ fn temporary_contracted_order_worker() {
                 step(5, 4, 6, &["d", "a"]),
             ],
             s.contract(
+                engine,
                 &t,
                 &ContractSpec {
                     lhs: &[1, 2],
@@ -612,7 +632,7 @@ fn temporary_contracted_order_worker() {
             "{name}: ambiguous size"
         );
         let runtime = Runtime::builder().build().unwrap();
-        let (inputs, _) = temporary_order_fixture(&runtime);
+        let (inputs, _) = temporary_order_fixture(engine, &runtime);
         let refs = [0, 1]
             .into_iter()
             .chain(extra_inputs)
@@ -638,7 +658,7 @@ fn temporary_contracted_order_worker() {
         reset_live_registry();
         ENABLED.store(true, Ordering::SeqCst);
         let actual = planned
-            .execute(&refs, &mut NetworkExecutionWorkspace::default())
+            .execute(engine, &refs, &mut NetworkExecutionWorkspace::default())
             .unwrap();
         ENABLED.store(false, Ordering::SeqCst);
         assert_eq!(
@@ -660,9 +680,10 @@ fn temporary_contracted_order_worker() {
 
 #[test]
 fn first_execution_lays_out_temporaries_in_the_consumer_contracted_order() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     if std::env::var_os("SYMTN_TEMPORARY_ORDER_ALLOC_WORKER").is_some() {
-        temporary_contracted_order_worker();
+        temporary_contracted_order_worker(engine);
         return;
     }
     let output = Command::new(std::env::current_exe().unwrap())
@@ -930,7 +951,7 @@ fn sample_overwrite_replays<R, D>(
     }
 }
 
-fn typed_overwrite_worker<D>(chi: usize, reuse: bool)
+fn typed_overwrite_worker<D>(engine: &mut dyn Engine, chi: usize, reuse: bool)
 where
     D: AllocationScalar,
 {
@@ -947,6 +968,7 @@ where
             _ => (&left_dual, &right),
         };
         TypedTensorMap::rand_with_seed(
+            engine,
             &runtime,
             [codomain],
             [domain],
@@ -958,9 +980,9 @@ where
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
     let planned = network.plan_with(&refs, plan).unwrap();
     let oracle = tensors[0]
-        .contract(&tensors[1], &OVERWRITE_FIRST_SPEC)
+        .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()
-        .contract(&tensors[2], &OVERWRITE_SECOND_SPEC)
+        .contract(engine, &tensors[2], &OVERWRITE_SECOND_SPEC)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -968,7 +990,7 @@ where
     sample_overwrite_replays(
         chi,
         reuse,
-        |workspace| planned.execute(&refs, workspace).unwrap(),
+        |workspace| planned.execute(engine, &refs, workspace).unwrap(),
         &oracle,
     );
 }
@@ -976,13 +998,13 @@ where
 /// The checked-Generic twin over SU(2): one self-dual spin-½ sector per leg
 /// keeps every step output a single `(chi + 1)²` block, as in the U(1) worker.
 #[cfg(feature = "cgc-gen")]
-fn checked_overwrite_worker<D>(chi: usize, reuse: bool)
+fn checked_overwrite_worker<D>(engine: &mut dyn Engine, chi: usize, reuse: bool)
 where
     D: AllocationScalar,
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let fundamental = || vec![1_i64];
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi)]).unwrap();
@@ -996,6 +1018,7 @@ where
             _ => (&left_dual, &right),
         };
         TypedTensorMap::rand_with_seed(
+            engine,
             &runtime,
             [codomain],
             [domain],
@@ -1007,9 +1030,9 @@ where
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
     let planned = network.plan_with(&refs, plan).unwrap();
     let oracle = tensors[0]
-        .contract(&tensors[1], &OVERWRITE_FIRST_SPEC)
+        .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()
-        .contract(&tensors[2], &OVERWRITE_SECOND_SPEC)
+        .contract(engine, &tensors[2], &OVERWRITE_SECOND_SPEC)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -1017,7 +1040,7 @@ where
     sample_overwrite_replays(
         chi,
         reuse,
-        |workspace| planned.execute(&refs, workspace).unwrap(),
+        |workspace| planned.execute(engine, &refs, workspace).unwrap(),
         &oracle,
     );
 }
@@ -1028,14 +1051,14 @@ where
 /// Every leg has dimension `chi + 1`, so each step output is one `(chi + 1)²`
 /// block whatever order the planner picks.
 #[cfg(feature = "cgc-gen")]
-fn checked_cached_worker<D>(chi: usize, cached: bool)
+fn checked_cached_worker<D>(engine: &mut dyn Engine, chi: usize, cached: bool)
 where
     D: AllocationScalar,
 {
     use symtn::sector::LieGroupFusionRule;
     use symtn_network::{configure_plan_cache, PlanCacheConfig};
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -1049,6 +1072,7 @@ where
     let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let codomain = if index == 2 { &leg_dual } else { &leg };
         TypedTensorMap::rand_with_seed(
+            engine,
             &runtime,
             [codomain],
             [&leg],
@@ -1058,20 +1082,20 @@ where
     });
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
     let oracle = tensors[0]
-        .contract(&tensors[1], &OVERWRITE_FIRST_SPEC)
+        .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()
-        .contract(&tensors[2], &OVERWRITE_SECOND_SPEC)
+        .contract(engine, &tensors[2], &OVERWRITE_SECOND_SPEC)
         .unwrap()
         .dense_data()
         .unwrap()
         .to_vec();
-    let contract = || {
+    let mut contract = || {
         net(
             &[op(&["a"], &["b"]), op(&["b"], &["c"]), op(&["a"], &["d"])],
             &["c"],
             &["d"],
         )
-        .contract(&refs)
+        .contract(engine, &refs)
         .unwrap()
     };
     sample_overwrite_replays::<LieGroupFusionRule, D>(chi, cached, |_| contract(), &oracle);
@@ -1138,19 +1162,29 @@ fn run_typed_overwrite_worker(
         .collect()
 }
 
-fn lazy_conj_worker() {
+fn lazy_conj_worker(engine: &mut dyn Engine) {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
     };
     let (left, bond, right) = (space(5), space(7), space(11));
-    let lhs =
-        TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&left], [&bond], 74_700)
-            .unwrap();
-    let rhs =
-        TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&left], [&right], 74_701)
-            .unwrap();
+    let lhs = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&left],
+        [&bond],
+        74_700,
+    )
+    .unwrap();
+    let rhs = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&left],
+        [&right],
+        74_701,
+    )
+    .unwrap();
     let label = TemporaryLabel::from;
     let network = Network::new(
         vec![vec![label("x"), label("k")], vec![label("x"), label("r")]],
@@ -1166,7 +1200,7 @@ fn lazy_conj_worker() {
         .unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
     for _ in 0..3 {
-        drop(planned.execute(&refs, &mut workspace).unwrap());
+        drop(planned.execute(engine, &refs, &mut workspace).unwrap());
     }
 
     let parent_pointer = lhs.dense_data().unwrap().as_ptr();
@@ -1174,7 +1208,7 @@ fn lazy_conj_worker() {
     PAYLOAD_SIZE.store(5 * 7 * std::mem::size_of::<f64>(), Ordering::Relaxed);
     reset_live_registry();
     ENABLED.store(true, Ordering::SeqCst);
-    let output = planned.execute(&refs, &mut workspace).unwrap();
+    let output = planned.execute(engine, &refs, &mut workspace).unwrap();
     assert_eq!(output.rank(), 2);
     drop(output);
     ENABLED.store(false, Ordering::SeqCst);
@@ -1188,6 +1222,7 @@ fn lazy_conj_worker() {
 
     let compact_bond = space(13);
     let compact = TypedTensorMap::<U1FusionRule, f64>::diagonal(
+        engine,
         &runtime,
         &compact_bond,
         [SectorSpectrum {
@@ -1211,7 +1246,7 @@ fn lazy_conj_worker() {
     for _ in 0..3 {
         drop(
             compact_plan
-                .execute(&[&compact], &mut compact_workspace)
+                .execute(engine, &[&compact], &mut compact_workspace)
                 .unwrap(),
         );
     }
@@ -1221,7 +1256,7 @@ fn lazy_conj_worker() {
     reset_live_registry();
     ENABLED.store(true, Ordering::SeqCst);
     let output = compact_plan
-        .execute(&[&compact], &mut compact_workspace)
+        .execute(engine, &[&compact], &mut compact_workspace)
         .unwrap();
     ENABLED.store(false, Ordering::SeqCst);
     drop(output);
@@ -1233,9 +1268,10 @@ fn lazy_conj_worker() {
 
 #[test]
 fn warm_lazy_conj_replay_does_not_materialize_the_input() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     if std::env::var_os("SYMTN_LAZY_CONJ_ALLOC_WORKER").is_some() {
-        lazy_conj_worker();
+        lazy_conj_worker(engine);
         return;
     }
     let output = Command::new(std::env::current_exe().unwrap())
@@ -1258,6 +1294,7 @@ fn warm_lazy_conj_replay_does_not_materialize_the_input() {
 
 #[test]
 fn typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     if let Ok(dtype) = std::env::var("SYMTN_TYPED_ALLOC_DTYPE") {
         let chi = std::env::var("SYMTN_TYPED_ALLOC_CHI")
@@ -1267,16 +1304,16 @@ fn typed_overwrite_replay_allocates_two_payloads_fresh_and_one_warm() {
         let reuse = std::env::var("SYMTN_TYPED_ALLOC_MODE").unwrap() == "reuse";
         let rule = std::env::var("SYMTN_TYPED_ALLOC_RULE").unwrap();
         match (rule.as_str(), dtype.as_str()) {
-            ("u1", "f64") => typed_overwrite_worker::<f64>(chi, reuse),
-            ("u1", "c64") => typed_overwrite_worker::<Complex64>(chi, reuse),
+            ("u1", "f64") => typed_overwrite_worker::<f64>(engine, chi, reuse),
+            ("u1", "c64") => typed_overwrite_worker::<Complex64>(engine, chi, reuse),
             #[cfg(feature = "cgc-gen")]
-            ("sun2", "f64") => checked_overwrite_worker::<f64>(chi, reuse),
+            ("sun2", "f64") => checked_overwrite_worker::<f64>(engine, chi, reuse),
             #[cfg(feature = "cgc-gen")]
-            ("sun2", "c64") => checked_overwrite_worker::<Complex64>(chi, reuse),
+            ("sun2", "c64") => checked_overwrite_worker::<Complex64>(engine, chi, reuse),
             #[cfg(feature = "cgc-gen")]
-            ("sun2-cached", "f64") => checked_cached_worker::<f64>(chi, reuse),
+            ("sun2-cached", "f64") => checked_cached_worker::<f64>(engine, chi, reuse),
             #[cfg(feature = "cgc-gen")]
-            ("sun2-cached", "c64") => checked_cached_worker::<Complex64>(chi, reuse),
+            ("sun2-cached", "c64") => checked_cached_worker::<Complex64>(engine, chi, reuse),
             _ => panic!("unknown typed allocator worker {rule:?}/{dtype:?}"),
         }
         return;

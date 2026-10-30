@@ -130,6 +130,7 @@ fn checked_generic_owned_trace_returns_the_traced_scalar_value() {
         BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(provider, destination_hom)
             .unwrap();
     let output = crate::tensortrace::tensortrace_fusion_dyn_owned_generic_checked(
+        strided_kernel::Exec::serial(),
         &dst,
         &src,
         &[2.0],
@@ -189,9 +190,26 @@ fn assert_owned_trace_matches_initialized_for_real_and_complex<R>(
         .map(|index| index as f64 + 0.25)
         .collect::<Vec<_>>();
     let mut expected_real = vec![0.0; dst_len];
-    tensortrace_fusion_dyn_into(dst, &mut expected_real, src, &real_source, axes, 1.0, 0.0)
-        .unwrap();
-    let actual_real = tensortrace_fusion_dyn_owned(dst, src, &real_source, axes, 1.0).unwrap();
+    tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
+        dst,
+        &mut expected_real,
+        src,
+        &real_source,
+        axes,
+        1.0,
+        0.0,
+    )
+    .unwrap();
+    let actual_real = tensortrace_fusion_dyn_owned(
+        strided_kernel::Exec::serial(),
+        dst,
+        src,
+        &real_source,
+        axes,
+        1.0,
+    )
+    .unwrap();
     // The owned writer and the initialized writer are two paths whose
     // agreement is the contract; each destination entry sums at most
     // `src_len` recoupled source entries.
@@ -209,6 +227,7 @@ fn assert_owned_trace_matches_initialized_for_real_and_complex<R>(
         .collect::<Vec<_>>();
     let mut expected_complex = vec![Complex64::new(0.0, 0.0); dst_len];
     tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
         dst,
         &mut expected_complex,
         src,
@@ -218,9 +237,15 @@ fn assert_owned_trace_matches_initialized_for_real_and_complex<R>(
         Complex64::new(0.0, 0.0),
     )
     .unwrap();
-    let actual_complex =
-        tensortrace_fusion_dyn_owned(dst, src, &complex_source, axes, Complex64::new(1.0, 0.0))
-            .unwrap();
+    let actual_complex = tensortrace_fusion_dyn_owned(
+        strided_kernel::Exec::serial(),
+        dst,
+        src,
+        &complex_source,
+        axes,
+        Complex64::new(1.0, 0.0),
+    )
+    .unwrap();
     crate::test_numerics::numerics::assert_slices_close(
         "owned vs initialized complex trace",
         &actual_complex,
@@ -298,6 +323,7 @@ fn public_dynamic_fz2_trace_validates_exact_extents_before_mutation() {
     for case in cases {
         let mut dst = case.dst;
         let result = tensortrace_fusion_dyn_into(
+            strided_kernel::Exec::serial(),
             &dst_space,
             &mut dst,
             &src_space,
@@ -821,6 +847,7 @@ fn fz2_trace_raw_entry_validates_host_slice_extents_before_mutation() {
         let initial_dst = case.dst.clone();
         let mut dst = case.dst;
         let result = crate::tensortrace::tensortrace_fusion_dyn_into_raw(
+            strided_kernel::Exec::serial(),
             &rule,
             &dst_space,
             &mut dst,
@@ -877,6 +904,7 @@ fn fz2_lowered_dynamic_trace_matches_encoded_data_oracle() {
     let mut encoded_data = vec![7.0_f64];
     let mut lowered_data = encoded_data.clone();
     tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
         &encoded_dst,
         &mut encoded_data,
         &encoded_src,
@@ -887,6 +915,7 @@ fn fz2_lowered_dynamic_trace_matches_encoded_data_oracle() {
     )
     .unwrap();
     tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
         &lowered_dst,
         &mut lowered_data,
         &lowered_src,
@@ -1172,6 +1201,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
             .unwrap();
     let mut unchecked = initial.clone();
     tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
         &dynamic_dst,
         &mut unchecked,
         &dynamic_src,
@@ -1185,6 +1215,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
 
     let mut checked = initial.clone();
     tensortrace_fusion_dyn_into_checked(
+        strided_kernel::Exec::serial(),
         &dynamic_dst,
         &mut checked,
         &dynamic_src,
@@ -1199,9 +1230,15 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
         probe::take(Event::TraceAxisPlanDerivation),
         probe::take(Event::TraceSelectedHomspaceDerivation),
     );
-    let owned =
-        tensortrace_fusion_dyn_owned_checked(&dynamic_dst, &dynamic_src, &src_data, axes, alpha)
-            .unwrap();
+    let owned = tensortrace_fusion_dyn_owned_checked(
+        strided_kernel::Exec::serial(),
+        &dynamic_dst,
+        &dynamic_src,
+        &src_data,
+        axes,
+        alpha,
+    )
+    .unwrap();
     // What: one checked compile derives one axis plan and one selected HomSpace.
     assert_eq!(
         (
@@ -1224,6 +1261,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
         crate::tensortrace_stage_multiplicity_free(&dynamic_src, axes, dynamic_dst.space().nout())
             .unwrap();
     let (eager_dst, eager) = crate::tensortrace_multiplicity_free_in(
+        strided_kernel::Exec::serial(),
         stage,
         &dynamic_src,
         |_| None,
@@ -1248,6 +1286,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
         crate::tensortrace_stage_multiplicity_free(&other, axes, dynamic_dst.space().nout())
             .unwrap();
     let (_, fallback) = crate::tensortrace_multiplicity_free_in(
+        strided_kernel::Exec::serial(),
         stage,
         &dynamic_src,
         |_| None,
@@ -1267,6 +1306,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
 
     let mut unchanged = initial.clone();
     let error = tensortrace_fusion_dyn_into_checked(
+        strided_kernel::Exec::serial(),
         &dynamic_dst,
         &mut unchanged,
         &dynamic_src,
@@ -1286,6 +1326,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
     assert_eq!(unchanged, initial);
     assert_eq!(
         tensortrace_fusion_dyn_owned_checked(
+            strided_kernel::Exec::serial(),
             &dynamic_dst,
             &dynamic_src,
             &src_data[..11],
@@ -1336,6 +1377,7 @@ fn dynamic_u1_nonconjugating_trace_keeps_parent_axis_geometry() {
     let mut actual = vec![Complex64::new(0.0, 0.0); 3];
 
     tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
         &dst,
         &mut actual,
         &src,
@@ -1352,6 +1394,7 @@ fn dynamic_u1_nonconjugating_trace_keeps_parent_axis_geometry() {
     // but the incompatible selected destination remains the earlier error.
     assert_eq!(
         tensortrace_fusion_dyn_owned_checked(
+            strided_kernel::Exec::serial(),
             &dst,
             &src,
             &src_data,
@@ -1434,10 +1477,29 @@ fn dynamic_u1_adjoint_trace_replays_two_pairs_from_padded_storage() {
 
     let adjoint_view_build_count_rec = probe::record();
     let mut unchecked = initial.clone();
-    tensortrace_fusion_dyn_into(&dst, &mut unchecked, &src, &src_data, axes, alpha, beta).unwrap();
+    tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
+        &dst,
+        &mut unchecked,
+        &src,
+        &src_data,
+        axes,
+        alpha,
+        beta,
+    )
+    .unwrap();
     let mut checked = initial;
-    tensortrace_fusion_dyn_into_checked(&dst, &mut checked, &src, &src_data, axes, alpha, beta)
-        .unwrap();
+    tensortrace_fusion_dyn_into_checked(
+        strided_kernel::Exec::serial(),
+        &dst,
+        &mut checked,
+        &src,
+        &src_data,
+        axes,
+        alpha,
+        beta,
+    )
+    .unwrap();
 
     // What: logical adjoint lowering remaps two trace pairs and the reversed
     // retained axes while reading only the hand-indexed padded storage cells.
@@ -1480,8 +1542,26 @@ fn owned_trace_reuses_initialized_fallback_for_padded_destination() {
     let src_data = vec![1.0, 2.0, 3.0, 4.0];
     let axes = TensorTraceAxisSpec::new(&[], &[0], &[1]);
     let mut expected = vec![0.0; 2];
-    tensortrace_fusion_dyn_into(&dst, &mut expected, &src, &src_data, axes, 1.0, 0.0).unwrap();
-    let actual = tensortrace_fusion_dyn_owned(&dst, &src, &src_data, axes, 1.0).unwrap();
+    tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
+        &dst,
+        &mut expected,
+        &src,
+        &src_data,
+        axes,
+        1.0,
+        0.0,
+    )
+    .unwrap();
+    let actual = tensortrace_fusion_dyn_owned(
+        strided_kernel::Exec::serial(),
+        &dst,
+        &src,
+        &src_data,
+        axes,
+        1.0,
+    )
+    .unwrap();
 
     assert_eq!(actual, expected);
     assert_eq!(actual[0], 0.0);
@@ -2269,6 +2349,7 @@ fn structure_executors_reject_terms_compiled_for_other_spaces() {
 
     assert_eq!(
         crate::tensortrace_fusion_dyn_structure_owned(
+            strided_kernel::Exec::serial(),
             &structure,
             dst.space(),
             other.space(),
@@ -2280,6 +2361,7 @@ fn structure_executors_reject_terms_compiled_for_other_spaces() {
     let mut out = vec![0.0];
     assert_eq!(
         crate::tensortrace_fusion_dyn_structure_into_raw(
+            strided_kernel::Exec::serial(),
             &structure,
             dst.space(),
             &mut out,
@@ -2291,6 +2373,7 @@ fn structure_executors_reject_terms_compiled_for_other_spaces() {
         Err(OperationError::StructureMismatch { tensor: "src" })
     );
     assert!(crate::tensortrace_fusion_dyn_structure_owned(
+        strided_kernel::Exec::serial(),
         &structure,
         dst.space(),
         compiled_for.space(),

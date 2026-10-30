@@ -10,9 +10,9 @@
 //! counts; `CACHE_SCALING_WARM_MS` (default 500) is the warm window and
 //! `CACHE_SCALING_COLD_ROUNDS` (default 3) the cold windows per row. A row
 //! runs when every `filter` equals one of its `scenario,symmetry,case,
-//! runtime,phase` fields. Every Runtime is built with `dense_threads(1)` and
-//! `recoupling_threads(1)`, so each worker runs its operation on its own
-//! thread and the requested count is the thread count.
+//! runtime,phase` fields. Every worker holds its own serial engine, so each
+//! worker runs its operation on its own thread and the requested count is the
+//! thread count.
 //!
 //! Scenarios:
 //! - `raw_front` / `raw_shard` / `raw_spread`: one standalone
@@ -48,7 +48,7 @@ use std::time::{Duration, Instant};
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
+use symtn::typed::{ContractSpec, CpuEngine, Engine, GradedSpace, Runtime, TensorMap};
 use symtn_core::{core_reset_epoch, StructureCache};
 use symtn_network::{clear_plan_cache, Network};
 
@@ -237,11 +237,7 @@ fn warm_loop(stop: &AtomicBool, mut call: impl FnMut()) -> u64 {
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder()
-        .dense_threads(1)
-        .recoupling_threads(1)
-        .build()
-        .expect("runtime")
+    Runtime::builder().build().expect("runtime")
 }
 
 fn raw(config: &Config) {
@@ -368,14 +364,17 @@ macro_rules! ops_rows {
         // the matrix `b = (l0 <- l0)`.
         let operands = |rt: &Runtime, id: usize, sectors: usize| {
             let legs: Vec<_> = degs(id, 4, sectors).iter().map(|d| $leg(d)).collect();
+            let engine = &mut CpuEngine::serial();
             let a = TensorMap::<_, f64>::rand_with_seed(
+                engine,
                 rt,
                 [&legs[0], &legs[1]],
                 [&legs[2], &legs[3]],
                 1,
             )
             .expect("a");
-            let b = TensorMap::<_, f64>::rand_with_seed(rt, [&legs[0]], [&legs[0]], 2).expect("b");
+            let b = TensorMap::<_, f64>::rand_with_seed(engine, rt, [&legs[0]], [&legs[0]], 2)
+                .expect("b");
             (a, b)
         };
         let spec = ContractSpec {
@@ -384,12 +383,16 @@ macro_rules! ops_rows {
             codomain: &[0, 1, 2],
             domain: &[3],
         };
-        let apply =
-            |op: Op, (a, b): &(TensorMap<_, f64>, TensorMap<_, f64>), net: &Network| match op {
-                Op::Permute => drop(black_box(a.permute(&[1, 2], &[3, 0]).expect("permute"))),
-                Op::Contract => drop(black_box(a.contract(b, &spec).expect("contract"))),
-                Op::Network => drop(black_box(net.contract(&[a, b]).expect("network"))),
-            };
+        let apply = |engine: &mut dyn Engine,
+                     op: Op,
+                     (a, b): &(TensorMap<_, f64>, TensorMap<_, f64>),
+                     net: &Network| match op {
+            Op::Permute => drop(black_box(
+                a.permute(engine, &[1, 2], &[3, 0]).expect("permute"),
+            )),
+            Op::Contract => drop(black_box(a.contract(engine, b, &spec).expect("contract"))),
+            Op::Network => drop(black_box(net.contract(engine, &[a, b]).expect("network"))),
+        };
         for (op, op_name) in [
             (Op::Permute, "permute"),
             (Op::Contract, "contract"),
@@ -423,12 +426,13 @@ macro_rules! ops_rows {
                                     .map(|id| operands(rt, id, sectors))
                                     .collect();
                                 let net = network();
+                                let mut engine = CpuEngine::serial();
                                 if warm {
                                     for _ in 0..2 {
-                                        apply(op, &inputs[0], &net);
+                                        apply(&mut engine, op, &inputs[0], &net);
                                     }
                                 }
-                                (own, inputs, net)
+                                (own, inputs, net, std::sync::Mutex::new(engine))
                             };
                             // Cold rows run `cold_rounds` windows; each starts
                             // from cleared caches (setup rebuilds the inputs
@@ -442,12 +446,14 @@ macro_rules! ops_rows {
                                     blocks,
                                     threads,
                                     &setup,
-                                    |_, (_, inputs, net), stop| {
+                                    |_, (_, inputs, net, engine), stop| {
+                                        // Uncontended: each worker locks only its own engine.
+                                        let engine = &mut *engine.lock().unwrap();
                                         if warm {
-                                            warm_loop(stop, || apply(op, &inputs[0], net))
+                                            warm_loop(stop, || apply(engine, op, &inputs[0], net))
                                         } else {
                                             for input in inputs {
-                                                apply(op, input, net);
+                                                apply(engine, op, input, net);
                                             }
                                             inputs.len() as u64
                                         }

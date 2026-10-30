@@ -18,6 +18,7 @@
 //! [historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1315-single-precision-base.md).
 
 use std::hint::black_box;
+use symtn::typed::Engine;
 
 use std::sync::Arc;
 
@@ -47,21 +48,23 @@ fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize, usize) {
 }
 
 fn build_runtime() -> Runtime {
-    Runtime::builder().dense_threads(1).build().unwrap()
+    Runtime::builder().build().unwrap()
 }
 
 /// A permute at one payload dtype, which is the cheapest public operation
 /// that leases the runtime's execution lane for that dtype.
 macro_rules! permuted {
-    ($runtime:expr, $dtype:ty, $space:expr, $seed:expr) => {{
+    ($engine:ident, $runtime:expr, $dtype:ty, $space:expr, $seed:expr) => {{
         let tensor: TensorMap<U1FusionRule, $dtype> =
-            TensorMap::rand_with_seed($runtime, [$space, $space], [$space], $seed).unwrap();
-        black_box(tensor.permute(&[1], &[2, 0]).unwrap());
+            TensorMap::rand_with_seed($engine, $runtime, [$space, $space], [$space], $seed)
+                .unwrap();
+        black_box(tensor.permute($engine, &[1], &[2, 0]).unwrap());
     }};
 }
 
 #[test]
 fn runtime_construction_does_not_build_unused_dtype_lanes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Warm anything the process initialises once (thread pools, env parsing)
     // so every build measured below is steady state.
@@ -75,7 +78,7 @@ fn runtime_construction_does_not_build_unused_dtype_lanes() {
     // to build: the lanes belong to the runtime that needed them, and nothing
     // about them is global or sticky.
     let user = build_runtime();
-    permuted!(&user, Complex32, &space, 1);
+    permuted!(engine, &user, Complex32, &space, 1);
     let (_, after_use, _) = measured(build_runtime);
     assert_eq!(
         after_use, baseline,
@@ -92,11 +95,11 @@ fn runtime_construction_does_not_build_unused_dtype_lanes() {
     // be per-runtime rather than process-global.
     for round in 0..2 {
         let runtime = build_runtime();
-        permuted!(&runtime, f64, &space, 10 + round);
-        permuted!(&runtime, f64, &space, 20 + round);
+        permuted!(engine, &runtime, f64, &space, 10 + round);
+        permuted!(engine, &runtime, f64, &space, 20 + round);
 
-        let (_, cold, _) = measured(|| permuted!(&runtime, Complex32, &space, 30 + round));
-        let (_, warm, _) = measured(|| permuted!(&runtime, Complex32, &space, 40 + round));
+        let (_, cold, _) = measured(|| permuted!(engine, &runtime, Complex32, &space, 30 + round));
+        let (_, warm, _) = measured(|| permuted!(engine, &runtime, Complex32, &space, 40 + round));
         eprintln!("round {round}: first Complex32 permute {cold} calls, second {warm}");
         assert!(
             cold > warm,
@@ -123,28 +126,29 @@ fn u1_space() -> GradedSpace<U1FusionRule> {
 /// A macro because the payload dtype is the only thing that varies and the
 /// two instantiations must run the identical sequence of public calls.
 macro_rules! measure_pipeline {
-    ($runtime:expr, $dtype:ty, $space:expr) => {{
+    ($engine:ident, $runtime:expr, $dtype:ty, $space:expr) => {{
         let space = $space;
         // Warm the lane, the layout admission and the transform plan, so the
         // measured pass is steady state at both precisions.
         let warm: TensorMap<U1FusionRule, $dtype> =
-            TensorMap::rand_with_seed($runtime, [space, space], [space], 5_501).unwrap();
-        black_box(warm.permute(&[1], &[2, 0]).unwrap());
-        black_box(warm.norm(2.0).unwrap());
+            TensorMap::rand_with_seed($engine, $runtime, [space, space], [space], 5_501).unwrap();
+        black_box(warm.permute($engine, &[1], &[2, 0]).unwrap());
+        black_box(warm.norm($engine, 2.0).unwrap());
 
         measured(|| {
             let tensor: TensorMap<U1FusionRule, $dtype> =
-                TensorMap::rand_with_seed($runtime, [space, space], [space], 5_502).unwrap();
-            let permuted = tensor.permute(&[1], &[2, 0]).unwrap();
+                TensorMap::rand_with_seed($engine, $runtime, [space, space], [space], 5_502)
+                    .unwrap();
+            let permuted = tensor.permute($engine, &[1], &[2, 0]).unwrap();
             // `FactorScalar::from_real`, not `<$dtype>::from(1.0)`: an
             // unsuffixed float literal has no type to fall back to that every
             // instantiation of this macro accepts.
             let one = <$dtype as FactorScalar>::from_real(1.0);
-            let sum = tensor.axpby(one, &tensor, one).unwrap();
+            let sum = tensor.axpby($engine, one, &tensor, one).unwrap();
             black_box((
                 permuted,
                 sum,
-                tensor.norm(2.0).unwrap(),
+                tensor.norm($engine, 2.0).unwrap(),
                 tensor.dense_data().unwrap().len(),
             ))
         })
@@ -153,14 +157,15 @@ macro_rules! measure_pipeline {
 
 #[test]
 fn single_precision_allocates_as_often_as_double_and_half_the_payload_bytes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = u1_space();
 
-    let (_, f64_calls, f64_bytes) = measure_pipeline!(&runtime, f64, &space);
-    let (single, f32_calls, f32_bytes) = measure_pipeline!(&runtime, f32, &space);
-    let (_, c64_calls, c64_bytes) = measure_pipeline!(&runtime, Complex64, &space);
-    let (_, c32_calls, c32_bytes) = measure_pipeline!(&runtime, Complex32, &space);
+    let (_, f64_calls, f64_bytes) = measure_pipeline!(engine, &runtime, f64, &space);
+    let (single, f32_calls, f32_bytes) = measure_pipeline!(engine, &runtime, f32, &space);
+    let (_, c64_calls, c64_bytes) = measure_pipeline!(engine, &runtime, Complex64, &space);
+    let (_, c32_calls, c32_bytes) = measure_pipeline!(engine, &runtime, Complex32, &space);
     let payload = single.3;
 
     eprintln!(
@@ -212,69 +217,72 @@ fn single_precision_allocates_as_often_as_double_and_half_the_payload_bytes() {
 /// instance, which is what makes it a property of the algorithm rather than of
 /// the process.
 macro_rules! measure_factorizations {
-    ($runtime:expr, $dtype:ty, $space:expr) => {{
+    ($engine:ident, $runtime:expr, $dtype:ty, $space:expr) => {{
         let space = $space;
-        let sequence = || {
+        let sequence = |$engine: &mut dyn Engine| {
             let tensor: TensorMap<U1FusionRule, $dtype> =
-                TensorMap::rand_with_seed($runtime, [space, space], [space], 7_502).unwrap();
-            let Qr { q, r } = tensor.qr_compact(&[0, 1], &[2]).unwrap();
-            let Svd { u, s, vh } = tensor.svd_compact(&[0, 1], &[2]).unwrap();
+                TensorMap::rand_with_seed($engine, $runtime, [space, space], [space], 7_502)
+                    .unwrap();
+            let Qr { q, r } = tensor.qr_compact($engine, &[0, 1], &[2]).unwrap();
+            let Svd { u, s, vh } = tensor.svd_compact($engine, &[0, 1], &[2]).unwrap();
             // The truncated SVD is a composition (#1534).
             let found = s.domain()[0]
-                .find_truncated(&s.diagview().unwrap(), &Truncation::rank(4))
+                .find_truncated(&s.diagview($engine).unwrap(), &Truncation::rank(4))
                 .unwrap();
             let truncated = (
-                u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
+                u.restrict_leg($engine, &[(u.codomain_rank(), &found.selection)])
                     .unwrap(),
-                s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+                s.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
                     .unwrap(),
-                vh.restrict_leg(&[(0, &found.selection)]).unwrap(),
+                vh.restrict_leg($engine, &[(0, &found.selection)]).unwrap(),
             );
             (tensor, q, r, u, s, vh, truncated)
         };
         // Warm: every one-time backend workspace growth is paid here.
         for _ in 0..4 {
-            black_box(sequence());
+            black_box(sequence($engine));
         }
         // Shape observation, outside the counter: `diagview` allocates.
-        let (tensor, q, r, u, s, vh, truncated) = sequence();
+        let (tensor, q, r, u, s, vh, truncated) = sequence($engine);
         let produced = tensor.dense_data().unwrap().len()
             + q.dense_data().unwrap().len()
             + r.dense_data().unwrap().len()
             + u.dense_data().unwrap().len()
-            + s.materialize().unwrap().dense_data().unwrap().len()
+            + s.materialize($engine).unwrap().dense_data().unwrap().len()
             + vh.dense_data().unwrap().len()
             + truncated.0.dense_data().unwrap().len()
             + truncated
                 .1
-                .materialize()
+                .materialize($engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
                 .len()
             + truncated.2.dense_data().unwrap().len();
-        let spectrum_sectors = s.diagview().unwrap().len() + truncated.1.diagview().unwrap().len();
+        let spectrum_sectors =
+            s.diagview($engine).unwrap().len() + truncated.1.diagview($engine).unwrap().len();
         black_box((tensor, q, r, u, s, vh, truncated));
 
-        let (_, calls, bytes) = measured(|| black_box(sequence()));
+        let (_, calls, bytes) = measured(|| black_box(sequence($engine)));
         (produced, spectrum_sectors, calls, bytes)
     }};
 }
 
 #[test]
 fn single_precision_factorizations_allocate_like_double() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = u1_space();
 
     let (f64_payload, f64_sectors, f64_calls, f64_bytes) =
-        measure_factorizations!(&runtime, f64, &space);
+        measure_factorizations!(engine, &runtime, f64, &space);
     let (f32_payload, f32_sectors, f32_calls, f32_bytes) =
-        measure_factorizations!(&runtime, f32, &space);
+        measure_factorizations!(engine, &runtime, f32, &space);
     let (c64_payload, c64_sectors, c64_calls, c64_bytes) =
-        measure_factorizations!(&runtime, Complex64, &space);
+        measure_factorizations!(engine, &runtime, Complex64, &space);
     let (c32_payload, c32_sectors, c32_calls, c32_bytes) =
-        measure_factorizations!(&runtime, Complex32, &space);
+        measure_factorizations!(engine, &runtime, Complex32, &space);
 
     eprintln!(
         "factorizations: f64 {f64_calls} calls/{f64_bytes} B ({f64_payload} entries, \

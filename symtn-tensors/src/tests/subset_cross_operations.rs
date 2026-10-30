@@ -55,8 +55,11 @@ fn assert_complete_destination(
     assert!(omitted > 0, "fixture must exercise omitted valid keys");
 }
 
-fn assert_subset_cross_operation_oracle<R>(rule: &R, sectors: [SectorId; 2])
-where
+fn assert_subset_cross_operation_oracle<R>(
+    engine: &mut dyn Engine,
+    rule: &R,
+    sectors: [SectorId; 2],
+) where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
 {
     let complete_space = scalar_matrix_space(rule, sectors);
@@ -120,6 +123,7 @@ where
     let mut contract_destination =
         TestTensor::<f64>::from_vec_with_fusion_space(initial.clone(), complete_space).unwrap();
     fusion_contract_into(
+        engine,
         rule,
         &mut contract_destination,
         &source,
@@ -140,14 +144,17 @@ where
 
 #[test]
 fn bound_subset_is_a_structural_zero_source_across_public_operations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the same admitted Subset source contributes retained blocks and
     // treats omitted valid blocks as zero across add, zero-pair trace, and
     // left-hand contraction into Complete destinations.
     assert_subset_cross_operation_oracle(
+        engine,
         &U1FusionRule,
         [U1Irrep::new(-1).sector_id(), U1Irrep::new(2).sector_id()],
     );
     assert_subset_cross_operation_oracle(
+        engine,
         &SU2FusionRule,
         [
             SU2Irrep::from_twice_spin(0).sector_id(),
@@ -155,6 +162,7 @@ fn bound_subset_is_a_structural_zero_source_across_public_operations() {
         ],
     );
     assert_subset_cross_operation_oracle(
+        engine,
         &FermionParityFusionRule,
         [SectorId::new(0), SectorId::new(1)],
     );
@@ -172,6 +180,7 @@ fn bound_subset_is_a_structural_zero_source_across_public_operations() {
         )
     };
     assert_subset_cross_operation_oracle(
+        engine,
         &product_rule,
         [
             product_sector(SectorId::new(0), 0, 0),

@@ -5,6 +5,7 @@
 //! complementary on the complete fused spaces.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 #[cfg(feature = "cgc-gen")]
 use symtn::typed::HermitianTol;
 
@@ -33,16 +34,16 @@ type Fz2U1Codec = PackedProductCodec<symtn::sector::Fz2SectorLayout, U1SectorLay
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
 
 macro_rules! assert_close {
-    ($actual:expr, $expected:expr) => {{
+    ($engine:ident, $actual:expr, $expected:expr) => {{
         let actual = $actual;
         let expected = $expected;
         let error = actual
-            .axpby(1.0.into(), expected, (-1.0).into())
+            .axpby($engine, 1.0.into(), expected, (-1.0).into())
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
         assert!(
-            error <= 1e-10 * (1.0 + expected.norm(2.0).unwrap()),
+            error <= 1e-10 * (1.0 + expected.norm($engine, 2.0).unwrap()),
             "residual {error}"
         );
     }};
@@ -51,8 +52,8 @@ macro_rules! assert_close {
 /// `values` must not follow a low-order linear recurrence, or the populated
 /// sectors lose rank and the null spaces change.
 macro_rules! side_only_case {
-    ($rule:expr, $left:expr, $phys:expr, $right:expr, $scalar:ty, $value:expr) => {{
-        let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $rule:expr, $left:expr, $phys:expr, $right:expr, $scalar:ty, $value:expr) => {{
+        let rt = Runtime::builder().build().unwrap();
         let provider = Arc::new($rule);
         let left = GradedSpace::try_new(Arc::clone(&provider), $left).unwrap();
         let phys = GradedSpace::try_new(Arc::clone(&provider), $phys).unwrap();
@@ -60,63 +61,93 @@ macro_rules! side_only_case {
         let mut counter = 0usize;
         let value = $value;
         let t: TensorMap<_, $scalar> =
-            TensorMap::from_subblock_fn(&rt, [&left, &phys], [&right], |_, _| {
+            TensorMap::from_subblock_fn($engine, &rt, [&left, &phys], [&right], |_, _| {
                 counter += 1;
                 value(counter)
             })
             .unwrap();
         let codomain_id: TensorMap<_, $scalar> =
-            TensorMap::isomorphism(&rt, [&left, &phys], [&left, &phys]).unwrap();
+            TensorMap::isomorphism($engine, &rt, [&left, &phys], [&left, &phys]).unwrap();
         let domain_id: TensorMap<_, $scalar> =
-            TensorMap::isomorphism(&rt, [&right], [&right]).unwrap();
-        let unitary = |u: &TensorMap<_, $scalar>| {
-            let adjoint = u.adjoint().unwrap();
-            let inner = TensorMap::isomorphism(&rt, u.domain().iter(), u.domain().iter()).unwrap();
+            TensorMap::isomorphism($engine, &rt, [&right], [&right]).unwrap();
+        let unitary = |$engine: &mut dyn Engine, u: &TensorMap<_, $scalar>| {
+            let adjoint = u.adjoint($engine).unwrap();
+            let inner =
+                TensorMap::isomorphism($engine, &rt, u.domain().iter(), u.domain().iter()).unwrap();
             let outer =
-                TensorMap::isomorphism(&rt, u.codomain().iter(), u.codomain().iter()).unwrap();
-            assert_close!(&adjoint.compose(u).unwrap(), &inner);
-            assert_close!(&u.compose(&adjoint).unwrap(), &outer);
+                TensorMap::isomorphism($engine, &rt, u.codomain().iter(), u.codomain().iter())
+                    .unwrap();
+            assert_close!($engine, &adjoint.compose($engine, u).unwrap(), &inner);
+            assert_close!($engine, &u.compose($engine, &adjoint).unwrap(), &outer);
         };
 
-        let Qr { q, r } = t.qr_full(&[0, 1], &[2]).unwrap();
-        assert_close!(&q.compose(&r).unwrap(), &t);
-        unitary(&q);
-        let Lq { l, q } = t.lq_full(&[0, 1], &[2]).unwrap();
-        assert_close!(&l.compose(&q).unwrap(), &t);
-        unitary(&q);
-        let Svd { u, s, vh } = t.svd_full(&[0, 1], &[2]).unwrap();
-        assert_close!(&u.compose(&s).unwrap().compose(&vh).unwrap(), &t);
-        unitary(&u);
-        unitary(&vh);
-
-        let pseudo = t.pinv(&[0, 1], &[2], 1e-12).unwrap();
-        let null = t.left_null(&[0, 1], &[2]).unwrap();
-        let null_adjoint = null.adjoint().unwrap();
-        assert!(null_adjoint.compose(&t).unwrap().norm(2.0).unwrap() <= 1e-10);
+        let Qr { q, r } = t.qr_full($engine, &[0, 1], &[2]).unwrap();
+        assert_close!($engine, &q.compose($engine, &r).unwrap(), &t);
+        unitary($engine, &q);
+        let Lq { l, q } = t.lq_full($engine, &[0, 1], &[2]).unwrap();
+        assert_close!($engine, &l.compose($engine, &q).unwrap(), &t);
+        unitary($engine, &q);
+        let Svd { u, s, vh } = t.svd_full($engine, &[0, 1], &[2]).unwrap();
         assert_close!(
-            &null_adjoint.compose(&null).unwrap(),
-            &TensorMap::isomorphism(&rt, null.domain().iter(), null.domain().iter()).unwrap()
+            $engine,
+            &u.compose($engine, &s)
+                .unwrap()
+                .compose($engine, &vh)
+                .unwrap(),
+            &t
+        );
+        unitary($engine, &u);
+        unitary($engine, &vh);
+
+        let pseudo = t.pinv($engine, &[0, 1], &[2], 1e-12).unwrap();
+        let null = t.left_null($engine, &[0, 1], &[2]).unwrap();
+        let null_adjoint = null.adjoint($engine).unwrap();
+        assert!(
+            null_adjoint
+                .compose($engine, &t)
+                .unwrap()
+                .norm($engine, 2.0)
+                .unwrap()
+                <= 1e-10
         );
         assert_close!(
-            &null
-                .compose(&null_adjoint)
+            $engine,
+            &null_adjoint.compose($engine, &null).unwrap(),
+            &TensorMap::isomorphism($engine, &rt, null.domain().iter(), null.domain().iter())
                 .unwrap()
-                .axpby(1.0.into(), &t.compose(&pseudo).unwrap(), 1.0.into())
+        );
+        let t_compose = &t.compose($engine, &pseudo).unwrap();
+        assert_close!(
+            $engine,
+            &null
+                .compose($engine, &null_adjoint)
+                .unwrap()
+                .axpby($engine, 1.0.into(), t_compose, 1.0.into())
                 .unwrap(),
             &codomain_id
         );
-        let null = t.right_null(&[0, 1], &[2]).unwrap();
-        let null_adjoint = null.adjoint().unwrap();
-        assert!(t.compose(&null_adjoint).unwrap().norm(2.0).unwrap() <= 1e-10);
-        assert_close!(
-            &null.compose(&null_adjoint).unwrap(),
-            &TensorMap::isomorphism(&rt, null.codomain().iter(), null.codomain().iter()).unwrap()
+        let null = t.right_null($engine, &[0, 1], &[2]).unwrap();
+        let null_adjoint = null.adjoint($engine).unwrap();
+        assert!(
+            t.compose($engine, &null_adjoint)
+                .unwrap()
+                .norm($engine, 2.0)
+                .unwrap()
+                <= 1e-10
         );
         assert_close!(
-            &null_adjoint
-                .compose(&null)
+            $engine,
+            &null.compose($engine, &null_adjoint).unwrap(),
+            &TensorMap::isomorphism($engine, &rt, null.codomain().iter(), null.codomain().iter())
                 .unwrap()
-                .axpby(1.0.into(), &pseudo.compose(&t).unwrap(), 1.0.into())
+        );
+        let pseudo_compose = &pseudo.compose($engine, &t).unwrap();
+        assert_close!(
+            $engine,
+            &null_adjoint
+                .compose($engine, &null)
+                .unwrap()
+                .axpby($engine, 1.0.into(), pseudo_compose, 1.0.into())
                 .unwrap(),
             &domain_id
         );
@@ -132,10 +163,11 @@ fn complex(k: usize) -> Complex64 {
 }
 
 macro_rules! all_symmetries {
-    ($scalar:ty, $value:expr) => {{
+    ($engine:ident, $scalar:ty, $value:expr) => {{
         // U(1): codomain-only charge 2, domain-only charge 3.
         let q = U1Irrep::new;
         side_only_case!(
+            $engine,
             U1FusionRule,
             [(q(0), 2), (q(1), 2)],
             [(q(0), 1), (q(1), 1)],
@@ -146,6 +178,7 @@ macro_rules! all_symmetries {
         // SU(2): codomain-only spin 1, domain-only spin 2.
         let j = SU2Irrep::from_twice_spin;
         side_only_case!(
+            $engine,
             SU2FusionRule,
             [(j(1), 2)],
             [(j(1), 1)],
@@ -161,6 +194,7 @@ macro_rules! all_symmetries {
             )
         };
         side_only_case!(
+            $engine,
             Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
             [(f(false, 0), 2), (f(true, 1), 2)],
             [(f(false, 0), 1), (f(true, 1), 1)],
@@ -173,12 +207,14 @@ macro_rules! all_symmetries {
 
 #[test]
 fn side_only_full_and_null_factors_are_complete_real() {
-    all_symmetries!(f64, real);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    all_symmetries!(engine, f64, real);
 }
 
 #[test]
 fn side_only_full_and_null_factors_are_complete_complex() {
-    all_symmetries!(Complex64, complex);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    all_symmetries!(engine, Complex64, complex);
 }
 
 /// TensorKit `initialize_output(qr_full!/lq_full!)`: Q of full QR maps
@@ -188,18 +224,21 @@ fn side_only_full_and_null_factors_are_complete_complex() {
 /// independently of the factorization.
 #[cfg(feature = "cgc-gen")]
 macro_rules! full_qr_lq_bond_case {
-    ($rt:expr, $scalar:ty, $codomain:expr, $domain:expr, $qr_bond:expr, $lq_bond:expr, $seed:expr) => {{
+    ($engine:ident, $rt:expr, $scalar:ty, $codomain:expr, $domain:expr, $qr_bond:expr, $lq_bond:expr, $seed:expr) => {{
         let rt = $rt;
-        let owned_adjoint = |u: &TensorMap<_, $scalar>| {
-            let adjoint = u.adjoint().unwrap();
-            adjoint.axpby(1.0.into(), &adjoint, 0.0.into()).unwrap()
+        let owned_adjoint = |$engine: &mut dyn Engine, u: &TensorMap<_, $scalar>| {
+            let adjoint = u.adjoint($engine).unwrap();
+            adjoint
+                .axpby($engine, 1.0.into(), &adjoint, 0.0.into())
+                .unwrap()
         };
         // Checked Generic has no `id`: a Hermitian map is the identity iff
         // every eigenvalue is one, and a count equal to the expected reduced
         // dimension rules out an unstored (zero) side-only block.
-        let identity = |gram: TensorMap<_, $scalar>, reduced: usize| {
+        let identity = |$engine: &mut dyn Engine, gram: TensorMap<_, $scalar>, reduced: usize| {
             let values = gram
                 .eigh_vals(
+                    $engine,
                     &codomain_axes(&gram),
                     &domain_axes(&gram),
                     HermitianTol::DEFAULT,
@@ -215,40 +254,66 @@ macro_rules! full_qr_lq_bond_case {
             );
         };
         let reduced = |space: &GradedSpace<_>| space.degeneracies().iter().sum::<usize>();
-        let unitary = |u: &TensorMap<_, $scalar>, bond: &GradedSpace<_>| {
-            let adjoint = owned_adjoint(u);
-            identity(adjoint.compose(u).unwrap(), reduced(bond));
-            identity(u.compose(&adjoint).unwrap(), reduced(bond));
-        };
+        let unitary =
+            |$engine: &mut dyn Engine, u: &TensorMap<_, $scalar>, bond: &GradedSpace<_>| {
+                let adjoint = owned_adjoint($engine, u);
+                let adjoint_compose = adjoint.compose($engine, u).unwrap();
+                identity($engine, adjoint_compose, reduced(bond));
+                let u_compose = u.compose($engine, &adjoint).unwrap();
+                identity($engine, u_compose, reduced(bond));
+            };
         let t: TensorMap<_, $scalar> =
-            TensorMap::rand_with_seed(rt, $codomain, $domain, $seed).unwrap();
-        let Qr { q, r } = t.qr_full(&codomain_axes(&t), &domain_axes(&t)).unwrap();
+            TensorMap::rand_with_seed($engine, rt, $codomain, $domain, $seed).unwrap();
+        let Qr { q, r } = t
+            .qr_full($engine, &codomain_axes(&t), &domain_axes(&t))
+            .unwrap();
         assert_eq!(q.domain(), std::slice::from_ref($qr_bond));
         assert_eq!(r.codomain(), q.domain());
-        assert_close!(&q.compose(&r).unwrap(), &t);
-        unitary(&q, $qr_bond);
-        let Lq { l, q } = t.lq_full(&codomain_axes(&t), &domain_axes(&t)).unwrap();
+        assert_close!($engine, &q.compose($engine, &r).unwrap(), &t);
+        unitary($engine, &q, $qr_bond);
+        let Lq { l, q } = t
+            .lq_full($engine, &codomain_axes(&t), &domain_axes(&t))
+            .unwrap();
         assert_eq!(q.codomain(), std::slice::from_ref($lq_bond));
         assert_eq!(l.domain(), q.codomain());
-        assert_close!(&l.compose(&q).unwrap(), &t);
-        unitary(&q, $lq_bond);
+        assert_close!($engine, &l.compose($engine, &q).unwrap(), &t);
+        unitary($engine, &q, $lq_bond);
         // Null spaces already use the side-aware builder: a side-only sector
         // is wholly null, so rank + null dimension is the fused dimension.
         let rank = t
-            .svd_vals(&codomain_axes(&t), &domain_axes(&t))
+            .svd_vals($engine, &codomain_axes(&t), &domain_axes(&t))
             .unwrap()
             .into_iter()
             .flat_map(|spectrum| spectrum.values)
             .filter(|&value| value > 1e-10)
             .count();
-        let n = t.left_null(&codomain_axes(&t), &domain_axes(&t)).unwrap();
-        let n_adjoint = owned_adjoint(&n);
-        assert!(n_adjoint.compose(&t).unwrap().norm(2.0).unwrap() <= 1e-10);
-        identity(n_adjoint.compose(&n).unwrap(), reduced($qr_bond) - rank);
-        let n = t.right_null(&codomain_axes(&t), &domain_axes(&t)).unwrap();
-        let n_adjoint = owned_adjoint(&n);
-        assert!(t.compose(&n_adjoint).unwrap().norm(2.0).unwrap() <= 1e-10);
-        identity(n.compose(&n_adjoint).unwrap(), reduced($lq_bond) - rank);
+        let n = t
+            .left_null($engine, &codomain_axes(&t), &domain_axes(&t))
+            .unwrap();
+        let n_adjoint = owned_adjoint($engine, &n);
+        assert!(
+            n_adjoint
+                .compose($engine, &t)
+                .unwrap()
+                .norm($engine, 2.0)
+                .unwrap()
+                <= 1e-10
+        );
+        let n_adjoint_compose = n_adjoint.compose($engine, &n).unwrap();
+        identity($engine, n_adjoint_compose, reduced($qr_bond) - rank);
+        let n = t
+            .right_null($engine, &codomain_axes(&t), &domain_axes(&t))
+            .unwrap();
+        let n_adjoint = owned_adjoint($engine, &n);
+        assert!(
+            t.compose($engine, &n_adjoint)
+                .unwrap()
+                .norm($engine, 2.0)
+                .unwrap()
+                <= 1e-10
+        );
+        let n_compose = n.compose($engine, &n_adjoint).unwrap();
+        identity($engine, n_compose, reduced($lq_bond) - rank);
     }};
 }
 
@@ -256,8 +321,8 @@ macro_rules! full_qr_lq_bond_case {
 /// 2 and domain-only charge 3 obeys the same output-space rule.
 #[cfg(feature = "cgc-gen")]
 macro_rules! multiplicity_free_full_qr_lq_bonds {
-    ($d:ty) => {{
-        let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $d:ty) => {{
+        let rt = Runtime::builder().build().unwrap();
         let provider = Arc::new(U1FusionRule);
         let q = U1Irrep::new;
         let space = |irreps: Vec<(U1Irrep, usize)>| {
@@ -267,8 +332,26 @@ macro_rules! multiplicity_free_full_qr_lq_bonds {
         let phys = space(vec![(q(0), 1), (q(1), 1)]);
         let right = space(vec![(q(0), 2), (q(1), 3), (q(3), 2)]);
         let fused = left.fuse(&phys).unwrap();
-        full_qr_lq_bond_case!(&rt, $d, [&left, &phys], [&right], &fused, &right, 1524);
-        full_qr_lq_bond_case!(&rt, $d, [&right], [&left, &phys], &right, &fused, 1525);
+        full_qr_lq_bond_case!(
+            $engine,
+            &rt,
+            $d,
+            [&left, &phys],
+            [&right],
+            &fused,
+            &right,
+            1524
+        );
+        full_qr_lq_bond_case!(
+            $engine,
+            &rt,
+            $d,
+            [&right],
+            [&left, &phys],
+            &right,
+            &fused,
+            1525
+        );
     }};
 }
 
@@ -281,8 +364,8 @@ mod checked_generic {
     /// multiplicity two and the codomain-only 10, 10̄, 27; `b` holds the
     /// domain-only 6. Both orientations put side-only sectors on each side.
     macro_rules! checked_full_qr_lq_bonds {
-        ($d:ty) => {{
-            let rt = Runtime::builder().dense_threads(1).build().unwrap();
+        ($engine:ident, $d:ty) => {{
+            let rt = Runtime::builder().build().unwrap();
             let provider = Arc::new(
                 LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
             );
@@ -292,8 +375,8 @@ mod checked_generic {
             let a = space(vec![(vec![1, 1], 2), (vec![0, 0], 1)]);
             let b = space(vec![(vec![1, 1], 2), (vec![0, 0], 1), (vec![2, 0], 2)]);
             let fused = a.fuse(&a).unwrap();
-            full_qr_lq_bond_case!(&rt, $d, [&a, &a], [&b], &fused, &b, 1526);
-            full_qr_lq_bond_case!(&rt, $d, [&b], [&a, &a], &b, &fused, 1527);
+            full_qr_lq_bond_case!($engine, &rt, $d, [&a, &a], [&b], &fused, &b, 1526);
+            full_qr_lq_bond_case!($engine, &rt, $d, [&b], [&a, &a], &b, &fused, 1527);
         }};
     }
 
@@ -405,34 +488,40 @@ mod checked_generic {
     }
 
     macro_rules! literal_side_only_case {
-        ($rt:expr, $scalar:ty, $codomain:expr, $domain:expr, $qr_bond:expr, $lq_bond:expr, $seed:expr) => {{
+        ($engine:ident, $rt:expr, $scalar:ty, $codomain:expr, $domain:expr, $qr_bond:expr, $lq_bond:expr, $seed:expr) => {{
             let rt = $rt;
-            let owned_adjoint = |u: &TensorMap<_, $scalar>| {
-                let adjoint = u.adjoint().unwrap();
-                adjoint.axpby(1.0.into(), &adjoint, 0.0.into()).unwrap()
+            let owned_adjoint = |$engine: &mut dyn Engine, u: &TensorMap<_, $scalar>| {
+                let adjoint = u.adjoint($engine).unwrap();
+                adjoint
+                    .axpby($engine, 1.0.into(), &adjoint, 0.0.into())
+                    .unwrap()
             };
             let reduced = |space: &GradedSpace<_>| space.degeneracies().iter().sum::<usize>();
             let t: TensorMap<_, $scalar> =
-                TensorMap::rand_with_seed(rt, $codomain, $domain, $seed).unwrap();
-            let Qr { q, r } = t.qr_full(&codomain_axes(&t), &domain_axes(&t)).unwrap();
-            let qh = owned_adjoint(&q);
+                TensorMap::rand_with_seed($engine, rt, $codomain, $domain, $seed).unwrap();
+            let Qr { q, r } = t
+                .qr_full($engine, &codomain_axes(&t), &domain_axes(&t))
+                .unwrap();
+            let qh = owned_adjoint($engine, &q);
             assert_eq!(
-                assert_literal_identity!(qh.compose(&q).unwrap()),
+                assert_literal_identity!(qh.compose($engine, &q).unwrap()),
                 reduced($qr_bond)
             );
             assert_eq!(
-                assert_literal_identity!(q.compose(&qh).unwrap()),
+                assert_literal_identity!(q.compose($engine, &qh).unwrap()),
                 reduced($qr_bond)
             );
             let qr_trees = assert_side_only_identity_slices!($scalar, &t, &q, &r, $qr_bond, false);
-            let Lq { l, q } = t.lq_full(&codomain_axes(&t), &domain_axes(&t)).unwrap();
-            let qh = owned_adjoint(&q);
+            let Lq { l, q } = t
+                .lq_full($engine, &codomain_axes(&t), &domain_axes(&t))
+                .unwrap();
+            let qh = owned_adjoint($engine, &q);
             assert_eq!(
-                assert_literal_identity!(qh.compose(&q).unwrap()),
+                assert_literal_identity!(qh.compose($engine, &q).unwrap()),
                 reduced($lq_bond)
             );
             assert_eq!(
-                assert_literal_identity!(q.compose(&qh).unwrap()),
+                assert_literal_identity!(q.compose($engine, &qh).unwrap()),
                 reduced($lq_bond)
             );
             let lq_trees = assert_side_only_identity_slices!($scalar, &t, &q, &l, $lq_bond, true);
@@ -446,8 +535,8 @@ mod checked_generic {
     /// makes 8 codomain-only and 15 = (4,0) domain-only; the mixed
     /// `b = 1² ⊕ 8³ ⊕ 15²` keeps 8 populated.
     macro_rules! checked_literal_side_only {
-        ($d:ty) => {{
-            let rt = Runtime::builder().dense_threads(1).build().unwrap();
+        ($engine:ident, $d:ty) => {{
+            let rt = Runtime::builder().build().unwrap();
             let provider = Arc::new(
                 LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
             );
@@ -460,10 +549,10 @@ mod checked_generic {
             let mixed = space(vec![(vec![0, 0], 2), (vec![1, 1], 3), (vec![4, 0], 2)]);
             for (seed, b) in [(1528, &pure), (1530, &mixed)] {
                 let (qr_trees, _) =
-                    literal_side_only_case!(&rt, $d, [&a, &a], [b], &fused, b, seed);
+                    literal_side_only_case!($engine, &rt, $d, [&a, &a], [b], &fused, b, seed);
                 assert!(qr_trees >= 4, "{qr_trees}");
                 let (_, lq_trees) =
-                    literal_side_only_case!(&rt, $d, [b], [&a, &a], b, &fused, seed + 1);
+                    literal_side_only_case!($engine, &rt, $d, [b], [&a, &a], b, &fused, seed + 1);
                 assert!(lq_trees >= 4, "{lq_trees}");
             }
         }};
@@ -471,15 +560,17 @@ mod checked_generic {
 
     #[test]
     fn checked_generic_side_only_identity_is_literal_in_tree_order() {
-        checked_literal_side_only!(f64);
-        checked_literal_side_only!(Complex64);
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        checked_literal_side_only!(engine, f64);
+        checked_literal_side_only!(engine, Complex64);
     }
 
     #[test]
     fn checked_generic_full_qr_lq_bonds_are_fused_sides() {
-        multiplicity_free_full_qr_lq_bonds!(f64);
-        checked_full_qr_lq_bonds!(f64);
-        multiplicity_free_full_qr_lq_bonds!(Complex64);
-        checked_full_qr_lq_bonds!(Complex64);
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        multiplicity_free_full_qr_lq_bonds!(engine, f64);
+        checked_full_qr_lq_bonds!(engine, f64);
+        multiplicity_free_full_qr_lq_bonds!(engine, Complex64);
+        checked_full_qr_lq_bonds!(engine, Complex64);
     }
 }

@@ -23,8 +23,11 @@ use symtn::sector::{
 use symtn::typed::{Eigh, GradedSpace, Qr, Runtime, Svd, TensorMap};
 
 macro_rules! same {
-    ($got:expr, $want:expr, $what:expr) => {{
-        let (got, want) = ($got.materialize().unwrap(), $want.materialize().unwrap());
+    ($engine:ident, $got:expr, $want:expr, $what:expr) => {{
+        let (got, want) = (
+            $got.materialize($engine).unwrap(),
+            $want.materialize($engine).unwrap(),
+        );
         assert!(
             got.codomain() == want.codomain() && got.domain() == want.domain(),
             "{}",
@@ -39,15 +42,15 @@ macro_rules! same {
 }
 
 macro_rules! close {
-    ($got:expr, $want:expr, $what:expr) => {{
+    ($engine:ident, $got:expr, $want:expr, $what:expr) => {{
         let (got, want) = (&$got, &$want);
         let residual = got
-            .axpby(1.0.into(), want, (-1.0).into())
+            .axpby($engine, 1.0.into(), want, (-1.0).into())
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
         assert!(
-            residual <= 1e-10 * want.norm(2.0).unwrap().max(1.0),
+            residual <= 1e-10 * want.norm($engine, 2.0).unwrap().max(1.0),
             "{}: {residual}",
             $what
         );
@@ -55,78 +58,77 @@ macro_rules! close {
 }
 
 macro_rules! check {
-    ($runtime:expr, $d:ty, $v:expr, $w:expr, $label:expr) => {{
+    ($cuda:ident, $engine:ident, $runtime:expr, $d:ty, $v:expr, $w:expr, $label:expr) => {{
         let (v, w) = (&$v, &$w);
         let host: TensorMap<_, $d> =
-            TensorMap::rand_with_seed(&$runtime, [v, w], [w, v], 1553).unwrap();
-        let device = host.to_cuda().unwrap();
+            TensorMap::rand_with_seed($engine, &$runtime, [v, w], [w, v], 1553).unwrap();
+        let device = host.to_cuda($cuda).unwrap();
         let (rows, cols) = ([2, 0], [3, 1]);
-        let permuted = device.permute(&rows, &cols).unwrap();
-        let host_permuted = host.permute(&rows, &cols).unwrap();
+        let permuted = device.permute($cuda, &rows, &cols).unwrap();
+        let host_permuted = host.permute($engine, &rows, &cols).unwrap();
 
-        let Svd { u, s, vh } = device.svd_compact(&rows, &cols).unwrap();
-        let expected = permuted.svd_compact(&[0, 1], &[2, 3]).unwrap();
-        same!(u.to_host().unwrap(), expected.u.to_host().unwrap(), $label);
-        same!(s.to_host().unwrap(), expected.s.to_host().unwrap(), $label);
+        let Svd { u, s, vh } = device.svd_compact($cuda, &rows, &cols).unwrap();
+        let expected = permuted.svd_compact($cuda, &[0, 1], &[2, 3]).unwrap();
+        same!($engine, u.to_host($cuda).unwrap(), expected.u.to_host($cuda).unwrap(), $label);
+        same!($engine, s.to_host($cuda).unwrap(), expected.s.to_host($cuda).unwrap(), $label);
         same!(
-            vh.to_host().unwrap(),
-            expected.vh.to_host().unwrap(),
+            $engine, vh.to_host($cuda).unwrap(),
+            expected.vh.to_host($cuda).unwrap(),
             $label
         );
         let rebuilt = u
-            .to_host()
+            .to_host($cuda)
             .unwrap()
-            .compose(&s.to_host().unwrap())
+            .compose($engine, &s.to_host($cuda).unwrap())
             .unwrap()
-            .compose(&vh.to_host().unwrap())
+            .compose($engine, &vh.to_host($cuda).unwrap())
             .unwrap();
-        close!(rebuilt, host_permuted, $label);
+        close!($engine, rebuilt, host_permuted, $label);
 
-        let Qr { q, r } = device.qr_compact(&rows, &cols).unwrap();
-        let expected = permuted.qr_compact(&[0, 1], &[2, 3]).unwrap();
-        same!(q.to_host().unwrap(), expected.q.to_host().unwrap(), $label);
-        same!(r.to_host().unwrap(), expected.r.to_host().unwrap(), $label);
-        let rebuilt = q.to_host().unwrap().compose(&r.to_host().unwrap()).unwrap();
-        close!(rebuilt, host_permuted, $label);
+        let Qr { q, r } = device.qr_compact($cuda, &rows, &cols).unwrap();
+        let expected = permuted.qr_compact($cuda, &[0, 1], &[2, 3]).unwrap();
+        same!($engine, q.to_host($cuda).unwrap(), expected.q.to_host($cuda).unwrap(), $label);
+        same!($engine, r.to_host($cuda).unwrap(), expected.r.to_host($cuda).unwrap(), $label);
+        let rebuilt = q.to_host($cuda).unwrap().compose($engine, &r.to_host($cuda).unwrap()).unwrap();
+        close!($engine, rebuilt, host_permuted, $label);
 
         // Square roles on a Hermitian source: both sides swap their two legs.
         let square: TensorMap<_, $d> =
-            TensorMap::rand_with_seed(&$runtime, [v, w], [v, w], 1554).unwrap();
+            TensorMap::rand_with_seed($engine, &$runtime, [v, w], [v, w], 1554).unwrap();
+        let square_adjoint = square.adjoint($engine).unwrap().materialize($engine).unwrap();
         let hermitian = square
-            .axpby(
-                1.0.into(),
-                &square.adjoint().unwrap().materialize().unwrap(),
-                1.0.into(),
-            )
+            .axpby($engine, 1.0.into(), &square_adjoint, 1.0.into())
             .unwrap();
-        let device = hermitian.to_cuda().unwrap();
+        let device = hermitian.to_cuda($cuda).unwrap();
         let (rows, cols) = ([1, 0], [3, 2]);
         let Eigh { d, v: vectors } = device
-            .eigh_full(&rows, &cols, HermitianTol::DEFAULT)
+            .eigh_full($cuda, &rows, &cols, HermitianTol::DEFAULT)
             .unwrap();
         let expected = device
-            .permute(&rows, &cols)
+            .permute($cuda, &rows, &cols)
             .unwrap()
-            .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+            .eigh_full($cuda, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
             .unwrap();
-        same!(d.to_host().unwrap(), expected.d.to_host().unwrap(), $label);
+        same!($engine, d.to_host($cuda).unwrap(), expected.d.to_host($cuda).unwrap(), $label);
         same!(
-            vectors.to_host().unwrap(),
-            expected.v.to_host().unwrap(),
+            $engine, vectors.to_host($cuda).unwrap(),
+            expected.v.to_host($cuda).unwrap(),
             $label
         );
-        let vectors = vectors.to_host().unwrap();
+        let vectors = vectors.to_host($cuda).unwrap();
+        let vectors_adjoint = vectors.adjoint($engine).unwrap();
+        let vectors_adjoint_materialize = vectors_adjoint.materialize($engine).unwrap();
         let rebuilt = vectors
-            .compose(&d.to_host().unwrap())
+            .compose($engine, &d.to_host($cuda).unwrap())
             .unwrap()
-            .compose(&vectors.adjoint().unwrap().materialize().unwrap())
+            .compose($engine, &vectors_adjoint_materialize)
             .unwrap();
-        close!(rebuilt, hermitian.permute(&rows, &cols).unwrap(), $label);
+        close!($engine, rebuilt, hermitian.permute($engine, &rows, &cols).unwrap(), $label);
 
         // The current split is the unchanged device path.
-        let current = hermitian.to_cuda().unwrap();
-        assert!(current.svd_compact(&[0, 1], &[2, 3]).is_ok());
-        assert!(matches!(current.svd_compact(&[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. })),
+        let current = hermitian.to_cuda($cuda).unwrap();
+        assert!(current.svd_compact($cuda, &[0, 1], &[2, 3]).is_ok());
+        assert!(matches!(current.svd_compact($cuda, &[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. })),
             "malformed roles");
     }};
 }
@@ -134,7 +136,9 @@ macro_rules! check {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_leg_roles_equal_the_device_permute_composition() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = |charges: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
@@ -143,6 +147,8 @@ fn device_leg_roles_equal_the_device_permute_composition() {
         .unwrap()
     };
     check!(
+        cuda,
+        engine,
         runtime,
         f64,
         u1(&[(-1, 1), (0, 2), (1, 2)]),
@@ -150,6 +156,8 @@ fn device_leg_roles_equal_the_device_permute_composition() {
         "u1 f64"
     );
     check!(
+        cuda,
+        engine,
         runtime,
         Complex64,
         u1(&[(-1, 1), (0, 2), (1, 2)]),
@@ -166,6 +174,8 @@ fn device_leg_roles_equal_the_device_permute_composition() {
         .unwrap()
     };
     check!(
+        cuda,
+        engine,
         runtime,
         f64,
         su2(&[(0, 2), (1, 2), (2, 1)]),
@@ -173,6 +183,8 @@ fn device_leg_roles_equal_the_device_permute_composition() {
         "su2 f64"
     );
     check!(
+        cuda,
+        engine,
         runtime,
         Complex64,
         su2(&[(0, 2), (1, 2), (2, 1)]),
@@ -199,9 +211,9 @@ fn device_leg_roles_equal_the_device_permute_composition() {
         let v = fz2u1(&[(false, 0, 2), (true, 1, 2), (true, -1, 1)]);
         let w = fz2u1(&[(false, 1, 1), (true, 0, 2)]).try_dual().unwrap();
         if d {
-            check!(runtime, Complex64, v, w, label);
+            check!(cuda, engine, runtime, Complex64, v, w, label);
         } else {
-            check!(runtime, f64, v, w, label);
+            check!(cuda, engine, runtime, f64, v, w, label);
         }
     }
 }

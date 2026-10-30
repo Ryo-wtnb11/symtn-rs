@@ -253,6 +253,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn move_members<A, D>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     shape: &mut Vec<usize>,
     dst_strides: &mut Vec<isize>,
@@ -284,6 +285,7 @@ where
     src_strides.extend_from_slice(local_src_strides);
     src_strides.push(src_member_stride);
     kernels.copy_scale_strided_baked(
+        exec,
         dst,
         src,
         shape,
@@ -309,6 +311,7 @@ where
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -331,6 +334,7 @@ where
         // The ordinary entry retains its structural parallel schedule and
         // already admits the single member before writing its destination.
         return tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
             kernels,
             dense,
             workspace,
@@ -381,106 +385,115 @@ where
         &mut workspace.member_dst_strides,
         &mut workspace.member_src_strides,
     );
-    for &index in task.inactive_destination_layouts() {
-        let (dims, strides) = layouts.inactive_role(index)?;
-        let zero = [D::zero()];
-        workspace.zero_strides.clear();
-        workspace.zero_strides.resize(dims.len(), 0);
-        move_members(
-            kernels,
-            shape,
-            dst_strides,
-            src_strides,
-            dst_data,
-            &zero,
-            dims,
-            strides,
-            &workspace.zero_strides,
-            dst_stride,
-            0,
-            layouts.entry(index).offset,
-            0,
-            members,
-            false,
-            D::one(),
-        )?;
-    }
-    for block in task.blocks() {
-        let TreeTransformBlock::Single {
-            dst_layout,
-            src_layout,
-            coefficient,
-        } = *block
-        else {
-            continue;
-        };
-        let role = layouts.role(dst_layout)?;
-        let dst = layouts.entry(dst_layout);
-        let src = layouts.entry(src_layout);
-        shape.clear();
-        shape.extend_from_slice(role.dims());
-        shape.push(members);
-        dst_strides.clear();
-        dst_strides.extend_from_slice(role.dst_strides());
-        dst_strides.push(dst_stride);
-        src_strides.clear();
-        src_strides.extend_from_slice(role.src_strides());
-        src_strides.push(src_stride);
-        kernels.transform_strided_baked(
-            &mut workspace.zero_strides,
-            dst_data,
-            src_data,
-            shape,
-            dst_strides,
-            src_strides,
-            dst.offset,
-            src.offset,
-            task.storage_conjugate(),
-            TransformScale::new(
-                alpha.at(dst.offset),
-                task.single_coefficients()[coefficient],
-            ),
-            None,
-            None,
-            None,
-        )?;
-    }
-    for (block_index, job) in plan.entries() {
-        let &TreeTransformBlock::Multi {
-            src_layout_start,
-            src_count,
-            element_count,
-            ..
-        } = recoupling_multi_block(task, block_index)?
-        else {
-            unreachable!()
-        };
-        for column in 0..src_count {
-            let entry = src_layout_start + column;
-            let role = layouts.role(entry)?;
+    // Host moves before and after the one grouped GEMM, each phase on the
+    // caller engine's token.
+    crate::host_pool::with_exec(engine, |mut exec| {
+        for &index in task.inactive_destination_layouts() {
+            let (dims, strides) = layouts.inactive_role(index)?;
+            let zero = [D::zero()];
+            workspace.zero_strides.clear();
+            workspace.zero_strides.resize(dims.len(), 0);
             move_members(
+                exec.reborrow(),
                 kernels,
                 shape,
                 dst_strides,
                 src_strides,
-                workspace.packed.source_mut().as_mut_slice(),
-                src_data,
-                role.dims(),
-                role.dst_strides(),
-                role.src_strides(),
-                packed_src_stride,
-                src_stride,
-                offset_to_isize(job.lhs_offset + column * element_count)?,
-                layouts.entry(entry).offset,
+                dst_data,
+                &zero,
+                dims,
+                strides,
+                &workspace.zero_strides,
+                dst_stride,
+                0,
+                layouts.entry(index).offset,
+                0,
                 members,
-                task.storage_conjugate(),
+                false,
                 D::one(),
             )?;
         }
-    }
+        for block in task.blocks() {
+            let TreeTransformBlock::Single {
+                dst_layout,
+                src_layout,
+                coefficient,
+            } = *block
+            else {
+                continue;
+            };
+            let role = layouts.role(dst_layout)?;
+            let dst = layouts.entry(dst_layout);
+            let src = layouts.entry(src_layout);
+            shape.clear();
+            shape.extend_from_slice(role.dims());
+            shape.push(members);
+            dst_strides.clear();
+            dst_strides.extend_from_slice(role.dst_strides());
+            dst_strides.push(dst_stride);
+            src_strides.clear();
+            src_strides.extend_from_slice(role.src_strides());
+            src_strides.push(src_stride);
+            kernels.transform_strided_baked(
+                exec.reborrow(),
+                &mut workspace.zero_strides,
+                dst_data,
+                src_data,
+                shape,
+                dst_strides,
+                src_strides,
+                dst.offset,
+                src.offset,
+                task.storage_conjugate(),
+                TransformScale::new(
+                    alpha.at(dst.offset),
+                    task.single_coefficients()[coefficient],
+                ),
+                None,
+                None,
+                None,
+            )?;
+        }
+        for (block_index, job) in plan.entries() {
+            let &TreeTransformBlock::Multi {
+                src_layout_start,
+                src_count,
+                element_count,
+                ..
+            } = recoupling_multi_block(task, block_index)?
+            else {
+                unreachable!()
+            };
+            for column in 0..src_count {
+                let entry = src_layout_start + column;
+                let role = layouts.role(entry)?;
+                move_members(
+                    exec.reborrow(),
+                    kernels,
+                    shape,
+                    dst_strides,
+                    src_strides,
+                    workspace.packed.source_mut().as_mut_slice(),
+                    src_data,
+                    role.dims(),
+                    role.dst_strides(),
+                    role.src_strides(),
+                    packed_src_stride,
+                    src_stride,
+                    offset_to_isize(job.lhs_offset + column * element_count)?,
+                    layouts.entry(entry).offset,
+                    members,
+                    task.storage_conjugate(),
+                    D::one(),
+                )?;
+            }
+        }
+        Ok(())
+    })?;
     if !workspace.chunk_jobs.is_empty() {
         let (source, destination) = workspace.packed.source_and_destination_mut();
         recoupling_gemm_batch(
+            engine,
             dense,
             destination.as_mut_slice(),
             source.as_slice(),
@@ -489,40 +502,43 @@ where
             &workspace.chunk_runs,
         )?;
     }
-    for (block_index, job) in plan.entries() {
-        let &TreeTransformBlock::Multi {
-            dst_layout_start,
-            dst_count,
-            element_count,
-            ..
-        } = recoupling_multi_block(task, block_index)?
-        else {
-            unreachable!()
-        };
-        for column in 0..dst_count {
-            let entry = dst_layout_start + column;
-            let role = layouts.role(entry)?;
-            move_members(
-                kernels,
-                shape,
-                dst_strides,
-                src_strides,
-                dst_data,
-                workspace.packed.destination().as_slice(),
-                role.dims(),
-                role.dst_strides(),
-                role.src_strides(),
-                dst_stride,
-                packed_dst_stride,
-                layouts.entry(entry).offset,
-                offset_to_isize(job.dst_offset + column * element_count)?,
-                members,
-                false,
-                alpha.at(layouts.entry(entry).offset),
-            )?;
+    crate::host_pool::with_exec(engine, |mut exec| {
+        for (block_index, job) in plan.entries() {
+            let &TreeTransformBlock::Multi {
+                dst_layout_start,
+                dst_count,
+                element_count,
+                ..
+            } = recoupling_multi_block(task, block_index)?
+            else {
+                unreachable!()
+            };
+            for column in 0..dst_count {
+                let entry = dst_layout_start + column;
+                let role = layouts.role(entry)?;
+                move_members(
+                    exec.reborrow(),
+                    kernels,
+                    shape,
+                    dst_strides,
+                    src_strides,
+                    dst_data,
+                    workspace.packed.destination().as_slice(),
+                    role.dims(),
+                    role.dst_strides(),
+                    role.src_strides(),
+                    dst_stride,
+                    packed_dst_stride,
+                    layouts.entry(entry).offset,
+                    offset_to_isize(job.dst_offset + column * element_count)?,
+                    members,
+                    false,
+                    alpha.at(layouts.entry(entry).offset),
+                )?;
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -531,7 +547,7 @@ mod tests {
     use crate::{StridedHostKernelAdapter, TreeTransformBlockSpec};
     use num_complex::Complex64;
     use symtn_dense::{
-        CpuBackendKind, DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseWrite,
+        DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseWrite,
     };
 
     fn fixture() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
@@ -569,8 +585,7 @@ mod tests {
     impl CountingDense {
         fn one_thread_faer() -> Self {
             Self {
-                inner: DefaultDenseExecutor::with_threads_and_kind(1, CpuBackendKind::Faer)
-                    .unwrap(),
+                inner: DefaultDenseExecutor::new(),
                 submissions: 0,
                 jobs: 0,
             }
@@ -578,26 +593,41 @@ mod tests {
     }
 
     impl DenseExecutor for CountingDense {
-        fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-            self.inner.svd(input)
+        fn svd(
+            &mut self,
+            engine: &mut dyn Engine,
+            input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
+            self.inner.svd(engine, input)
         }
-        fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-            self.inner.qr(input)
+        fn qr(
+            &mut self,
+            engine: &mut dyn Engine,
+            input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
+            self.inner.qr(engine, input)
         }
-        fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-            self.inner.eigh(input)
+        fn eigh(
+            &mut self,
+            engine: &mut dyn Engine,
+            input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
+            self.inner.eigh(engine, input)
         }
         fn dot_general_into(
             &mut self,
+            engine: &mut dyn Engine,
             output: DenseWrite<'_>,
             lhs: DenseRead<'_>,
             rhs: DenseRead<'_>,
             config: &DenseDotConfig,
         ) -> Result<(), DenseError> {
-            self.inner.dot_general_into(output, lhs, rhs, config)
+            self.inner
+                .dot_general_into(engine, output, lhs, rhs, config)
         }
         fn matmul_batch_axpby_into(
             &mut self,
+            engine: &mut dyn Engine,
             output: DenseWrite<'_>,
             lhs: DenseRead<'_>,
             rhs: DenseRead<'_>,
@@ -609,12 +639,13 @@ mod tests {
             self.submissions += 1;
             self.jobs += jobs.len();
             self.inner
-                .matmul_batch_axpby_into(output, lhs, rhs, jobs, runs, alpha, beta)
+                .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
         }
     }
 
     #[test]
     fn member_overwrite_matches_hand_recoupling_and_clears_inactive() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (blocks, transform) = fixture();
         let mut workspace = TreeTransformWorkspace::<f64>::default();
         for members in [1, 2, 17, 2] {
@@ -627,6 +658,7 @@ mod tests {
             let mut destination = vec![f64::NAN; source.len()];
             let mut dense = CountingDense::default();
             tree_transform_members_overwrite_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut dense,
                 &mut workspace,
@@ -672,6 +704,7 @@ mod tests {
 
     #[test]
     fn complex_members_keep_real_structural_scale_and_grouped_rhs() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (blocks, transform) = fixture();
         let source = [
             Complex64::new(1.0, 2.0),
@@ -686,6 +719,7 @@ mod tests {
         let mut dst = vec![Complex64::new(f64::NAN, f64::NAN); source.len()];
         let mut dense = CountingDense::default();
         tree_transform_members_overwrite_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
             &mut TreeTransformWorkspace::default(),
@@ -717,11 +751,13 @@ mod tests {
 
     #[test]
     fn short_last_member_rejects_before_any_write_or_dense_submission() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (blocks, transform) = fixture();
         let source = [1.0; 7];
         let mut dst = [f64::NAN; 8];
         let mut dense = CountingDense::default();
         let error = tree_transform_members_overwrite_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
             &mut TreeTransformWorkspace::default(),
@@ -748,6 +784,7 @@ mod tests {
 
     #[test]
     fn heterogeneous_multi_blocks_share_one_dense_submission() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let blocks = Arc::new(
             BlockStructure::packed_column_major(
                 1,
@@ -784,6 +821,7 @@ mod tests {
         let mut destination = vec![f64::NAN; source.len()];
         let mut dense = CountingDense::default();
         tree_transform_members_overwrite_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
             &mut TreeTransformWorkspace::default(),
@@ -819,6 +857,7 @@ mod tests {
 
     #[test]
     fn conjugated_complex_source_uses_the_task_view_flag() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let blocks = Arc::new(BlockStructure::packed_column_major(1, [vec![1]]).unwrap());
         let transform = TreeTransformStructure::compile_structures_with_storage_conjugation(
             &blocks,
@@ -830,6 +869,7 @@ mod tests {
         let source = [Complex64::new(1.0, 2.0), Complex64::new(-3.0, 4.0)];
         let mut destination = [Complex64::new(f64::NAN, f64::NAN); 2];
         tree_transform_members_overwrite_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut CountingDense::default(),
             &mut TreeTransformWorkspace::default(),
@@ -851,6 +891,7 @@ mod tests {
 
     #[test]
     fn conjugated_complex_multi_pack_matches_hand_matrix_action() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let blocks = Arc::new(BlockStructure::packed_column_major(1, [vec![1], vec![1]]).unwrap());
         let transform = TreeTransformStructure::compile_structures_with_storage_conjugation(
             &blocks,
@@ -872,6 +913,7 @@ mod tests {
         let mut destination = [Complex64::new(f64::NAN, f64::NAN); 4];
         let mut dense = CountingDense::default();
         tree_transform_members_overwrite_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
             &mut TreeTransformWorkspace::default(),
@@ -899,11 +941,13 @@ mod tests {
 
     #[test]
     fn invalid_batch_count_rejects_before_writes() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (blocks, transform) = fixture();
         let mut destination = [f64::NAN; 8];
         let mut dense = CountingDense::default();
         for members in [0, usize::MAX] {
             assert!(tree_transform_members_overwrite_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut dense,
                 &mut TreeTransformWorkspace::default(),
@@ -938,8 +982,11 @@ mod tests {
             let mut ordinary_workspace = TreeTransformWorkspace::<f64>::default();
             let mut batch_dense = CountingDense::one_thread_faer();
             let mut ordinary_dense = CountingDense::one_thread_faer();
+            let mut batch_engine = symtn_dense::CpuEngine::serial();
+            let mut ordinary_engine = symtn_dense::CpuEngine::serial();
             let mut batch = || {
                 tree_transform_members_overwrite_raw(
+                    &mut batch_engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut batch_dense,
                     &mut batch_workspace,
@@ -957,6 +1004,7 @@ mod tests {
             let mut ordinary = || {
                 for member in 0..members {
                     tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                        &mut ordinary_engine,
                         &mut StridedHostKernelAdapter::default(),
                         &mut ordinary_dense,
                         &mut ordinary_workspace,
