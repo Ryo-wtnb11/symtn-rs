@@ -65,7 +65,7 @@ product, is at most `u32::MAX`, and every torus charge satisfies
 budget; a label past either bound or past that budget returns
 `UnrepresentableLabel`. The
 identity is the `GroupId` value (root systems, torus rank and canonical
-character lattice), so equal labels or fingerprints across different groups
+character lattice), so equal labels across different groups
 are insufficient for compatibility, while one group built by different
 constructors (for example SU(n)/Z1 and SU(n)) has one identity while a rule
 over it is alive.

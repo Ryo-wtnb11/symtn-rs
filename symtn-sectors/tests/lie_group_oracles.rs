@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use fusion_symbols::category::FusionCategory;
+use fusion_symbols::category::{FusionCategory, SymbolBlock};
 use fusion_symbols::lie::{GroupId, HalfInt, LieError, LieGroup, RootSystem};
 use symtn_sectors::{
     BraidingStyleKind, CategoryProvider, CheckedGenericFusion, CheckedGenericPivotal,
@@ -367,10 +367,6 @@ fn codec_holes_width_foreign_objects_and_full_group_identity() {
             rule(ids[i].clone()).rule_identity()
         );
         for j in 0..i {
-            assert_eq!(
-                rules[i].category().authority_fingerprint(),
-                rules[j].category().authority_fingerprint()
-            );
             assert_ne!(rules[i], rules[j]);
             assert_ne!(rules[i].rule_identity(), rules[j].rule_identity());
             let id = rules[i].encode_irrep(&[1]).unwrap();
@@ -753,8 +749,12 @@ fn multi_factor_and_torus_queries_forward_to_fusion_symbols() {
             let (dynkin, charges) = r.decode_irrep(id).unwrap();
             fs.irrep_with_charges(&dynkin, &charges).unwrap()
         };
-        let labels =
-            |x: &fusion_symbols::lie::LieIrrep| (x.dynkin(), x.charges().collect::<Vec<_>>());
+        let labels = |x: &fusion_symbols::lie::LieIrrep| {
+            (
+                x.dynkin().collect::<Vec<_>>(),
+                x.charges().collect::<Vec<_>>(),
+            )
+        };
         for &a in &sectors {
             let oa = object(a);
             assert_eq!(
@@ -781,15 +781,15 @@ fn multi_factor_and_torus_queries_forward_to_fusion_symbols() {
                     let oc = object(c);
                     assert_eq!(
                         r.try_nsymbol(a, b, c).unwrap(),
-                        fs.try_nsymbol(&oa, &ob, &oc).unwrap() as usize
+                        fs.nsymbol(&oa, &ob, &oc).unwrap() as usize
                     );
                     let rs = r.try_r_symbol_generic(a, b, c).unwrap();
                     let rf = fs.r_symbol(&oa, &ob, &oc).unwrap();
                     let (rows, cols) = rs.shape();
-                    assert_eq!([rows, cols], [rf.dim(); 2]);
+                    assert_eq!([rows, cols], rf.dims());
                     for i in 0..rows {
                         for j in 0..cols {
-                            assert_eq!(rs.get(i, j).to_bits(), rf.at(i, j).to_bits());
+                            assert_eq!(rs.get(i, j).to_bits(), rf.get([i, j]).to_bits());
                         }
                     }
                 }
@@ -812,7 +812,7 @@ fn multi_factor_and_torus_queries_forward_to_fusion_symbols() {
                         for (x, y) in (0..k).flat_map(|x| (0..l).map(move |y| (x, y))) {
                             assert_eq!(
                                 block.get(index.0, index.1, x, y).to_bits(),
-                                fs_block.at(index.0, index.1, x, y).to_bits()
+                                fs_block.get([index.0, index.1, x, y]).to_bits()
                             );
                         }
                     }

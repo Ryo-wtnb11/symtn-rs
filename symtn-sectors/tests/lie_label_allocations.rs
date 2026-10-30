@@ -47,7 +47,12 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
         let channel_labels: Vec<_> = category
             .fusion(&adjoint, &adjoint)
             .unwrap()
-            .map(|channel| (channel.dynkin(), channel.charges().collect::<Vec<_>>()))
+            .map(|channel| {
+                (
+                    channel.dynkin().collect::<Vec<_>>(),
+                    channel.charges().collect::<Vec<_>>(),
+                )
+            })
             .collect();
         let encode = || {
             channel_labels
@@ -101,7 +106,7 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
         assert_eq!(sector, expected);
         // One Arc entry and the initial backing allocation of each of the two maps.
-        // Provider label clones share their weight buffer; dynkin_labels() adds none.
+        // Provider label clones share their weight buffer; dynkin() adds none.
         assert_eq!(allocs.calls, 1 + 2, "SU({n}): {allocs:?}");
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
         assert_eq!(sector, expected);

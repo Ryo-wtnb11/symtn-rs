@@ -444,20 +444,9 @@ fn cgc_dense(rule: &LieGroupFusionRule, a: SectorId, b: SectorId, c: SectorId) -
             &sun_irrep(&category, rule, c),
         )
         .unwrap();
-    let dims = cgc.dims();
-    let mut data = Vec::with_capacity(dims.iter().product());
-    for m1 in 0..dims[0] {
-        for m2 in 0..dims[1] {
-            for m3 in 0..dims[2] {
-                for mu in 0..dims[3] {
-                    data.push(cgc.at([m1, m2, m3, mu]));
-                }
-            }
-        }
-    }
     DenseTensor {
-        shape: dims.to_vec(),
-        data,
+        shape: cgc.dims().to_vec(),
+        data: cgc.to_dense(),
     }
 }
 

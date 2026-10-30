@@ -25,7 +25,7 @@ testing = []
 smallvec = { version = "1", features = ["const_generics", "union"] }
 num-complex = "0.4"
 num-traits = { version = "0.2", optional = true }
-fusion-symbols = { version = "0.10.0", default-features = false }
+fusion-symbols = { git = "https://github.com/Ryo-wtnb11/fusion-symbols", rev = "b322d055bbcbe022b5a70f1b88fdb804fb25f052", default-features = false }
 
 [dev-dependencies]
 # Enables `testing` for this crate's own integration tests.

@@ -459,7 +459,6 @@ const SECTOR: &[&str] = &[
     "ProductSectorComponent",
     "ProductSectorLayout",
     "RuleIdentity",
-    "SU2CoefficientError",
     "SU2FusionRule",
     "SU2Irrep",
     "LieGroupFusionRule",

@@ -94,8 +94,8 @@ fn warm_generic_product_queries() {
     let (b, b_cost) = counting_alloc::measure_matching(128..=128, adapted_b);
     assert_eq!(f.data(), fs_f.as_slice());
     assert_eq!(r.data(), fs_r.as_slice());
-    assert_eq!(a.data(), fs_a.data());
-    assert_eq!(b.data(), fs_b.data());
+    assert_eq!(a.data(), fs_a.as_slice());
+    assert_eq!(b.data(), fs_b.as_slice());
     assert_eq!(f.data().len(), 256);
     assert_eq!(r.data().len(), 16);
     assert_eq!(a.data().len(), 16);
@@ -184,8 +184,8 @@ fn warm_nested_generic_product_queries() {
     let (b, b_cost) = counting_alloc::measure(adapted_b);
     assert_eq!(f.data(), fs_f.as_slice());
     assert_eq!(r.data(), fs_r.as_slice());
-    assert_eq!(a.data(), fs_a.data());
-    assert_eq!(b.data(), fs_b.data());
+    assert_eq!(a.data(), fs_a.as_slice());
+    assert_eq!(b.data(), fs_b.as_slice());
     assert_eq!(f.data().len(), 4096);
     for block in [&r, &a, &b] {
         assert_eq!(block.shape(), (8, 8));

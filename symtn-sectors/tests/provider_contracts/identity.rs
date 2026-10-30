@@ -167,7 +167,7 @@ fn product_identity_composes_factor_identities_under_the_codec() {
 }
 
 #[test]
-fn table_identity_is_the_fingerprint_under_the_table_tag() {
+fn table_identity_is_the_uuid_under_the_table_tag() {
     assert_eq!(
         TableRule::fibonacci().rule_identity(),
         table_identity(&fusion_symbols::table::TableCategory::fibonacci())

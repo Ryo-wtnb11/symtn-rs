@@ -107,8 +107,8 @@ impl FusionCategory for Z4Anyons {
     fn dim(&self, _: &Z4) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &Z4) -> Complex64 {
-        Complex64::new(1.0, 0.0)
+    fn frobenius_schur_phase(&self, _: &Z4) -> Result<Complex64, Self::Error> {
+        Ok(Complex64::new(1.0, 0.0))
     }
     fn frobenius_schur_indicator(&self, a: &Z4) -> Complex64 {
         Complex64::new(f64::from(u8::from(a.0.is_multiple_of(2))), 0.0)
@@ -119,8 +119,8 @@ impl FusionCategory for Z4Anyons {
     fn fusion<'a>(&'a self, a: &Z4, b: &Z4) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(Z4((a.0 + b.0) % 4)))
     }
-    fn nsymbol(&self, a: &Z4, b: &Z4, c: &Z4) -> u32 {
-        u32::from((a.0 + b.0) % 4 == c.0)
+    fn nsymbol(&self, a: &Z4, b: &Z4, c: &Z4) -> Result<u32, Self::Error> {
+        Ok(u32::from((a.0 + b.0) % 4 == c.0))
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -134,17 +134,14 @@ impl FusionCategory for Z4Anyons {
         e: &Z4,
         f: &Z4,
     ) -> Result<Complex64, Self::Error> {
-        let n = self.nsymbol(a, b, e)
-            * self.nsymbol(e, c, d)
-            * self.nsymbol(b, c, f)
-            * self.nsymbol(a, f, d);
+        let n = self.nsymbol(a, b, e)?
+            * self.nsymbol(e, c, d)?
+            * self.nsymbol(b, c, f)?
+            * self.nsymbol(a, f, d)?;
         Ok(Complex64::new(f64::from(n), 0.0))
     }
     fn r_symbol(&self, a: &Z4, b: &Z4, c: &Z4) -> Result<Complex64, Self::Error> {
-        Ok(i_power(u32::from(a.0) * u32::from(b.0)) * f64::from(self.nsymbol(a, b, c)))
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:z4-anyons"
+        Ok(i_power(u32::from(a.0) * u32::from(b.0)) * f64::from(self.nsymbol(a, b, c)?))
     }
     fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
         Ok(Some(4))
@@ -298,8 +295,8 @@ impl FusionCategory for ClaimsGeneric {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -310,8 +307,8 @@ impl FusionCategory for ClaimsGeneric {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(0))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        1
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
+        Ok(1)
     }
     fn has_canonical_unit(&self) -> bool {
         self.canonical_unit
@@ -321,9 +318,6 @@ impl FusionCategory for ClaimsGeneric {
     }
     fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
         Ok(1.0)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:claims-generic"
     }
     fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
         Ok(Some(1))
@@ -445,8 +439,9 @@ fn a_and_b_blocks_are_the_category_authority() {
         sun.try_a_symbol_generic(lie_group_octet, lie_group_octet, lie_group_octet)
             .unwrap(),
     ] {
-        assert_eq!(block.shape(), (authority_a.dim(), authority_a.dim()));
-        assert_eq!(block.data(), authority_a.data());
+        let [rows, cols] = authority_a.dims();
+        assert_eq!(block.shape(), (rows, cols));
+        assert_eq!(block.data(), authority_a.as_slice());
     }
     for block in [
         rule.try_b_symbol_generic(rule_octet, rule_octet, rule_octet)
@@ -454,8 +449,9 @@ fn a_and_b_blocks_are_the_category_authority() {
         sun.try_b_symbol_generic(lie_group_octet, lie_group_octet, lie_group_octet)
             .unwrap(),
     ] {
-        assert_eq!(block.shape(), (authority_b.dim(), authority_b.dim()));
-        assert_eq!(block.data(), authority_b.data());
+        let [rows, cols] = authority_b.dims();
+        assert_eq!(block.shape(), (rows, cols));
+        assert_eq!(block.data(), authority_b.as_slice());
     }
 }
 
@@ -488,10 +484,9 @@ fn equal_category_values_share_one_identity() {
 }
 
 #[test]
-fn a_shared_fingerprint_does_not_alias_different_moduli() {
+fn different_moduli_have_distinct_identities() {
     let z3 = ZN::new(3).unwrap();
     let z5 = ZN::new(5).unwrap();
-    assert_eq!(z3.authority_fingerprint(), z5.authority_fingerprint());
     assert_ne!(
         FusionRule::rule_identity(&mf(z3)),
         FusionRule::rule_identity(&mf(z5))
@@ -534,8 +529,8 @@ impl FusionCategory for CollidingHash {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -546,8 +541,8 @@ impl FusionCategory for CollidingHash {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(0))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        1
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
+        Ok(1)
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -557,9 +552,6 @@ impl FusionCategory for CollidingHash {
     }
     fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
         Ok(1.0)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:colliding-hash"
     }
     fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
         Ok(Some(1))
@@ -691,8 +683,8 @@ impl FusionCategory for Tracked {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -703,8 +695,8 @@ impl FusionCategory for Tracked {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(0))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        1
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
+        Ok(1)
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -714,9 +706,6 @@ impl FusionCategory for Tracked {
     }
     fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
         Ok(1.0)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:tracked"
     }
     fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
         Ok(Some(1))
@@ -895,7 +884,8 @@ impl CategoryCodec<ZN> for FreshZ3Codec {
     ) -> Result<ZNIrrep, FusionAlgebraError> {
         u32::try_from(id.id())
             .ok()
-            .and_then(|charge| ZNIrrep::from_canonical(charge, category().modulus()).ok())
+            .filter(|&charge| charge < category().modulus())
+            .and_then(|charge| ZNIrrep::new(i64::from(charge), category().modulus()).ok())
             .ok_or(FusionAlgebraError::InvalidSector { sector: id })
     }
     fn sector_id<'a>(
@@ -974,8 +964,8 @@ fn a_product_category_is_numbered_in_bounded_manhattan_order() {
     let rule = mf(fusion_symbols::product::Product::new((z2, z3)));
     let label = |a: u32, b: u32| {
         (
-            ZNIrrep::from_canonical(a, 2).unwrap(),
-            ZNIrrep::from_canonical(b, 3).unwrap(),
+            ZNIrrep::new(i64::from(a), 2).unwrap(),
+            ZNIrrep::new(i64::from(b), 3).unwrap(),
         )
     };
     // Bounds (2, 3), by coordinate sum, then lexicographically.
@@ -996,7 +986,7 @@ fn a_product_category_is_numbered_in_bounded_manhattan_order() {
     let mixed = mf(fusion_symbols::product::Product::new((z2, U1)));
     let pair = |a: u32, q: i32| {
         (
-            ZNIrrep::from_canonical(a, 2).unwrap(),
+            ZNIrrep::new(i64::from(a), 2).unwrap(),
             FsU1Irrep::new(q).unwrap(),
         )
     };
@@ -1131,8 +1121,8 @@ impl FusionCategory for StorageProbe {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -1143,11 +1133,7 @@ impl FusionCategory for StorageProbe {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(0))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        STORAGE_N_CALLS.with(|n| n.set(n.get() + 1));
-        self.n
-    }
-    fn try_nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
+    fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
         STORAGE_N_CALLS.with(|n| n.set(n.get() + 1));
         Ok(self.checked_n.map_or(
             self.n,
@@ -1170,9 +1156,6 @@ impl FusionCategory for StorageProbe {
     }
     fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<Self::RSymbol, Self::Error> {
         Ok(self.r.clone())
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:storage-probe"
     }
     fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
         Ok(Some(2))
@@ -1342,10 +1325,136 @@ fn equal_volume_axis_corruption_is_rejected_for_f_r_a_and_b() {
         .is_ok());
     assert!(valid.try_r_symbol_generic(s(1), s(1), s(1)).is_ok());
 
-    // Default fs A/B constructs 2 x 2 storage; checked N reports 1 x 4.
-    category.f.data = &[1.0; 4];
+    // A/B against the reciprocal vertex. fs's default A/B sizes its block by
+    // N(a,b,c) x N(a,b,c) = 1 x 1, which symtn rejects against 1 x 4 by
+    // length; the equal-volume A/B case needs a real 2 x 2 block
+    // (`equal_volume_a_and_b_axis_corruption_is_rejected`).
+    category.f.data = &[1.0];
     category.checked_n = Some((1, 4));
     let rule = cg(category.clone());
+    for error in [
+        rule.try_a_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
+        rule.try_b_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
+    ] {
+        assert_eq!(
+            adapter_source::<std::convert::Infallible>(&error),
+            &CategoryAdapterError::MalformedSymbolData(SymbolShapeError {
+                actual_len: 1,
+                expected_len: Some(4),
+            })
+        );
+    }
+    category.f.data = &[1.0; 4];
+    category.checked_n = None;
+    let valid = cg(category);
+    assert!(valid.try_a_symbol_generic(s(1), s(1), s(1)).is_ok());
+    assert!(valid.try_b_symbol_generic(s(1), s(1), s(1)).is_ok());
+}
+
+/// `StorageProbe` whose A and B are a real 2 x 2 block (SU(3)'s
+/// `A^{8,8}_8`), so its volume can equal a 1 x 4 checked N.
+#[cfg(feature = "cgc-gen")]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RealAbProbe(StorageProbe);
+
+#[cfg(feature = "cgc-gen")]
+fn su3_octet_a() -> RBlock<f64> {
+    static BLOCK: std::sync::OnceLock<RBlock<f64>> = std::sync::OnceLock::new();
+    BLOCK
+        .get_or_init(|| {
+            let su3 = LieGroup::new(GroupId::su(3).unwrap()).unwrap();
+            let octet = su3.irrep(&[1, 1]).unwrap();
+            let block = su3.a_symbol(&octet, &octet, &octet).unwrap();
+            assert_eq!(block.dims(), [2, 2]);
+            block
+        })
+        .clone()
+}
+
+#[cfg(feature = "cgc-gen")]
+impl FusionCategory for RealAbProbe {
+    type Object = u8;
+    type Scalar = f64;
+    type FSymbol = ProbeBlock<4>;
+    type RSymbol = ProbeBlock<2>;
+    type Fusion<'a> = std::iter::Once<u8>;
+    type Error = std::convert::Infallible;
+
+    fn fusion_style(&self) -> FusionStyle {
+        self.0.fusion_style()
+    }
+    fn braiding_style(&self) -> BraidingStyle {
+        self.0.braiding_style()
+    }
+    fn unit(&self) -> u8 {
+        self.0.unit()
+    }
+    fn contains(&self, a: &u8) -> bool {
+        self.0.contains(a)
+    }
+    fn dual(&self, a: &u8) -> u8 {
+        self.0.dual(a)
+    }
+    fn dim(&self, a: &u8) -> f64 {
+        self.0.dim(a)
+    }
+    fn frobenius_schur_phase(&self, a: &u8) -> Result<f64, Self::Error> {
+        self.0.frobenius_schur_phase(a)
+    }
+    fn frobenius_schur_indicator(&self, a: &u8) -> f64 {
+        self.0.frobenius_schur_indicator(a)
+    }
+    fn twist(&self, a: &u8) -> f64 {
+        self.0.twist(a)
+    }
+    fn fusion<'a>(&'a self, a: &u8, b: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
+        self.0.fusion(a, b)
+    }
+    fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
+        self.0.nsymbol(a, b, c)
+    }
+    fn has_canonical_unit(&self) -> bool {
+        self.0.has_canonical_unit()
+    }
+    fn f_symbol(
+        &self,
+        a: &u8,
+        b: &u8,
+        c: &u8,
+        d: &u8,
+        e: &u8,
+        f: &u8,
+    ) -> Result<Self::FSymbol, Self::Error> {
+        self.0.f_symbol(a, b, c, d, e, f)
+    }
+    fn r_symbol(&self, a: &u8, b: &u8, c: &u8) -> Result<Self::RSymbol, Self::Error> {
+        self.0.r_symbol(a, b, c)
+    }
+    fn a_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<RBlock<f64>, Self::Error> {
+        Ok(su3_octet_a())
+    }
+    fn b_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<RBlock<f64>, Self::Error> {
+        Ok(su3_octet_a())
+    }
+    fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
+        self.0.object_count()
+    }
+    fn object_at(&self, index: u64) -> Result<u8, EnumerationError> {
+        self.0.object_at(index)
+    }
+    fn object_index(&self, a: &u8) -> Result<u64, EnumerationError> {
+        self.0.object_index(a)
+    }
+}
+
+/// An A/B block of the right volume (2 x 2 = 1 x 4) but the wrong axes is
+/// rejected by axes, not accepted by length.
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn equal_volume_a_and_b_axis_corruption_is_rejected() {
+    let mut category = StorageProbe::new(2, &[1.0; 16]);
+    category.checked_n = Some((1, 4));
+    let rule = cg(RealAbProbe(category));
     for error in [
         rule.try_a_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
         rule.try_b_symbol_generic(s(1), s(1), s(1)).unwrap_err(),
@@ -1358,10 +1467,6 @@ fn equal_volume_axis_corruption_is_rejected_for_f_r_a_and_b() {
             }
         );
     }
-    category.checked_n = None;
-    let valid = cg(category);
-    assert!(valid.try_a_symbol_generic(s(1), s(1), s(1)).is_ok());
-    assert!(valid.try_b_symbol_generic(s(1), s(1), s(1)).is_ok());
 }
 
 #[test]
@@ -1518,8 +1623,8 @@ impl FusionCategory for Faulty {
             1.0
         }
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -1535,8 +1640,8 @@ impl FusionCategory for Faulty {
             _ => Ok(std::iter::once(0)),
         }
     }
-    fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> u32 {
-        u32::from(a ^ b == *c)
+    fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
+        Ok(u32::from(a ^ b == *c))
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -1563,9 +1668,6 @@ impl FusionCategory for Faulty {
     fn b_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<RBlock<f64>, AuthorityFailed> {
         Ok(RBlock::one(1.0))
     }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:faulty"
-    }
     fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
         Ok(Some(3))
     }
@@ -1579,6 +1681,128 @@ impl FusionCategory for Faulty {
     fn object_index(&self, a: &u8) -> Result<u64, EnumerationError> {
         Ok(u64::from(*a))
     }
+}
+
+/// Z2 x Z2 (XOR fusion, self-dual) whose N fails on any vertex touching 3
+/// and whose Frobenius–Schur phase fails on 2.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct FallibleNPhase;
+
+impl FusionCategory for FallibleNPhase {
+    type Object = u8;
+    type Scalar = f64;
+    type FSymbol = f64;
+    type RSymbol = f64;
+    type Fusion<'a> = std::iter::Once<u8>;
+    type Error = AuthorityFailed;
+
+    fn fusion_style(&self) -> FusionStyle {
+        FusionStyle::Unique
+    }
+    fn braiding_style(&self) -> BraidingStyle {
+        BraidingStyle::Bosonic
+    }
+    fn unit(&self) -> u8 {
+        0
+    }
+    fn contains(&self, a: &u8) -> bool {
+        *a < 4
+    }
+    fn dual(&self, a: &u8) -> u8 {
+        *a
+    }
+    fn dim(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn frobenius_schur_phase(&self, a: &u8) -> Result<f64, AuthorityFailed> {
+        if *a == 2 {
+            Err(AuthorityFailed)
+        } else {
+            Ok(1.0)
+        }
+    }
+    fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn twist(&self, _: &u8) -> f64 {
+        1.0
+    }
+    fn fusion<'a>(&'a self, a: &u8, b: &u8) -> Result<Self::Fusion<'a>, AuthorityFailed> {
+        Ok(std::iter::once(a ^ b))
+    }
+    fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, AuthorityFailed> {
+        if [a, b, c].contains(&&3) {
+            Err(AuthorityFailed)
+        } else {
+            Ok(u32::from(a ^ b == *c))
+        }
+    }
+    fn has_canonical_unit(&self) -> bool {
+        true
+    }
+    fn f_symbol(
+        &self,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+        _: &u8,
+    ) -> Result<f64, AuthorityFailed> {
+        Ok(1.0)
+    }
+    fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, AuthorityFailed> {
+        Ok(1.0)
+    }
+    fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
+        Ok(Some(4))
+    }
+    fn object_at(&self, index: u64) -> Result<u8, EnumerationError> {
+        u8::try_from(index)
+            .ok()
+            .filter(|&object| object < 4)
+            .ok_or(EnumerationError::OutOfRange)
+    }
+    fn object_index(&self, a: &u8) -> Result<u64, EnumerationError> {
+        Ok(u64::from(*a))
+    }
+}
+
+#[test]
+fn n_and_phase_provider_failures_keep_their_typed_source() {
+    fn is_provider_failure(error: &FusionAlgebraError) -> bool {
+        let FusionAlgebraError::CategoryFailure(failure) = error else {
+            panic!("expected a category failure, got {error:?}");
+        };
+        std::error::Error::source(failure)
+            .and_then(|source| source.downcast_ref::<AuthorityFailed>())
+            .is_some()
+    }
+    let rule = cg(FallibleNPhase);
+    // Direct queries.
+    assert!(is_provider_failure(
+        &rule.try_nsymbol(s(3), s(0), s(3)).unwrap_err()
+    ));
+    assert!(is_provider_failure(
+        &rule.try_frobenius_schur_phase_scalar(s(2)).unwrap_err()
+    ));
+    // Dependent symbols: F and R shape by N; the default A needs the phase
+    // of `a` while every N of A^{2,0}_2 succeeds.
+    assert!(is_provider_failure(
+        &rule
+            .try_f_symbol_generic(s(3), s(0), s(0), s(3), s(3), s(0))
+            .unwrap_err()
+    ));
+    assert!(is_provider_failure(
+        &rule.try_r_symbol_generic(s(3), s(0), s(3)).unwrap_err()
+    ));
+    assert!(is_provider_failure(
+        &rule.try_a_symbol_generic(s(2), s(0), s(2)).unwrap_err()
+    ));
+    // The same queries away from the failing labels succeed.
+    assert_eq!(rule.try_nsymbol(s(1), s(1), s(0)), Ok(1));
+    assert_eq!(rule.try_frobenius_schur_phase_scalar(s(1)), Ok(1.0));
+    assert!(rule.try_a_symbol_generic(s(1), s(0), s(1)).is_ok());
 }
 
 #[test]
@@ -1726,8 +1950,8 @@ impl FusionCategory for ForeignUnit {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -1738,8 +1962,8 @@ impl FusionCategory for ForeignUnit {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(1))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        1
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
+        Ok(1)
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -1749,9 +1973,6 @@ impl FusionCategory for ForeignUnit {
     }
     fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
         Ok(1.0)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:foreign-unit"
     }
 }
 
@@ -1868,7 +2089,8 @@ impl CategoryCodec<ZN> for ScheduledZn {
     ) -> Result<ZNIrrep, FusionAlgebraError> {
         u32::try_from(id.id())
             .ok()
-            .and_then(|charge| ZNIrrep::from_canonical(charge, category().modulus()).ok())
+            .filter(|&charge| charge < category().modulus())
+            .and_then(|charge| ZNIrrep::new(i64::from(charge), category().modulus()).ok())
             .ok_or(FusionAlgebraError::InvalidSector { sector: id })
     }
     fn sector_id<'a>(
@@ -2087,7 +2309,7 @@ impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
         _: &RuleIdentity,
         object: &LieIrrep,
     ) -> Result<SectorId, FusionAlgebraError> {
-        let twice_spin = object.dynkin_labels().next().unwrap_or(0) as usize;
+        let twice_spin = object.dynkin().next().unwrap_or(0) as usize;
         Ok(s(twice_spin))
     }
     fn admit<'a, const N: usize>(
@@ -2204,8 +2426,8 @@ impl FusionCategory for Watched {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -2216,8 +2438,8 @@ impl FusionCategory for Watched {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(0))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        1
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
+        Ok(1)
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -2227,9 +2449,6 @@ impl FusionCategory for Watched {
     }
     fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
         Ok(1.0)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"test:watched"
     }
 }
 
@@ -2324,7 +2543,8 @@ impl CantorZ2Z2 {
     fn factor(id: SectorId) -> Result<ZNIrrep, FusionAlgebraError> {
         u32::try_from(id.id())
             .ok()
-            .and_then(|charge| ZNIrrep::from_canonical(charge, 2).ok())
+            .filter(|&charge| charge < 2)
+            .and_then(|charge| ZNIrrep::new(i64::from(charge), 2).ok())
             .ok_or(FusionAlgebraError::InvalidSector { sector: id })
     }
 }
@@ -2658,7 +2878,7 @@ impl CategoryCodec<ZN> for ShiftedZ3 {
         _: impl Fn() -> &'a ZN + Copy,
         id: SectorId,
     ) -> Result<ZNIrrep, FusionAlgebraError> {
-        Ok(ZNIrrep::from_canonical((id.id() as u32 + self.object) % 3, 3).unwrap())
+        Ok(ZNIrrep::new(i64::from((id.id() as u32 + self.object) % 3), 3).unwrap())
     }
     fn sector_id<'a>(
         &self,

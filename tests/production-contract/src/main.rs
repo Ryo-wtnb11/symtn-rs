@@ -47,9 +47,9 @@ impl FusionCategory for Probe {
     fn dim(&self, _: &u8) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &u8) -> f64 {
+    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
         PHASES.set(PHASES.get() + 1);
-        1.0
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
         1.0
@@ -63,8 +63,8 @@ impl FusionCategory for Probe {
     fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(std::iter::once(0))
     }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> u32 {
-        1
+    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
+        Ok(1)
     }
     fn f_symbol(&self, _: &u8, _: &u8, _: &u8, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
         panic!("A/B forwarding must not query F")
@@ -90,9 +90,6 @@ impl FusionCategory for Probe {
     }
     fn object_index(&self, _: &u8) -> Result<u64, EnumerationError> {
         Ok(0)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"production-contract-routing-probe"
     }
 }
 

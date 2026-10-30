@@ -51,7 +51,7 @@ symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-fe
 symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }
 # Tests reset fusion-symbols' process-global caches as an application would.
-fusion-symbols = { version = "0.10.0", default-features = false }
+fusion-symbols = { git = "https://github.com/Ryo-wtnb11/fusion-symbols", rev = "b322d055bbcbe022b5a70f1b88fdb804fb25f052", default-features = false }
 
 [[test]]
 name = "integration"

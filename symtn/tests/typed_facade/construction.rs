@@ -73,8 +73,8 @@ fn tensor_map_rejects_distinct_rule_identities_before_provider_work() {
 fn enumerated_rules_share_identity_by_category_value() {
     let _serial = crate::counting_alloc::serial();
     // What: a fusion-symbols category under `EnumeratedCodec` is identified by
-    // its value. Two separately built Z3 rules mix, and Z3 and Z5 (whose
-    // fusion-symbols fingerprints are equal) are a rule mismatch.
+    // its value. Two separately built Z3 rules mix, and Z3 and Z5 are a rule
+    // mismatch.
     use fusion_symbols::finite::{ZNIrrep, ZN};
     use symtn::sector::EnumeratedCodec;
 
@@ -86,8 +86,8 @@ fn enumerated_rules_share_identity_by_category_value() {
         GradedSpace::try_new(
             Arc::clone(rule),
             [
-                (ZNIrrep::from_canonical(0, modulus).unwrap(), 2),
-                (ZNIrrep::from_canonical(1, modulus).unwrap(), 1),
+                (ZNIrrep::new(0, modulus).unwrap(), 2),
+                (ZNIrrep::new(1, modulus).unwrap(), 1),
             ],
         )
         .unwrap()
@@ -177,7 +177,7 @@ fn a_composed_codec_identity_never_shares_a_layout_across_categories() {
         let leg = |charge| {
             GradedSpace::try_new(
                 Arc::clone(&rule),
-                [(ZNIrrep::from_canonical(charge, modulus).unwrap(), 1)],
+                [(ZNIrrep::new(i64::from(charge), modulus).unwrap(), 1)],
             )
             .unwrap()
         };

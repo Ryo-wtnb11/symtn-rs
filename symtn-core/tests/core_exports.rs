@@ -297,7 +297,6 @@ fn symtn_core_exports_exactly_the_pinned_names() {
         "ProductSectorComponent",
         "ProductSectorLayout",
         "RuleIdentity",
-        "SU2CoefficientError",
         "SU2FusionRule",
         "SU2Irrep",
         "SU2_MAX_DOUBLED_SPIN",

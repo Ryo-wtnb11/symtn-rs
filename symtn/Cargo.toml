@@ -49,7 +49,7 @@ symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features
 
 [dev-dependencies]
 # External categories of the typed-facade extension tests (#2016).
-fusion-symbols = { version = "0.10.0", default-features = false }
+fusion-symbols = { git = "https://github.com/Ryo-wtnb11/fusion-symbols", rev = "b322d055bbcbe022b5a70f1b88fdb804fb25f052", default-features = false }
 rayon = "1.10"
 # The table-backed Fibonacci provider of the planar workflow test (#2016).
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }

@@ -1219,7 +1219,7 @@ pub(crate) mod forward {
     ) -> Result<usize, Error<A>> {
         let n = rule
             .category()
-            .try_nsymbol(a, b, c)
+            .nsymbol(a, b, c)
             .map_err(provider(rule, inputs))?;
         // `u32` always fits the `usize` of a supported target.
         Ok(n as usize)
@@ -1253,7 +1253,9 @@ pub(crate) mod forward {
         sector: SectorId,
     ) -> Result<Value<A>, Error<A>> {
         let object = member(rule, sector)?;
-        Ok(rule.category().frobenius_schur_phase(&object))
+        rule.category()
+            .frobenius_schur_phase(&object)
+            .map_err(provider(rule, [sector]))
     }
 
     pub(crate) fn twist<A: AdapterAccess>(

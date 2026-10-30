@@ -61,7 +61,7 @@ mod table_rule;
 pub use table_rule::{TableRule, TableRuleError, TableSector};
 
 mod su2;
-pub use su2::{SU2CoefficientError, SU2FusionRule, SU2Irrep, SU2_MAX_DOUBLED_SPIN};
+pub use su2::{SU2FusionRule, SU2Irrep, SU2_MAX_DOUBLED_SPIN};
 
 #[cfg(feature = "cgc-gen")]
 mod lie;
