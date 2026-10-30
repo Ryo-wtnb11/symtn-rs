@@ -12,10 +12,11 @@
 //! A CPU engine supplies its team's token (a one-thread engine a serial
 //! one). Without a compiled CPU provider there is no CPU engine type, so
 //! regions run on a serial token. A CUDA engine has no Host pool: the Host
-//! structural metadata a device operation prepares (plan and structure
-//! compilation) runs inline on an explicit serial token, and its payload work
-//! stays on the device. Any other engine is refused with a typed error before
-//! the region runs.
+//! structural metadata a device operation prepares
+//! ([`HostPoolSite::PlanCompile`]) runs inline on an explicit serial token,
+//! and its payload work stays on the device. Every other site moves Host
+//! payload and refuses a CUDA engine, as it refuses any other engine, with a
+//! typed error before the region runs.
 
 #[cfg(any(test, feature = "testing"))]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,8 +55,10 @@ pub fn region<R>(
         });
         match ran {
             Some(result) => result,
+            // Why only plan compilation: the other sites move Host payload,
+            // which a CUDA engine does not execute.
             #[cfg(feature = "cuda")]
-            None if is_cuda_engine(engine) => {
+            None if site == HostPoolSite::PlanCompile && is_cuda_engine(engine) => {
                 observe(site, 1);
                 let op = op.take().expect("region body runs once");
                 Ok(op(Exec::serial()))
@@ -112,8 +115,8 @@ pub fn threads(engine: &mut dyn Engine) -> usize {
 /// rule admits the parallel section (threadteam's `pays` on strided's `Copy`
 /// estimate for `elements`, against the engine pool's dispatch cost), and 1
 /// otherwise. A serial engine never forks; the caller sets parallelism only
-/// through its engine (pool width and dispatch costs). A broken engine is a
-/// typed error.
+/// through its engine (pool width and dispatch costs). A broken or non-CPU
+/// engine (CUDA included: the replay moves Host payload) is a typed error.
 pub fn copy_width(engine: &mut dyn Engine, elements: usize) -> Result<usize, OperationError> {
     #[cfg(feature = "tenferro")]
     {
@@ -136,8 +139,6 @@ pub fn copy_width(engine: &mut dyn Engine, elements: usize) -> Result<usize, Ope
         });
         match width {
             Some(width) => width,
-            #[cfg(feature = "cuda")]
-            None if is_cuda_engine(engine) => Ok(1),
             None => Err(OperationError::Dense(DenseError::Unsupported {
                 op: "host_region",
                 message: "Host regions run on the caller's CPU or CUDA engine".to_string(),

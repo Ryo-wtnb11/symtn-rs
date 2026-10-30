@@ -154,9 +154,9 @@ impl RuntimeIdentity {
 }
 
 impl Runtime {
-    /// Starts building a runtime. The default runtime uses the CPU backend;
-    /// feature-gated device options such as CUDA are attached through the
-    /// builder so tensor construction keeps the same shape.
+    /// Starts building a runtime. The runtime holds structural state only;
+    /// each numerical operation takes the caller's engine (CPU or CUDA), so
+    /// the backend is chosen per call, not here.
     pub fn builder() -> RuntimeBuilder {
         RuntimeBuilder::default()
     }

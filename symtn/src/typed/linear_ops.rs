@@ -41,6 +41,7 @@ impl<R> TensorMap<R, num_complex::Complex64> {
         engine: &mut dyn Engine,
         part: impl Fn(num_complex::Complex64) -> f64,
     ) -> Result<TensorMap<R, f64>, Error> {
+        admit_host_engine(engine)?;
         let materialized = self.materialized_tensor_uncached(engine)?;
         let source = materialized
             .owned_body()
@@ -130,6 +131,9 @@ where
         // trust-boundary violation rather than an algebra error.
         require_same_runtime_and_space(self, other)?;
         if let (Some(x), Some(y)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
+            if x.spectrum().is_some() || y.spectrum().is_some() {
+                admit_host_engine(engine)?;
+            }
             if let Some(sum) = x.compact_axpby(alpha, y, beta)? {
                 return S::from_host(EXEC, sum);
             }
@@ -158,6 +162,7 @@ where
     /// storage-local.
     pub fn scale(&self, engine: &mut dyn Engine, factor: D) -> Result<Self, FacadeError<R>> {
         if let Some(spectrum) = self.spectrum() {
+            admit_host_engine(engine)?;
             return Ok(self.with_spectrum(
                 spectrum
                     .iter()
@@ -426,10 +431,11 @@ pub trait ElementwiseExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
     fn zeros(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D>,
     ) -> Result<TensorMap<R, D>, Error> {
+        admit_host_engine(engine)?;
         Ok(t.with_data(vec![
             D::from_real(0.0);
             t.owned_body()
@@ -441,12 +447,13 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
     }
 
     fn combine(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D>,
         alpha: D,
         y: Option<(&TensorMap<R, D>, D)>,
     ) -> Result<TensorMap<R, D>, Error> {
+        admit_host_engine(engine)?;
         let Some((y, beta)) = y else {
             let data = x
                 .owned_body()
@@ -499,6 +506,7 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
         alpha: D,
         beta: D,
     ) -> Result<(), Error> {
+        admit_host_engine(engine)?;
         let TypedTensorRepr::Owned(destination_body) = &mut destination.repr else {
             return Err(internal_layout_error("ordinary destination checked above"));
         };
@@ -600,8 +608,7 @@ where
         engine: &mut dyn Engine,
         factor: D,
     ) -> Result<(), FacadeError<R>> {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let (body, factor) = match &mut self.repr {
             TypedTensorRepr::Owned(body) => (Arc::get_mut(body), factor),
             TypedTensorRepr::Adjoint(view) => (

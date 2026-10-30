@@ -23,6 +23,7 @@ where
                 self.rank()
             )));
         }
+        admit_host_engine(engine)?;
         // A rank-0 payload holds at most one element; summing gives the empty
         // payload its zero for free.
         let materialized = self.materialized_tensor_uncached(engine)?;
@@ -226,6 +227,7 @@ where
         // way on every representation and storage.
         validate_norm_p(p)?;
         if let Some(spectrum) = S::as_host(EXEC, self).and_then(TensorMap::spectrum) {
+            admit_host_engine(engine)?;
             return compact_norm(spectrum, self.logical_space().provider(), p);
         }
         // Every entrywise norm is adjoint invariant: reduce the parent's
@@ -279,6 +281,9 @@ where
         let other = &*other;
         super::linear_ops::require_same_runtime_and_space(self, other)?;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
+            if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
+                admit_host_engine(engine)?;
+            }
             if let Some(value) = lhs.compact_inner_arms(rhs)? {
                 return Ok(value);
             }
@@ -364,11 +369,12 @@ where
     D: TensorScalar,
 {
     fn dense_norm(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D>,
         p: f64,
     ) -> Result<f64, FacadeError<R>> {
+        admit_host_engine(engine)?;
         let provider = t.logical_space().provider();
         let payload = t
             .owned_body()
@@ -417,11 +423,12 @@ where
     }
 
     fn dense_inner(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D>,
         y: &TensorMap<R, D>,
     ) -> Result<D, FacadeError<R>> {
+        admit_host_engine(engine)?;
         let provider = x.logical_space().provider();
         if matches!(&x.repr, TypedTensorRepr::Adjoint(_))
             || matches!(&y.repr, TypedTensorRepr::Adjoint(_))
@@ -617,10 +624,8 @@ where
     /// assert!((id.tr(engine)? - Complex64::new(golden_ratio, 0.0)).norm() < 1e-15);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    // Host-local work: the engine is the uniform call shape, forwarded to the
-    // lazy adjoint's parent.
-    #[allow(clippy::only_used_in_recursion)]
     pub fn tr(&self, engine: &mut dyn Engine) -> Result<D, FacadeError<R>> {
+        admit_host_engine(engine)?;
         let hom = self.logical_space().space().homspace();
         // The weighted trace below indexes codomain axis `i` together with
         // domain axis `nout + i` and would be meaningless without this check.

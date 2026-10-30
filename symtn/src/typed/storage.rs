@@ -85,3 +85,16 @@ impl<R, D: 'static> TypedStorage<R, D> for Vec<D> {
         Ok(t)
     }
 }
+
+/// Admits the caller's engine for a Host value operation: the check every
+/// Host region makes before it runs, for entries whose arithmetic needs no
+/// token. A broken CPU engine, a CUDA engine or any other engine is a typed
+/// error, never a serial fallback.
+pub(crate) fn admit_host_engine(engine: &mut dyn Engine) -> Result<(), Error> {
+    symtn_operations::host_pool::region(
+        engine,
+        symtn_operations::host_pool::HostPoolSite::Strided,
+        |_| (),
+    )?;
+    Ok(())
+}

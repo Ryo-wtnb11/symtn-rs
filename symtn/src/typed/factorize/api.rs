@@ -669,8 +669,7 @@ where
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn map_diagonal(&self, engine: &mut dyn Engine, f: impl Fn(D) -> D) -> Result<Self, Error> {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let Some(spectrum) = self.spectrum() else {
             return Err(Error::InvalidArgument(
                 "map_diagonal requires a compact diagonal tensor (a compact factor or a \

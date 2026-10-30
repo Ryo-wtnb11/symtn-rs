@@ -103,8 +103,7 @@ where
         R: TypedSectorAdmission,
         R::Mode: TypedTensorRootDispatch<R>,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         require_restriction_set(self.logical_space(), legs)?;
         let compact = self
             .spectrum()

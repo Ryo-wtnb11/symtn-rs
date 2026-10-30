@@ -76,7 +76,7 @@ fn check_device_batch<R>(
             v: eager_v,
         } = device_input
             .eigh_full(
-                engine,
+                cuda,
                 &codomain_axes(device_input),
                 &domain_axes(device_input),
                 HermitianTol::DEFAULT,

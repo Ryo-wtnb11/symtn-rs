@@ -5,8 +5,10 @@
 //! - A tensor owned by another CUDA engine, even one on the same device
 //!   ordinal, is refused the same way: engines are separate allocation
 //!   domains, and nothing moves a buffer between them implicitly.
-//! - A CUDA engine handed to a Host contraction is refused; there is no
-//!   device fallback for Host payloads.
+//! - A CUDA engine handed to a Host contraction, permutation or value
+//!   operation is refused; there is no device fallback for Host payloads,
+//!   and the CUDA engine's serial Host token covers structural metadata
+//!   only.
 //!
 //! Run with `cargo test -p symtn --no-default-features --features cuda,cpu-faer
 //! --test integration cuda_engine_ownership:: -- --ignored` on a CUDA host.
@@ -114,5 +116,22 @@ fn a_cuda_engine_is_refused_on_host_contractions() {
     assert!(lhs
         .contract_into(cuda, &rhs, &SPEC, &mut destination, 1.0, 0.0)
         .is_err());
+    assert_eq!(destination.dense_data().unwrap(), before.as_slice());
+}
+
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_cuda_engine_is_refused_on_host_permutations_and_value_operations() {
+    let engine = &mut CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    let host = fixture(engine, &runtime, 1.0);
+    let mut destination = fixture(engine, &runtime, 3.0);
+    let before = destination.dense_data().unwrap().to_vec();
+    // A nonidentity U(1) permutation is a pure Host payload replay.
+    assert!(host.permute(cuda, &[1], &[0]).is_err());
+    assert!(host.scale(cuda, 2.0).is_err());
+    assert!(host.norm(cuda, 2.0).is_err());
+    assert!(host.axpby_into(cuda, &mut destination, 1.0, 1.0).is_err());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
 }

@@ -114,8 +114,7 @@ where
         Domain: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let codomain: Vec<_> = codomain.into_iter().collect();
         let domain: Vec<_> = domain.into_iter().collect();
         let legs: Vec<_> = codomain.iter().chain(&domain).copied().collect();
@@ -153,8 +152,7 @@ where
         F: FnMut(&BlockFusionTrees<R::Sector>, &[usize]) -> D,
         R: 'a,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let codomain: Vec<_> = codomain.into_iter().collect();
         let domain: Vec<_> = domain.into_iter().collect();
         let legs: Vec<_> = codomain.iter().chain(&domain).copied().collect();
@@ -213,8 +211,7 @@ where
         Domain: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let codomain: Vec<_> = codomain.into_iter().collect();
         let domain: Vec<_> = domain.into_iter().collect();
         let legs: Vec<_> = codomain.iter().chain(&domain).copied().collect();
@@ -350,8 +347,7 @@ where
         M: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         Self::structural(runtime, codomain, domain, false)
     }
 
@@ -388,8 +384,7 @@ where
         M: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         Self::structural(runtime, codomain, domain, true)
     }
 }
@@ -412,6 +407,7 @@ where
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
         if let Some(spectrum) = self.spectrum() {
+            admit_host_engine(engine)?;
             return Ok(self.with_spectrum(
                 spectrum
                     .iter()

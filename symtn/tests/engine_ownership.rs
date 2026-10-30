@@ -134,5 +134,65 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
             t.compose(&mut engine, &adjoint).is_err(),
             "width {threads}: compose"
         );
+        // Host value operations whose arithmetic needs no token admit the
+        // engine too: a value result, a destination write, an in-place
+        // update, and the compact-diagonal arms that return before any
+        // storage kernel.
+        let refused = |result: Result<(), String>, what: &str| {
+            let message = result.expect_err(&format!("width {threads}: {what}"));
+            assert!(
+                message.contains("host_region"),
+                "width {threads}: {what}: {message}"
+            );
+        };
+        let err = |e: &dyn std::fmt::Debug| format!("{e:?}");
+        refused(
+            t.scale(&mut engine, 2.0).map(drop).map_err(|e| err(&e)),
+            "scale",
+        );
+        refused(
+            t.norm(&mut engine, 2.0).map(drop).map_err(|e| err(&e)),
+            "norm",
+        );
+        refused(
+            t.inner(&mut engine, &t).map(drop).map_err(|e| err(&e)),
+            "inner",
+        );
+        refused(
+            t.zeros_like(&mut engine).map(drop).map_err(|e| err(&e)),
+            "zeros_like",
+        );
+        let mut destination = t.scale(&mut CpuEngine::serial(), 1.0).unwrap();
+        let before = destination.dense_data().unwrap().to_vec();
+        refused(
+            t.axpby_into(&mut engine, &mut destination, 1.0, 1.0)
+                .map_err(|e| err(&e)),
+            "axpby_into",
+        );
+        refused(
+            destination
+                .scale_assign(&mut engine, 2.0)
+                .map_err(|e| err(&e)),
+            "scale_assign",
+        );
+        assert_eq!(destination.dense_data().unwrap(), before.as_slice());
+        let s = t
+            .svd_compact(&mut CpuEngine::serial(), &[0, 1], &[2])
+            .unwrap()
+            .s;
+        refused(
+            s.norm(&mut engine, 2.0).map(drop).map_err(|e| err(&e)),
+            "compact norm",
+        );
+        refused(
+            s.scale(&mut engine, 2.0).map(drop).map_err(|e| err(&e)),
+            "compact scale",
+        );
+        refused(
+            s.axpby(&mut engine, 1.0, &s, 1.0)
+                .map(drop)
+                .map_err(|e| err(&e)),
+            "compact axpby",
+        );
     }
 }

@@ -402,8 +402,7 @@ where
     /// An index at or past [`Self::len`] is
     /// [`Error::BatchMemberOutOfRange`].
     pub fn member(&self, engine: &mut dyn Engine, i: usize) -> Result<TensorMap<R, D>, Error> {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        super::admit_host_engine(engine)?;
         if i >= self.members {
             return Err(Error::BatchMemberOutOfRange {
                 member: i,
@@ -536,12 +535,13 @@ pub trait StackExec<D>: TensorStorage<D> + super::storage::sealed::Sealed + Size
 
 impl<D: Copy> StackExec<D> for Vec<D> {
     fn select_members<R>(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D>,
         members: &[usize],
         len: usize,
     ) -> Result<StackedTensorMap<R, D>, Error> {
+        super::admit_host_engine(engine)?;
         let mut storage = Vec::with_capacity(len);
         for &member in members {
             storage
@@ -551,7 +551,7 @@ impl<D: Copy> StackExec<D> for Vec<D> {
     }
 
     fn restrict_members<R: TypedSectorAdmission>(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D>,
         destination: BoundDynamicFusionMapSpace<R>,
@@ -560,6 +560,7 @@ impl<D: Copy> StackExec<D> for Vec<D> {
     where
         D: TensorScalar,
     {
+        super::admit_host_engine(engine)?;
         let data = symtn_tensors::stacked_fusion_restrict_owned(
             destination.space().structure(),
             FusionOperand::direct(stack.space.space()),

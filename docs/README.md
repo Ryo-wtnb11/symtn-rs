@@ -26,9 +26,11 @@ Use source and focused tests as evidence. Keep revision-specific audits and
 measurements in review records or [benchmarks](../benchmarks/README.md), with
 revision, provider, build, thread count, workload and raw results.
 
-[CI](../.github/workflows/ci.yml) runs lint, feature/backend contracts, the Host
-pool audit, Linux coverage tests, doctests, examples and rustdoc on ready PRs
-and main pushes. The lint job also runs `cargo run -p symtn-production-contract`,
+[CI](../.github/workflows/ci.yml) runs lint, feature/backend contracts, Linux
+coverage tests, doctests, examples and rustdoc on ready PRs and main pushes.
+Engine ownership (the caller's engine runs every numerical step; a broken or
+wrong-backend engine is refused) is covered by the `engine_ownership` and
+`cuda_engine_ownership` integration tests. The lint job also runs `cargo run -p symtn-production-contract`,
 a [normal-dependency consumer](../tests/production-contract/src/main.rs) that
 checks category A/B forwarding and query costs with `testing` disabled.
 The full default-provider macOS suite runs on main nightly at

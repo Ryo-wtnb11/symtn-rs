@@ -58,8 +58,7 @@ where
     R::Mode: TypedTensorRootDispatch<R>,
     D: TensorScalar,
 {
-    // Host-local work: the engine is the uniform call shape.
-    let _ = engine;
+    crate::typed::admit_host_engine(engine)?;
     tensor.diagonal_spectrum()
 }
 

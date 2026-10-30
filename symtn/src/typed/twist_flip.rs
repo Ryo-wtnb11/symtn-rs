@@ -136,6 +136,9 @@ where
         else {
             return Ok(self.clone());
         };
+        if S::as_host(EXEC, self).is_some_and(|t| t.spectrum().is_some()) {
+            admit_host_engine(engine)?;
+        }
         if let Some(compact) = S::as_host(EXEC, self)
             .and_then(|t| compact_arms::twist_spectrum(t, legs, inverse, &theta))
         {
@@ -193,12 +196,13 @@ pub trait TwistExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> TwistExec<R, D> for Vec<D> {
     fn scale_blocks<C: TwistCoefficient<D>>(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D>,
         factor_of: &dyn Fn(&BlockKey) -> C,
         _: &'static str,
     ) -> Result<TensorMap<R, D>, Error> {
+        admit_host_engine(engine)?;
         let space = t.logical_space();
         let mut data = t
             .owned_body()
@@ -260,8 +264,7 @@ where
         legs: &[usize],
         direction: Direction,
     ) -> Result<Self, FacadeError<R>> {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let inverse = direction.is_inverse();
         let rank = self.rank();
         let name = if inverse { "inverse flip" } else { "flip" };

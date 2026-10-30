@@ -28,13 +28,15 @@ pub(super) fn effective_tree_transform_threads(
 }
 
 /// Runs a replay phase split over `threads` workers with the operation's
-/// engine token; a serial phase takes no token.
+/// engine token. A serial phase runs on a serial token, but the engine is
+/// still admitted first: a broken or CUDA engine never reaches Host payload.
 pub(super) fn replay_region<R>(
     engine: &mut dyn Engine,
     threads: usize,
     op: impl FnOnce(Exec<'_>) -> R,
 ) -> Result<R, OperationError> {
     if threads <= 1 {
+        crate::host_pool::region(engine, crate::host_pool::HostPoolSite::Replay, |_| ())?;
         return Ok(op(Exec::serial()));
     }
     crate::host_pool::region(engine, crate::host_pool::HostPoolSite::Replay, op)

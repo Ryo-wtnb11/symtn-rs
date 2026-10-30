@@ -96,6 +96,7 @@ where
                 if let Some((host, spectrum)) =
                     S::as_host(EXEC, self).and_then(|t| Some((t, t.spectrum()?)))
                 {
+                    admit_host_engine(engine)?;
                     let data = symtn_matrixalgebra::seam::diagonal_bond_data(
                         host.logical_space().space(),
                         spectrum,
@@ -152,12 +153,13 @@ pub trait MaterializeExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> MaterializeExec<R, D> for Vec<D> {
     fn materialize(
-        _engine: &mut dyn Engine,
+        engine: &mut dyn Engine,
         _: ExecToken,
         _t: &TensorMap<R, D>,
         source: &Self,
         map: Option<&symtn_tensors::AdjointBlockMap<'_>>,
     ) -> Result<Self, Error> {
+        admit_host_engine(engine)?;
         let Some(map) = map else {
             return Ok(source.clone());
         };
@@ -326,8 +328,7 @@ where
     where
         I: IntoIterator<Item = SectorSpectrum<R::Sector, D>>,
     {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let spectra: Vec<_> = spectra.into_iter().collect();
         let mut labels: Vec<_> = spectra.iter().map(|entry| &entry.sector).collect();
         labels.sort_unstable();
@@ -468,8 +469,7 @@ where
         &self,
         engine: &mut dyn Engine,
     ) -> Result<Vec<SectorSpectrum<R::Sector, D>>, FacadeError<R>> {
-        // Host-local work: the engine is the uniform call shape.
-        let _ = engine;
+        admit_host_engine(engine)?;
         let body = self.owned_body().ok_or_else(|| {
             FacadeError::<R>::from(Error::InvalidArgument(
                 "diagview requires an owned tensor, not a lazy adjoint".to_string(),

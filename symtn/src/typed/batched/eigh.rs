@@ -59,12 +59,7 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 /// # Retained state and shared effects
 ///
 /// Each workspace owns its output stacks and host spectra, reported by
-/// [`EighFullWorkspace::retained_bytes`] and freed on drop. It reserves
-/// nothing in the
-/// device context's plan-entry ledger: no step submits a cuTENSOR
-/// contraction (the admission and gather are CubeCL kernels, and the
-/// materializations and copies are permutations, which Tenferro caches
-/// separately).
+/// [`EighFullWorkspace::retained_bytes`] and freed on drop.
 ///
 /// ```
 /// use std::sync::Arc;
