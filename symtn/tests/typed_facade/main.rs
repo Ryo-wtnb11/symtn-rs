@@ -154,8 +154,8 @@ impl FusionCategory for ExternalZ3 {
     fn dim(&self, _: &Z3Charge) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &Z3Charge) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &Z3Charge) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, a: &Z3Charge) -> f64 {
         if a.0 == 0 {
@@ -170,8 +170,8 @@ impl FusionCategory for ExternalZ3 {
     fn fusion<'a>(&'a self, a: &Z3Charge, b: &Z3Charge) -> Result<Self::Fusion<'a>, Self::Error> {
         Ok(core::iter::once(Z3Charge((a.0 + b.0) % 3)))
     }
-    fn nsymbol(&self, a: &Z3Charge, b: &Z3Charge, c: &Z3Charge) -> u32 {
-        u32::from((a.0 + b.0) % 3 == c.0)
+    fn nsymbol(&self, a: &Z3Charge, b: &Z3Charge, c: &Z3Charge) -> Result<u32, Self::Error> {
+        Ok(u32::from((a.0 + b.0) % 3 == c.0))
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -185,17 +185,14 @@ impl FusionCategory for ExternalZ3 {
         e: &Z3Charge,
         f: &Z3Charge,
     ) -> Result<f64, Self::Error> {
-        let admissible = self.nsymbol(a, b, e)
-            * self.nsymbol(e, c, d)
-            * self.nsymbol(b, c, f)
-            * self.nsymbol(a, f, d);
+        let admissible = self.nsymbol(a, b, e)?
+            * self.nsymbol(e, c, d)?
+            * self.nsymbol(b, c, f)?
+            * self.nsymbol(a, f, d)?;
         Ok(f64::from(admissible))
     }
     fn r_symbol(&self, a: &Z3Charge, b: &Z3Charge, c: &Z3Charge) -> Result<f64, Self::Error> {
-        Ok(f64::from(self.nsymbol(a, b, c)))
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"symtn-typed-facade-external-z3"
+        Ok(f64::from(self.nsymbol(a, b, c)?))
     }
 }
 
@@ -388,7 +385,7 @@ impl FusionCategory for ExternalSu2 {
     fn dim(&self, a: &LieIrrep) -> f64 {
         self.0.dim(a)
     }
-    fn frobenius_schur_phase(&self, a: &LieIrrep) -> f64 {
+    fn frobenius_schur_phase(&self, a: &LieIrrep) -> Result<f64, Self::Error> {
         self.0.frobenius_schur_phase(a)
     }
     fn frobenius_schur_indicator(&self, a: &LieIrrep) -> f64 {
@@ -400,7 +397,7 @@ impl FusionCategory for ExternalSu2 {
     fn fusion<'a>(&'a self, a: &LieIrrep, b: &LieIrrep) -> Result<Self::Fusion<'a>, LieError> {
         self.0.fusion(a, b)
     }
-    fn nsymbol(&self, a: &LieIrrep, b: &LieIrrep, c: &LieIrrep) -> u32 {
+    fn nsymbol(&self, a: &LieIrrep, b: &LieIrrep, c: &LieIrrep) -> Result<u32, Self::Error> {
         self.0.nsymbol(a, b, c)
     }
     fn has_canonical_unit(&self) -> bool {
@@ -424,9 +421,6 @@ impl FusionCategory for ExternalSu2 {
         c: &LieIrrep,
     ) -> Result<Self::RSymbol, LieError> {
         self.0.r_symbol(a, b, c)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        self.0.authority_fingerprint()
     }
 }
 
@@ -482,7 +476,7 @@ impl CategoryCodec<ExternalSu2> for Su2Codec {
         object: &LieIrrep,
     ) -> Result<SectorId, FusionAlgebraError> {
         object
-            .dynkin_labels()
+            .dynkin()
             .next()
             .and_then(|twice_spin| usize::try_from(twice_spin).ok())
             .map(SectorId::new)
@@ -717,8 +711,8 @@ impl FusionCategory for PlanarTrivial {
     fn dim(&self, _: &PlanarTrivialSector) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &PlanarTrivialSector) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &PlanarTrivialSector) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &PlanarTrivialSector) -> f64 {
         1.0
@@ -738,8 +732,8 @@ impl FusionCategory for PlanarTrivial {
         _: &PlanarTrivialSector,
         _: &PlanarTrivialSector,
         _: &PlanarTrivialSector,
-    ) -> u32 {
-        1
+    ) -> Result<u32, NoBraiding> {
+        Ok(1)
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -762,9 +756,6 @@ impl FusionCategory for PlanarTrivial {
         _: &PlanarTrivialSector,
     ) -> Result<f64, NoBraiding> {
         Err(NoBraiding)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"symtn-typed-facade-planar-trivial"
     }
 }
 
@@ -1421,8 +1412,8 @@ impl FusionCategory for PlanarZ2 {
     fn dim(&self, _: &PlanarParity) -> f64 {
         1.0
     }
-    fn frobenius_schur_phase(&self, _: &PlanarParity) -> f64 {
-        1.0
+    fn frobenius_schur_phase(&self, _: &PlanarParity) -> Result<f64, Self::Error> {
+        Ok(1.0)
     }
     fn frobenius_schur_indicator(&self, _: &PlanarParity) -> f64 {
         1.0
@@ -1437,8 +1428,13 @@ impl FusionCategory for PlanarZ2 {
     ) -> Result<Self::Fusion<'a>, NoBraiding> {
         Ok(core::iter::once(PlanarParity(a.0 ^ b.0)))
     }
-    fn nsymbol(&self, a: &PlanarParity, b: &PlanarParity, c: &PlanarParity) -> u32 {
-        u32::from(a.0 ^ b.0 == c.0)
+    fn nsymbol(
+        &self,
+        a: &PlanarParity,
+        b: &PlanarParity,
+        c: &PlanarParity,
+    ) -> Result<u32, Self::Error> {
+        Ok(u32::from(a.0 ^ b.0 == c.0))
     }
     fn has_canonical_unit(&self) -> bool {
         true
@@ -1452,10 +1448,10 @@ impl FusionCategory for PlanarZ2 {
         e: &PlanarParity,
         f: &PlanarParity,
     ) -> Result<f64, NoBraiding> {
-        let admissible = self.nsymbol(a, b, e)
-            * self.nsymbol(e, c, d)
-            * self.nsymbol(b, c, f)
-            * self.nsymbol(a, f, d);
+        let admissible = self.nsymbol(a, b, e)?
+            * self.nsymbol(e, c, d)?
+            * self.nsymbol(b, c, f)?
+            * self.nsymbol(a, f, d)?;
         Ok(f64::from(admissible))
     }
     fn r_symbol(
@@ -1465,9 +1461,6 @@ impl FusionCategory for PlanarZ2 {
         _: &PlanarParity,
     ) -> Result<f64, NoBraiding> {
         Err(NoBraiding)
-    }
-    fn authority_fingerprint(&self) -> &[u8] {
-        b"symtn-typed-facade-planar-z2"
     }
 }
 

@@ -77,8 +77,8 @@ fn warm_lie_group_symbol_queries() {
     let (b, b_cost) = counting_alloc::measure(adapted_b);
     assert_eq!(f.data(), fs_f.as_slice());
     assert_eq!(r.data(), fs_r.as_slice());
-    assert_eq!(a.data(), fs_a.data());
-    assert_eq!(b.data(), fs_b.data());
+    assert_eq!(a.data(), fs_a.as_slice());
+    assert_eq!(b.data(), fs_b.as_slice());
     assert_eq!(f.data().len(), 16);
     for block in [&r, &a, &b] {
         assert_eq!(block.shape(), (2, 2));

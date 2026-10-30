@@ -42,10 +42,9 @@ use crate::{FusionAlgebraError, MultiplicityFreeAdmissionMode, RuleIdentity, Sec
 ///
 /// # Identity
 ///
-/// The [`RuleIdentity`] is built from the table's authority fingerprint
-/// (provenance record plus source bytes): each entry is its own category,
-/// two instances of one entry are equal, and no table entry equals a
-/// closed-form rule, even for the same group.
+/// The [`RuleIdentity`] is the table's AnyonWiki uuid under the rule type:
+/// each entry is its own category, two instances of one entry are equal, and
+/// no table entry equals a closed-form rule, even for the same group.
 ///
 /// # Examples
 ///
@@ -135,7 +134,7 @@ impl TableRule {
     }
 
     fn from_category(category: TableCategory) -> Self {
-        let bytes = category.authority_fingerprint();
+        let bytes = category.uuid().as_bytes();
         let identity = RuleIdentity::from_canonical_bytes::<Self>(fnv1a64(bytes), Arc::from(bytes));
         Self { category, identity }
     }
@@ -276,9 +275,9 @@ mod tests {
     }
 
     #[test]
-    fn identity_is_bound_to_the_table_fingerprint() {
+    fn identity_is_bound_to_the_table_uuid() {
         let fib = TableRule::fibonacci();
-        let bytes = fib.category.authority_fingerprint();
+        let bytes = fib.uuid().as_bytes();
         assert_eq!(
             fib.rule_identity(),
             RuleIdentity::from_canonical_bytes::<TableRule>(fnv1a64(bytes), Arc::from(bytes))

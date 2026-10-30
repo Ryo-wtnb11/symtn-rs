@@ -145,7 +145,8 @@ impl CategoryCodec<ZN> for ZnCodec {
     ) -> Result<FsZNIrrep, FusionAlgebraError> {
         u32::try_from(id.id())
             .ok()
-            .and_then(|charge| FsZNIrrep::from_canonical(charge, category().modulus()).ok())
+            .filter(|&charge| charge < category().modulus())
+            .and_then(|charge| FsZNIrrep::new(i64::from(charge), category().modulus()).ok())
             .ok_or(FusionAlgebraError::InvalidSector { sector: id })
     }
 
@@ -308,8 +309,7 @@ parity_codec!(
     Z2Codec,
     ZN,
     FsZNIrrep,
-    |odd: bool| FsZNIrrep::from_canonical(u32::from(odd), 2)
-        .expect("a parity is a canonical charge modulo 2"),
+    |odd: bool| FsZNIrrep::new(i64::from(odd), 2).expect("a parity is a canonical charge modulo 2"),
     |object: &FsZNIrrep| object.charge() == 1
 );
 parity_codec!(

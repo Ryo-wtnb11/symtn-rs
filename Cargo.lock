@@ -1175,15 +1175,14 @@ dependencies = [
 [[package]]
 name = "fusion-symbols"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "159a8bad2fc3ab7dc4cfc09ebba0b9ede86a3e89a3eff7193de4bf38fd025a71"
+source = "git+https://github.com/Ryo-wtnb11/fusion-symbols?rev=b322d055bbcbe022b5a70f1b88fdb804fb25f052#b322d055bbcbe022b5a70f1b88fdb804fb25f052"
 dependencies = [
- "num-bigint",
+ "malachite-base",
+ "malachite-nz",
+ "malachite-q",
  "num-complex",
- "num-rational",
  "num-traits",
  "quick_cache",
- "t4a-faer",
 ]
 
 [[package]]
@@ -2007,6 +2006,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
 dependencies = [
  "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "malachite-base"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5399d024a5e8fd066c158d208a02fb2dabb737c401ab03954f27d170fd49ffc"
+dependencies = [
+ "hashbrown 0.16.1",
+ "itertools 0.14.0",
+ "libm",
+ "ryu",
+]
+
+[[package]]
+name = "malachite-nz"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ac55a9e8426447c374668b93c35b7b6ab43a21dc7ba97ad0e852be2305a5900"
+dependencies = [
+ "bytemuck",
+ "itertools 0.14.0",
+ "libm",
+ "malachite-base",
+ "wide",
+]
+
+[[package]]
+name = "malachite-q"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "070267491ad6c23e504a71368542a2376d62f6622286be47870d7dcd56f24fce"
+dependencies = [
+ "itertools 0.14.0",
+ "libm",
+ "malachite-base",
+ "malachite-nz",
 ]
 
 [[package]]
@@ -2961,6 +2997,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3734,56 +3785,6 @@ dependencies = [
  "derive-new",
  "serde",
  "smallvec",
-]
-
-[[package]]
-name = "t4a-faer"
-version = "0.24.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7442ea342f37c81922d0dc68ae424b3d5d5229b516756718bd3b52dc133cc45"
-dependencies = [
- "bytemuck",
- "dyn-stack",
- "equator 0.6.0",
- "gemm",
- "generativity",
- "libm",
- "nano-gemm",
- "num-complex",
- "num-traits",
- "pulp",
- "reborrow",
- "t4a-faer-traits",
- "t4a-private-gemm-x86",
-]
-
-[[package]]
-name = "t4a-faer-traits"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b20254002b5028791c3b97cf7baebce6ea5f3541977348da1c109d16c1dc889"
-dependencies = [
- "bytemuck",
- "dyn-stack",
- "generativity",
- "libm",
- "num-complex",
- "num-traits",
- "pulp",
- "qd",
- "reborrow",
-]
-
-[[package]]
-name = "t4a-private-gemm-x86"
-version = "0.1.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6e140e3b2522528a14dc01752648b0eefa6594e1b8e7e7baff2c217acfb2c62"
-dependencies = [
- "defer",
- "interpol",
- "num_cpus",
- "raw-cpuid",
 ]
 
 [[package]]
@@ -4716,6 +4717,16 @@ dependencies = [
  "log",
  "raw-window-handle",
  "web-sys",
+]
+
+[[package]]
+name = "wide"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

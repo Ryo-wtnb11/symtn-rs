@@ -595,7 +595,7 @@ fn core_and_racah_resets_have_separate_owners() {
     );
     let base_tiers = || {
         use fusion_symbols::cache::{tier_stats, CoefficientCacheTier as Tier};
-        [Tier::ThreeJ, Tier::SixJ, Tier::DerivedF].map(tier_stats)
+        [Tier::Wigner3j, Tier::Wigner6j, Tier::FSymbol].map(tier_stats)
     };
     let populated = base_tiers();
     assert_ne!(populated.iter().map(|tier| tier.entries).sum::<usize>(), 0);

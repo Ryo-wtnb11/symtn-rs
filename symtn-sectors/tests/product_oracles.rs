@@ -389,8 +389,8 @@ mod generated {
         fn dim(&self, a: &LieIrrep) -> f64 {
             self.group.dim(a)
         }
-        fn frobenius_schur_phase(&self, a: &LieIrrep) -> Complex64 {
-            self.group.frobenius_schur_phase(a).into()
+        fn frobenius_schur_phase(&self, a: &LieIrrep) -> Result<Complex64, Self::Error> {
+            self.group.frobenius_schur_phase(a).map(Complex64::from)
         }
         fn frobenius_schur_indicator(&self, a: &LieIrrep) -> Complex64 {
             self.group.frobenius_schur_indicator(a).into()
@@ -401,7 +401,7 @@ mod generated {
         fn fusion<'a>(&'a self, a: &LieIrrep, b: &LieIrrep) -> Result<Self::Fusion<'a>, LieError> {
             self.group.fusion(a, b)
         }
-        fn nsymbol(&self, a: &LieIrrep, b: &LieIrrep, c: &LieIrrep) -> u32 {
+        fn nsymbol(&self, a: &LieIrrep, b: &LieIrrep, c: &LieIrrep) -> Result<u32, Self::Error> {
             self.group.nsymbol(a, b, c)
         }
         fn has_canonical_unit(&self) -> bool {
@@ -417,12 +417,15 @@ mod generated {
             f: &LieIrrep,
         ) -> Result<RotatedF, LieError> {
             let vertices = [(a, b, e), (e, c, d), (b, c, f), (a, f, d)];
-            let axes = vertices.map(|(x, y, z)| self.nsymbol(x, y, z) as usize);
+            let mut axes = [0; 4];
+            for (axis, (x, y, z)) in axes.iter_mut().zip(vertices) {
+                *axis = self.nsymbol(x, y, z)? as usize;
+            }
             let base = self.group.f_symbol(a, b, c, d, e, f)?;
             let mut data = if axes.contains(&0) {
                 vec![]
             } else {
-                base.data()
+                base.as_slice()
                     .iter()
                     .copied()
                     .map(Complex64::from)
@@ -430,9 +433,9 @@ mod generated {
             };
             for (axis, (x, y, z)) in vertices.into_iter().enumerate() {
                 if data.is_empty()
-                    || !x.dynkin_labels().eq([2, 1])
-                    || !y.dynkin_labels().eq([1, 2])
-                    || !z.dynkin_labels().eq([2, 2])
+                    || !x.dynkin().eq([2, 1])
+                    || !y.dynkin().eq([1, 2])
+                    || !z.dynkin().eq([2, 2])
                 {
                     continue;
                 }
@@ -462,13 +465,6 @@ mod generated {
             Err(LieError::Unsupported {
                 requires: "braiding in the rotated gauge",
             })
-        }
-        fn authority_fingerprint(&self) -> &[u8] {
-            if self.complex {
-                b"test:su3-complex-vertex-gauge"
-            } else {
-                b"test:su3-real-vertex-gauge"
-            }
         }
         fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
             self.group.object_count()
@@ -1162,8 +1158,8 @@ mod storage {
         fn dim(&self, _: &u8) -> f64 {
             1.0
         }
-        fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-            1.0
+        fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+            Ok(1.0)
         }
         fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
             1.0
@@ -1184,8 +1180,8 @@ mod storage {
             }
             .into_iter())
         }
-        fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> u32 {
-            if *a == 0 {
+        fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
+            Ok(if *a == 0 {
                 u32::from(b == c)
             } else if *b == 0 {
                 u32::from(a == c)
@@ -1193,7 +1189,7 @@ mod storage {
                 1
             } else {
                 self.0
-            }
+            })
         }
         fn f_symbol(
             &self,
@@ -1205,10 +1201,10 @@ mod storage {
             f: &u8,
         ) -> Result<Block<4>, Infallible> {
             let dims = [
-                self.nsymbol(a, b, e),
-                self.nsymbol(e, c, d),
-                self.nsymbol(b, c, f),
-                self.nsymbol(a, f, d),
+                self.nsymbol(a, b, e)?,
+                self.nsymbol(e, c, d)?,
+                self.nsymbol(b, c, f)?,
+                self.nsymbol(a, f, d)?,
             ]
             .map(|n| n as usize);
             let data = match (a, b, c, d, e, f, self.0) {
@@ -1234,9 +1230,6 @@ mod storage {
         }
         fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Infallible> {
             Ok(1.0)
-        }
-        fn authority_fingerprint(&self) -> &[u8] {
-            b"test:product-symbol-storage"
         }
         fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
             Ok(Some(2))
@@ -1414,8 +1407,8 @@ mod storage {
         fn dim(&self, _: &u8) -> f64 {
             1.0
         }
-        fn frobenius_schur_phase(&self, _: &u8) -> f64 {
-            1.0
+        fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
+            Ok(1.0)
         }
         fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
             1.0
@@ -1429,7 +1422,7 @@ mod storage {
         fn fusion<'a>(&'a self, a: &u8, b: &u8) -> Result<Self::Fusion<'a>, Infallible> {
             Symbols(2, true).fusion(a, b)
         }
-        fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> u32 {
+        fn nsymbol(&self, a: &u8, b: &u8, c: &u8) -> Result<u32, Self::Error> {
             Symbols(2, true).nsymbol(a, b, c)
         }
         fn f_symbol(
@@ -1462,9 +1455,6 @@ mod storage {
         }
         fn b_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<RBlock<f64>, Infallible> {
             Ok(RBlock::one(1.0))
-        }
-        fn authority_fingerprint(&self) -> &[u8] {
-            b"test:malformed-product-symbols"
         }
         fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
             Ok(Some(2))

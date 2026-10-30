@@ -33,8 +33,7 @@ let z3 = CategoryRule::try_new(
 Labels are category objects; IDs and sector order follow enumeration, and
 fusion channels retain category order. Equal live category values share a
 rule identity. It is weakly held: after all rules over that value are dropped,
-old cache identities are not reused. The authority fingerprint alone is not
-identity because it can be shared across category parameters.
+old cache identities are not reused.
 `FusionAlgebraError` distinguishes invalid IDs, unrepresentable labels or
 fusion outcomes, and category failures with their source errors.
 
@@ -88,7 +87,7 @@ Each operation adds its coefficient and payload bounds. Outer multiplicity
 Built-in rules keep their own types over the shared adapter, rather than being
 `CategoryRule` aliases. [`TableRule`](../symtn-sectors/src/table_rule.rs)
 serves every pinned AnyonWiki `TableCategory`, including Fibonacci, Ising and
-fusion-only Rep(S₃), with identity built from the table's authority fingerprint.
+fusion-only Rep(S₃), with identity built from the table's AnyonWiki uuid.
 The [abelian](../symtn-sectors/src/abelian.rs) and
 [CU(1)](../symtn-sectors/src/cu1.rs) rules forward every symbol, including A/B;
 U(1)'s physical entries also use the category's CGC.
@@ -99,7 +98,7 @@ category's `frobenius_schur_phase`.
 
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
-| `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries use the checked scalar CGC evaluator |
+| `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; physical entries are fusion-symbols' scalar `su2::clebsch_gordan` after symtn's sector, channel and carrier-index validation (an admitted projection mismatch is its exact zero) |
 | `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
@@ -159,12 +158,11 @@ label's id already overflows, which returns
 `LieGroupFusionRuleError::UnrepresentableLabel`. Object conversion
 checks the complete category membership before using an interned label.
 The identity is the `GroupId` value under the rule type: codec, admission and
-scalar conventions are fixed by the type, and the category fingerprint by the
+scalar conventions are fixed by the type, and the category's values by the
 group and the build. Construction hashes the sparse canonical `GroupId` once
 and comparison uses its equality, without building the character lattice.
 Equal lattices share one identity whatever constructor or basis built them;
-full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups even when
-their provider fingerprints agree. As for `CategoryRule`, the group is held
+full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups. As for `CategoryRule`, the group is held
 weakly: after all rules over it are dropped, old cache identities are not
 reused. Persist semantic labels and rebuild caches when provider identity or
 codec conventions change.
@@ -172,10 +170,12 @@ codec conventions change.
 symtn retains only the bounded codec interner (65,536 label/object pairs and
 its dual lookup), with uncached conversion after capacity is reached. It
 computes no symbols and stores no symbol cache. fusion-symbols owns generated
-coefficients and its B/C/D catalog's default 256 MiB retention budget; that
-budget also charges the trivial and defining seeds, so construction fails for
-B/C/D ranks whose defining generators exceed it (roughly rank 200), and it
-does not bound temporary generation memory. The categorical scalar is
+coefficients in its process-wide coefficient-cache tiers, one per data kind
+(`product`, `cgc`, `f_symbol`, `r_symbol`, `wigner_3j`, `wigner_6j`), each with
+its own byte limit; the tiers do not bound temporary generation memory.
+`LieGroup::new` defers root-system construction and builds no coefficient
+state, so constructing a rule of any rank allocates no generated data. The
+categorical scalar is
 `f64`, and tensor execution uses the ordinary supported real/complex Host
 payloads; physical expansion and CUDA execution are not provided by this rule.
 Sp fundamental representations have FS indicator -1 and twist +1; this is

@@ -30,11 +30,11 @@ pub use symtn_sectors::{
     MultiplicityFreeRigidSymbols, PackedProductCodec, PackedSectorLayout, PhysicalBasisError,
     PhysicalFusionBasis, ProductAdmission, ProductFusionRule, ProductFusionRuleError,
     ProductSector, ProductSectorCodec, ProductSectorCodecError, ProductSectorComponent,
-    ProductSectorLayout, RuleIdentity, SU2CoefficientError, SU2FusionRule, SU2Irrep, SectorCodec,
-    SectorId, SectorOrderKey, SectorVec, Su2SectorLayout, SymbolShapeError, TableRule,
-    TableRuleError, TableSector, TensorKitProductCodec, TypedSectorAdmission, U1FusionRule,
-    U1Irrep, U1SectorLayout, UncertifiedUnitAdmission, Z2FusionRule, Z2Irrep, ZNFusionRule,
-    ZNIrrep, CU1_MAX_TWICE_CHARGE, SU2_MAX_DOUBLED_SPIN,
+    ProductSectorLayout, RuleIdentity, SU2FusionRule, SU2Irrep, SectorCodec, SectorId,
+    SectorOrderKey, SectorVec, Su2SectorLayout, SymbolShapeError, TableRule, TableRuleError,
+    TableSector, TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep,
+    U1SectorLayout, UncertifiedUnitAdmission, Z2FusionRule, Z2Irrep, ZNFusionRule, ZNIrrep,
+    CU1_MAX_TWICE_CHARGE, SU2_MAX_DOUBLED_SPIN,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};

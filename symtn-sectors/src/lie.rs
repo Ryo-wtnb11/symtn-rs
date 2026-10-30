@@ -272,8 +272,8 @@ impl LieGroupFusionRule {
         }
         let category = LieGroup::new(group.clone()).map_err(provider_error)?;
         // Why the group alone is a complete key: the codec and its conventions
-        // are fixed by the rule type, and the provider fingerprint by the
-        // group and this build.
+        // are fixed by the rule type, and the provider's values by the group
+        // and this build.
         let group = Arc::new(group);
         let identity = RuleIdentity::value_of::<Self, GroupId>().resolve_value(&group);
         Ok(Self {
@@ -456,7 +456,7 @@ impl LieCodec {
         label
             .try_reserve_exact(len)
             .map_err(|source| LieGroupFusionRuleError::LabelAllocation { len, source })?;
-        label.extend(irrep.dynkin_labels().chain(irrep.charges()));
+        label.extend(irrep.dynkin().chain(irrep.charges()));
         Ok(label)
     }
 
@@ -534,7 +534,7 @@ impl LieCodec {
     ) -> Result<(Vec<i64>, Vec<i64>), LieGroupFusionRuleError> {
         if let Some(irrep) = self.irreps.by_id(sector) {
             return Ok((
-                try_collect_labels(irrep.dynkin_labels())?,
+                try_collect_labels(irrep.dynkin())?,
                 try_collect_labels(irrep.charges())?,
             ));
         }
@@ -659,10 +659,10 @@ impl LieCodec {
         }
         let sector = self.encode_coordinates(
             || {
-                let dynkin = irrep.dynkin_labels().map(|x| usize::try_from(x).ok());
+                let dynkin = irrep.dynkin().map(|x| usize::try_from(x).ok());
                 dynkin.chain(irrep.charges().map(zigzag))
             },
-            || irrep.dynkin_labels().chain(irrep.charges()).collect(),
+            || irrep.dynkin().chain(irrep.charges()).collect(),
         )?;
         self.irreps.insert(sector, Arc::new(irrep.into_owned()));
         Ok(sector)
@@ -764,7 +764,7 @@ impl CategoryCodec<LieGroup> for LieCodec {
     /// decodes the id.
     fn sector_order_key(&self, id: SectorId) -> SectorOrderKey {
         let key = match self.irreps.by_id(id) {
-            Some(irrep) => self.order_key(|| irrep.dynkin_labels(), irrep.charges()),
+            Some(irrep) => self.order_key(|| irrep.dynkin(), irrep.charges()),
             None => self
                 .decode_coordinates(id)
                 .ok()
@@ -1014,7 +1014,7 @@ impl CheckedGenericRigidSymbols for LieGroupFusionRule {
             .map_err(provider_error)?;
         let rows = self
             .category()
-            .try_nsymbol(&a, &b, &c)
+            .nsymbol(&a, &b, &c)
             .map_err(provider_error)? as usize;
         let cols = if rows == 0 {
             0
@@ -1022,7 +1022,7 @@ impl CheckedGenericRigidSymbols for LieGroupFusionRule {
             let dual_id = CheckedGenericFusion::try_dual(self, ids[0])?;
             let dual = self.codec.object(|| self.category(), dual_id)?;
             self.category()
-                .try_nsymbol(&dual, &c, &b)
+                .nsymbol(&dual, &c, &b)
                 .map_err(provider_error)? as usize
         };
         let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
@@ -1045,7 +1045,7 @@ impl CheckedGenericRigidSymbols for LieGroupFusionRule {
             .map_err(provider_error)?;
         let rows = self
             .category()
-            .try_nsymbol(&a, &b, &c)
+            .nsymbol(&a, &b, &c)
             .map_err(provider_error)? as usize;
         let cols = if rows == 0 {
             0
@@ -1053,7 +1053,7 @@ impl CheckedGenericRigidSymbols for LieGroupFusionRule {
             let dual_id = CheckedGenericFusion::try_dual(self, ids[1])?;
             let dual = self.codec.object(|| self.category(), dual_id)?;
             self.category()
-                .try_nsymbol(&c, &dual, &a)
+                .nsymbol(&c, &dual, &a)
                 .map_err(provider_error)? as usize
         };
         let data = forward::shaped(self, &ids, &block, [rows, cols])?.to_vec();
@@ -1265,6 +1265,7 @@ mod tests {
     /// Dynkin reversal and constant unit twist, respectively, bit for bit.
     #[test]
     fn rigid_data_matches_f_symbol_and_dynkin_derivations() {
+        use fusion_symbols::category::SymbolBlock;
         for (n, max_total) in [(2, 6), (3, 3), (4, 2)] {
             let rule = LieGroupFusionRule::new(GroupId::su(n).unwrap()).unwrap();
             let unit = rule.category().unit();
@@ -1282,7 +1283,7 @@ mod tests {
                     .f_symbol(&a, &dual, &a, &a, &unit, &unit)
                     .unwrap();
                 assert_eq!(block.dims(), [1, 1, 1, 1]);
-                let f_sign = block.at(0, 0, 0, 0).signum();
+                let f_sign = block.get([0, 0, 0, 0]).signum();
                 assert_eq!(
                     rule.try_frobenius_schur_phase_scalar(sector)
                         .unwrap()
