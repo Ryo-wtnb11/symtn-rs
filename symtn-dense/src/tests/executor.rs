@@ -6,9 +6,10 @@ fn provider_inject_rejects_linalg_before_backend_work() {
     let mut executor = DefaultDenseExecutor::new();
     let data = [1.0, 0.0, 0.0, 1.0];
     let error = executor
-        .svd(DenseRead::F64(
-            DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap(),
-        ))
+        .svd(
+            &mut crate::CpuEngine::serial(),
+            DenseRead::F64(DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap()),
+        )
         .unwrap_err();
     let DenseError::Unsupported { op, message } = error else {
         panic!("provider-inject SVD must be unsupported")
@@ -26,9 +27,10 @@ fn provider_inject_rejects_values_only_before_backend_work() {
     let data = [1.0, 0.0, 0.0, 1.0];
 
     let error = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap(),
-        ))
+        .svd_vals(
+            &mut crate::CpuEngine::serial(),
+            DenseRead::F64(DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap()),
+        )
         .unwrap_err();
     let DenseError::Unsupported { op, message } = error else {
         panic!("provider-inject SVD values must be unsupported")
@@ -40,9 +42,10 @@ fn provider_inject_rejects_values_only_before_backend_work() {
     );
 
     let error = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap(),
-        ))
+        .eigh_vals(
+            &mut crate::CpuEngine::serial(),
+            DenseRead::F64(DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap()),
+        )
         .unwrap_err();
     let DenseError::Unsupported { op, message } = error else {
         panic!("provider-inject EIGH values must be unsupported")

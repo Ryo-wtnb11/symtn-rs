@@ -1004,12 +1004,13 @@ where
     ///
     /// `CopyC` is TensorKit `blas_contract!`'s `copyC`
     /// (`tensoroperations.jl:436-446` @cfaa073): `mul!(Cnew, A, B)` into the
-    /// lane's pooled temporary, then `tensoradd!(C, Cnew, pAB, false, α, β)`.
-    /// TensorKit allocates `Cnew` per call (`tensoralloc_add(..., Val(true))`);
-    /// the pooled buffer plays that role, so a warm call allocates no
-    /// output-sized temporary. Stale pooled values are never read: eager
-    /// scratch carries no core slot, so the core writes the temporary with a
-    /// strong-zero `beta = 0`, inactive blocks included.
+    /// context's `copyC` temporary, then
+    /// `tensoradd!(C, Cnew, pAB, false, α, β)`. TensorKit allocates `Cnew` per
+    /// call (`tensoralloc_add(..., Val(true))`); so does an eager call here,
+    /// whose context is per-call scratch, while a context a caller keeps
+    /// reuses it. Stale values are never read: eager scratch carries no core
+    /// slot, so the core writes the temporary with a strong-zero `beta = 0`,
+    /// inactive blocks included.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn execute_contract_route_host(
         &mut self,
@@ -1037,7 +1038,7 @@ where
     }
 
     /// The eager arm of every route: the one route executor at one member,
-    /// over this context's tree workspace and scratch (the pooled `copyC`
+    /// over this context's tree workspace and scratch (the context's `copyC`
     /// temporary as a CopyC core destination).
     #[allow(clippy::too_many_arguments)]
     fn execute_route_host(
