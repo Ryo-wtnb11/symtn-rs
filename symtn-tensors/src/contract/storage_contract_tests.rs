@@ -2873,5 +2873,69 @@ fn the_planner_walks_the_requested_order_once() {
     assert_eq!(walks(&u1_case()), (RouteKind::DynamicTree, 3));
 }
 
+/// #1488: `dim(C)` below both operands takes `copyC`. On the S1 sort
+/// `A[3,2]·B[1,0] → [2,3,0,1]` and the S2 swap `A[0,1]·B[2,3] → [3,2,1,0]`
+/// of `symtn/tests/contract_candidate_core.rs`
+/// (`small_output_copy_c_shapes_match_tensorkit_with_one_output_transform`), with `v = u1{-1:8, 0:8,
+/// 1:8}` and `c = u1{0:2, 1:1}`, the Host eager entry and the planner both
+/// resolve to CopyC, and its core reads both operands untransformed: only
+/// C is copied, never an operand. Whether the scorer ran is not observed.
+#[test]
+fn small_output_takes_copy_c_without_copying_an_operand() {
+    let u1 = Arc::new(U1FusionRule);
+    let leg = |entries: &[(i32, usize)]| {
+        SectorLeg::new(
+            entries
+                .iter()
+                .map(|&(charge, degeneracy)| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            false,
+        )
+    };
+    let v = || leg(&[(-1, 8), (0, 8), (1, 8)]);
+    let c = || leg(&[(0, 2), (1, 1)]);
+    let cases = [
+        (
+            "S1",
+            Case {
+                lhs: space(&u1, vec![c(), c()], vec![v(), v()]),
+                rhs: space(&u1, vec![v(), v()], vec![c(), c()]),
+                lhs_axes: vec![3, 2],
+                rhs_axes: vec![1, 0],
+                output_axes: vec![2, 3, 0, 1],
+            },
+        ),
+        (
+            "S2",
+            Case {
+                lhs: space(&u1, vec![v(), v()], vec![c(), c()]),
+                rhs: space(&u1, vec![c(), c()], vec![v(), v()]),
+                lhs_axes: vec![0, 1],
+                rhs_axes: vec![2, 3],
+                output_axes: vec![3, 2, 1, 0],
+            },
+        ),
+    ];
+    for (name, case) in &cases {
+        assert_eq!(
+            owned_routes(case),
+            (RouteKind::CopyC, RouteKind::CopyC),
+            "{name}"
+        );
+        let resolution = Context::<f64>::default()
+            .plan_contract::<crate::DirectCoreExecutor, _>(
+                &case.dst(),
+                FusionOperand::direct(case.lhs.space()),
+                FusionOperand::direct(case.rhs.space()),
+                &case.lhs_axes,
+                &case.rhs_axes,
+                &case.output_axes,
+            )
+            .unwrap();
+        let (core, _) = resolution.direct_core().unwrap();
+        core.require_identity_direct_replay()
+            .unwrap_or_else(|error| panic!("{name}: the core transforms an operand: {error}"));
+    }
+}
+
 #[path = "route_host_tests.rs"]
 mod route_host_tests;
