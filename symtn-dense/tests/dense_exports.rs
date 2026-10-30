@@ -154,6 +154,7 @@ fn symtn_dense_exports_exactly_the_pinned_names() {
         "DenseError",
         "DenseExecutor",
         "DenseFactorization",
+        "DenseGemmBatchBinding",
         "DenseGemmBatchJob",
         "DenseLinalgScopeBody",
         "DenseOwned",

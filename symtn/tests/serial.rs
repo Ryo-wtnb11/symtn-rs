@@ -58,6 +58,7 @@ mod precision_conversions;
 mod prepared_compose_allocations;
 mod prepared_compose_pins;
 mod prepared_eigh_allocations;
+mod prepared_member1_core_reuse;
 mod repartition_allocations;
 mod restrict_leg_allocations;
 mod single_precision_allocations;

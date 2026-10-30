@@ -48,7 +48,7 @@ pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};
 
 #[cfg(feature = "tenferro")]
-pub use tenferro_adapter::DefaultDenseExecutor;
+pub use tenferro_adapter::{DefaultDenseExecutor, DenseGemmBatchBinding};
 
 /// The execution resource every numerical entry takes as
 /// `engine: &mut dyn Engine`: tenferro's engine trait, re-exported so callers

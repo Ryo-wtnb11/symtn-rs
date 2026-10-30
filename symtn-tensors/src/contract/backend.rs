@@ -383,33 +383,9 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), OperationError> {
-        // Whole storage buffers as flat rank-1 views; the batch jobs carry the
-        // per-matrix offsets. Same plan-compile validation contract as
-        // matmul_rank2_axpby_into_raw.
-        let dst_shape = [dst_data.len()];
-        let lhs_shape = [lhs_data.len()];
-        let rhs_shape = [rhs_data.len()];
-        let flat_strides = [1];
-        let lhs = D::dense_read(DenseView::new_trusted(
-            lhs_data,
-            &lhs_shape,
-            &flat_strides,
-            0,
-        ));
-        let rhs = D::dense_read(DenseView::new_trusted(
-            rhs_data,
-            &rhs_shape,
-            &flat_strides,
-            0,
-        ));
-        let output = D::dense_write(DenseViewMut::new_trusted(
-            dst_data,
-            &dst_shape,
-            &flat_strides,
-            0,
-        ));
-        self.dense_mut()
-            .matmul_batch_axpby_into(
+        let dense = self.dense_mut();
+        with_flat_batch_views(dst_data, lhs_data, rhs_data, |output, lhs, rhs| {
+            dense.matmul_batch_axpby_into(
                 engine,
                 output,
                 lhs,
@@ -419,7 +395,7 @@ where
                 alpha.dense_scalar(),
                 beta.dense_scalar(),
             )
-            .map_err(OperationError::Dense)
+        })
     }
 
     fn matmul_rank2_batch_with_ops_axpby_into_raw(
@@ -436,30 +412,9 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), OperationError> {
-        let dst_shape = [dst_data.len()];
-        let lhs_shape = [lhs_data.len()];
-        let rhs_shape = [rhs_data.len()];
-        let flat_strides = [1];
-        let lhs = D::dense_read(DenseView::new_trusted(
-            lhs_data,
-            &lhs_shape,
-            &flat_strides,
-            0,
-        ));
-        let rhs = D::dense_read(DenseView::new_trusted(
-            rhs_data,
-            &rhs_shape,
-            &flat_strides,
-            0,
-        ));
-        let output = D::dense_write(DenseViewMut::new_trusted(
-            dst_data,
-            &dst_shape,
-            &flat_strides,
-            0,
-        ));
-        self.dense_mut()
-            .matmul_batch_axpby_with_ops_into(
+        let dense = self.dense_mut();
+        with_flat_batch_views(dst_data, lhs_data, rhs_data, |output, lhs, rhs| {
+            dense.matmul_batch_axpby_with_ops_into(
                 engine,
                 output,
                 lhs,
@@ -471,8 +426,48 @@ where
                 alpha.dense_scalar(),
                 beta.dense_scalar(),
             )
-            .map_err(OperationError::Dense)
+        })
     }
+}
+
+/// Runs one dense batch call over whole Host buffers as flat rank-1 views;
+/// the batch jobs carry the per-matrix offsets. Same plan-compile validation
+/// contract as `matmul_rank2_axpby_into_raw`: replay hands slices whose
+/// lengths the plan bounds-checked, so the views use the trusted
+/// constructors (debug builds re-validate).
+pub(super) fn with_flat_batch_views<D: DenseBlockScalar>(
+    dst_data: &mut [D],
+    lhs_data: &[D],
+    rhs_data: &[D],
+    batch: impl FnOnce(
+        symtn_dense::DenseWrite<'_>,
+        symtn_dense::DenseRead<'_>,
+        symtn_dense::DenseRead<'_>,
+    ) -> Result<(), symtn_dense::DenseError>,
+) -> Result<(), OperationError> {
+    let dst_shape = [dst_data.len()];
+    let lhs_shape = [lhs_data.len()];
+    let rhs_shape = [rhs_data.len()];
+    let flat_strides = [1];
+    let lhs = D::dense_read(DenseView::new_trusted(
+        lhs_data,
+        &lhs_shape,
+        &flat_strides,
+        0,
+    ));
+    let rhs = D::dense_read(DenseView::new_trusted(
+        rhs_data,
+        &rhs_shape,
+        &flat_strides,
+        0,
+    ));
+    let output = D::dense_write(DenseViewMut::new_trusted(
+        dst_data,
+        &dst_shape,
+        &flat_strides,
+        0,
+    ));
+    batch(output, lhs, rhs).map_err(OperationError::Dense)
 }
 
 /// Replays a prepared tensor contraction structure on host slices.

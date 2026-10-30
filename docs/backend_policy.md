@@ -22,6 +22,21 @@ With feature `cuda`, a device operation runs on the caller's `CudaEngine`
 (`CudaEngine::open(CudaDeviceId::from_ordinal(n))`), passed like any other
 engine; a `Runtime` is not tied to a device.
 
+Eager calls prepare that grouped plan per batch: two top-level allocations
+in cpueinsum 0.9, plus any child heap allocations (a Packed `Complex64`
+child's boxes and scatters). A one-member Host `ContractPlan`/`ComposePlan`
+workspace keeps the plan of each grouped core submission instead, so a warm
+one-member call prepares no compatible grouped core plan: it is prepared on
+the workspace's first call, reused while the ordered jobs and dtype match (payloads, buffers and view offsets
+are checked on every call, not keyed), and released when the workspace runs
+another member count or plan. Its charge (16 KiB plus a few words per job
+extent for each job, plus the job list) is part of
+`ContractWorkspace::retained_bytes`. This holds for the faer provider and the
+four payload scalars only; BLAS and CUDA builds, member counts above one,
+transform stages and single-job or affine batches prepare as before; the
+latter use Tenferro's binary-plan cache, whose misses this guarantee does
+not cover.
+
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
 belong behind the dependency adapter, with independent correctness tests;

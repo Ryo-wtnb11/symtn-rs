@@ -1,10 +1,12 @@
 //! Warm Host compose workspace and plan/workspace allocation contract:
-//! after one call at
-//! a fixed `B`, `execute` and `execute_into` allocate nothing of symtn's on
-//! the caller thread. The one remaining allocation is Tenferro 0.7.1's
-//! grouped-GEMM validation (`tenferro-tensor src/backend.rs:
-//! validate_grouped_gemm`), which every grouped submission pays, eager
-//! included. The allocation target installs one shared counting allocator.
+//! after one call at a fixed `B`, `execute` and `execute_into` allocate at
+//! most once on the caller thread. The allowance is not a required
+//! allocation. At B = 1 the workspace keeps its core's grouped-GEMM plans
+//! and a warm call allocates nothing (`prepared_member1_core_reuse`); at the
+//! B = 5 of this test the core still prepares its native grouped plan on
+//! every call (two allocations in cpueinsum 0.9), so this row exceeds the
+//! budget until member retention lands. The allocation target installs one
+//! shared counting allocator.
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
@@ -33,7 +35,7 @@ fn allocations(f: impl FnOnce()) -> (usize, usize, std::time::Duration) {
 }
 
 #[test]
-fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
+fn warm_host_calls_allocate_at_most_once() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
@@ -41,11 +43,10 @@ fn warm_host_calls_allocate_only_the_backend_grouped_validation() {
     }
     // What: at a fixed B, a second `execute` and a second `execute_into`
     // (whose plan has inactive destination blocks to zero-fill) reuse the
-    // workspace's output, job list and fill strides, and the Runtime's pooled
-    // context. The zero fill adds nothing (`execute_into` == `execute`), and
-    // both stay within the one per-submission allocation of Tenferro's
-    // grouped validator. The cold call's count is the control that shows the
-    // counter sees this thread's allocations.
+    // workspace's output, job list, fill strides and grouped core plans. The
+    // zero fill adds nothing (`execute_into` == `execute`), and
+    // both stay within one allocation. The cold call's count is the control
+    // that shows the counter sees this thread's allocations.
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let count = 5;

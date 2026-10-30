@@ -10,6 +10,8 @@ mod executor;
     not(feature = "provider-inject")
 ))]
 mod factor_properties;
+#[cfg(feature = "tenferro")]
+mod grouped_binding;
 mod tensor;
 mod view;
 
