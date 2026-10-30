@@ -1375,7 +1375,7 @@ where
 }
 
 /// Submits one prepared move with a non-zero caller scale on the descriptor,
-/// taking the 1x1 coefficient operand from the structure's uploaded vector
+/// taking the one-element coefficient operand from the structure's uploaded vector
 /// or, where the host copies unscaled, from the context's shared `1`.
 #[allow(clippy::too_many_arguments)]
 fn submit_move<D: CudaScalar>(

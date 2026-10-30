@@ -1,7 +1,7 @@
 use super::*;
 
 /// The device operands a region call needs but never varies: the ones
-/// template, whose first element is the 1x1 coefficient of an unscaled move
+/// template, whose first element is the one-element coefficient of an unscaled move
 /// and whose packed prefix a trace contracts its diagonal against, and the
 /// zero template read as the packed source of a region fill, plus the scaled
 /// template a trace with a non-unit scale contracts its diagonal against.

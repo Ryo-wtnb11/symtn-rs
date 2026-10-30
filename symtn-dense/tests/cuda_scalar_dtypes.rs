@@ -3,7 +3,7 @@
 //!
 //! What this file owns that the `f64`/`Complex64` suites do not: the paths
 //! that were typed by `f64` rather than by the payload's real lane — the
-//! spectrum and reduction downloads, the rank-0 divisor of the Hermitian
+//! spectrum and reduction downloads, the normalizers of the Hermitian
 //! test, and its tolerance — plus complex device QR, the last
 //! dtype gate (tenferro-rs#1833, lifted by #1271).
 //!
@@ -586,8 +586,8 @@ fn region_eigh_obeys_its_laws_for_every_dtype() {
 }
 
 // ---------------------------------------------------------------------------
-// The real lane itself: spectra widened to f64, and the rank-0 divisor typed
-// by the lane rather than by f64 or by the payload.
+// The real lane itself: spectra widened to f64, and the Hermitian normalizers
+// typed by the payload rather than by f64.
 // ---------------------------------------------------------------------------
 
 /// A device spectrum of a single-precision payload comes back as `F32` and is
@@ -645,11 +645,11 @@ fn device_spectra_are_widened_to_f64_for_every_dtype() {
     spectrum_widening_case::<Complex64>(&mut ctx);
 }
 
-/// The Hermitian test divides the block by a rank-0 **real** scalar of the
-/// payload's lane. An `f64` divisor against an `F32`/`C32` block and a
-/// payload-typed complex divisor are both rejected by Tenferro, so a block
-/// this test admits is evidence that the divisor is typed by the lane: the
-/// whole chain would error out otherwise, not merely answer differently.
+/// The Hermitian test multiplies the block by power-of-two normalizers in the
+/// payload's own dtype, and reduces in the payload's real lane. Tenferro
+/// rejects an operand of another dtype, so a block this test admits is
+/// evidence that every operand is typed by the payload: the whole chain would
+/// error out otherwise, not merely answer differently.
 /// An `n x n` block that is Hermitian by construction — element `(row, col)`
 /// and `(col, row)` are built from the same pair of magnitudes with the
 /// imaginary part negated — scaled by an exact power of two so no rounding is

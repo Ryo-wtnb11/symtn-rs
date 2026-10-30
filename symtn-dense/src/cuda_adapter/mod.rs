@@ -99,18 +99,23 @@ mod cuda_scalar_sealed {
 ///
 /// Every payload names a **real lane** ([`TenferroScalar::Real`]: `f32` for
 /// `f32` and [`Complex32`], `f64` for `f64` and [`Complex64`]). Real device
-/// metadata — a spectrum, a reduction, the rank-0 divisor of the Hermitian
-/// test — is produced and consumed in that lane rather than in `f64` by
-/// assumption: Tenferro answers a single-precision payload with `F32`
-/// metadata and rejects an `F64` rank-0 divisor against it
-/// (`benchmarks/history/cuda-single-precision-probe-2026-09-20.md`). Metadata
+/// metadata — a spectrum, a reduction, the Hermitian test's normalizers — is
+/// produced and consumed in that lane rather than in `f64` by assumption:
+/// Tenferro answers a single-precision payload with `F32` metadata and
+/// rejects an `F64` operand against it
+/// (`benchmarks/history/cuda-single-precision-probe-2026-09-20.md`). A lane
+/// value enters the payload dtype through `From` (`(s, 0)` for a complex
+/// payload) when it must meet the payload in one elementwise op. Metadata
 /// symtn decides on is widened to `f64` at the download, so the host-side
 /// spectrum contract is unchanged.
 ///
 /// Admitting a dtype here does not by itself open a typed tensor API for it;
 /// `symtn`'s `CudaPayload` admits all four (#1336).
 pub trait CudaScalar:
-    TenferroScalar<Real: CudaRealScalar> + PartialEq + cuda_scalar_sealed::Sealed
+    TenferroScalar<Real: CudaRealScalar>
+    + From<<Self as TenferroScalar>::Real>
+    + PartialEq
+    + cuda_scalar_sealed::Sealed
 {
     /// symtn-side dtype tag, used for [`DenseError::DTypeMismatch`].
     const DTYPE: DenseDType;
@@ -162,7 +167,7 @@ pub trait CudaScalar:
 /// Sealed to `f32` and `f64`, which are exactly the
 /// [`TenferroScalar::Real`] types of the admitted payloads. It exists so the
 /// adapter's real-metadata paths — spectrum and reduction downloads, the
-/// rank-0 divisor upload, the Hermitian tolerance — are typed by the payload
+/// Hermitian normalizers, the Hermitian tolerance — are typed by the payload
 /// instead of assuming double precision, while the values symtn's host-side
 /// decisions consume stay `f64`.
 pub trait CudaRealScalar: TenferroScalar + cuda_scalar_sealed::Sealed {
@@ -173,7 +178,7 @@ pub trait CudaRealScalar: TenferroScalar + cuda_scalar_sealed::Sealed {
     /// every `f32` is an `f64`.
     fn widen(self) -> f64;
 
-    /// Narrows a host scalar to this lane, for a rank-0 device operand. The
+    /// Narrows a host scalar to this lane, for a device operand. The
     /// only values narrowed here are powers of two inside this lane's range,
     /// so the value round-trips.
     fn narrow(value: f64) -> Self;

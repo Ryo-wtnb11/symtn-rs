@@ -123,7 +123,7 @@ impl CudaRegion {
     }
 
     /// The `(dims ++ [1], strides ++ [1])` operand metadata `dot_general`
-    /// wants: the trailing unit mode is the one contracted against the 1x1
+    /// wants: the trailing unit mode is the one contracted against the one-element
     /// coefficient.
     pub(crate) fn contraction_view_metadata(&self) -> Result<(Vec<usize>, Vec<isize>), DenseError> {
         let mut dims = Vec::with_capacity(self.dims.len() + 1);

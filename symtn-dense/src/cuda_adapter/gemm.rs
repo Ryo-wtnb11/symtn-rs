@@ -163,8 +163,9 @@ fn cuda_gemm_region_strided_into<D: CudaScalar>(
         rhs_batch_dims: Default::default(),
     };
     let accumulation = DotGeneralAccumulation {
-        lhs_conj,
-        rhs_conj,
+        // Identity on a real payload; see `submit_region_axpby`.
+        lhs_conj: lhs_conj && D::IS_COMPLEX,
+        rhs_conj: rhs_conj && D::IS_COMPLEX,
         alpha: alpha.contraction_scalar(),
         beta: beta.contraction_scalar(),
     };

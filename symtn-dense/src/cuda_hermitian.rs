@@ -75,15 +75,15 @@ pub(crate) fn residual_stage(input_ss: f64, residual_scale: f64, max_exp: i32) -
 /// finite positive `scale` of a real lane with `max_exp` (its `MAX_EXP`)
 /// into `[1, 2)`.
 ///
-/// Why not divide by `scale` itself: Tenferro's complex-by-real division
-/// promotes the divisor to `Complex(s, 0)` and forms `s * s`, which leaves
-/// the lane once `|s|` passes the square root of its range (tenferro-rs#1922),
-/// while its complex-by-real multiplication is componentwise. Multiplying by
-/// a power of two is also exact wherever the product stays normal.
+/// Why not divide by `scale` itself: Tenferro's complex division by
+/// `Complex(s, 0)` forms `s * s`, which leaves the lane once `|s|` passes the
+/// square root of its range (tenferro-rs#1922), while a product with
+/// `(2^-k, 0)` scales each component. Multiplying by a power of two is also
+/// exact wherever the product stays normal.
 ///
 /// `k` is read from the exponent bits, never from a float `log2`. It is
-/// clamped to `[-(MAX_EXP - 2), MAX_EXP - 2]` so both `2^-k` and its
-/// reciprocal `2^k` (the operand a real payload divides by) are *normal*
+/// clamped to `[-(MAX_EXP - 2), MAX_EXP - 2]` so both `2^-k` (the operand
+/// the payload is multiplied by) and its reciprocal `2^k` are *normal*
 /// numbers of the lane, which flush-to-zero cannot touch. The lower bound
 /// acts only on a subnormal `scale`, whose clamped product still has a normal
 /// maximum (`>= 2^-23` in `f32`, `>= 2^-52` in `f64`); the upper bound acts
