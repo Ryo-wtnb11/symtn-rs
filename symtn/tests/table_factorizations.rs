@@ -543,8 +543,28 @@ fn truncate_by_hand(
 fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3]) {
     let t = case.filled("t", 2, 2);
     let norm = t.norm(2.0).unwrap();
-    let spectrum = t.svd_vals(&[0, 1], &[2, 3]).unwrap();
     let Svd { u, s, vh } = t.svd_compact(&[0, 1], &[2, 3]).unwrap();
+    // Why the rule by hand reads `s` and not `svd_vals`: the two are separate
+    // SVD runs that agree only to rounding, so a threshold placed at one of
+    // the values must be judged on the spectrum `find_truncated` selects from.
+    let spectrum: Vec<SectorSpectrum<TableSector>> = s
+        .diagview()
+        .unwrap()
+        .into_iter()
+        .map(|entry| SectorSpectrum {
+            sector: entry.sector,
+            values: entry.values.iter().map(|value| value.norm()).collect(),
+        })
+        .collect();
+    for (compact, values) in spectrum.iter().zip(t.svd_vals(&[0, 1], &[2, 3]).unwrap()) {
+        assert_eq!(compact.sector, values.sector);
+        for (&got, want) in compact.values.iter().zip(values.values) {
+            assert!(
+                close(got, want, norm),
+                "svd_compact {got} vs svd_vals {want}"
+            );
+        }
+    }
     for ((what, truncation, by_hand), tensorkit) in [
         ("rank 7", Truncation::rank(7), ByHand::Rank(7.0)),
         (
@@ -610,6 +630,104 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
         .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
         .unwrap();
     assert_eq!(degeneracies(&s.domain()[0]), want_dims, "cutoff at σ");
+}
+
+/// An absolute cutoff equal to a singular value keeps it and one ulp above
+/// drops it, in every sector at once. The operand is a compact diagonal
+/// whose magnitudes are dyadic, so its SVD values are exact and the tie is
+/// decided on the stated values, not on rounding. `at` and `above` are the
+/// kept degeneracies and the discarded `Σ d_c σ²`, written out by hand.
+fn exact_cutoff_is_inclusive(
+    case: &Case,
+    rule: TableRule,
+    values: &[(u16, &[Complex64])],
+    at: (&[(u16, usize)], f64),
+    above: (&[(u16, usize)], f64),
+) {
+    let bond = GradedSpace::try_new(
+        Arc::new(rule),
+        values
+            .iter()
+            .map(|&(label, values)| (TableSector::new(label), values.len())),
+    )
+    .unwrap();
+    let t: Table = TensorMap::diagonal(
+        &case.runtime,
+        &bond,
+        values.iter().map(|&(label, values)| SectorSpectrum {
+            sector: TableSector::new(label),
+            values: values.to_vec(),
+        }),
+    )
+    .unwrap();
+    let norm = t.norm(2.0).unwrap();
+    let Svd { u, s, vh } = t.svd_compact(&[0], &[1]).unwrap();
+    for (cutoff, (want_dims, discarded)) in [(1.0, at), (1.0_f64.next_up(), above)] {
+        let found = s.domain()[0]
+            .find_truncated(
+                &s.diagview().unwrap(),
+                &Truncation::absolute_cutoff(cutoff).unwrap(),
+            )
+            .unwrap();
+        let u = u
+            .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            .unwrap();
+        let s = s
+            .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            .unwrap();
+        let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
+        assert_eq!(degeneracies(&s.domain()[0]), want_dims, "cutoff {cutoff}");
+        let want_error = discarded.sqrt();
+        assert!(
+            close(found.error, want_error, norm),
+            "cutoff {cutoff}: error {} != {want_error}",
+            found.error
+        );
+        let truncated = u.compose(&s).unwrap().compose(&vh).unwrap();
+        assert!(
+            close(
+                truncated.norm(2.0).unwrap(),
+                (norm * norm - discarded).sqrt(),
+                norm
+            ),
+            "cutoff {cutoff}: norm"
+        );
+    }
+}
+
+#[test]
+fn fibonacci_exact_cutoff_is_inclusive() {
+    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    let c = Complex64::new;
+    exact_cutoff_is_inclusive(
+        &Case::fibonacci(),
+        TableRule::fibonacci(),
+        &[
+            (1, &[c(-2.0, 0.0), c(0.0, 1.0), c(0.5, 0.0)]),
+            (2, &[c(1.0, 0.0), c(-0.25, 0.0), c(0.0, -4.0)]),
+        ],
+        (&[(1, 2), (2, 2)], 0.5 * 0.5 + phi * 0.25 * 0.25),
+        (
+            &[(1, 1), (2, 1)],
+            1.0 + 0.5 * 0.5 + phi * (1.0 + 0.25 * 0.25),
+        ),
+    );
+}
+
+#[test]
+fn ising_exact_cutoff_is_inclusive() {
+    let c = Complex64::new;
+    exact_cutoff_is_inclusive(
+        &Case::ising(),
+        TableRule::ising(),
+        &[
+            (1, &[c(-1.0, 0.0), c(0.5, 0.0)]),
+            (2, &[c(0.0, 1.0)]),
+            (3, &[c(2.0, 0.0), c(0.0, -1.0)]),
+        ],
+        (&[(1, 1), (2, 1), (3, 2)], 0.5 * 0.5),
+        (&[(3, 1)], 1.0 + 0.5 * 0.5 + 1.0 + SQRT_2),
+    );
 }
 
 #[test]

@@ -951,9 +951,16 @@ fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
 /// - `S2` the swap `A[0,1]·B[2,3] → [3,2,1,0]`, `A: v⊗v ← c⊗c`,
 ///   `B: c⊗c ← v⊗v`.
 ///
-/// Debug builds also check the shortcut against full candidate scoring.
+/// Values against TensorKit's `blas_contract!` sequence, and one warm tree
+/// transform: the output permute, with neither operand rebuilt. The route
+/// itself (copyC, operands read untransformed) is pinned on these shapes by
+/// symtn-tensors' `small_output_takes_copy_c_without_copying_an_operand`;
+/// that the shortcut skips the DynamicTree scorer is established by source
+/// inspection of `copy_c_order` (debug builds compare it with full scoring),
+/// not asserted here. The CopyC allocation budget is
+/// `contract_route_host_allocations`'s contract.
 #[test]
-fn small_output_takes_copy_c_without_scoring() {
+fn small_output_copy_c_shapes_match_tensorkit_with_one_output_transform() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().dense_threads(1).build().unwrap();
     let v = u1(&[(-1, 8), (0, 8), (1, 8)]);
@@ -996,12 +1003,10 @@ fn small_output_takes_copy_c_without_scoring() {
             blas_contract_oracle(case).dense_data().unwrap(),
             case.terms(),
         );
-        let operand_bytes = std::mem::size_of_val(case.lhs.dense_data().unwrap()) as u64;
-        let (calls, bytes, _) = warm(&runtime, case);
-        eprintln!("U(1) {name}: {calls} calls, {bytes} B, operand {operand_bytes} B");
-        // What: copyC allocates the temporary and the output, never an
-        // operand-sized copy.
-        assert!(bytes < operand_bytes, "{name}: {bytes} B allocated");
+        let (calls, bytes, lookups) = warm(&runtime, case);
+        eprintln!("U(1) {name}: {calls} calls, {bytes} B, {lookups} transform lookups");
+        // What: the output permute is the only tree transform.
+        assert_eq!(lookups, 1, "{name}: transform lookups");
     }
 }
 

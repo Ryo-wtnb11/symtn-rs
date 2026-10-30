@@ -171,6 +171,53 @@ struct SpyExecutor {
     faults: Vec<SpyFault>,
     /// `(allowed kernels, reason)`: any other entry panics with `reason`.
     only: Option<(&'static [Kernel], &'static str)>,
+    /// Where each GEMM entry's views point, when a test asks.
+    gemms: Option<std::sync::Arc<std::sync::Mutex<Vec<SpyGemm>>>>,
+}
+
+/// The address ranges of the buffers one GEMM entry wrote and read, so a test
+/// can prove which storage a kernel touched (an operand read in place, an
+/// output written into its published buffer) instead of inferring it from
+/// allocation totals.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct SpyGemm {
+    kernel: Kernel,
+    output: std::ops::Range<usize>,
+    lhs: std::ops::Range<usize>,
+    rhs: std::ops::Range<usize>,
+}
+
+#[allow(dead_code)]
+fn spy_span<T>(data: &[T]) -> std::ops::Range<usize> {
+    let range = data.as_ptr_range();
+    range.start as usize..range.end as usize
+}
+
+#[allow(dead_code)]
+fn spy_read_span(view: &DenseRead<'_>) -> std::ops::Range<usize> {
+    match view {
+        DenseRead::F32(view) => spy_span(view.data()),
+        DenseRead::F64(view) => spy_span(view.data()),
+        DenseRead::I32(view) => spy_span(view.data()),
+        DenseRead::I64(view) => spy_span(view.data()),
+        DenseRead::Bool(view) => spy_span(view.data()),
+        DenseRead::C32(view) => spy_span(view.data()),
+        DenseRead::C64(view) => spy_span(view.data()),
+    }
+}
+
+#[allow(dead_code)]
+fn spy_write_span(view: &DenseWrite<'_>) -> std::ops::Range<usize> {
+    match view {
+        DenseWrite::F32(view) => spy_span(view.data()),
+        DenseWrite::F64(view) => spy_span(view.data()),
+        DenseWrite::I32(view) => spy_span(view.data()),
+        DenseWrite::I64(view) => spy_span(view.data()),
+        DenseWrite::Bool(view) => spy_span(view.data()),
+        DenseWrite::C32(view) => spy_span(view.data()),
+        DenseWrite::C64(view) => spy_span(view.data()),
+    }
 }
 
 #[allow(dead_code)]
@@ -188,6 +235,29 @@ impl SpyExecutor {
     fn only(mut self, kernels: &'static [Kernel], reason: &'static str) -> Self {
         self.only = Some((kernels, reason));
         self
+    }
+
+    /// Logs every GEMM entry's buffer addresses into `log`; see [`SpyGemm`].
+    fn recording_gemms(mut self, log: &std::sync::Arc<std::sync::Mutex<Vec<SpyGemm>>>) -> Self {
+        self.gemms = Some(std::sync::Arc::clone(log));
+        self
+    }
+
+    fn record_gemm(
+        &self,
+        kernel: Kernel,
+        output: &DenseWrite<'_>,
+        lhs: &DenseRead<'_>,
+        rhs: &DenseRead<'_>,
+    ) {
+        if let Some(log) = &self.gemms {
+            log.lock().unwrap().push(SpyGemm {
+                kernel,
+                output: spy_write_span(output),
+                lhs: spy_read_span(lhs),
+                rhs: spy_read_span(rhs),
+            });
+        }
     }
 
     /// Adds a fault; see [`SpyFault`].
@@ -339,6 +409,7 @@ impl DenseExecutor for SpyExecutor {
         config: &DenseDotConfig,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::DotGeneral)?;
+        self.record_gemm(Kernel::DotGeneral, &output, &lhs, &rhs);
         self.inner.dot_general_into(output, lhs, rhs, config)
     }
     fn matmul_into(
@@ -348,6 +419,7 @@ impl DenseExecutor for SpyExecutor {
         rhs: DenseRead<'_>,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::Matmul)?;
+        self.record_gemm(Kernel::Matmul, &output, &lhs, &rhs);
         self.inner.matmul_into(output, lhs, rhs)
     }
     fn matmul_axpby_into(
@@ -359,6 +431,7 @@ impl DenseExecutor for SpyExecutor {
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::MatmulAxpby)?;
+        self.record_gemm(Kernel::MatmulAxpby, &output, &lhs, &rhs);
         self.inner.matmul_axpby_into(output, lhs, rhs, alpha, beta)
     }
     #[allow(clippy::too_many_arguments)]
@@ -373,6 +446,7 @@ impl DenseExecutor for SpyExecutor {
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::MatmulBatch)?;
+        self.record_gemm(Kernel::MatmulBatch, &output, &lhs, &rhs);
         self.counts
             .batch_jobs
             .fetch_add(jobs.len(), std::sync::atomic::Ordering::Relaxed);
@@ -393,6 +467,7 @@ impl DenseExecutor for SpyExecutor {
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
         self.enter(Kernel::MatmulBatchOps)?;
+        self.record_gemm(Kernel::MatmulBatchOps, &output, &lhs, &rhs);
         self.counts
             .batch_jobs
             .fetch_add(jobs.len(), std::sync::atomic::Ordering::Relaxed);
