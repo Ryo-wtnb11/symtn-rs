@@ -317,6 +317,9 @@ mod checked_generic {
     // neither hide nor trigger it.
     #[test]
     fn checked_generic_polar_writes_its_factors_in_place() {
+        // Serial: its structure builds move the process-global cache
+        // counters that sibling tests take deltas of.
+        let _serial = crate::counting_alloc::serial();
         let gemms = Arc::new(std::sync::Mutex::new(Vec::new()));
         let counts = Arc::new(SpyCounts::default());
         let runtime = Runtime::builder()
