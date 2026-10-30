@@ -52,7 +52,7 @@ pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};
 
 #[cfg(feature = "tenferro")]
-pub use tenferro_adapter::{DefaultDenseExecutor, SharedCpuContext};
+pub use tenferro_adapter::{DefaultDenseExecutor, DenseGemmBatchBinding, SharedCpuContext};
 
 #[cfg(feature = "cuda")]
 pub use cuda_adapter::{

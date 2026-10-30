@@ -56,6 +56,17 @@ pub struct ContractPlan<R, D, S = Vec<D>> {
 /// destination; and the caller never reaches the buffer mutably until
 /// `take_output` moves it out for good. `execute_into` cannot rely on any of
 /// this for a caller's destination and rewrites every inactive block.
+///
+/// On Host with the faer provider, a one-member workspace also keeps the
+/// prepared native grouped-GEMM plan of each grouped core submission, built
+/// on its first call and reused while it matches, so a warm one-member call
+/// prepares no compatible grouped core plan. One-job and affine core batches
+/// keep Tenferro's binary-plan cache, whose misses are outside this
+/// guarantee. Changing the member count releases them (a
+/// later one-member call prepares them again), and dropping the workspace
+/// frees them; two workspaces of one plan each keep their own.
+/// [`Self::retained_bytes`] includes their charge. Member counts above one
+/// prepare their grouped plans per call.
 pub struct ContractWorkspace<R, D, S = Vec<D>> {
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     runtime: Runtime,
@@ -528,7 +539,10 @@ impl<R, D, S> ContractWorkspace<R, D, S> {
 
 impl<R, D, S: PreparedExec<R, D>> ContractWorkspace<R, D, S> {
     /// Retained output payload and replay scratch (on CUDA, device payload
-    /// and Host layout scratch), excluding Runtime resources.
+    /// and Host layout scratch), plus on Host a conservative charge for the
+    /// one-member core's grouped-GEMM plans (16 KiB plus eight bytes per
+    /// `3 m + 3 n + 2 k + 4` for each job, and the job list), excluding
+    /// Runtime resources.
     pub fn retained_bytes(&self) -> usize {
         self.members.retained_bytes()
             + S::retained_scratch_bytes(EXEC, self)

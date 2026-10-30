@@ -7,8 +7,7 @@
 //! through `CudaDenseStorage::download`, `CudaMetadataDownloadBytes` the
 //! part that went through `cuda_download`; the two are not one event.
 
-// Without the `cuda` feature no event is recorded; the CPU-only builds use
-// the buffer log alone.
+// Without the `cuda` feature only the grouped-plan event is recorded.
 #![cfg_attr(not(feature = "cuda"), allow(dead_code))]
 
 use std::cell::RefCell;
@@ -20,9 +19,11 @@ pub(crate) enum Event {
     CudaFullDownloadBytes,
     /// Bytes `cuda_download` moved device to host (reductions, spectra).
     CudaMetadataDownloadBytes,
+    /// The native grouped GEMM route prepared a `cpueinsum::GroupedPlan`.
+    GroupedPlanBuild,
 }
 
-const EVENTS: usize = Event::CudaMetadataDownloadBytes as usize + 1;
+const EVENTS: usize = Event::GroupedPlanBuild as usize + 1;
 
 #[derive(Default)]
 struct Probe {
