@@ -26,6 +26,8 @@ pub(crate) struct DynamicFusionTransformedSourceEntry<C = f64> {
 pub(crate) struct DynamicFusionCoreDstEntry<C = f64> {
     pub(crate) space: Arc<DynamicFusionMapSpace>,
     pub(crate) output_transform_structure: TreeTransformStructure<C>,
+    /// The output transform's destination codomain rank.
+    pub(crate) output_nout: usize,
 }
 
 /// The core-layout space of a stored source and its transformer. A
@@ -152,5 +154,6 @@ where
     Ok(DynamicFusionCoreDstEntry {
         space: Arc::new(space),
         output_transform_structure,
+        output_nout: output_dst.nout(),
     })
 }

@@ -1716,6 +1716,7 @@ where
         Ok(DynamicFusionCoreDstEntry {
             space: Arc::new(space),
             output_transform_structure,
+            output_nout: output_dst.nout(),
         })
     }
 

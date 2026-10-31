@@ -640,50 +640,6 @@ where
         .map(drop)
     }
 
-    /// The one owned Host contraction and composition of both modes, the
-    /// steps every storage runs ([`StagedContract`]): stage the destination
-    /// (multiplicity-free derives it; checked Generic admits the operands and
-    /// stages it), plan, replay into a fresh owned payload, then commit and
-    /// publish (#2063).
-    #[allow(clippy::type_complexity)]
-    pub(super) fn tensorcontract_in<'a, St, R>(
-        &mut self,
-        engine: &mut dyn Engine,
-        (lhs_authority, lhs, lhs_data): (
-            &'a BoundDynamicFusionMapSpace<R>,
-            FusionOperand<'a>,
-            &[D],
-        ),
-        (rhs_authority, rhs, rhs_data): (
-            &'a BoundDynamicFusionMapSpace<R>,
-            FusionOperand<'a>,
-            &[D],
-        ),
-        request: ContractRequest<'a>,
-    ) -> Result<(BoundDynamicFusionMapSpace<R>, Vec<D>), ContractStageError<'a, R, St>>
-    where
-        St: ContractStageParts<'a, R>,
-        St::M: PlanningAlgebra<R, Scalar = C>,
-        D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ZeroBytes,
-    {
-        let mut staged = stage_contract::<R, St>(
-            (lhs_authority, lhs, lhs_data.len()),
-            (rhs_authority, rhs, rhs_data.len()),
-            request,
-        )?;
-        let resolution =
-            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
-        let data = self.execute_contract_resolution_host_owned(
-            engine,
-            &resolution,
-            staged_destination(&staged).structure(),
-            (lhs.storage_space().structure(), lhs_data),
-            (rhs.storage_space().structure(), rhs_data),
-        )?;
-        let destination = staged_commit(staged, &resolution)?;
-        Ok((destination, data))
-    }
-
     /// [`Self::tensorcontract_in`] writing into an existing destination: the
     /// same staging, then the space check against `dst_space` before
     /// `dst_data` runs the caller's remaining checks, then `alpha · op +
@@ -801,53 +757,6 @@ where
             rhs,
             alpha,
         )
-    }
-
-    /// Replays a planned route on the Host into a fresh owned payload of
-    /// `dst_structure`: `contract(lhs, rhs)` (`alpha = 1`, no prior
-    /// destination), the one owned contraction entry of every Host storage.
-    /// A route whose core writes the destination replays it into
-    /// uninitialized memory ([`FusionBlockContractPlan::execute_owned`]):
-    /// the output is not zero-filled by the allocator, and inactive blocks
-    /// and padding are written `+0.0`. Backend-side output fills (a one-job
-    /// batch, the faer strategy's per-job prefill) and the zero fill of
-    /// scatter blocks remain. A route with an output transform (CopyC, a
-    /// DynamicTree output) still overwrites an allocator-zeroed payload.
-    ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
-    ///
-    /// [`FusionBlockContractPlan::execute_owned`]: symtn_operations::FusionBlockContractPlan::execute_owned
-    #[doc(hidden)]
-    pub fn execute_contract_resolution_host_owned(
-        &mut self,
-        engine: &mut dyn Engine,
-        resolution: &StorageContractResolution<C>,
-        dst_structure: &Arc<BlockStructure>,
-        lhs: (&Arc<BlockStructure>, &[D]),
-        rhs: (&Arc<BlockStructure>, &[D]),
-    ) -> Result<Vec<D>, OperationError>
-    where
-        D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ZeroBytes,
-    {
-        #[cfg(test)]
-        self.record_contract_route(resolution);
-        let mut output = Vec::new();
-        self.execute_route_host(
-            engine,
-            resolution,
-            (
-                dst_structure,
-                RouteDestination::Owned {
-                    output: &mut output,
-                    zeroed: crate::zeroed_payload::<D>,
-                },
-            ),
-            lhs,
-            rhs,
-            D::one(),
-        )?;
-        Ok(output)
     }
 
     /// [`StagedContract::plan_beyond_core`] of a multiplicity-free
@@ -1096,7 +1005,10 @@ where
         &mut self,
         engine: &mut dyn Engine,
         resolution: &StorageContractResolution<C>,
-        dst: (&Arc<BlockStructure>, RouteDestination<'_, D>),
+        dst: (
+            &Arc<BlockStructure>,
+            RouteDestination<'_, D, BT, BT::Workspace, C>,
+        ),
         lhs: (&Arc<BlockStructure>, &[D]),
         rhs: (&Arc<BlockStructure>, &[D]),
         alpha: D,
@@ -1134,6 +1046,118 @@ where
             1,
             alpha,
         )
+    }
+}
+
+/// The owned Host entries: their output transform writes through the dense
+/// backend's owned writer, which only [`DenseTreeTransformOperations`] has.
+impl<D, RuleKey, E, BC, C>
+    TensorContractFusionExecutionContext<D, RuleKey, DenseTreeTransformOperations<E>, BC, C>
+where
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
+    C: DenseBlockScalar,
+    RuleKey: 'static + Clone + Eq + Hash + Send + Sync,
+    E: symtn_dense::DenseExecutor,
+    BC: TensorContractBackend<D, C>,
+{
+    /// The one owned Host contraction and composition of both modes, the
+    /// steps every storage runs ([`StagedContract`]): stage the destination
+    /// (multiplicity-free derives it; checked Generic admits the operands and
+    /// stages it), plan, replay into a fresh owned payload, then commit and
+    /// publish (#2063).
+    #[allow(clippy::type_complexity)]
+    pub(super) fn tensorcontract_in<'a, St, R>(
+        &mut self,
+        engine: &mut dyn Engine,
+        (lhs_authority, lhs, lhs_data): (
+            &'a BoundDynamicFusionMapSpace<R>,
+            FusionOperand<'a>,
+            &[D],
+        ),
+        (rhs_authority, rhs, rhs_data): (
+            &'a BoundDynamicFusionMapSpace<R>,
+            FusionOperand<'a>,
+            &[D],
+        ),
+        request: ContractRequest<'a>,
+    ) -> Result<(BoundDynamicFusionMapSpace<R>, Vec<D>), ContractStageError<'a, R, St>>
+    where
+        St: ContractStageParts<'a, R>,
+        St::M: PlanningAlgebra<R, Scalar = C>,
+        D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ZeroBytes,
+    {
+        let mut staged = stage_contract::<R, St>(
+            (lhs_authority, lhs, lhs_data.len()),
+            (rhs_authority, rhs, rhs_data.len()),
+            request,
+        )?;
+        let resolution =
+            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
+        let data = self.execute_contract_resolution_host_owned(
+            engine,
+            &resolution,
+            staged_destination(&staged).structure(),
+            (lhs.storage_space().structure(), lhs_data),
+            (rhs.storage_space().structure(), rhs_data),
+        )?;
+        let destination = staged_commit(staged, &resolution)?;
+        Ok((destination, data))
+    }
+
+    /// Replays a planned route on the Host into a fresh owned payload of
+    /// `dst_structure`: `contract(lhs, rhs)` (`alpha = 1`, no prior
+    /// destination), the one owned contraction entry of every Host storage.
+    /// A route whose core writes the destination replays it into
+    /// uninitialized memory ([`FusionBlockContractPlan::execute_owned`]):
+    /// the output is not zero-filled by the allocator, and inactive blocks
+    /// and padding are written `+0.0`. Backend-side output fills (a one-job
+    /// batch, the faer strategy's per-job prefill) and the zero fill of
+    /// scatter blocks remain. A route with an output transform (CopyC, a
+    /// DynamicTree output) runs its core into scratch, then the transform
+    /// writes every destination element once into an uninitialized payload
+    /// ([`DenseTreeTransformOperations::try_tree_transform_structure_overwrite_owned_raw`])
+    /// when the destination proves exact overwrite coverage: every block,
+    /// inactive ones included, one contiguous interval, the blocks tiling the
+    /// payload, and the coupled-sector regions tiling it. Otherwise (for
+    /// example a coupled sector with several codomain trees, whose blocks are
+    /// strided) the transform overwrites an allocator-zeroed payload.
+    ///
+    /// This concrete cross-crate entrypoint is internal and unstable despite
+    /// being public for `symtn`; downstream callers must not rely on it.
+    ///
+    /// [`FusionBlockContractPlan::execute_owned`]: symtn_operations::FusionBlockContractPlan::execute_owned
+    #[doc(hidden)]
+    pub fn execute_contract_resolution_host_owned(
+        &mut self,
+        engine: &mut dyn Engine,
+        resolution: &StorageContractResolution<C>,
+        dst_structure: &Arc<BlockStructure>,
+        lhs: (&Arc<BlockStructure>, &[D]),
+        rhs: (&Arc<BlockStructure>, &[D]),
+    ) -> Result<Vec<D>, OperationError>
+    where
+        D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ZeroBytes,
+    {
+        #[cfg(test)]
+        self.record_contract_route(resolution);
+        let mut output = Vec::new();
+        self.execute_route_host(
+            engine,
+            resolution,
+            (
+                dst_structure,
+                RouteDestination::Owned {
+                    output: &mut output,
+                    overwrite:
+                        DenseTreeTransformOperations::<E>::try_tree_transform_structure_overwrite_owned_raw,
+                    zeroed: crate::zeroed_payload::<D>,
+                },
+            ),
+            lhs,
+            rhs,
+            D::one(),
+        )?;
+        Ok(output)
     }
 }
 
@@ -1847,6 +1871,7 @@ where
             temporary_len: temporary.required_len().map_err(OperationError::from)?,
             temporary: temporary_structure,
             transform,
+            nout: target.space.nout(),
         },
     ))))
 }
