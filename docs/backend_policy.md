@@ -40,9 +40,32 @@ policy are execute-time inputs, not part of the key. Each entry is charged
 its inline size, key and entry overhead, 16 KiB, and 8 bytes per
 `3m + 3n + 2k + 4` (a Packed plan's scatter vectors); with a budget of zero,
 or for an entry the budget rejects, every call prepares its plans as before
-with the same results. This holds for the faer provider and the four payload
-scalars only; BLAS and CUDA builds prepare as before, and single-job or
-affine batches use Tenferro's binary-plan cache, outside this cache.
+with the same results. For initialized destinations this holds for the faer
+provider and the four payload scalars only; BLAS and CUDA builds prepare as
+before, and single-job or affine batches use Tenferro's binary-plan cache,
+outside this cache.
+
+The dense executor also has a hidden fresh entry that writes a batch into
+uninitialized destination memory, for owned outputs. It keeps the
+initialized route's choices. A single job or a gapless affine run inside one
+destination segment is zero-filled and then takes its initialized strided
+call. An affine run with gaps between its outputs goes grouped. On the faer
+provider a grouped fresh batch runs the same lanes, geometry-plan cache and
+executor staging as an initialized one, through tcontract's fresh entry.
+That entry still zero-fills each output block on its lane before the product
+(tcontract's faer strategy initializes a fresh destination itself), so the
+fill moves from one serial pass into the lanes rather than disappearing. On a
+BLAS provider under `Auto` or `Sequential` with nonzero `alpha`, a grouped
+fresh batch is zero-filled and makes its initialized call: the same grouped
+plan and whole-group vendor/native decision, the same per-job engine cache
+slots, and one extra store over the destination. When its jobs lie in
+several destination segments, an identity batch makes one initialized call
+per segment (so the vendor/native decision is per segment) and an op-bearing
+batch runs each job as the initialized serial route does. A forced
+`Outer`/`Inner`/`Split` policy, or `alpha == 0`, runs a grouped fresh BLAS
+batch on the native lanes instead (cpueinsum's grouped native alternative
+has no fresh form); those calls use the geometry-plan cache and the
+executor's staging above, which a BLAS executor then also keeps.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities

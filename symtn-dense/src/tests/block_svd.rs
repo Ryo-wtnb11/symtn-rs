@@ -10,8 +10,7 @@ use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneScratch, OpKin
 use crate::block_kernel::{factor, schedule};
 use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
-#[path = "../../../tests/support/numerics.rs"]
-pub(super) mod numerics;
+pub(super) use super::numerics;
 
 pub(super) trait Scalar: Copy + std::fmt::Debug + 'static {
     const COMPLEX: bool;
