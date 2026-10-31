@@ -339,6 +339,15 @@ fn col_major<'a, T>(data: &'a [T], layout: &'a ([usize; 2], [usize; 2])) -> Dens
     DenseView::new(data, &layout.0, &layout.1, 0).unwrap()
 }
 
+/// Every factor entry's bit pattern (real and imaginary parts): `-0.0`
+/// against `0.0` or two NaN payloads are differences here.
+fn bits(tensor: &DenseTensor) -> Vec<(u64, u64)> {
+    wide(tensor)
+        .iter()
+        .map(|x| (x.re.to_bits(), x.im.to_bits()))
+        .collect()
+}
+
 /// Purpose: the determinism contract — for one engine configuration
 /// (provider, build, width, policy) and input, the factors are bitwise
 /// reproducible; nothing is promised across widths or policies.
@@ -362,7 +371,7 @@ fn factors_are_bitwise_reproducible_for_a_fixed_engine() {
                 .factorize_batch(&mut engine, DenseFactorization::Svd, &inputs)
                 .unwrap()
                 .iter()
-                .map(|factors| factors.iter().map(wide).collect::<Vec<_>>())
+                .map(|factors| factors.iter().map(bits).collect::<Vec<_>>())
                 .collect::<Vec<_>>()
         };
         assert_eq!(run(), run(), "{threads} threads, {policy:?}");
