@@ -94,29 +94,32 @@ fn row(codomain: &[usize]) -> Row {
 /// both routes): an eager call now allocates its executor and transform
 /// scratch per call (the Runtime keeps no execution pool; TensorKit's
 /// TensorOperations also allocates temporaries per call), and an unbound
-/// grouped core submission prepares its `cpueinsum` 0.9 `GroupedPlan` per
-/// call (two allocations, where Tenferro 0.7.1's grouped validator made
-/// one). `B = 1` workspaces keep their grouped plans, so `member1_warm` is
-/// zero; `B > 1` retention is deferred.
+/// grouped core submission runs on the block GEMM kernel, which stages it
+/// per call in seven allocations whatever the job count (job order, geometry
+/// index, job slots, one plan per distinct geometry, costs, lane table, lane
+/// jobs; the `cpueinsum` 0.9 `GroupedPlan` it replaced took two, but one
+/// plan per job, so B = 17 warm bytes drop from 248880 to 16700). `B = 1`
+/// workspaces keep their grouped plans, so `member1_warm` is zero; `B > 1`
+/// retention is deferred.
 const BASE: [(&str, Row); 2] = [
     (
         "core",
         Row {
-            eager_warm: (14, 16064),
+            eager_warm: (18, 16140),
             member1_cold: (6, 15472),
             member1_warm: (0, 0),
-            member17_cold: (11, 252328),
-            member17_warm: (2, 248880),
+            member17_cold: (15, 18516),
+            member17_warm: (7, 16700),
         },
     ),
     (
         "copyC",
         Row {
-            eager_warm: (18, 18984),
+            eager_warm: (22, 19060),
             member1_cold: (7, 17992),
             member1_warm: (0, 0),
-            member17_cold: (15, 295264),
-            member17_warm: (2, 248880),
+            member17_cold: (19, 61452),
+            member17_warm: (7, 16700),
         },
     ),
 ];

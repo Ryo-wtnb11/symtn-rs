@@ -5,7 +5,8 @@
 //!
 //! Scope: the native grouped route (no BLAS provider), one dense thread, so
 //! every allocation is on the measured thread. The executor is warmed with
-//! the same batch unbound first, so engine scratch is not in the window.
+//! the same batch, unbound and through a throwaway binding, so engine and
+//! staging scratch are not in the window.
 
 #![cfg(not(feature = "cpu-blas-core"))]
 
@@ -87,7 +88,9 @@ fn check<T: Copy>(
         .unwrap()
     };
     call(&mut executor, None);
-    call(&mut executor, None);
+    // A throwaway binding warms the bound route's own job staging, which the
+    // unbound block kernel does not use.
+    call(&mut executor, Some(&mut DenseGemmBatchBinding::default()));
     let mut binding = DenseGemmBatchBinding::default();
     let ((), cold) = counting_alloc::measure(|| call(&mut executor, Some(&mut binding)));
     let ((), warm) = counting_alloc::measure(|| call(&mut executor, Some(&mut binding)));

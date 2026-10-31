@@ -28,10 +28,13 @@ mod cuda_hermitian;
 #[cfg(any(feature = "cuda", test))]
 #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 mod cuda_region;
-// Test-only until the native block kernels consume it (#2430 K1, #2337 F1);
-// those leaves drop the `test` gate rather than carry unused production code.
-#[cfg(all(feature = "tenferro", test))]
+#[cfg(feature = "tenferro")]
 mod block_kernel {
+    // The BLAS provider keeps its own grouped scheduler until the
+    // factorization kernels run here too.
+    #[cfg(not(feature = "cpu-blas-core"))]
+    pub(crate) mod gemm;
+    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod schedule;
 }
 #[cfg(test)]

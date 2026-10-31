@@ -7,7 +7,7 @@
 //! through `CudaDenseStorage::download`, `CudaMetadataDownloadBytes` the
 //! part that went through `cuda_download`; the two are not one event.
 
-// Without the `cuda` feature only the grouped-plan event is recorded.
+// Without the `cuda` feature only the GEMM plan events are recorded.
 #![cfg_attr(not(feature = "cuda"), allow(dead_code))]
 
 use std::cell::RefCell;
@@ -21,9 +21,11 @@ pub(crate) enum Event {
     CudaMetadataDownloadBytes,
     /// The native grouped GEMM route prepared a `cpueinsum::GroupedPlan`.
     GroupedPlanBuild,
+    /// The native block GEMM kernel prepared one geometry's `tcontract::Plan`.
+    GemmPlanBuild,
 }
 
-const EVENTS: usize = Event::GroupedPlanBuild as usize + 1;
+const EVENTS: usize = Event::GemmPlanBuild as usize + 1;
 
 #[derive(Default)]
 struct Probe {

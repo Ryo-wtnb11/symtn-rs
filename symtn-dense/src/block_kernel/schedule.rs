@@ -48,6 +48,9 @@ pub(crate) fn estimate(ns: f64) -> Duration {
 /// Serial time of `work` weighted multiply-adds under the engine's work model,
 /// mirroring `tcontract-exec` `batch.rs: item_ns` (a rate that is not `> 0`,
 /// NaN included, counts as 1).
+// The factorization kernels' cost; the GEMM kernel uses the contraction
+// model instead.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
     let rate = if model.muladds_per_ns > 0.0 {
         model.muladds_per_ns
@@ -85,6 +88,17 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
         )
     };
     let lanes = lanes.max(1);
+    if lanes == 1 {
+        return Allocation {
+            budget,
+            slots,
+            decision,
+            lanes: vec![Lane {
+                budget: slots,
+                jobs: (0..jobs).collect(),
+            }],
+        };
+    }
 
     let mut order: Vec<usize> = (0..jobs).collect();
     order.sort_unstable_by_key(|&j| (Reverse(times[j]), j));
@@ -119,18 +133,23 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
     }
 }
 
-/// Run every job of `allocation` on `exec` and return the lowest canonical
-/// failure.
+/// Run every job of `allocation` on `exec` with exclusive access to its own
+/// `states` entry, and return the lowest canonical failure.
 ///
 /// Every job runs even after another fails, so each job below the returned
 /// index has completed. Lane `k` gets a child token of exactly
 /// `allocation.lanes[k].budget` slots (threadteam's even `fork` share over S)
 /// with the caller's workspace and policy. A panicking job unwinds after the
 /// lanes join; the engine's guarded entry then marks itself broken.
-pub(crate) fn run<E: Send>(
+///
+/// Why per-job state is lent by lane rather than behind a lock per job: a
+/// lock per job costs an allocation per job on platforms whose mutex is
+/// boxed, and a lane already owns its jobs exclusively.
+pub(crate) fn run<S: Send, E: Send>(
     exec: Exec<'_>,
     allocation: &Allocation,
-    job: impl Fn(usize, Exec<'_>) -> Result<(), E> + Sync,
+    states: &mut [S],
+    job: impl Fn(usize, &mut S, Exec<'_>) -> Result<(), E> + Sync,
 ) -> Result<(), (usize, E)> {
     let lanes = &allocation.lanes;
     if lanes.is_empty() {
@@ -141,29 +160,46 @@ pub(crate) fn run<E: Send>(
     let slots = NonZeroUsize::new(allocation.slots).unwrap_or(NonZeroUsize::MIN);
     let token = exec.limit(slots).into_token();
     // A lane's jobs ascend, so its first failure is its lowest one.
-    let first_failure: Vec<Mutex<Option<(usize, E)>>> =
-        lanes.iter().map(|_| Mutex::new(None)).collect();
-    let run_lane = |k: usize, token: tenferro_cpu::threadteam::Exec<'_>| {
+    let run_lane = |token: tenferro_cpu::threadteam::Exec<'_>,
+                    jobs: &mut dyn Iterator<Item = (usize, &mut S)>| {
         let mut lane_exec = Exec::from_token(token, workspace, policy);
-        for &j in &lanes[k].jobs {
-            if let Err(error) = job(j, lane_exec.reborrow()) {
-                let mut slot = first_failure[k]
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                if slot.is_none() {
-                    *slot = Some((j, error));
-                }
+        let mut first = None;
+        for (j, state) in jobs {
+            if let Err(error) = job(j, state, lane_exec.reborrow()) {
+                first.get_or_insert((j, error));
             }
         }
+        first
     };
-    if lanes.len() == 1 {
-        run_lane(0, token);
-    } else {
-        token.fork(lanes.len(), run_lane);
+    if let [lane] = lanes.as_slice() {
+        debug_assert_eq!(lane.jobs.len(), states.len());
+        return run_lane(token, &mut states.iter_mut().enumerate()).map_or(Ok(()), Err);
     }
-    first_failure
+    let mut lane_of = vec![0; states.len()];
+    for (k, lane) in lanes.iter().enumerate() {
+        for &j in &lane.jobs {
+            lane_of[j] = k;
+        }
+    }
+    let mut parts: Vec<Vec<(usize, &mut S)>> = lanes
+        .iter()
+        .map(|lane| Vec::with_capacity(lane.jobs.len()))
+        .collect();
+    for (j, state) in states.iter_mut().enumerate() {
+        parts[lane_of[j]].push((j, state));
+    }
+    let parts: Vec<Mutex<_>> = parts
         .into_iter()
-        .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner))
+        .map(|part| Mutex::new((part, None)))
+        .collect();
+    token.fork(lanes.len(), |k, token| {
+        let mut part = parts[k].lock().unwrap_or_else(PoisonError::into_inner);
+        let (jobs, failure) = &mut *part;
+        *failure = run_lane(token, &mut jobs.iter_mut().map(|(j, s)| (*j, &mut **s)));
+    });
+    parts
+        .into_iter()
+        .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner).1)
         .min_by_key(|&(j, _)| j)
         .map_or(Ok(()), Err)
 }
@@ -253,7 +289,7 @@ mod tests {
         let mut engine = engine(8, BatchPolicy::default());
         let calls = AtomicUsize::new(0);
         let result = engine.with_contraction_exec(|exec, _, _| {
-            Ok(run(exec.reborrow(), &a, |_, _| {
+            Ok(run(exec.reborrow(), &a, &mut [(); 0], |_, _, _| {
                 calls.fetch_add(1, Ordering::Relaxed);
                 Ok::<(), ()>(())
             }))
@@ -323,15 +359,20 @@ mod tests {
             .with_contraction_exec(|exec, _, _| {
                 let a = allocate(exec, &times, 1e9);
                 assert_eq!(a.lanes.len(), 4);
-                Ok(run(exec.reborrow(), &a, |j, _| {
-                    ran[j].fetch_add(1, Ordering::Relaxed);
-                    match j {
-                        4 => Err(Injected::Validation(j)),
-                        2 => Err(Injected::Numeric(j)),
-                        5 => Err(Injected::Validation(j)),
-                        _ => Ok(()),
-                    }
-                }))
+                Ok(run(
+                    exec.reborrow(),
+                    &a,
+                    &mut vec![(); times.len()],
+                    |j, _, _| {
+                        ran[j].fetch_add(1, Ordering::Relaxed);
+                        match j {
+                            4 => Err(Injected::Validation(j)),
+                            2 => Err(Injected::Numeric(j)),
+                            5 => Err(Injected::Validation(j)),
+                            _ => Ok(()),
+                        }
+                    },
+                ))
             })
             .unwrap();
         assert_eq!(result, Err((2, Injected::Numeric(2))));
@@ -346,11 +387,16 @@ mod tests {
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine.with_contraction_exec(|exec, _, _| {
                 let a = allocate(exec, &times, 1e9);
-                Ok(run(exec.reborrow(), &a, |j, _| {
-                    assert_ne!(j, 2, "injected lane panic");
-                    ran.fetch_add(1, Ordering::Relaxed);
-                    Ok::<(), ()>(())
-                }))
+                Ok(run(
+                    exec.reborrow(),
+                    &a,
+                    &mut vec![(); times.len()],
+                    |j, _, _| {
+                        assert_ne!(j, 2, "injected lane panic");
+                        ran.fetch_add(1, Ordering::Relaxed);
+                        Ok::<(), ()>(())
+                    },
+                ))
             })
         }));
         assert!(unwound.is_err());
@@ -392,13 +438,15 @@ mod tests {
                             check(&a, p, jobs);
                             let seen: Vec<AtomicUsize> =
                                 (0..jobs).map(|_| AtomicUsize::new(0)).collect();
-                            let result = run(exec.reborrow(), &a, |j, child| {
-                                let lane = a.lanes.iter().find(|l| l.jobs.contains(&j)).unwrap();
-                                assert_eq!(child.budget(), lane.budget);
-                                assert_eq!(child.batch_policy(), &policy);
-                                seen[j].fetch_add(1, Ordering::Relaxed);
-                                Ok::<(), ()>(())
-                            });
+                            let result =
+                                run(exec.reborrow(), &a, &mut vec![(); jobs], |j, _, child| {
+                                    let lane =
+                                        a.lanes.iter().find(|l| l.jobs.contains(&j)).unwrap();
+                                    assert_eq!(child.budget(), lane.budget);
+                                    assert_eq!(child.batch_policy(), &policy);
+                                    seen[j].fetch_add(1, Ordering::Relaxed);
+                                    Ok::<(), ()>(())
+                                });
                             assert_eq!(result, Ok(()));
                             assert!(seen.iter().all(|s| s.load(Ordering::Relaxed) == 1));
                             Ok(())

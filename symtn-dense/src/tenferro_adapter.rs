@@ -55,6 +55,7 @@ fn descriptor_slot<T: 'static>(
     (hasher.finish() % capacity as u64) as usize
 }
 
+#[cfg(feature = "cpu-blas-core")]
 fn run_partition_covers(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
     let mut start = 0usize;
     for &run_len in runs {
@@ -76,7 +77,8 @@ fn run_partition_covers(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
 pub struct DefaultDenseExecutor {
     matmul_config: DotGeneralConfig,
     strided_batch_matmul_config: DotGeneralConfig,
-    // Reused job list of the grouped route: scratch, not a plan cache.
+    // Reused job list of the bound and BLAS grouped route: scratch, not a
+    // plan cache.
     grouped_jobs: Vec<cpueinsum::GroupedGemmJob>,
     // Test-only count of low-level batch seam submissions: one per strided
     // call and one per job in the serial route.
@@ -161,6 +163,7 @@ impl DefaultDenseExecutor {
             rhs,
             jobs,
             runs,
+            [MatrixOp::Identity; 2],
             alpha,
             beta,
             Some(binding),
@@ -176,81 +179,86 @@ impl DefaultDenseExecutor {
         rhs: DenseRead<'_>,
         jobs: &[DenseGemmBatchJob],
         runs: &[usize],
+        ops: [MatrixOp; 2],
         alpha: DenseScalar,
         beta: DenseScalar,
         binding: Option<&mut DenseGemmBatchBinding>,
     ) -> Result<(), DenseError> {
+        let op = if ops == [MatrixOp::Identity; 2] {
+            "matmul_batch_axpby_into"
+        } else {
+            "matmul_batch_axpby_with_ops_into"
+        };
         let (out_dtype, lhs_dtype, rhs_dtype) = (output.dtype(), lhs.dtype(), rhs.dtype());
-        host_cpu(engine, "matmul_batch_axpby_into", |cpu| {
-            match (output, lhs, rhs) {
-                (DenseWrite::F32(mut out), DenseRead::F32(lhs), DenseRead::F32(rhs)) => self
-                    .matmul_batch_axpby_route_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        alpha,
-                        beta,
-                        binding,
-                        |view: DenseViewMut<'_, f32>| DenseWrite::F32(view),
-                        |view: DenseView<'_, f32>| DenseRead::F32(view),
-                    ),
-                (DenseWrite::F64(mut out), DenseRead::F64(lhs), DenseRead::F64(rhs)) => self
-                    .matmul_batch_axpby_route_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        alpha,
-                        beta,
-                        binding,
-                        |view: DenseViewMut<'_, f64>| DenseWrite::F64(view),
-                        |view: DenseView<'_, f64>| DenseRead::F64(view),
-                    ),
-                (DenseWrite::C32(mut out), DenseRead::C32(lhs), DenseRead::C32(rhs)) => self
-                    .matmul_batch_axpby_route_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        alpha,
-                        beta,
-                        binding,
-                        |view: DenseViewMut<'_, Complex32>| DenseWrite::C32(view),
-                        |view: DenseView<'_, Complex32>| DenseRead::C32(view),
-                    ),
-                (DenseWrite::C64(mut out), DenseRead::C64(lhs), DenseRead::C64(rhs)) => self
-                    .matmul_batch_axpby_route_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        alpha,
-                        beta,
-                        binding,
-                        |view: DenseViewMut<'_, Complex64>| DenseWrite::C64(view),
-                        |view: DenseView<'_, Complex64>| DenseRead::C64(view),
-                    ),
-                _ => Err(crate::executor::batch_operand_error(
-                    "matmul_batch_axpby_into",
-                    out_dtype,
-                    lhs_dtype,
-                    rhs_dtype,
-                )),
-            }
+        host_cpu(engine, op, |cpu| match (output, lhs, rhs) {
+            (DenseWrite::F32(mut out), DenseRead::F32(lhs), DenseRead::F32(rhs)) => self
+                .matmul_batch_axpby_route_typed(
+                    cpu,
+                    &mut out,
+                    lhs,
+                    rhs,
+                    jobs,
+                    runs,
+                    ops,
+                    alpha,
+                    beta,
+                    binding,
+                    |view: DenseViewMut<'_, f32>| DenseWrite::F32(view),
+                    |view: DenseView<'_, f32>| DenseRead::F32(view),
+                ),
+            (DenseWrite::F64(mut out), DenseRead::F64(lhs), DenseRead::F64(rhs)) => self
+                .matmul_batch_axpby_route_typed(
+                    cpu,
+                    &mut out,
+                    lhs,
+                    rhs,
+                    jobs,
+                    runs,
+                    ops,
+                    alpha,
+                    beta,
+                    binding,
+                    |view: DenseViewMut<'_, f64>| DenseWrite::F64(view),
+                    |view: DenseView<'_, f64>| DenseRead::F64(view),
+                ),
+            (DenseWrite::C32(mut out), DenseRead::C32(lhs), DenseRead::C32(rhs)) => self
+                .matmul_batch_axpby_route_typed(
+                    cpu,
+                    &mut out,
+                    lhs,
+                    rhs,
+                    jobs,
+                    runs,
+                    ops,
+                    alpha,
+                    beta,
+                    binding,
+                    |view: DenseViewMut<'_, Complex32>| DenseWrite::C32(view),
+                    |view: DenseView<'_, Complex32>| DenseRead::C32(view),
+                ),
+            (DenseWrite::C64(mut out), DenseRead::C64(lhs), DenseRead::C64(rhs)) => self
+                .matmul_batch_axpby_route_typed(
+                    cpu,
+                    &mut out,
+                    lhs,
+                    rhs,
+                    jobs,
+                    runs,
+                    ops,
+                    alpha,
+                    beta,
+                    binding,
+                    |view: DenseViewMut<'_, Complex64>| DenseWrite::C64(view),
+                    |view: DenseView<'_, Complex64>| DenseRead::C64(view),
+                ),
+            _ => Err(crate::executor::batch_operand_error(
+                op, out_dtype, lhs_dtype, rhs_dtype,
+            )),
         })
     }
 
-    /// Routes one typed identity batch by what the two tenferro entries can
-    /// represent, not by a run-length cutoff. The strided entry is one rank-3
+    /// Routes one typed batch by what the strided entry and the grouped
+    /// kernel can represent, not by a run-length cutoff. The strided entry is one rank-3
     /// contraction, so it can carry a batch iff the batch is one job (batch
     /// extent one; TensorKit's per-block `mul!`) or ONE affine run:
     /// `runs == [jobs.len()]`, at least two jobs (a step needs two offsets),
@@ -259,17 +267,18 @@ impl DefaultDenseExecutor {
     /// one would apply job 0's shape and steps to every job), and
     /// a destination step of at least `rows * cols`, which is the O(1) proof
     /// that the rank-3 destination view is self-disjoint (tenferro's dot path
-    /// does not check destination overlap; its grouped validator does). The
-    /// grouped entry — TensorKit `mul!` per matched sector, QSpace
+    /// does not check destination overlap; the grouped kernel does). An
+    /// op-bearing run also needs nonzero extents and a rank-3 layout the views
+    /// admit. The grouped kernel — TensorKit `mul!` per matched sector, QSpace
     /// `contract_matchAB_groupC` -> `contractDATA_group`, a destination-grouped
     /// GEMM list with no cutoff — represents every batch, so everything else
     /// goes there as ONE submission built from `jobs` (never from `runs`, so a
     /// malformed partition cannot skip or over-index a job).
     ///
-    /// Why not send one job to the grouped entry too: an unbound grouped
-    /// submission prepares a `GroupedPlan` on every call (two top-level
-    /// allocations in cpueinsum 0.9, plus child heap allocations such as a
-    /// Packed child's), so a recoupling replay that submits one GEMM per
+    /// Why not send one job to the grouped kernel too: an unbound grouped
+    /// submission prepares its geometry plans and lane table on every call
+    /// (a few top-level allocations, plus child heap allocations such as a
+    /// Packed plan's), so a recoupling replay that submits one GEMM per
     /// Multi block would allocate per block on every warm call (#2184); the
     /// strided entry allocates nothing once its engine cache is warm.
     ///
@@ -287,6 +296,7 @@ impl DefaultDenseExecutor {
         rhs: DenseView<'_, T>,
         jobs: &[DenseGemmBatchJob],
         runs: &[usize],
+        ops: [MatrixOp; 2],
         alpha: DenseScalar,
         beta: DenseScalar,
         binding: Option<&mut DenseGemmBatchBinding>,
@@ -314,18 +324,34 @@ impl DefaultDenseExecutor {
                 .checked_sub(jobs[0].dst_offset)
                 .zip(jobs[0].rows.checked_mul(jobs[0].cols))
                 .is_some_and(|(dst_step, block)| dst_step >= block);
-        if jobs.len() == 1 || single_self_disjoint_run {
+        let identity = ops == [MatrixOp::Identity; 2];
+        // An op-bearing run additionally needs nonzero extents and a layout
+        // the views admit: its transposed rank-3 view is otherwise refused,
+        // while the grouped kernel represents every such batch.
+        let strided = (jobs.len() == 1 || single_self_disjoint_run)
+            && (identity
+                || jobs[0].rows * jobs[0].contracted * jobs[0].cols != 0
+                    && self
+                        .strided_batch_run_layout(jobs, ops[0], ops[1])
+                        .is_ok_and(|layout| {
+                            self.strided_batch_run_layout_admitted(output, lhs, rhs, &layout)
+                        }));
+        if strided {
             self.matmul_strided_batch_run_typed(
                 cpu,
                 output,
                 lhs,
                 rhs,
                 jobs,
-                MatrixOp::Identity,
-                MatrixOp::Identity,
+                ops[0],
+                ops[1],
                 alpha,
                 beta,
-                "strided_batch_gemm",
+                if identity {
+                    "strided_batch_gemm"
+                } else {
+                    "matmul_batch_axpby_with_ops_into"
+                },
                 wrap_write,
                 wrap_read,
             )?;
@@ -340,6 +366,20 @@ impl DefaultDenseExecutor {
             self.seam_dispatches += 1;
         }
         let _ = (wrap_write, wrap_read);
+        #[cfg(not(feature = "cpu-blas-core"))]
+        if binding.is_none() {
+            let (Some(alpha), Some(beta)) = (T::from_dense(alpha), T::from_dense(beta)) else {
+                return Err(grouped_error(
+                    "alpha/beta dtype differs from the operands".to_string(),
+                ));
+            };
+            return crate::block_kernel::gemm::gemm_batch_into(
+                cpu, output, lhs, rhs, jobs, ops, alpha, beta,
+            );
+        }
+        // Only identity batches reach here: the BLAS op-bearing route stays
+        // on its own partition, and only identity batches carry a binding.
+        debug_assert!(identity);
         grouped_gemm_into(
             cpu,
             &mut self.grouped_jobs,
@@ -353,6 +393,7 @@ impl DefaultDenseExecutor {
         )
     }
 
+    #[cfg(feature = "cpu-blas-core")]
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_ops_typed<T, W, R>(
         &mut self,
@@ -397,6 +438,7 @@ impl DefaultDenseExecutor {
     /// as one serial call (one engine lock) instead of one call per run. Plan-cache
     /// slots are absolute job indices on both routes, so every GEMM keeps the
     /// slot, kernel and order it had with one serial call per run.
+    #[cfg(feature = "cpu-blas-core")]
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_ops_partition_typed<T, W, R>(
         &mut self,
@@ -482,6 +524,7 @@ impl DefaultDenseExecutor {
         )
     }
 
+    #[cfg(feature = "cpu-blas-core")]
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_ops_serial_typed<T, W, R>(
         &mut self,
@@ -535,6 +578,7 @@ impl DefaultDenseExecutor {
         )
     }
 
+    #[cfg(feature = "cpu-blas-core")]
     /// The numerical body of [`Self::matmul_batch_axpby_ops_serial_typed`].
     #[allow(clippy::too_many_arguments)]
     fn run_batch_jobs<T, W, R>(
@@ -1309,7 +1353,18 @@ impl DenseExecutor for DefaultDenseExecutor {
         alpha: DenseScalar,
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
-        self.matmul_batch_axpby_dispatch(engine, output, lhs, rhs, jobs, runs, alpha, beta, None)
+        self.matmul_batch_axpby_dispatch(
+            engine,
+            output,
+            lhs,
+            rhs,
+            jobs,
+            runs,
+            [MatrixOp::Identity; 2],
+            alpha,
+            beta,
+            None,
+        )
     }
 
     #[allow(clippy::redundant_closure)]
@@ -1329,6 +1384,44 @@ impl DenseExecutor for DefaultDenseExecutor {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
             return self.matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta);
         }
+        #[cfg(not(feature = "cpu-blas-core"))]
+        return self.matmul_batch_axpby_dispatch(
+            engine,
+            output,
+            lhs,
+            rhs,
+            jobs,
+            runs,
+            [lhs_op, rhs_op],
+            alpha,
+            beta,
+            None,
+        );
+        #[cfg(feature = "cpu-blas-core")]
+        return self.matmul_batch_axpby_ops_blas(
+            engine, output, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
+        );
+    }
+}
+
+impl DefaultDenseExecutor {
+    /// The BLAS provider's op-bearing batch: strided runs plus a per-job
+    /// serial remainder, unchanged by the native block kernel.
+    #[cfg(feature = "cpu-blas-core")]
+    #[allow(clippy::too_many_arguments, clippy::redundant_closure)]
+    fn matmul_batch_axpby_ops_blas(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        jobs: &[DenseGemmBatchJob],
+        runs: &[usize],
+        lhs_op: MatrixOp,
+        rhs_op: MatrixOp,
+        alpha: DenseScalar,
+        beta: DenseScalar,
+    ) -> Result<(), DenseError> {
         let (out_dtype, lhs_dtype, rhs_dtype) = (output.dtype(), lhs.dtype(), rhs.dtype());
         host_cpu(engine, "matmul_batch_axpby_with_ops_into", |cpu| {
             match (output, lhs, rhs) {
@@ -1562,7 +1655,7 @@ impl DenseGemmBatchBinding {
 }
 grouped_scalar!(f32 => F32; f64 => F64; Complex32 => C32; Complex64 => C64);
 
-fn grouped_error(message: String) -> DenseError {
+pub(crate) fn grouped_error(message: String) -> DenseError {
     DenseError::Backend {
         backend: DenseBackend::Tenferro,
         op: "grouped_gemm",
@@ -1592,7 +1685,7 @@ fn grouped_span(shape: &[usize], strides: &[usize], role: &str) -> Result<usize,
 /// out-of-range job reported is the lowest-indexed one (`GroupedPlan` checks
 /// in its sorted output order instead). Output overlap is left to the
 /// grouped plan's constructor, which rejects it before any write.
-fn grouped_validate<T>(
+pub(crate) fn grouped_validate<T>(
     output: &DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -1625,21 +1718,20 @@ fn grouped_validate<T>(
     Ok(lens)
 }
 
-/// symtn's block-contraction kernel (#2337): one grouped plan over the batch,
-/// run on the caller engine's execution bundle with its own batch policy.
+/// The grouped route of a bound native batch and of every BLAS batch: one
+/// grouped plan over the batch, run on the caller engine's execution bundle
+/// with its own batch policy (an unbound native batch runs on
+/// `block_kernel::gemm` instead).
 /// Every bound and the output overlap are checked before the first write;
 /// jobs keep their caller index, and each output range is written by exactly
 /// one job, so lane order cannot change a result.
 ///
-/// The native provider uses `cpueinsum::GroupedPlan`. A BLAS build uses
+/// A bound native batch uses `cpueinsum::GroupedPlan`. A BLAS build uses
 /// `cpueinsum_blas::GroupedPlan`: under the `Auto`/`Sequential` batch policy
 /// it runs one vendor GEMM per job in order on the calling thread, and a
 /// forced `Outer`/`Inner`/`Split` policy runs its prepared native alternative.
 ///
-/// Without a `binding` the native plan is prepared per call and dropped: O(J)
-/// child plans in two top-level allocations (cpueinsum 0.9 pre-sizes them),
-/// plus any child heap allocations (a Packed c64 child's boxes and
-/// scatters). With one, a plan prepared for the same ordered jobs and dtype
+/// With a `binding`, a plan prepared for the same ordered jobs and dtype
 /// is reused and any other plan is prepared and then stored in it; the
 /// executor itself keeps no plan memo, because it has no structure key for a
 /// batch. Reuse skips preparation only: the buffer checks below and the

@@ -3,6 +3,8 @@
 use super::*;
 use num_complex::{Complex32, Complex64};
 
+#[cfg(all(feature = "tenferro", not(feature = "cpu-blas-core")))]
+mod block_gemm;
 mod dot;
 mod executor;
 #[cfg(all(

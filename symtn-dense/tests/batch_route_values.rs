@@ -187,7 +187,16 @@ fn op_bearing_serial_batch_error_keeps_executor_usable() {
             )
             .unwrap_err()
     };
-    assert_eq!(error, DenseError::OutOfBounds);
+    // The BLAS serial route writes the good job, then builds the bad job's
+    // view and reports it out of bounds; the native block kernel bounds
+    // every job first, where the bad offset overflows, and writes nothing.
+    let (expected, written) = if cfg!(feature = "cpu-blas-core") {
+        (DenseError::OutOfBounds, [5.0, 11.0, 11.0, 25.0])
+    } else {
+        (DenseError::OffsetOverflow { value: usize::MAX }, [0.0; 4])
+    };
+    assert_eq!(error, expected);
+    assert_eq!(output, written);
 
     // The executor still works after the failed batch.
     let mut again = [0.0f64; 4];
