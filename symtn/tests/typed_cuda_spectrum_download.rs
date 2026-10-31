@@ -2,7 +2,7 @@
 //! number of coupled sectors.
 //!
 //! - Compact SVD writes each sector's singular values into `s` on the device:
-//! it downloads nothing, and uploads only the three zero-initialized
+//!   it downloads nothing, and uploads only the three zero-initialized
 //!   factors (the only device allocation path), so `s` costs no
 //!   upload beyond its zero initialization.
 //! - Full EIGH must read its eigenvalues on the host (non-finite check, ascending
