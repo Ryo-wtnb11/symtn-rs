@@ -33,3 +33,44 @@ Reviewers treat a stale document as a finding.
 Pin performance evidence to a revision, provider, build, thread count,
 workload, and raw result; report regressions and inconclusive measurements
 too.
+
+## Tests
+
+A test exists to protect a stated purpose; write the purpose first, then the
+assertion that checks exactly it. Reviewers judge every test by that pair.
+
+1. One purpose per test, named in the test name; the assertion checks that
+   purpose and nothing incidental.
+2. Correctness oracles are independent of the code under test: dense
+   expansion, hand values, TensorKit reference steps, or F/R-symbol
+   composition. Never compare against a recorded earlier output of the same
+   code.
+3. Expected values are written inline. Opaque fixture files are allowed only
+   for wire-format goldens.
+4. Allocation, byte, upload and kernel-call tests assert structural
+   invariants only: zero on a warm path, equality between a small and a large
+   fixture (no growth), one allocation for the one output payload, retained
+   bytes at most the charge, build or miss counters at zero when warm.
+5. Never assert a recorded count, ceiling or byte figure. If an exact count
+   is the contract, compute it from the fixture.
+6. No wall-clock timing, sleeps for ordering, or exact `size_of` checks.
+   Write an upper bound only when a memory bound is the documented contract.
+7. Probe and spy counts are zero or derived from the fixture. Do not assert
+   internal staging order or step counts that a valid refactor may change.
+8. A forced-route flag is not a substitute for a public fixture; a branch no
+   public input reaches is deleted.
+9. Error tests assert the variant. Match message text only for a stringly
+   variant, and then only the reason substring; at most one `Display` test per
+   error type.
+10. Do not re-test dependency contracts (fusion-symbols mathematics, Tenferro
+    or vendor kernels); test symtn's boundary only.
+11. Cover the relevant semantic dimensions (non-Abelian, multiplicity,
+    fermionic, dual legs, real and complex) once per contract in one matrix,
+    not again per file, storage mode or engine.
+12. Backend- or hardware-dependent tests are `#[ignore = "<reason>"]`; never
+    return early to pass silently.
+13. Benchmarks and measurements live in `benches/`, not in ignored tests.
+14. No issue numbers, commit hashes, leaf or stage names, or "measured on
+    main" notes in test names or comments; explain why, not the history.
+15. Reuse the shared fixtures in `tests/support/` (legs, spaces, counting
+    allocator, export scanner) instead of adding local copies.
