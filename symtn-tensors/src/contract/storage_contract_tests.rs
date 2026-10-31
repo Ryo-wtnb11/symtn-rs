@@ -195,8 +195,6 @@ impl symtn_dense::DenseExecutor for CountingDense {
     }
 }
 
-impl super::route_host::MemberCoreExecutor for CountingDense {}
-
 fn physical_oracle<R>(case: &Case<R>, lhs: &[f64], rhs: &[f64]) -> (Vec<usize>, Vec<f64>)
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_core::PhysicalFusionBasis<Scalar = f64>,

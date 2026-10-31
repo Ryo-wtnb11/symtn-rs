@@ -1,16 +1,17 @@
-//! The acceptance gate of the workspace-owned `B = 1` core bindings: a
-//! warmed Host `ComposePlan`/`ContractPlan` workspace prepares no compatible
-//! grouped core plan again (affine batches' binary-plan cache misses are
-//! outside this guarantee).
+//! The acceptance gate of `B = 1` core reuse: a warmed Host
+//! `ComposePlan`/`ContractPlan` workspace prepares no grouped core GEMM plan
+//! again (affine batches' binary-plan cache misses are outside this
+//! guarantee). The block GEMM kernel keeps its plans in the process-global
+//! geometry-plan cache, so the observation is that cache's miss count, which
+//! a warm call, a second workspace of the plan and a return to `B = 1` after
+//! `B > 1` all leave unchanged.
 //!
-//! The observation is the calling thread's allocations with one dense
-//! thread: preparing a native grouped plan always allocates its child list on
-//! the calling thread, so a call that allocates nothing prepared nothing.
-//! New payload values on every call show that payloads and buffers are not
-//! part of the binding. Leaving `B = 1` releases the bindings: the return to
-//! `B = 1` is a cold call again, and its retained footprint equals the first
-//! one. A second workspace of the same plan warms its own bindings, and
-//! `retained_bytes` covers what dropping it frees.
+//! The workspace's dense executor keeps the kernel's staging (job records,
+//! geometry index, plan-handle slots, costs, lane tables), so a warm call
+//! allocates nothing, whatever the payload values. `retained_bytes` covers
+//! what dropping a workspace frees, that staging included (it keeps its
+//! high-water capacity across member counts); the cached plans are not
+//! workspace state.
 
 // The native grouped route is the faer provider's; a BLAS provider runs the
 // grouped jobs through its dot and prepares no plan.
@@ -82,6 +83,19 @@ trait Prepared<R, D> {
     );
 }
 
+fn plan_cache() -> symtn::cache::StructureCacheInfo {
+    symtn::cache::stats()
+        .into_iter()
+        .find(|info| info.kind() == symtn::cache::StructureCacheKind::GemmPlans)
+        .unwrap()
+}
+
+/// Geometry-plan builds so far (cache misses; the serial guard keeps every
+/// other test out).
+fn plan_builds() -> u64 {
+    plan_cache().misses()
+}
+
 fn check<R, D, P>(name: &str, op: &P)
 where
     R: symtn::sector::TypedSectorAdmission<
@@ -107,6 +121,9 @@ where
         other.take_output().unwrap()
     };
     op.execute_into(&lhs, &rhs, &mut dst, &mut workspace);
+    let builds = plan_builds();
+    let hits = plan_cache().hits();
+    let mut warm_calls = None;
     for salt in 2..5 {
         let (lhs, rhs) = op.stacks(1, salt);
         let mut reference_ws = op.workspace();
@@ -114,60 +131,49 @@ where
         let warm = calls(|| {
             op.execute(&lhs, &rhs, &mut workspace);
         });
-        assert_eq!(warm, 0, "{name} salt={salt}: warm execute prepared");
+        assert_eq!(warm, 0, "{name} salt={salt}: warm execute allocated");
+        warm_calls.get_or_insert(warm);
         assert_eq!(data(op.execute(&lhs, &rhs, &mut workspace)), want, "{name}");
-        let warm_into = calls(|| op.execute_into(&lhs, &rhs, &mut dst, &mut workspace));
-        assert_eq!(
-            warm_into, 0,
-            "{name} salt={salt}: warm execute_into prepared"
-        );
+        op.execute_into(&lhs, &rhs, &mut dst, &mut workspace);
         assert_eq!(data(&dst), want, "{name} salt={salt}: execute_into");
         assert_eq!(workspace.retained_bytes(), footprint, "{name}: footprint");
     }
-    // A second workspace of the same plan warms independently.
+    assert_eq!(plan_builds(), builds, "{name}: warm calls built a plan");
+    assert!(plan_cache().hits() > hits, "{name}: premise: grouped core");
+    // A second workspace of the same plan finds the shared plans.
     let mut second = op.workspace();
-    assert!(
-        calls(|| {
-            op.execute(&lhs, &rhs, &mut second);
-        }) > 0
-    );
+    op.execute(&lhs, &rhs, &mut second);
     assert_eq!(
-        calls(|| {
-            op.execute(&lhs, &rhs, &mut second);
-        }),
-        0,
-        "{name}: second workspace warm"
+        plan_builds(),
+        builds,
+        "{name}: second workspace built a plan"
     );
     assert_eq!(
         second.retained_bytes(),
         footprint,
         "{name}: second footprint"
     );
-    // The facade query covers everything the warmed workspace owns, its
-    // core bindings included: dropping it frees no more than it reports.
+    // The facade query covers everything the warmed workspace owns:
+    // dropping it frees no more than it reports.
     let ((), dropped) = counting_alloc::measure(|| drop(second));
     assert!(
         dropped.freed_bytes > 0 && dropped.freed_bytes as usize <= footprint,
         "{name}: freed {} B against retained_bytes {footprint} B",
         dropped.freed_bytes
     );
-    eprintln!(
-        "{name}: drop freed {} B of {footprint} B",
-        dropped.freed_bytes
-    );
-    // B = 2 and 17 release the bindings; B = 1 then prepares again.
+    // B = 2 and 17 in between; the return to B = 1 still builds no plan.
     for count in [2, 17] {
         let (lhs, rhs) = op.stacks(count, 7);
         op.execute(&lhs, &rhs, &mut workspace);
     }
-    let again = calls(|| {
-        op.execute(&lhs, &rhs, &mut workspace);
-    });
+    let builds = plan_builds();
+    op.execute(&lhs, &rhs, &mut workspace);
+    assert_eq!(plan_builds(), builds, "{name}: B = 1 again built a plan");
+    // The GEMM staging keeps its high-water capacity from B = 17.
     assert!(
-        again >= 2,
-        "{name}: the return to B = 1 rebuilds ({again} calls)"
+        workspace.retained_bytes() >= footprint,
+        "{name}: B = 1 again"
     );
-    assert_eq!(workspace.retained_bytes(), footprint, "{name}: B = 1 again");
     assert_eq!(
         calls(|| {
             op.execute(&lhs, &rhs, &mut workspace);
@@ -175,7 +181,10 @@ where
         0,
         "{name}: warm again"
     );
-    eprintln!("{name}: cold={cold} calls, again={again} calls, retained {footprint} B");
+    eprintln!(
+        "{name}: cold={cold} calls, warm={} calls, retained {footprint} B",
+        warm_calls.unwrap()
+    );
 }
 
 struct Compose<R, D> {
@@ -291,7 +300,7 @@ where
 }
 
 #[test]
-fn warmed_member1_workspace_prepares_no_grouped_core_plan() {
+fn warmed_member1_workspace_builds_no_grouped_core_plan() {
     let _serial = counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;

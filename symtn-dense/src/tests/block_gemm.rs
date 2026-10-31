@@ -1,8 +1,10 @@
 //! The native block GEMM kernel through the public batch entries: values
 //! against an independent column-major triple loop for every scalar, op
-//! lowering, engine width and batch policy; one prepared plan per distinct
-//! geometry; rejections before any write; and the engine-derived reserved
-//! lane widths.
+//! lowering, engine width and batch policy; one plan lookup per distinct
+//! geometry; rejections before any write; the engine-derived reserved lane
+//! widths; and the geometry-plan cache (a hit is the rebuilt plan, every key
+//! field separates entries, a disabled or rejecting cache builds per lookup,
+//! concurrent misses build once).
 
 use super::*;
 use crate::block_kernel::{gemm, schedule};
@@ -112,7 +114,7 @@ fn value(i: usize, salt: f64) -> Complex64 {
 }
 
 /// Runs `jobs` as one public batch call (identity entry when both ops are
-/// Identity) and returns the result and the geometry plans prepared.
+/// Identity) and returns the result and the geometry plans looked up.
 #[allow(clippy::too_many_arguments)]
 fn run<T: Scalar>(
     engine: &mut CpuEngine,
@@ -145,7 +147,7 @@ fn run<T: Scalar>(
         T::dense(alpha),
         T::dense(beta),
     );
-    (result, recording.get(crate::probe::Event::GemmPlanBuild))
+    (result, recording.get(crate::probe::Event::GemmPlanLookup))
 }
 
 /// Heterogeneous, non-affine jobs with repeated geometries, gaps, outputs
@@ -203,9 +205,12 @@ fn check<T: Scalar>(engine: &mut CpuEngine, ops: [MatrixOp; 2], beta: Complex64,
         beta,
     );
     let mut out = initial.clone();
-    let (result, built) = run(engine, &jobs, base, &mut out, &lhs, &rhs, ops, alpha, beta);
+    let (result, looked_up) = run(engine, &jobs, base, &mut out, &lhs, &rhs, ops, alpha, beta);
     result.unwrap();
-    assert_eq!(built, geometries, "{label}: one plan per distinct geometry");
+    assert_eq!(
+        looked_up, geometries,
+        "{label}: one lookup per distinct geometry"
+    );
     for (index, (found, want)) in wide(&out).iter().zip(&want).enumerate() {
         assert!(
             (found - want).norm() <= T::TOL * (1.0 + want.norm()),
@@ -319,7 +324,7 @@ fn complex_adjoint_conjugates_and_transposes() {
         let initial: Vec<Complex64> = (0..9).map(|i| c64(i as f64, -1.0)).collect();
         let mut out = initial.clone();
         let (alpha, beta) = (c64(0.5, -0.75), c64(0.25, 1.5));
-        let (result, built) = run::<Complex64>(
+        let (result, looked_up) = run::<Complex64>(
             &mut engine,
             &jobs,
             [1, 1, 1],
@@ -331,7 +336,7 @@ fn complex_adjoint_conjugates_and_transposes() {
             beta,
         );
         result.unwrap();
-        assert_eq!(built, 2, "{name}");
+        assert_eq!(looked_up, 2, "{name}");
         let mut want = initial.clone();
         // Job 0: (A^H)[i,p] = conj(a[p + 3 i]), (B^H)[p,j] = conj(b[j + 2 p]).
         for j in 0..2 {
@@ -367,7 +372,7 @@ fn overlapping_destinations_are_rejected_before_any_write() {
         batch_job((1, 3, 3), (3, 6, 6)),
     ];
     let mut out = [-5.0; 12];
-    let (result, built) = run::<f64>(
+    let (result, looked_up) = run::<f64>(
         &mut engine,
         &jobs,
         [0; 3],
@@ -383,7 +388,7 @@ fn overlapping_destinations_are_rejected_before_any_write() {
         matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("jobs 0 and 2 overlap")),
         "{error:?}"
     );
-    assert_eq!(built, 0, "rejected before any plan");
+    assert_eq!(looked_up, 0, "rejected before any plan");
     assert_eq!(out, [-5.0; 12]);
 }
 
@@ -427,7 +432,8 @@ fn the_lowest_indexed_out_of_range_job_is_reported() {
 fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
     let pool = || crate::Pool::builder().threads(16).build().unwrap();
     let large = vec![batch_job((256, 256, 256), (0, 0, 0)); 5];
-    let (times, mean) = gemm::costs::<f64>(&large);
+    let mut times = Vec::new();
+    let mean = gemm::costs_into::<f64>(&large, &mut times);
     let widths = |policy: BatchPolicy| {
         let mut engine = CpuEngine::new(pool()).with_batch_policy(policy);
         engine
@@ -467,7 +473,8 @@ fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
 
     // Many tiny jobs: every reserved width is one or the batch is serial.
     let tiny = vec![batch_job((2, 2, 2), (0, 0, 0)); 200];
-    let (times, mean) = gemm::costs::<f64>(&tiny);
+    let mut times = Vec::new();
+    let mean = gemm::costs_into::<f64>(&tiny, &mut times);
     let mut engine = CpuEngine::new(pool());
     let allocation = engine
         .with_contraction_exec(|exec, _, _| Ok(schedule::allocate(exec, &times, mean)))
@@ -476,4 +483,251 @@ fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
         allocation.lanes.len() == 1 || allocation.lanes.iter().all(|l| l.budget == 1),
         "{allocation:?}"
     );
+}
+
+mod plan_cache {
+    use super::*;
+    use crate::block_kernel::gemm::{cached_plan, GemmPlanCache, Geometry};
+    use std::sync::Arc;
+    use symtn_core::{ErasedStructureCacheControl, StructureCache, StructureCacheKind};
+    use tcontract::api::Scalar as PlanScalar;
+    use tcontract::{Algorithm, Plan, SliceAccumulationSource};
+
+    fn cache(budget: u64) -> GemmPlanCache {
+        StructureCache::new(StructureCacheKind::GemmPlans, budget)
+    }
+
+    fn geometry(mkn: (usize, usize, usize), ops: [MatrixOp; 2]) -> Geometry {
+        Geometry::new(&batch_job(mkn, (0, 0, 0)), ops).unwrap()
+    }
+
+    /// `plan` run serially on fixed inputs with nontrivial alpha and beta,
+    /// widened bit for bit.
+    fn execute<T: Scalar + PlanScalar + Default>(plan: &Plan<T>, at: &Geometry) -> Vec<[u64; 2]> {
+        let [m, k, n] = at.mkn;
+        let data = |len: usize, salt: f64| (0..len).map(|i| T::make(value(i, salt))).collect();
+        let (lhs, rhs): (Vec<T>, Vec<T>) = (data(m * k, 0.5), data(k * n, 7.0));
+        let mut out: Vec<T> = data(m * n, 3.0);
+        plan.execute_slices_accum(
+            &mut tcontract_exec::Exec::serial(),
+            T::make(c64(0.75, -0.5)),
+            (&lhs, 0),
+            (&rhs, 0),
+            T::make(c64(-0.25, 0.125)),
+            SliceAccumulationSource::Output,
+            (&mut out, 0),
+        )
+        .unwrap();
+        out.iter()
+            .map(|x| [x.wide().re.to_bits(), x.wide().im.to_bits()])
+            .collect()
+    }
+
+    fn builds<R>(f: impl FnOnce() -> R) -> (R, usize) {
+        let recording = crate::probe::record();
+        let result = f();
+        (result, recording.get(crate::probe::Event::GemmPlanBuild))
+    }
+
+    /// Small Faer geometries in every op lowering, and a `Complex64` one
+    /// above tcontract's default Faer volume limit, which plans Packed.
+    fn cases() -> Vec<Geometry> {
+        let ops = [MatrixOp::Identity, MatrixOp::Transpose, MatrixOp::Adjoint];
+        let mut cases = Vec::new();
+        for a in ops {
+            for b in ops {
+                cases.push(geometry((3, 4, 2), [a, b]));
+                cases.push(geometry((64, 64, 64), [a, b]));
+            }
+        }
+        cases
+    }
+
+    fn hit_equals_rebuild<T: Scalar + PlanScalar + Default>() {
+        let cache = cache(1 << 26);
+        for at in cases() {
+            let cold = cached_plan::<T>(&cache, at).unwrap();
+            let (hit, built) = builds(|| cached_plan::<T>(&cache, at).unwrap());
+            assert_eq!(built, 0, "{at:?}: a repeat is a hit");
+            assert!(Arc::ptr_eq(&cold, &hit), "{at:?}");
+            let rebuilt = at.plan::<T>().unwrap();
+            assert_eq!(hit.report().algorithm, rebuilt.report().algorithm);
+            assert_eq!(execute(&hit, &at), execute(&rebuilt, &at), "{at:?}");
+        }
+    }
+
+    #[test]
+    fn a_cached_plan_computes_what_a_rebuilt_plan_computes_bit_for_bit() {
+        hit_equals_rebuild::<f32>();
+        hit_equals_rebuild::<f64>();
+        hit_equals_rebuild::<Complex32>();
+        hit_equals_rebuild::<Complex64>();
+    }
+
+    #[test]
+    fn every_reachable_strategy_is_covered_by_the_cases() {
+        // What: the lowered GEMM always has nonempty m, n and k roles, so
+        // tcontract never plans it Elementwise (all-batch); small geometries
+        // plan Faer, and `Complex64` above the Faer volume limit Packed.
+        let algorithm = |at: Geometry| at.plan::<Complex64>().unwrap().report().algorithm;
+        for at in cases() {
+            let want = if at.mkn == [64, 64, 64] {
+                Algorithm::Packed
+            } else {
+                Algorithm::Faer
+            };
+            assert_eq!(algorithm(at), want, "{at:?}");
+            assert_eq!(
+                at.plan::<f64>().unwrap().report().algorithm,
+                Algorithm::Faer
+            );
+        }
+        for mkn in [(1, 1, 1), (3, 0, 2), (0, 3, 2), (0, 0, 0)] {
+            let at = geometry(mkn, [MatrixOp::Identity; 2]);
+            assert_ne!(algorithm(at), Algorithm::Elementwise, "{mkn:?}");
+        }
+    }
+
+    #[test]
+    fn every_key_field_separates_entries() {
+        let cache = cache(1 << 24);
+        let base = geometry((3, 4, 2), [MatrixOp::Identity; 2]);
+        let first = cached_plan::<f64>(&cache, base).unwrap();
+        let mut padded_d = base;
+        padded_d.strides[2] = [1, 4];
+        let variants = [
+            ("m", geometry((4, 4, 2), [MatrixOp::Identity; 2])),
+            ("k", geometry((3, 5, 2), [MatrixOp::Identity; 2])),
+            ("n", geometry((3, 4, 3), [MatrixOp::Identity; 2])),
+            (
+                "A strides",
+                geometry((3, 4, 2), [MatrixOp::Transpose, MatrixOp::Identity]),
+            ),
+            (
+                "B strides",
+                geometry((3, 4, 2), [MatrixOp::Identity, MatrixOp::Transpose]),
+            ),
+            ("D strides", padded_d),
+        ];
+        let charged = std::cell::Cell::new(cache.info().charged_bytes());
+        let misses = std::cell::Cell::new(1);
+        let check = |what: &str, lookup: &dyn Fn() -> bool| {
+            // What: the changed field misses (a new plan is built), and the
+            // next lookup of it hits.
+            let (fresh, built) = builds(lookup);
+            assert!(fresh, "{what}: a distinct entry");
+            assert_eq!(built, 1, "{what}: built once");
+            assert_eq!(builds(lookup).1, 0, "{what}: then hit");
+            misses.set(misses.get() + 1);
+            let info = cache.info();
+            assert_eq!(info.misses(), misses.get(), "{what}");
+            assert!(info.charged_bytes() > charged.get(), "{what}: charged");
+            charged.set(info.charged_bytes());
+        };
+        for (what, at) in variants {
+            check(what, &|| {
+                !Arc::ptr_eq(&cached_plan::<f64>(&cache, at).unwrap(), &first)
+            });
+        }
+        check("dtype", &|| cached_plan::<f32>(&cache, base).is_ok());
+        // Adjoint and Transpose lower to the same strides; only the
+        // conjugation flag tells the plans apart.
+        let transposed = geometry((3, 4, 2), [MatrixOp::Transpose, MatrixOp::Transpose]);
+        let plain = cached_plan::<Complex64>(&cache, transposed).unwrap();
+        misses.set(misses.get() + 1);
+        charged.set(cache.info().charged_bytes());
+        for (what, ops) in [
+            ("A conj", [MatrixOp::Adjoint, MatrixOp::Transpose]),
+            ("B conj", [MatrixOp::Transpose, MatrixOp::Adjoint]),
+        ] {
+            let at = geometry((3, 4, 2), ops);
+            assert_eq!(at.strides, transposed.strides, "{what}: premise");
+            check(what, &|| {
+                !Arc::ptr_eq(&cached_plan::<Complex64>(&cache, at).unwrap(), &plain)
+            });
+        }
+        let info = cache.info();
+        assert_eq!(
+            (info.entries() as u64, info.admissions()),
+            (misses.get(), misses.get())
+        );
+    }
+
+    #[test]
+    fn a_disabled_or_rejecting_cache_builds_every_lookup_with_the_same_result() {
+        let at = geometry((64, 64, 64), [MatrixOp::Adjoint, MatrixOp::Identity]);
+        let resident = cached_plan::<Complex64>(&cache(1 << 26), at).unwrap();
+        let want = execute(&resident, &at);
+        // Budget 0 admits nothing; 4 KiB admits at most 2 KiB, below one
+        // plan's charge.
+        for budget in [0, 4096] {
+            let cache = cache(budget);
+            for lookup in 1..=2 {
+                let (plan, built) = builds(|| cached_plan::<Complex64>(&cache, at).unwrap());
+                assert_eq!(built, 1, "budget {budget}: lookup {lookup} builds");
+                assert_eq!(execute(&plan, &at), want, "budget {budget}");
+            }
+            let info = cache.info();
+            assert_eq!(
+                (
+                    info.entries(),
+                    info.misses(),
+                    info.rejections(),
+                    info.hits()
+                ),
+                (0, 2, 2, 0),
+                "budget {budget}"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_first_lookups_of_one_geometry_build_once() {
+        const THREADS: usize = 8;
+        let cache = cache(1 << 26);
+        let at = geometry((64, 64, 64), [MatrixOp::Identity; 2]);
+        let start = std::sync::Barrier::new(THREADS);
+        let results: Vec<(Arc<Plan<Complex64>>, usize)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        builds(|| cached_plan::<Complex64>(&cache, at).unwrap())
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        // What: one thread built, every thread got its plan, and the waiters
+        // count as hits rather than duplicate builds.
+        assert_eq!(results.iter().map(|(_, built)| built).sum::<usize>(), 1);
+        assert!(results
+            .iter()
+            .all(|(plan, _)| Arc::ptr_eq(plan, &results[0].0)));
+        let info = cache.info();
+        assert_eq!(
+            (info.misses(), info.hits(), info.duplicate_builds()),
+            (1, THREADS as u64 - 1, 0)
+        );
+    }
+
+    #[test]
+    fn a_cleared_cache_rebuilds_the_same_plan() {
+        let cache = cache(1 << 26);
+        let at = geometry((5, 3, 4), [MatrixOp::Adjoint, MatrixOp::Transpose]);
+        let before = cached_plan::<Complex32>(&cache, at).unwrap();
+        ErasedStructureCacheControl::clear(&cache);
+        let info = cache.info();
+        assert_eq!(
+            (info.entries(), info.charged_bytes(), info.misses()),
+            (0, 0, 0)
+        );
+        let (after, built) = builds(|| cached_plan::<Complex32>(&cache, at).unwrap());
+        // What: the clear dropped the entry (a held plan stays valid), and
+        // the rebuild computes the same values.
+        assert_eq!(built, 1);
+        assert!(!Arc::ptr_eq(&before, &after));
+        assert_eq!(execute(&before, &at), execute(&after, &at));
+        assert_eq!(cache.info().entries(), 1);
+    }
 }

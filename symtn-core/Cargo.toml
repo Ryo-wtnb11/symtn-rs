@@ -26,7 +26,7 @@ smallvec = { version = "1", features = ["const_generics", "union"] }
 # block structure (small integer sequences, no untrusted input) — the Rust
 # analog of Julia's fast `Dict` hash; std's SipHash is needlessly slow here.
 rustc-hash = "2"
-# The one bounded concurrent cache behind symtn's four structure caches
+# The one bounded concurrent cache behind symtn's five structure caches
 # (#2014): byte-weighted, sharded, single-flight misses. Default features off:
 # the caches pass their own hasher, and std locks suffice.
 quick_cache = { version = "0.7", default-features = false, features = ["sharded-lock"] }

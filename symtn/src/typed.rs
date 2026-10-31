@@ -287,10 +287,7 @@ pub use symtn_core::{
 /// which takes the batch's thread count from the engine's cost rule over its
 /// estimated serial time and its lane count from the engine's batch decision;
 /// the lanes share those threads, so a batch of a few large blocks gives each
-/// lane several threads. The exception is the grouped core batch of a
-/// one-member `ContractPlan`/`ComposePlan` workspace, which reuses its
-/// retained grouped plan and under `Auto` still runs one GEMM per lane with a
-/// single thread each. A caller can still give each GEMM the whole pool:
+/// lane several threads. A caller can still give each GEMM the whole pool:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
 /// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs

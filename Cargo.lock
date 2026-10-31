@@ -2350,6 +2350,7 @@ dependencies = [
  "cpueinsum",
  "cpueinsum-blas",
  "num-complex",
+ "symtn-core",
  "tcontract",
  "tcontract-exec",
  "tenferro-cpu",

@@ -58,16 +58,17 @@ pub struct ContractPlan<R, D, S = Vec<D>> {
 /// `take_output` moves it out for good. `execute_into` cannot rely on any of
 /// this for a caller's destination and rewrites every inactive block.
 ///
-/// On Host with the faer provider, a one-member workspace also keeps the
-/// prepared native grouped-GEMM plan of each grouped core submission, built
-/// on its first call and reused while it matches, so a warm one-member call
-/// prepares no compatible grouped core plan. One-job and affine core batches
-/// keep Tenferro's binary-plan cache, whose misses are outside this
-/// guarantee. Changing the member count releases them (a
-/// later one-member call prepares them again), and dropping the workspace
-/// frees them; two workspaces of one plan each keep their own.
-/// [`Self::retained_bytes`] includes their charge. Member counts above one
-/// prepare their grouped plans per call.
+/// On Host with the faer provider, the dense GEMM plans of the grouped core
+/// submissions are not workspace state: the block GEMM kernel takes them
+/// from the process-global geometry-plan cache
+/// ([`StructureCacheKind::GemmPlans`](crate::cache::StructureCacheKind::GemmPlans)),
+/// shared by every workspace, member count and eager call, so a warm call
+/// prepares no grouped core plan while the cache keeps it. The workspace's
+/// dense executor keeps the kernel's per-call staging, so a warm call on a
+/// serial engine allocates nothing; [`Self::retained_bytes`] includes that
+/// staging, which keeps its high-water capacity. One-job and affine
+/// core batches keep Tenferro's binary-plan cache, whose misses are outside
+/// this guarantee.
 pub struct ContractWorkspace<R, D, S = Vec<D>> {
     binding: Arc<StorageContractResolution<f64>>,
     pub(super) output: OutputSlot<StackedTensorMap<R, D, S>>,
@@ -588,13 +589,15 @@ impl<R, D, S> ContractWorkspace<R, D, S> {
 
 impl<R, D, S: PreparedExec<R, D>> ContractWorkspace<R, D, S> {
     /// Retained output payload and replay scratch (on CUDA, device payload
-    /// and Host layout scratch), plus on Host a conservative charge for the
-    /// one-member core's grouped-GEMM plans (16 KiB plus eight bytes per
-    /// `3 m + 3 n + 2 k + 4` for each job, and the job list). On CUDA the zero
-    /// and `1` templates of the fills are not counted: they are bounded by the
+    /// and Host layout scratch), plus on Host the dense executors' kept GEMM
+    /// staging (job records, geometry index, plan-handle slots, costs and
+    /// lane tables, charged by capacity). GEMM plans are not counted: they
+    /// live in the process-global geometry-plan cache. On CUDA the zero and
+    /// `1` templates of the fills are not counted: they are bounded by the
     /// largest fill of one call, not by what the member count sizes.
     pub fn retained_bytes(&self) -> usize {
         self.members.retained_bytes()
+            + self.host_context.dense_scratch_bytes()
             + S::retained_scratch_bytes(EXEC, self)
             + self
                 .output

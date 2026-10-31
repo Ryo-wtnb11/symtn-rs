@@ -19,9 +19,10 @@ pub(crate) enum Event {
     CudaFullDownloadBytes,
     /// Bytes `cuda_download` moved device to host (reductions, spectra).
     CudaMetadataDownloadBytes,
-    /// The native grouped GEMM route prepared a `cpueinsum::GroupedPlan`.
-    GroupedPlanBuild,
-    /// The native block GEMM kernel prepared one geometry's `tcontract::Plan`.
+    /// The native block GEMM kernel looked up one distinct geometry's plan.
+    GemmPlanLookup,
+    /// The native block GEMM kernel prepared one geometry's `tcontract::Plan`
+    /// (a geometry-plan cache miss).
     GemmPlanBuild,
 }
 
