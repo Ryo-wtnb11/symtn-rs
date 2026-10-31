@@ -1,7 +1,7 @@
 //! `exp` takes the Hermitian spectral route `V exp(D) Vᴴ` exactly when every
 //! coupled-sector block passes the `64 eps(D)` relative Hermitian predicate,
-//! in both fusion modes, and Padé [13/13] otherwise (#1799:
-//! TensorKit `exp!` per block, whose `LinearAlgebra.exp!` takes
+//! in both fusion modes, and Padé [13/13] otherwise
+//! (TensorKit `exp!` per block, whose `LinearAlgebra.exp!` takes
 //! `exp(Hermitian(A))` and `copytri!`s it exactly Hermitian).
 //!
 //! Oracles: a Taylor series of each block evaluated here in `Complex64`

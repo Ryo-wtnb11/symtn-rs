@@ -317,7 +317,7 @@ impl OperationError {
 mod tests {
     use super::*;
 
-    // Canary (#231) against `OperationError` regrowing past the clippy
+    // Canary against `OperationError` regrowing past the clippy
     // `result_large_err` threshold: `MissingBlockKey` boxes `BlockKey` and the
     // `TreeTransformOperation` payload on `Unsupported{FusionStyle,
     // BraidingStyle,TreeTransformScope}` is boxed, keeping every

@@ -253,7 +253,7 @@ fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
     lq_full_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
     full_calls += 1;
 
-    // Full QR/LQ publish each side through the side-aware builder (#1524).
+    // Full QR/LQ publish each side through the side-aware builder.
     let one_sided = one_sided_rec.one_sided_publication();
     assert_eq!(
         (
@@ -316,7 +316,7 @@ where
     // per output.
     let (compact_calls, full_calls) = (3, 2);
 
-    // Full QR/LQ publish each side through the side-aware builder (#1524).
+    // Full QR/LQ publish each side through the side-aware builder.
     let one_sided = one_sided_rec.one_sided_publication();
     assert_eq!(
         (

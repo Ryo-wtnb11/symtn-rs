@@ -45,7 +45,7 @@ mod checked_generic_absorb;
 mod checked_generic_trace_duality;
 mod checked_generic_trace_oracle;
 mod compact_reductions_both_modes;
-mod compact_spectrum_axpby_pins;
+mod compact_spectrum_axpby_lazy_adjoint;
 mod complex_symbol_lazy_adjoint;
 mod contract_into_reordered_overwrite;
 mod contract_spec_split;

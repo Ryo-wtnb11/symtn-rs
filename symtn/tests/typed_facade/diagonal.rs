@@ -217,7 +217,7 @@ fn compose_declines_a_compact_arm_it_cannot_prove() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #584: the compact diagonal arm of `contract`.
+// The compact diagonal arm of `contract`.
 // ---------------------------------------------------------------------------
 
 /// The three axis patterns the diagonal `contract` arm claims, plus one it must
@@ -250,7 +250,7 @@ const DIAGONAL_CONTRACT_CASES: &[(&str, bool, ContractSpec<'static>)] = &[
             domain: &[1],
         },
     ),
-    // A split of another size: one codomain leg (#1549).
+    // A split of another size: one codomain leg.
     (
         "t*s resplit",
         true,
@@ -283,7 +283,7 @@ const DIAGONAL_CONTRACT_CASES: &[(&str, bool, ContractSpec<'static>)] = &[
             domain: &[2, 0],
         },
     ),
-    // Every open leg in the codomain (#1549).
+    // Every open leg in the codomain.
     (
         "s*t resplit",
         false,
@@ -1336,7 +1336,7 @@ fn compact_is_posdef_matches_the_forced_dense_route_for_a_hermitian_c64_spectrum
 }
 
 // ---------------------------------------------------------------------------
-// Issue #604: the compact full-pair trace arm. The typed `trace_pairs` keeps
+// The compact full-pair trace arm. The typed `trace_pairs` keeps
 // a compact spectrum factor compact. The value sweep here
 // covers the same rules, orientations, and variants against a forced-dense
 // typed route. The storage claim lives in `typed_diagonal_allocations.rs`.
@@ -1509,8 +1509,8 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         let typed_s = compact_bond_trace(&runtime, &typed_leg, complex);
         sweep_compact_trace_variants(&format!("fz2 dual={is_dual} c64"), &typed_s, widen_complex);
 
-        // U(1) x fZ2, using the packed codec from the #589 section's rule
-        // aliases: both the charge and parity factor must survive into the
+        // U(1) x fZ2, using the packed codec from the rule aliases of this
+        // file's earlier section: both the charge and parity factor must survive into the
         // coefficient.
         let product_label = |charge: i32, parity: u8| {
             symtn::sector::ProductSector::new(

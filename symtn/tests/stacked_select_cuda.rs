@@ -1,4 +1,4 @@
-//! `StackedTensorMap::select` on a real device (#1502).
+//! `StackedTensorMap::select` on a real device.
 //!
 //! `cuda_transfer_stats` is thread-local. Run with `cargo test -p symtn --no-default-features
 //! --features cuda,cpu-faer --test integration stacked_select_cuda:: -- --ignored`.

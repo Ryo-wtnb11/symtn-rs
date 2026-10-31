@@ -1,5 +1,5 @@
 //! Real-device gates for general-axes contraction on device tensors
-//! (issue #1345): the Host `DynamicTree` artifact replayed by device
+//!: the Host `DynamicTree` artifact replayed by device
 //! executors.
 //!
 //! Evidence chain:
@@ -15,10 +15,10 @@
 //!    Host typed ops (bosonic providers), and device == the physical-basis
 //!    dense contraction (U(1), SU(2)). Both oracles are pinned against the
 //!    Host by the ungated `typed_contract_host_oracle.rs`;
-//! 4. fermionic providers (#1347): device == Host == TensorKit's
+//! 4. fermionic providers: device == Host == TensorKit's
 //!    sequence with the twist on either role, and the TensorKit-valued FZ2
 //!    loops as explicit device `contract` calls;
-//! 5. `contract_into` (#1346): into a NaN-poisoned device
+//! 5. `contract_into`: into a NaN-poisoned device
 //!    destination, device == Host eager `contract` (whose overwrite twin is
 //!    pinned ungated) == the same independent oracles, on every fixture
 //!    above plus destinations with blocks no GEMM writes; warm calls transfer
@@ -209,7 +209,7 @@ fn lazy_at<D: DevicePayload>(
     }
 }
 
-/// The zero-copy sorted/swapped candidates (#1468) run the device Core
+/// The zero-copy sorted/swapped candidates run the device Core
 /// route, swapped operands and lazy-adjoint GEMM flags included. The
 /// fermionic probes take the twisted `blas_contract!` oracle: C2 and L5
 /// contract dual B legs in their literal sequence, which TensorKit twists.
@@ -282,7 +282,7 @@ fn lazy_adjoint_operands_match_the_host_at_every_dtype() {
     lazy_at::<Complex32>(engine, cuda, &runtime);
 }
 
-/// #2147: a lazy adjoint whose tree transform is the identity, against a
+/// A lazy adjoint whose tree transform is the identity, against a
 /// permuted partner, runs the device DynamicTree with the adjoint read from
 /// its parent's device buffer under a GEMM adjoint op (TensorKit
 /// `blas_contract!` without `copyA`, `tensoroperations.jl:383-450` @cfaa073).
@@ -341,7 +341,7 @@ fn identity_adjoint_operands_are_borrowed_by_the_device_dynamic_tree() {
     at::<_, Complex64>(engine, cuda, &u1_non_self_dual(), "U(1)");
 }
 
-/// #1857: device `contract` / `contract_into` take TensorKit's `copyC`
+/// Device `contract` / `contract_into` take TensorKit's `copyC`
 /// (`blas_contract!`, `tensoroperations.jl:436-446` @cfaa073) where the batched
 /// `ContractPlan` does: the zero-copy core into the core-destination scratch,
 /// then one permute. Values only: the call-local scratch is not observable.
@@ -420,8 +420,8 @@ fn copy_c_probes_move_only_c_and_match_the_host_at_every_dtype() {
     });
 }
 
-/// Orders process-global cache clears against warm/cold count windows
-/// (#2084). Cooperative: every new clearing test must take the write lock
+/// Orders process-global cache clears against warm/cold count windows.
+/// Cooperative: every new clearing test must take the write lock
 /// and every new count-dependent test `cache_shared`.
 static CACHE_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
@@ -444,7 +444,7 @@ fn device_contract<R: DeviceRule, D: DevicePayload>(
 }
 
 /// Device == Host and device == TensorKit's `blas_contract!` with the twist
-/// on the B role and on the A role (#1347).
+/// on the B role and on the A role.
 fn check_fermionic<R, D>(
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
@@ -571,7 +571,7 @@ fn rejections_happen_before_any_device_work_and_match_the_host() {
 }
 
 /// Every split size of `case`'s open legs, in its own output order and
-/// reversed (#1549): the device result is the Host one, which
+/// reversed: the device result is the Host one, which
 /// `contract_spec_split.rs` pins against contract-then-permute. The returning
 /// and the overwrite forms both run.
 fn check_splits<R: DeviceRule, D: DevicePayload>(
@@ -681,7 +681,7 @@ fn malformed_rank_five_specs() -> [ContractSpec<'static>; 4] {
 }
 
 // ---------------------------------------------------------------------------
-// `contract_into` (#1346)
+// `contract_into`
 // ---------------------------------------------------------------------------
 
 /// Device `contract_into` of `case` into a NaN-poisoned device
@@ -864,8 +864,8 @@ fn overwrite_rejections_match_the_host_in_order_and_leave_the_destination_untouc
         );
     }
 
-    // Runtime, shared ownership and alias. Every alpha and beta is supported
-    // (#1550), so there is no device scale boundary left to reject.
+    // Runtime, shared ownership and alias. Every alpha and beta is supported,
+    // so there is no device scale boundary left to reject.
     let mut destination = poison(engine).to_cuda(cuda).unwrap();
     let stranger = u1_rank_five::<f64>(engine, &other)
         .rhs

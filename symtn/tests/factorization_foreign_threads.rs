@@ -1,4 +1,4 @@
-//! #1389: streaming factorizations called from a worker of a foreign Rayon
+//! Streaming factorizations called from a worker of a foreign Rayon
 //! pool, inside a `rayon::join`, and concurrently from plain threads, each
 //! caller on its own engine over one shared Runtime, return the results of
 //! the same calls run serially on one thread.

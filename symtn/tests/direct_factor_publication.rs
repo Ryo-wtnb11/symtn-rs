@@ -1,5 +1,5 @@
 //! Compact LQ and checked-Generic polar write their factors straight into the
-//! output storage (#1478): LQ appends each sector's adjoint instead of
+//! output storage: LQ appends each sector's adjoint instead of
 //! zero-filling first, and polar runs its GEMMs into the output regions
 //! instead of per-sector temporaries that are then copied.
 
@@ -174,7 +174,7 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
 // request left is the dense backend's R factor (Tenferro
 // `faer_linalg::upper_triangle_vec_from_mat`), whose total over sectors is
 // the payload of L: 4872 zeroed bytes for this fixture. The counter observes
-// `alloc_zeroed` (e.g. `vec![0.0; len]`) for f64 (#1478).
+// `alloc_zeroed` (e.g. `vec![0.0; len]`) for f64.
 /// Purpose: compact LQ requests no zeroed storage beyond the dense backend's
 /// R factor.
 #[test]
@@ -341,12 +341,12 @@ mod checked_generic {
         cases!(engine, Complex64, &runtime);
     }
 
-    // The polar publication contract (#1478, no per-sector W, P or scaled
+    // The polar publication contract (no per-sector W, P or scaled
     // factor temporary) is observed on the GEMM views in the lib test
     // `checked_generic_polar_writes_its_factors_in_place`, which can inject a
     // recording dense executor.
 
-    // Byte contract (#1494): the leg-degeneracy (facade) layout of a rank-3
+    // Byte contract: the leg-degeneracy (facade) layout of a rank-3
     // and a rank-4 multiplicity map is a coupled-sector tiling, so QR, SVD,
     // LQ and `svd_vals` read the payload in place. Before, `FusionTreeKey`
     // Ord admission rejected the facade tree order and each call first packed

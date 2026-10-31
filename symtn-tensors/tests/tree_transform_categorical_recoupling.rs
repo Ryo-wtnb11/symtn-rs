@@ -1,5 +1,5 @@
 //! CPU-only half of the categorical recoupling evidence for the device
-//! tree-transform executor (issue #1310).
+//! tree-transform executor.
 //!
 //! The device suite (`cuda_tree_transform_categorical.rs`, `#[ignore]`) replays
 //! provider-compiled SU(2) and fZ2 x SU(2) structures and compares them with

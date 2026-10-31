@@ -1,5 +1,4 @@
-//! Fixtures and the independent oracle for the `EighFullPlan` gates
-//! (#1499).
+//! Fixtures and the independent oracle for the `EighFullPlan` gates.
 //!
 //! The oracle reads tensors only through the public block API. Each coupled
 //! sector's matrix is assembled from its fusion-tree blocks (rows and columns

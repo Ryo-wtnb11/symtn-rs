@@ -1,5 +1,5 @@
 //! Standalone ops on a SHARED `Runtime` must be correct and deterministic when
-//! driven from many threads at once (#155), each thread on its own engine:
+//! driven from many threads at once, each thread on its own engine:
 //! each op leases a per-rule execution context from the Runtime's pool
 //! instead of holding a coarse runtime lock, so this exercises that the
 //! pooled machinery never leaks state across concurrent ops.

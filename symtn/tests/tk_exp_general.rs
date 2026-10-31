@@ -3,7 +3,7 @@
 #![allow(clippy::excessive_precision)]
 
 //! TensorKit `exp(::AbstractTensorMap)` correspondence for the general
-//! (non-Hermitian) arm of `TensorMap::exp` (issue #577).
+//! (non-Hermitian) arm of `TensorMap::exp`.
 //!
 //! TensorKit 0.17 `src/tensors/linalg.jl`, `exp` at line 44 and `exp!` at
 //! lines 420-428:
@@ -36,11 +36,11 @@
 //!
 //! # Fixture certification
 //!
-//! `norm` is a pre-existing method that predates #577, and `norm(t)` is
+//! `norm` is an existing method independent of `exp`, and `norm(t)` is
 //! basis-free — `sqrt(Σ_c dim(c) ||block_c||_F²)`, with `dim(c) = 1` for every
 //! U(1) sector — so it depends on the multiset of block entries and nothing
 //! else. Pinning `norm` of the *input* against Julia therefore proves symtn's
-//! fixture is the tensor Julia exponentiated, before any of #577's code runs.
+//! fixture is the tensor Julia exponentiated, before any `exp` code runs.
 //! The entrywise oracle for the same fixture lives one layer down, in
 //! `symtn-matrixalgebra`'s `exp_of_a_multisector_u1_endomorphism_matches_the_series`.
 

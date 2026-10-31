@@ -134,7 +134,7 @@ where
 {
     // Why not `fold_surgery`: a unique fold has exactly one forward and one
     // inverse move, and threading that single term through the surgery's
-    // move iterators measurably slows cold unique transposes (#1852).
+    // move iterators measurably slows cold unique transposes.
     // These are the surgery's steps, unrolled, with the multiplicity-free
     // coefficient kernel.
     let kernel = SimpleK(rule);

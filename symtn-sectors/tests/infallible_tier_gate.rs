@@ -1,4 +1,4 @@
-//! Export firewall for the infallible Generic symbol tier (#1854).
+//! Export firewall for the infallible Generic symbol tier.
 //!
 //! Production Generic is checked only: the infallible symbol traits and the
 //! adapter's symbol impl exist only behind `testing`. The adapter itself and

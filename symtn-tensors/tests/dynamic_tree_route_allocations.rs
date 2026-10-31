@@ -1,5 +1,5 @@
 //! Allocation contracts of the Host DynamicTree route, eager and member
-//! (B = 1, 17), on one thread (#1859):
+//! (B = 1, 17), on one thread:
 //!
 //! - a warm member replay allocates nothing, at B = 1 and B = 17;
 //! - a warm eager call and a warm member replay build no GEMM plan (the

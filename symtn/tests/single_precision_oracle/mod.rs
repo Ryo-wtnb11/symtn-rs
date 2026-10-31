@@ -1,5 +1,5 @@
 //! Shared oracle harness for the single-precision integration suites
-//! (#1315 base family, #1324 factorization family).
+//! (base and factorization families).
 //!
 //! The oracle for every check built on this module is the **`f64`/`Complex64`
 //! result of the same operation on the widened input**. Both tensors are

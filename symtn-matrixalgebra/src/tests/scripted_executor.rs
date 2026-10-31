@@ -1,4 +1,4 @@
-//! The one `DenseExecutor` test double of symtn-matrixalgebra (#1826).
+//! The one `DenseExecutor` test double of symtn-matrixalgebra.
 //!
 //! Each entry point has a scripted [`Action`]: forward to the wrapped
 //! `DefaultDenseExecutor`, keep the trait's default body (which funnels into

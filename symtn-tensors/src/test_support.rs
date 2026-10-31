@@ -17,7 +17,7 @@
 //! asserts on it (`Arc::ptr_eq` of cached values, intern-table lengths/ids).
 //! Both species must serialize against each other, not just against their
 //! own kind — a reader racing an unlocked resetter is exactly the bug class
-//! this lock exists to close (see #169, #172).
+//! this lock exists to close.
 //!
 //! Poison-tolerant: a panicking test must not poison the mutex and cascade
 //! spurious failures onto every other test sharing it, so callers use
@@ -30,7 +30,7 @@ pub(crate) static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(
 /// cache or intern-table counters. `CACHE_TEST_LOCK` only serializes the small
 /// set of tests that take it; ordinary, unlocked construction elsewhere in
 /// the same binary's cached path can still evict entries or move counters
-/// between this test's own reads (#649/#650 first used this for
+/// between this test's own reads (as in
 /// `checked_bind_failure_preserves_subset_admission_and_caches`).
 ///
 /// Call at the top of the `#[test]` fn with a name-unique env var and the

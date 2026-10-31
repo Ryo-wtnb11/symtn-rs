@@ -59,7 +59,7 @@ fn lowered_final_cold_build_has_no_per_tree_shape_allocation_slope() {
     let encoded_one = cold_encoded_allocations(1);
     let encoded_sixteen = cold_encoded_allocations(16);
 
-    // The encoded builder is the established #256 single-pass baseline. The
+    // The encoded builder is the single-pass baseline. The
     // checked enumeration may change the constant term, but must not add a
     // steeper allocation slope as the tree count grows.
     assert!(sixteen - one <= encoded_sixteen - encoded_one);

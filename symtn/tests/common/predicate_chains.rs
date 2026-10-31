@@ -1,5 +1,5 @@
 // The TensorKit predicates and projections as the public chains symtn spells
-// them with (#1557). Included with `include!` so the integration tests and the
+// them with. Included with `include!` so the integration tests and the
 // crate's own unit tests read one spelling; `TensorMap` must be in scope at the
 // call site, and the includer implements `ChainCoefficient` for its payloads. Each macro evaluates to a `bool` (or the projected tensor) and
 // panics on an operation error.

@@ -388,7 +388,7 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         symtn::typed::__network::network_reuse_class(&factor, false),
         NetworkReuseClass::Compact
     ));
-    // TensorKit `adjoint(::DiagonalTensorMap)` is again a diagonal (#1449).
+    // TensorKit `adjoint(::DiagonalTensorMap)` is again a diagonal.
     let factor_adjoint = factor.adjoint(engine).unwrap();
     assert!(matches!(
         symtn::typed::__network::network_reuse_class(&factor_adjoint, false),
@@ -1560,7 +1560,7 @@ macro_rules! single_precision_roundtrip {
             );
 
             // Checked Generic: vertex multiplicity; compact adjoints are owned
-            // compact values here too (#1449).
+            // compact values here too.
             let provider = Arc::new(GenericToy);
             let codec = GenericCodec {
                 provider: Arc::clone(&provider),

@@ -853,7 +853,7 @@ fn checked_only_generic_values_preserve_empty_scalar_and_shape_boundaries() {
 fn spectrum_only_entry_points_return_the_published_orders() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: svd_vals descending, eigh_vals ascending, eig_vals ascending
-    // lexicographic (re, im) within every sector (#1985).
+    // lexicographic (re, im) within every sector.
     let rule = Z2FusionRule;
     let hermitian = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let general = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);

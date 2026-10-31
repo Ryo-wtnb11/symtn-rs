@@ -1,4 +1,4 @@
-//! `FusionTreeKey` identity hash/eq canary (#153) for a multiplicity-free
+//! `FusionTreeKey` identity hash/eq canary for a multiplicity-free
 //! provider. Vertex labels remain part of exact identity; the benchmark uses
 //! the categorical label one required by `Z2FusionRule`. No timing assertion
 //! is used because shared CI runners are too noisy for a pass/fail latency

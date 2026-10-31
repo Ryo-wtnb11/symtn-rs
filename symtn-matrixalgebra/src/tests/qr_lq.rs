@@ -1,4 +1,4 @@
-//! QR and LQ factorization tests (#1596 split of tests.rs).
+//! QR and LQ factorization tests.
 
 use super::*;
 
@@ -1156,7 +1156,7 @@ fn lq_compact_positive_gauge_idempotent_on_isometry() {
 fn lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: without region admission, LQ of a lazy adjoint publishes by tree
-    // identity exactly the factors its region route publishes (#2070).
+    // identity exactly the factors its region route publishes.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -1200,7 +1200,7 @@ fn lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
 fn checked_lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the checked-Generic counterpart of the multiplicity-free test
-    // above (#2070): the tree route publishes the region route's factors.
+    // above: the tree route publishes the region route's factors.
     let (space, data) = generic_factorization_input();
     let (_, space) = bind_checked_layout(&space);
     let parent = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
@@ -1355,7 +1355,7 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
 fn checked_compact_lq_adds_no_per_sector_allocation_over_the_multiplicity_free_route() {
     // What: checked compact LQ, eager and lazy adjoint, adjoints every sector
     // through one scratch and writes each final adjoint once into the buffers
-    // it publishes, as the multiplicity-free route does (#2204). Its
+    // it publishes, as the multiplicity-free route does. Its
     // allocation excess over that route is then the per-call checked
     // staging alone, so it must not grow with the coupled-sector count.
     fn check<D: FactorScalar>() {

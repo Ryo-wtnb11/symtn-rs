@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// Decompositions (issue #567).
+// Decompositions.
 //
 // Factorizations are checked through their mathematical contracts.
 // ---------------------------------------------------------------------------

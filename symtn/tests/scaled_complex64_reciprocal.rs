@@ -1,4 +1,4 @@
-//! The `Complex64` compact reciprocal (symtn#1463): `inv`/`pinv` of a
+//! The `Complex64` compact reciprocal: `inv`/`pinv` of a
 //! multiplicity-free compact (diagonal) `Complex64` tensor apply
 //! `ScalarOps::recip_value` elementwise. Before this fix that was the naive
 //! `1.0 / z`, i.e. `(c - d*i) / (c*c + d*d)`: squaring both components

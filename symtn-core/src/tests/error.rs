@@ -1,6 +1,6 @@
 use super::*;
 
-// Canary (#231) against `CoreError` regrowing past the clippy
+// Canary against `CoreError` regrowing past the clippy
 // `result_large_err` threshold: `{Missing,Duplicate}BlockKey` box their
 // `BlockKey` payload precisely to keep every `Result<_, CoreError>` return
 // pointer-cheap on the hot paths that propagate it with `?`.

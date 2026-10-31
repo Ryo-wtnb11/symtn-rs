@@ -1,5 +1,5 @@
-//! Per-call cost of the public eager primitives on small many-block tensors
-//! (#1313): warm per-call minimum/median and allocation calls/bytes for
+//! Per-call cost of the public eager primitives on small many-block tensors:
+//! warm per-call minimum/median and allocation calls/bytes for
 //! `compose`, `contract`, `permute`, `repartition`, `qr_compact`,
 //! `svd_compact`, `lq_compact`, `left_null`, `eigh_full` (of the Hermitian
 //! `square' * square`), `restrict_leg`, `scale`, `axpby`, and `norm` over U(1), fZ2×U(1), and SU(2),

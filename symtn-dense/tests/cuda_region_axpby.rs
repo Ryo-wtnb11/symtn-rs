@@ -1,11 +1,11 @@
 //! Device tests for `cuda_region_axpby` / `cuda_region_zero`, the strided
 //! N-D region primitive the device structural operations are built on
-//! (issue #1301).
+//!.
 //!
 //! The oracle in every value test is an independent host strided loop over the
 //! same index space; nothing here is derived from a symtn descriptor, and the
 //! adapter's own metadata helpers are never used to build an expectation.
-//! `#1298`'s probe established the same claim directly against Tenferro; this
+//! An earlier probe established the same claim directly against Tenferro; this
 //! file re-establishes it through the production seam and adds the cases the
 //! probe did not cover: a coefficient that is a 1x1 *data* operand (so 0 and
 //! Inf propagate as they do on the host), a poisoned destination, the context
@@ -342,7 +342,7 @@ fn nd_sweep<D: RegionScalar>(ctx: &mut CudaDenseContext) {
     ];
     for &(dims, src_order, dst_order) in ND_CASES {
         for &conj in &[false, true] {
-            // A general beta (#1550) rides the same epilogue as 0 and 1.
+            // A general beta rides the same epilogue as 0 and 1.
             for &beta in &[
                 CudaRegionBeta::Overwrite,
                 CudaRegionBeta::Accumulate,

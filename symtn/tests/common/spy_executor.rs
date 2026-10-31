@@ -1,5 +1,5 @@
 use symtn_dense::Engine;
-// The one `DenseExecutor` test double (#1825): every kernel entry forwards to
+// The one `DenseExecutor` test double: every kernel entry forwards to
 // the compiled `DefaultDenseExecutor` and is counted where it enters the
 // executor; selected kernels can fail on their n-th call, and a strict spy
 // panics on any kernel outside the set a test allows. Included with

@@ -48,14 +48,14 @@ symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-fe
 symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features = false }
 
 [dev-dependencies]
-# External categories of the typed-facade extension tests (#2016).
+# External categories of the typed-facade extension tests.
 fusion-symbols = { version = "0.10.0", default-features = false }
 rayon = "1.10"
-# The table-backed Fibonacci provider of the planar workflow test (#2016).
+# The table-backed Fibonacci provider of the planar workflow test.
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }
-# Reference-oracle replay driver (#1767).
+# Reference-oracle replay driver.
 symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-features = false, features = ["testing"] }
-# The CUDA member workspace's failure seam (#1859).
+# The CUDA member workspace's failure seam.
 symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features = false, features = ["testing"] }
 
 [lints.clippy]

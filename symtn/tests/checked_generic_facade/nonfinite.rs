@@ -4,7 +4,7 @@ use crate::nonfinite_factor_input;
 use nonfinite_factor_input::assert_finite_input_refusals;
 
 /// Checked Generic factorizations refuse nonfinite input through the shared
-/// finite-input stage (#1986), dense and compact diagonal, real and complex;
+/// finite-input stage, dense and compact diagonal, real and complex;
 /// the multiplicity-free counterpart is `factorization_nonfinite_input.rs`.
 #[test]
 fn checked_generic_factorizations_refuse_nonfinite_input() {

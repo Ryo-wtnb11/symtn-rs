@@ -1,4 +1,4 @@
-//! The lazy adjoint of a complex-symbol rule (#2281): Ising through
+//! The lazy adjoint of a complex-symbol rule: Ising through
 //! `TableRule`, whose R-symbols are complex, so a transform of `t^H` read
 //! through its parent must use the dagger (inverse, conjugated) operation.
 //!

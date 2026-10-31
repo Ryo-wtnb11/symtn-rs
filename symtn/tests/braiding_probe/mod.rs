@@ -1,5 +1,5 @@
-//! One-sector real rules declaring a non-symmetric braiding style (#1355,
-//! #1372), shared by the `symtn` and `symtn-network` suites.
+//! One-sector real rules declaring a non-symmetric braiding style,
+//! shared by the `symtn` and `symtn-network` suites.
 //!
 //! The default probe has every symbol equal to 1, so only an explicit
 //! braiding guard can reject. `R_SCALE` injects extreme R values for fallback

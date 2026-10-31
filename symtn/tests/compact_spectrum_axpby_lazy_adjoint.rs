@@ -1,4 +1,4 @@
-//! Compact-spectrum `axpby` against a lazy adjoint operand (#2081 pins).
+//! Compact-spectrum `axpby` against a lazy adjoint operand.
 //!
 //! The compact operand's result must equal its dense twin's, which takes the
 //! ordinary dense route and never sees a spectrum. The lazy operand's parent

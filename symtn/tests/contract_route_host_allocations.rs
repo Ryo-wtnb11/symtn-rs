@@ -1,4 +1,4 @@
-//! #1859 Host H2: allocation contracts of the Host Core and CopyC routes,
+//! Allocation contracts of the Host Core and CopyC routes,
 //! eager (`contract_into`) and `ContractPlan` members (B = 1, 17), on one
 //! thread:
 //!

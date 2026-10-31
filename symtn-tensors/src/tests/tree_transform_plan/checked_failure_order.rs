@@ -212,7 +212,7 @@ fn order_fixture() -> OrderFixture {
 }
 
 /// What: the production checked compiler reports the approved step-major
-/// first provider error (#1962): the first whole-basis Artin step visits
+/// first provider error: the first whole-basis Artin step visits
 /// source A (succeeds) then source B (fails), before source A's later step.
 /// TensorKit fsbraid(block) applies each Artin move to the whole current
 /// basis:

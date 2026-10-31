@@ -1,4 +1,4 @@
-//! Issue #1124 measurement of the existing borrowed tree-transform admission seam.
+//! Measurement of the existing borrowed tree-transform admission seam.
 //! Tenferro 0.3 exposes no cache statistics here, so fresh versus reused
 //! `DenseTreeTransformOperations` is the recorded GEMM-analysis proxy.
 

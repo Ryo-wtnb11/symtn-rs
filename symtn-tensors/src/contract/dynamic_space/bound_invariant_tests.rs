@@ -238,8 +238,8 @@ fn checked_generic_equal_identity_checker_commits_under_source_arc() {
 fn checked_generic_bound_guards_preserve_typed_errors_before_commit() {
     let homspace = || FusionTreeHomSpace::from_sector_ids([(0, 1), (0, 1)], [(0, 1)]);
     // A fresh identity for this test's rules. Why not `of_type`: a
-    // successful walk may answer later ones from the sector-structure cache
-    // (#2030), so the failing checker gets a HomSpace no walk under this
+    // successful walk may answer later ones from the sector-structure cache,
+    // so the failing checker gets a HomSpace no walk under this
     // identity has published.
     let identity = RuleIdentity::new_unique::<FailAtCallRule>();
     let failing_homspace =
@@ -420,7 +420,7 @@ fn checked_generic_preparation_rejects_unchecked_binding_before_checker_algebra_
         CheckedGenericStructureError::Core(CoreError::MalformedFusionTree { .. })
     ));
     assert_eq!(checker.calls.get(), 0);
-    // The seam reads the checker identity once before the closure rejects (#2046).
+    // The seam reads the checker identity once before the closure rejects.
     assert_eq!(checker.identity_calls.get(), 1);
 }
 
@@ -584,8 +584,8 @@ fn checked_generic_bound_space_commits_the_staged_layout_without_reenumeration()
     assert_eq!(provider.calls.get(), 0);
     let preview = prepared.structure().clone();
     let required_len = prepared.required_len();
-    // The successful walk publishes its layout to the sector-structure cache
-    // (#2030); no block structure is admitted before the commit.
+    // The successful walk publishes its layout to the sector-structure cache;
+    // no block structure is admitted before the commit.
     let after_prepare = snapshots();
     assert_eq!(
         after_prepare.0.admissions(),
@@ -1329,7 +1329,7 @@ fn checked_adjoint_provider_derivation_cannot_republish_after_reset() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)] // The bound API requires Arc; this isolated spy uses Cell counters.
 fn checked_adjoint_of_a_subset_source_reports_the_first_missing_target_key() {
-    // What (#1942): only a Complete source skips the adjoint key check; a
+    // What: only a Complete source skips the adjoint key check; a
     // Subset source still enumerates the adjoint trees and reports the first
     // target-ordered key whose swapped source key is absent.
     let _guard = crate::test_support::CACHE_TEST_LOCK

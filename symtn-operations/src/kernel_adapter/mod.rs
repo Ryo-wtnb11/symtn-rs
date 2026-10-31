@@ -887,7 +887,7 @@ mod tests {
     /// tree-transform singles and by fusion pack/scatter, and the payload
     /// `alpha` copy/add/axpby ops — gives VectorInterface's
     /// `scale(x, 0) = zero(x) * 0` for a zero scale, so `±inf`/NaN sources
-    /// contribute zero (#1438). Oracle (Julia, TensorOperations 5.6.2):
+    /// contribute zero. Oracle (Julia, TensorOperations 5.6.2):
     /// `scale(complex(Inf, 1.0), 0.0)` and `scale(complex(Inf, NaN),
     /// complex(0.0, 0.0))` are `0.0 + 0.0im`, and `tensoradd!(C, A, p, false,
     /// 0, β)` leaves `scale(C, β)`: `C` for `β = 1`, `0` for `β = 0`.

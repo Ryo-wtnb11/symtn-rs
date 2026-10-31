@@ -1,4 +1,4 @@
-//! TensorKit scaling parity for non-finite data (#1438).
+//! TensorKit scaling parity for non-finite data.
 //!
 //! Oracle: outputs observed in Julia 1.11 with TensorKit main f87ca7fe
 //! (version 0.17.1), TensorOperations 5.6.2 and VectorInterface 0.6.0, on
@@ -73,7 +73,7 @@ fn cycle<D: Payload>(values: &[(f64, f64)], len: usize) -> Vec<D> {
 /// VectorInterface's `scale(x, β)` for the `β ∈ {0, 1, 2}` used here, with
 /// `β` in the payload type as symtn takes it (`T(β)` in Julia, so a complex
 /// payload is multiplied by `β + 0im`), and an exact `β = 1` as TensorKit's
-/// `One()`, which symtn's exact-one convention (#1398) stands for.
+/// `One()`, which symtn's exact-one convention stands for.
 fn tensorkit_scale<D: Payload>(value: D, beta: f64) -> (f64, f64) {
     if beta == 0.0 {
         (0.0, 0.0)

@@ -91,7 +91,7 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
     }
 }
 
-/// #1449: like TensorKit `adjoint(::DiagonalTensorMap)` and the
+/// Like TensorKit `adjoint(::DiagonalTensorMap)` and the
 /// multiplicity-free path, the checked-Generic adjoint of a compact diagonal is
 /// the owned conjugated diagonal, and its unstored zeros stay `+0 + 0i`.
 #[cfg(feature = "cgc-gen")]
@@ -391,8 +391,8 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
     assert!(std::ptr::eq(braided.provider(), provider.as_ref()));
 
     // A permutation this source has not taken: a warm one answers from its
-    // destination memo and completed transformer without the provider
-    // (#2154), so only a cold call reaches the failing algebra.
+    // destination memo and completed transformer without the provider,
+    // so only a cold call reaches the failing algebra.
     provider.fail_algebra.store(true, Ordering::Relaxed);
     let error = source.permute(engine, &[2, 1, 0], &[]).unwrap_err();
     assert!(matches!(
@@ -922,8 +922,8 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
     }
     let output = lhs.otimes(engine, &rhs).unwrap();
     assert!(std::ptr::eq(output.provider(), first.as_ref()));
-    // The sector-structure cache key (#2030) and the final commit guard
-    // reuse the identity the checked walk admitted (#2046).
+    // The sector-structure cache key and the final commit guard
+    // reuse the identity the checked walk admitted.
     assert_eq!(first.identity_queries.load(Ordering::Relaxed), 2);
     assert_eq!(second.identity_queries.load(Ordering::Relaxed), 1);
     assert!(first.final_style_guard_ran_last());
@@ -1711,7 +1711,7 @@ fn checked_multiplicity_lazy_fixture(
     tensor
 }
 
-/// Asserts `lazy.data()` against the literal pre-#1201 formula, builds an
+/// Asserts `lazy.data()` against the literal adjoint formula, builds an
 /// Owned twin from that literal payload, and checks that every listed
 /// transform gives the same blocks (or the same error) on both. `$ops` is a
 /// closure `(lazy, owned) -> [(name, Result, Result); N]`.

@@ -1,5 +1,5 @@
 //! Cross-cutting checked-Generic factor-plan, tree-stacking and provider
-//! dispatch tests that span more than one factorization (#1596 split of
+//! dispatch tests that span more than one factorization
 //! tests.rs).
 
 use super::*;

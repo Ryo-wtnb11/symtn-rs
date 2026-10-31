@@ -1,5 +1,5 @@
 //! A NaN reaching a truncation or pseudo-inverse cutoff is a typed error, never
-//! a silent finite decision (#1295).
+//! a silent finite decision.
 //!
 //! Neither reference defines this: MatrixAlgebraKit `findtruncated` /
 //! `_truncerr_impl` compare against a NaN-poisoned norm and keep nothing, and
@@ -157,7 +157,7 @@ fn su2_complex_nan_spectrum_is_rejected() {
 fn compact_svd_rejects_infinite_input_without_changing_spectrum() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // The shared finite-input stage refuses a nonfinite diagonal before any
-    // work, as the dense route refuses nonfinite input (#1986); the input is
+    // work, as the dense route refuses nonfinite input; the input is
     // unchanged.
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,

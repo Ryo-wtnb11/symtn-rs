@@ -1,4 +1,4 @@
-//! `StackedTensorMap` transfers on a real device (#1497).
+//! `StackedTensorMap` transfers on a real device.
 //!
 //! `cuda_transfer_stats` is thread-local. Run with `cargo test -p symtn --no-default-features
 //! --features cuda,cpu-faer --test integration stacked_tensor_map_cuda:: -- --ignored`.

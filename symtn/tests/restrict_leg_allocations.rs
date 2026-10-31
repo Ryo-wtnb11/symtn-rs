@@ -1,10 +1,10 @@
 //! Allocation contract of `restrict_leg` and of the re-routed internal
-//! network restriction (#1285).
+//! network restriction.
 //!
 //! The contract is *not* a total call count: each call rebuilds the small
 //! structural objects of the destination hom-space. What is pinned is that
 //! the output payload is never zero-filled — its blocks tile it, so it is
-//! allocated uninitialized and overwritten once (#1290) — and that everything
+//! allocated uninitialized and overwritten once — and that everything
 //! else is independent of the degeneracy dimensions — two tensors with the
 //! same sector structure and different degeneracies must allocate the same
 //! number of non-payload blocks.
@@ -177,7 +177,7 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
 fn restricting_three_legs_is_one_payload_pass() {
     let _serial = crate::counting_alloc::serial();
     // What: `k` legs are restricted in one strided pass into one output
-    // payload (#1561). Sequential one-leg passes would each allocate an
+    // payload. Sequential one-leg passes would each allocate an
     // intermediate payload whose size grows with the degeneracies, so the
     // non-payload bytes would not stay fixed across scales.
     let (small, small_bytes) = three_axis_measurement(1, false);
@@ -315,7 +315,7 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
     let _serial = crate::counting_alloc::serial();
     // What: the owned outputs of a lazy-adjoint `add` and of the first
     // lazy-adjoint `data()` tile their storage, so neither zero-fills its
-    // payload before overwriting every block (#1290). For `f64` the base
+    // payload before overwriting every block. For `f64` the base
     // fill was `vec![0.0; len]`, an allocator-zeroed allocation.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
@@ -578,7 +578,7 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
 #[test]
 fn a_many_run_selection_allocates_nothing_per_run() {
     let _serial = crate::counting_alloc::serial();
-    // What (#2095): the run gather and scatter walk their pieces in place,
+    // What: the run gather and scatter walk their pieces in place,
     // so the number of runs (here growing with the degeneracies) costs no
     // allocation: the restriction pays exactly what a contiguous one does,
     // and the embedding is independent of the run count.

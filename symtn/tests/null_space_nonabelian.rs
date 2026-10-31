@@ -1,6 +1,6 @@
 //! The shape-based null spaces are orthonormal and annihilate the input on
 //! non-Abelian fusion trees with an inner line and a dual leg (SU(2)) and
-//! with outer multiplicity (SU(3)) (#2309).
+//! with outer multiplicity (SU(3)).
 //!
 //! Oracle: the defining identities, evaluated by composition rather than by
 //! the factorization under test. A left null space `n` of `a` satisfies

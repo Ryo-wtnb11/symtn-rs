@@ -1,5 +1,5 @@
 //! Every factorization of a lazy adjoint equals the same factorization of its
-//! materialized adjoint, in both fusion modes (#1755): the same factor
+//! materialized adjoint, in both fusion modes: the same factor
 //! spaces, the same storage form (compact or dense), and the same values in
 //! the documented gauge (dense rounding tolerance).
 //!

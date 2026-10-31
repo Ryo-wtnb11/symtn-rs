@@ -2,7 +2,7 @@ use super::*;
 
 /// Tests one packed CUDA matrix region with the host EIGH rule; the
 /// one-region case of [`cuda_hermitian_regions`]. Test support only: no
-/// production caller decides a single region (#1805).
+/// production caller decides a single region.
 fn cuda_is_hermitian_region<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
     src: &CudaDenseStorage,
@@ -551,7 +551,7 @@ fn cuda_hermitian_region_is_scaled_and_downloads_only_scalar_metadata() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn cuda_transfer_bytes_scale_with_the_payload_dtype() {
-    // #1268: a complex payload must move the same *number* of buffers as
+    // A complex payload must move the same *number* of buffers as
     // the real one and exactly `size_of::<Complex64>() / size_of::<f64>()`
     // times the bytes for the same element count.
     let mut ctx_engine = cuda_engine(0);
@@ -694,7 +694,7 @@ fn warm_up_costs_one_gemm_one_solver_call_and_a_bounded_fixed_traffic() {
 
 #[test]
 fn cuda_errors_are_labelled_as_the_cuda_backend() {
-    // Regression for #38: CUDA failures must not be reported as Tenferro.
+    // CUDA failures must not be reported as Tenferro.
     let err = cuda_error("cuda_svd", "boom");
     let text = err.to_string();
     assert!(text.contains("Cuda"), "formatted error names CUDA: {text}");

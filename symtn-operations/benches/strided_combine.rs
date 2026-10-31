@@ -1,4 +1,4 @@
-//! Regression microbench for issue #230: the non-contiguous strided-combine
+//! Regression microbench: the non-contiguous strided-combine
 //! recurse path in `host_scalar_kernels`. This is the regime a rank-4 SU(2)
 //! d=4 contract feeds — a recoupling/permute block combine whose source is not
 //! column-major-contiguous, so `raw_strided_combine_recurse` walks it element
@@ -22,7 +22,7 @@ fn bench_noncontiguous_combine(c: &mut Criterion) {
     // Destination is column-major-contiguous; source reads as a transposed
     // (row-major) layout. Mismatched contiguity forces the per-element recurse
     // path instead of the fast contiguous slice copy — exactly the recoupling
-    // access pattern that regressed in #230.
+    // access pattern the recurse path handles slowly.
     let dst_strides: [isize; RANK] = [1, 4, 16, 64];
     let src_strides: [isize; RANK] = [64, 16, 4, 1];
 
@@ -77,7 +77,7 @@ fn padded_reversed(dims: Vec<usize>) -> Layout {
     (dims, dst, src)
 }
 
-/// Issue #2230 layouts: native rank 8; the same layout at raw rank 12 with
+/// Layouts: native rank 8; the same layout at raw rank 12 with
 /// four unit axes; at raw rank 12 with the four extent-4 axes split into
 /// contiguous `(2, 2)` pairs; and a true rank-12 layout that fuses to 12.
 fn rank_gate_layouts() -> Vec<(&'static str, Layout)> {

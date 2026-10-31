@@ -1,5 +1,5 @@
 //! Lazy-adjoint materialization and `add` with a lazy-adjoint operand are
-//! exact block copies and per-element `alpha`/`beta` updates (#1399).
+//! exact block copies and per-element `alpha`/`beta` updates.
 //!
 //! The oracle is independent of every strided kernel: each entry is filled
 //! with `from_subblock_fn` from a hash of its own fusion-tree pair and degeneracy

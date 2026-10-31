@@ -357,7 +357,7 @@ fn default_executor_fuses_same_shape_strided_batch_jobs_for_all_gemm_dtypes() {
 #[test]
 fn default_executor_bundles_short_runs_into_one_seam_dispatch() {
     let engine = &mut CpuEngine::serial();
-    // Structural guard for issue #103: a fragmented batch (three runs — two
+    // Structural guard: a fragmented batch (three runs — two
     // length-2 same-shape runs plus a singleton) is not one affine run, so it
     // must dispatch ONE grouped seam call, not one per run. Seam-call count
     // stays flat as a batch fragments into more runs.
@@ -2095,7 +2095,7 @@ fn identity_executor_replays_strided_grouped_strided_across_shapes() {
 #[cfg(feature = "tenferro")]
 #[test]
 fn identity_malformed_runs_route_grouped_over_all_jobs() {
-    // `runs` is consulted only for the O(1) single-run test (#1182), so a
+    // `runs` is consulted only for the O(1) single-run test, so a
     // short, long, or zero-entry partition can neither skip trailing jobs (a
     // short sum) nor over-index the job slice (a long sum). Every job runs,
     // grouped, in one submission.
@@ -2325,7 +2325,7 @@ fn identity_two_job_affine_run_is_admitted_to_the_strided_view() {
 fn identity_batch_with_malformed_single_run_falls_back_to_grouped() {
     let engine = &mut CpuEngine::serial();
     // `runs == [2]` claims one run, but job 1 has a different row count, so the
-    // two jobs are not one affine run (issue #1733). Job 1's destination step
+    // two jobs are not one affine run. Job 1's destination step
     // (8) still clears job 0's block (2*4), which must not select the strided
     // route and compute job 1 with job 0's shape.
     let jobs = [
@@ -2390,7 +2390,7 @@ fn identity_single_job_batch_takes_the_strided_entry() {
     let engine = &mut CpuEngine::serial();
     // One job is one GEMM. It is computed at its offsets with the caller's
     // alpha/beta, through the strided entry rather than the grouped one, whose
-    // validator allocates on every call (#2184). The `runs` hint is ignored.
+    // validator allocates on every call. The `runs` hint is ignored.
     let job = DenseGemmBatchJob {
         dst_offset: 3,
         lhs_offset: 2,
@@ -2575,7 +2575,7 @@ fn default_copy_into_reports_dtype_and_shape_mismatch() {
     );
 
     // A float destination of another precision is the same own dtype check,
-    // ahead of the Tenferro slice accessor (#1765), never a backend error.
+    // ahead of the Tenferro slice accessor, never a backend error.
     let mut qf = [0.0_f32; 4];
     let error = executor
         .qr_into(

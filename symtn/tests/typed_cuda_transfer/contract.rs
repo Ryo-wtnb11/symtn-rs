@@ -253,7 +253,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
         device.compose(cuda, &other_device).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     );
-    // General axes are admitted (#1345): a mismatched pairing is
+    // General axes are admitted: a mismatched pairing is
     // the Host's own error, and a permuted output is the Host's result.
     assert_eq!(
         device
@@ -587,7 +587,7 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
     .unwrap();
     assert_c64_contract_and_compose(engine, cuda, &host_result, &host_result_2);
 
-    // General axes are admitted (#1345): these scopes agree with the Host.
+    // General axes are admitted: these scopes agree with the Host.
     let host_lhs = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,
         &runtime,
@@ -777,7 +777,7 @@ fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
 /// The device destination-overwrite entry writes exactly what
 /// the returning device contraction returns, including the `+0.0` of every
 /// destination block no GEMM reaches, and every rejection leaves the
-/// destination's bytes untouched (#1276).
+/// destination's bytes untouched.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_contract_into_matches_the_returning_contraction() {
@@ -1029,7 +1029,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         cuda,
     );
     drop(shared);
-    // Every alpha and beta is supported (#1550): `2 * contract + 0.5 * dst`,
+    // Every alpha and beta is supported: `2 * contract + 0.5 * dst`,
     // with the unreached block scaled rather than cleared.
     lhs.contract_into(
         cuda,

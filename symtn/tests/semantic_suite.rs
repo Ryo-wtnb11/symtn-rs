@@ -1,10 +1,10 @@
-//! Operation-identity property tests over the user layer (issue #9, part 2)
-//! plus TensorKit's weighted rank truncation (part 3).
+//! Operation-identity property tests over the user layer plus
+//! TensorKit's weighted rank truncation.
 //!
 //! Seeding reuses the splitmix64 scheme of `TensorMap::rand_with_seed`;
 //! no new dependencies.
 //!
-//! Out of scope here (matching the issue): multiplicity `N > 1`,
+//! Out of scope here (by design): multiplicity `N > 1`,
 //! non-symmetric (anyonic) braiding, and repartition/bending — extend this
 //! suite when those land.
 
@@ -723,7 +723,7 @@ fn contraction_order_independence() {
     for_each_space!(engine, case);
 }
 
-/// Regression test for issue #12: SU(2) with non-uniform sector
+/// Regression test: SU(2) with non-uniform sector
 /// degeneracies (SU(2) sectors `[(0, 2), (1, 2), (2, 1)]`) used to fail every
 /// contract route that needs source tree transforms with
 /// `Operation(ShapeMismatch { dst: [2, 2, 2, 2], src: [2, 1, 1, 2] })` —
@@ -787,7 +787,7 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
     );
 }
 
-/// Regression test for issue #12, fZ2 shape: decreasing degeneracies
+/// Regression test, fZ2 shape: decreasing degeneracies
 /// (`fZ2` sectors `[(0, 2), (1, 1)]`, the fused norm leg of the finite-torus
 /// DL network) with a single contracted leg moving open legs across the
 /// codomain/domain boundary. Same root cause as the SU(2) case above; the
@@ -830,7 +830,7 @@ fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
     );
 }
 
-/// Regression test for issue #12, triple-product shape: non-uniform
+/// Regression test, triple-product shape: non-uniform
 /// degeneracies on the fZ2 x U1 x SU2 product rule with crossed contracted
 /// legs (the original suite only covered the degeneracy-1 triple space).
 #[test]

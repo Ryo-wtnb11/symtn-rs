@@ -1,7 +1,7 @@
-//! One spectrum download per factorization call (#1484): the spectra of many
+//! One spectrum download per factorization call: the spectra of many
 //! SVD or EIGH regions come back with a single device-to-host transfer, and
-//! bitwise equal to downloading each spectrum on its own (the pre-#1484
-//! per-block path), so gathering them on device only moves data.
+//! bitwise equal to downloading each spectrum on its own (the per-block
+//! download path), so gathering them on device only moves data.
 //!
 //! The deltas read the calling thread's [`cuda_transfer_stats`] counters.
 //!

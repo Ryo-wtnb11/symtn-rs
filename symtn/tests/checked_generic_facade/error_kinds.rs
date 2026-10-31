@@ -1,4 +1,4 @@
-//! One variant per error kind at the facade, in both fusion modes (#1765):
+//! One variant per error kind at the facade, in both fusion modes:
 //! a hom-space misuse is `SpaceMismatch`, a value precondition
 //! `InvalidArgument`, and a numerical failure `Dense(NumericalFailure)`,
 //! never a backend error.
@@ -83,7 +83,7 @@ fn multiplicity_free_misuse_has_one_variant_per_kind() {
         singular.inv(engine, &[0], &[1]),
         is_numerical_failure
     ));
-    // #2097: the remaining hom-space relations, each TensorKit `SpaceMismatch`.
+    // The remaining hom-space relations, each TensorKit `SpaceMismatch`.
     let mut other = skew.clone();
     let mut wrong_destination = rectangular.clone();
     assert!(multiplicity_free(rectangular.tr(engine), is_space_mismatch));
@@ -162,7 +162,7 @@ fn checked_misuse_has_one_variant_per_kind() {
         singular.inv(engine, &[0], &[1]),
         is_numerical_failure
     ));
-    // #2097: the remaining hom-space relations, each TensorKit `SpaceMismatch`.
+    // The remaining hom-space relations, each TensorKit `SpaceMismatch`.
     let mut other = skew.clone();
     assert!(checked(rectangular.tr(engine), is_space_mismatch));
     assert!(checked(

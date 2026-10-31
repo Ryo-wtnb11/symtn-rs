@@ -1,7 +1,7 @@
-//! Factorization-family oracle for the single-precision payloads (#1324).
+//! Factorization-family oracle for the single-precision payloads.
 //!
 //! Oracle, tolerance, fixtures and the exactly-widening draw stream come from
-//! `single_precision_oracle`, shared with the base-family suite (#1315).
+//! `single_precision_oracle`, shared with the base-family suite.
 //!
 //! Two kinds of evidence appear here, and they are kept apart on purpose:
 //!
@@ -44,7 +44,7 @@ use single_precision_oracle::{
     runtime, tolerance, u1_leg_with,
 };
 
-/// The truncated factorizations are compositions (#1534):
+/// The truncated factorizations are compositions:
 /// `svd_compact`/`eigh_full`/`eig_full` → `diagview` → `find_truncated` →
 /// `restrict_leg`.
 #[allow(dead_code)] // each case reads the factors it checks
@@ -1214,7 +1214,7 @@ mod checked_generic {
                     );
 
                     // A lazy-adjoint receiver reads its parent at single
-                    // precision too (#1755): the same singular values as its
+                    // precision too: the same singular values as its
                     // materialized adjoint, at the payload's precision.
                     let lazy = short.adjoint(engine).unwrap();
                     let lazy_values = lazy.svd_vals(engine, &[0], &[1]).unwrap();
@@ -1517,8 +1517,7 @@ fn a_rank_tie_the_single_precision_payload_cannot_resolve_keeps_the_other_sector
 ///
 /// The fixtures are non-dyadic (multiples of a tenth) and two of them sit
 /// within a rounding of the budget, which is where the rounding slack in
-/// `symtn-matrixalgebra/src/truncation.rs` decides (budget-relative since
-/// #1333). The kept counts are combinatorial and compared exactly; the error
+/// `symtn-matrixalgebra/src/truncation.rs` decides (budget-relative). The kept counts are combinatorial and compared exactly; the error
 /// is `sqrt(sum_discarded v^2)` (every `dim(c) == 1`), compared under the
 /// workspace tolerance rule with the hand value of the discarded tail.
 #[test]
@@ -1560,7 +1559,7 @@ fn double_precision_truncation_decisions_and_errors_match_hand_values() {
         // The budget is exactly the weight of the two smallest tails, so the
         // rounding slack is what decides: `0.1 * 0.1` twice sums to
         // `0.020000000000000004`, four ulps above the budget, and only the
-        // budget-relative `(n + 5) * eps` slack (#1333) lets the second tail
+        // budget-relative `(n + 5) * eps` slack lets the second tail
         // go. Without it this case keeps 8.
         (
             Truncation::relative_error((1.0f64 / 90.0).sqrt()).unwrap(),

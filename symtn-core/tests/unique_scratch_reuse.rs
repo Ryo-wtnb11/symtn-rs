@@ -1,4 +1,4 @@
-//! `UniqueTreePairScratch` reuse contract (#2192): one scratch serves every
+//! `UniqueTreePairScratch` reuse contract: one scratch serves every
 //! tree pair, whatever rule, rank, dual pattern or operation came before.
 
 use symtn_core::{

@@ -1,4 +1,4 @@
-//! Independent oracles for the whole-basis checked Generic composer (#1962).
+//! Independent oracles for the whole-basis checked Generic composer.
 //!
 //! - Original-step composition: every source column of the checked plan
 //!   equals the public per-pair checked operation on that source (TensorKit's
@@ -205,8 +205,8 @@ where
                 assert!(!dst[..index].contains(key), "duplicate destination");
             }
             // Source-major first appearance: the first source's reached
-            // destinations come first (#1962 changes only the order within
-            // one source, which is visible through `specs()`).
+            // destinations come first (the order within one source is a
+            // separate, `specs()`-visible choice).
             let first = &oracle[0];
             assert!(dst[..first.len()]
                 .iter()

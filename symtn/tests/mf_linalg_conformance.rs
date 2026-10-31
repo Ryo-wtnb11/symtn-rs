@@ -1,7 +1,7 @@
-//! Multiplicity-free public linear-algebra conformance (#1002).
+//! Multiplicity-free public linear-algebra conformance.
 //!
 //! These are deliberately public-API tests. They cover the residual provider
-//! fixtures in #1002, not every constructible `FusionRule` implementation.
+//! fixtures, not every constructible `FusionRule` implementation.
 
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");

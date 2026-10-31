@@ -1,4 +1,4 @@
-//! Typed Host network contraction through `Network::contract` (#2022):
+//! Typed Host network contraction through `Network::contract`:
 //! provider and dtype matrix, high-rank and permuted outputs, `conj`
 //! operands, rejections, and the typed workspace pools of the plan cache.
 
@@ -530,7 +530,7 @@ fn contracted_leg_degeneracy_mismatch_spells_out_both_legs() {
     assert!(message.contains("operand 1 leg 0"), "{message}");
 }
 
-/// #1372: the Host `Network::contract` pairwise step is the typed `contract`, so a
+/// The Host `Network::contract` pairwise step is the typed `contract`, so a
 /// non-symmetric (unbraided or anyonic) rule is rejected with its one error
 /// even for the canonical, crossing-free network, which is exactly `compose`
 /// (still admitted).

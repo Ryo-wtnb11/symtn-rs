@@ -419,7 +419,7 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     assert!(dimension_calls.load(Ordering::SeqCst) > 0);
 
     // `[3, 2] <- [3, 2]` factors put a 2x2 block at element offset 9, an
-    // unaligned destination for the device factor copy (#1320); these two fixtures cover that layout through the composition.
+    // unaligned destination for the device factor copy; these two fixtures cover that layout through the composition.
     let rank_deficient =
         TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&rows], |_, indices| {
             (indices[0] + 1) as f64 * (indices[1] + 1) as f64
@@ -705,7 +705,7 @@ fn typed_cuda_su2_svd_trunc_matches_host_at_every_weighted_rank_budget() {
     let cuda = &mut crate::common::cuda_engine();
     // What: SU(2) spectra with nontrivial degeneracies and quantum dimensions
     // 1, 2 and 3 take the Host decision at every integer rank budget, most of
-    // which land exactly on a cumulative `dim(c)` sum (#1871), in f64 and c64.
+    // which land exactly on a cumulative `dim(c)` sum, in f64 and c64.
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(SU2FusionRule),

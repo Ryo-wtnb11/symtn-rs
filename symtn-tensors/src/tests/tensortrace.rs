@@ -145,7 +145,7 @@ fn checked_generic_owned_trace_returns_the_traced_scalar_value() {
 fn checked_generic_trace_preflight_gates_non_symmetric_braiding_first() {
     // What: as TensorKit `trace_permute!`, the Generic preflight rejects a
     // non-symmetric braiding before it looks at the pairs, as the
-    // multiplicity-free compile already did (#1872).
+    // multiplicity-free compile already did.
     let leg = || SectorLeg::new([(SectorId::new(0), 1)], false);
     let src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
         Arc::new(CheckedTraceToy::new(symtn_core::BraidingStyleKind::Anyonic)),
@@ -1254,7 +1254,7 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
             .map(|trace| alpha * trace)
             .collect::<Vec<_>>()
     );
-    // What (#2146): the eager multiplicity-free trace selects its output
+    // What: the eager multiplicity-free trace selects its output
     // HomSpace once, in its stage; the compile reuses that admission (it
     // still compiles its own axis plan, a provider-free derivation).
     let stage =

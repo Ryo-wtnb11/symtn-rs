@@ -1,4 +1,4 @@
-//! Issue #971 regression: every shipped multiplicity-free provider states its
+//! Every shipped multiplicity-free provider states its
 //! fusion algebra once on [`CheckedFusionAlgebra`]; `FusionRule::{dual,
 //! fusion_channels, nsymbol}` must be exact one-line forwards, so they panic
 //! on precisely the sectors the checked entry point rejects — never more
@@ -10,8 +10,8 @@
 //! that are not `CheckedFusionAlgebra`, so it cannot forward without
 //! restricting which providers compose — its infallible `nsymbol` validates
 //! indirectly, through whichever components do forward. The out-of-domain
-//! sweep of the Fibonacci F/R/dim/twist symbols (#1737) lives in
-//! `tests/fibonacci_providers.rs`; the abelian and CU(1) one (#2278) is
+//! sweep of the Fibonacci F/R/dim/twist symbols lives in
+//! `tests/fibonacci_providers.rs`; the abelian and CU(1) one is
 //! `infallible_symbols_reject_out_of_domain_ids` below.
 
 use std::panic::{self, AssertUnwindSafe};

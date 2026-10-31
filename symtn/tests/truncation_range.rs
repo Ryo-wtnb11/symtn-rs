@@ -1,10 +1,10 @@
 //! Truncation norms and decisions stay correct when the spectrum's squares
-//! leave the `f64` range (#1440).
+//! leave the `f64` range.
 //!
 //! Fixture: SU(2) `j = 0` (dim 1) with `[4, 2] * s` and `j = 1/2` (dim 2) with
 //! `[2, 1] * s`. By hand, `norm^2 = (16 + 4 + 2 * (4 + 1)) s^2 = 30 s^2`, and
 //! the two `2 s` values tie across sectors; TensorKit's `isless` puts `j = 0`
-//! first (#1381), so `rank` keeps it first and `relative_error` discards it
+//! first, so `rank` keeps it first and `relative_error` discards it
 //! first.
 //!
 //! - `rank(3)`: keep `4, 2` of `j = 0` (weight 2); the tied `2` of `j = 1/2`

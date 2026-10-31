@@ -1,4 +1,4 @@
-//! Real-device gate for #1278: a first device contraction submits only its
+//! Real-device gate: a first device contraction submits only its
 //! own work (one GEMM per coupled block, no solver call).
 //!
 //! Run with `cargo test -p symtn --features cuda,cpu-faer --test integration cuda_warm_up:: \

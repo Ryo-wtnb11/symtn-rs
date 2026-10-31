@@ -1,5 +1,5 @@
 //! `inner`, `norm(p)`, `tr` and `axpby` over compact diagonal, dense and lazy
-//! operands take one body in both admission modes (#1867, #1868).
+//! operands take one body in both admission modes.
 //!
 //! TensorKit `cfaa073e` reduces a `DiagonalTensorMap` through the same
 //! `blocks(t)` loops as any tensor: `LinearAlgebra.norm`/`_norm`

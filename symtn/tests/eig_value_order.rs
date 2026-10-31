@@ -1,4 +1,4 @@
-//! The published eigenvalue order (#1985), against an independent oracle.
+//! The published eigenvalue order, against an independent oracle.
 //!
 //! Every fixture is built from hand-chosen eigenvalues: Hermitian blocks as
 //! `U diag(λ) U^H` with a fixed unitary `U`, general blocks (quasi-)upper

@@ -1,5 +1,5 @@
 //! The smallest Generic toy fusion rule, shared by symtn-tensors and
-//! symtn-matrixalgebra tests (#1938): one self-dual sector `x` with
+//! symtn-matrixalgebra tests: one self-dual sector `x` with
 //! `x (x) x -> 1 + x` and outer multiplicity two on `x (x) x -> x`. It carries
 //! fusion structure only, no symbols. `ID` gives otherwise identical rules
 //! distinct rule identities.

@@ -1,10 +1,10 @@
-//! Export firewall for `symtn-tensors` (#1802).
+//! Export firewall for `symtn-tensors`.
 //!
 //! Pins the exact names `lib.rs` re-exports, under every feature combination
 //! at once, so adding or removing one fails here and is reviewed as an API
 //! change. Every name below is used by another workspace crate, by an
 //! integration test or example of this crate, or by a retained public
-//! signature. There is no static-rank layer (#2222): every entry takes a
+//! signature. There is no static-rank layer: every entry takes a
 //! dynamic space. The structure caches, the dynamic-rank `*_dyn_owned` /
 //! `*_dyn_into` test entries, the re-exports of `symtn_operations` internals
 //! and every name without a consumer outside this crate (other than an
@@ -61,7 +61,7 @@ fn testing_gated(code: &str, at: usize) -> bool {
 }
 
 /// Leaf names re-exported by `pub use` in `source`, each with whether it is
-/// gated behind the `testing` feature (#1854), or an error for any other
+/// gated behind the `testing` feature, or an error for any other
 /// inline public item (`pub fn`, `pub enum`, `pub const`, ...) or
 /// `#[macro_export]`, which this firewall would otherwise not see.
 fn exported_names(source: &str) -> Result<BTreeMap<String, bool>, String> {
@@ -297,9 +297,9 @@ fn exported(testing: bool) -> BTreeSet<String> {
         .collect()
 }
 
-/// Nothing is exported behind `testing`: production Generic is checked only
-/// (#1854), and the infallible-Generic oracles left with the static-rank
-/// facade (#2222).
+/// Nothing is exported behind `testing`: production Generic is checked only,
+/// and the infallible-Generic oracles left with the static-rank
+/// facade.
 #[test]
 fn no_entries_are_exported_only_behind_testing() {
     assert_eq!(exported(true), BTreeSet::new());

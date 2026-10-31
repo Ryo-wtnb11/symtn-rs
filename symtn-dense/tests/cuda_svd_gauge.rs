@@ -1,4 +1,4 @@
-//! The device SVD gauge phases (#1552) against hand-computed phases: the
+//! The device SVD gauge phases against hand-computed phases: the
 //! first largest-magnitude entry of each `U` column decides, including exact
 //! magnitude ties, a maximum in the last row, and columns longer than a warp.
 //!

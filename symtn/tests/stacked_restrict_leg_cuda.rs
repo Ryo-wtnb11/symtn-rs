@@ -1,4 +1,4 @@
-//! `StackedTensorMap::restrict_leg` on a real device (#1503).
+//! `StackedTensorMap::restrict_leg` on a real device.
 //!
 //! `cuda_transfer_stats` is thread-local. Run with `cargo test -p symtn --no-default-features
 //! --features cuda,cpu-faer --test integration stacked_restrict_leg_cuda:: -- --ignored`.
@@ -102,14 +102,14 @@ macro_rules! device_restrict {
                 }
             }
 
-            // A multi-axis set is one upload and one gather too (#1561),
+            // A multi-axis set is one upload and one gather too,
             // bit-exact to one-axis restrictions applied in turn.
             let (on_a, on_dual) = (selections($a), selections($dual));
             let sets: [Vec<(usize, &LegSelection<_>)>; 3] = [
                 vec![(2, &on_a[1]), (0, &on_a[0]), (3, &on_dual[0]), (1, &on_dual[1])],
                 vec![(3, &on_dual[1]), (0, &on_a[0])],
                 // Non-contiguous kept positions on a codomain and a domain
-                // leg (#2095): the Host-built element table carries the
+                // leg: the Host-built element table carries the
                 // gather, so still one upload and one gather.
                 vec![(1, &on_dual[2]), (2, &on_a[2])],
             ];

@@ -1,4 +1,4 @@
-//! #2147 performance contract: on the DynamicTree route, a lazy adjoint whose
+//! Performance contract: on the DynamicTree route, a lazy adjoint whose
 //! own tree transform is the identity reaches the core GEMM as its parent's
 //! borrowed blocks with an adjoint op, not as an operand-sized copy
 //! (TensorKit `cfaa073e` `blas_contract!`, `tensoroperations.jl:383-450`:
@@ -9,7 +9,7 @@
 //! whole domain against legs 0 and 2 of `u: [V, X, V] ← []`, so `u` is
 //! permuted and the route is DynamicTree while `a` is already in core form.
 //!
-//! Fixture `reversed` (#2159, candidate selection): `a` contracted over its
+//! Fixture `reversed` (candidate selection): `a` contracted over its
 //! domain `(1, 2)` against `u: [V, V] ← [X]`'s codomain in reverse order
 //! `(1, 0)`, `|u| < |p|`. TensorKit `contract_memcost`
 //! (`tensoroperations.jl:364-374`) prices m1 (keep `a`'s order) at `|u|`
@@ -22,7 +22,7 @@
 //! positive control. This is symtn's own operand copy only: the dense
 //! backend's per-GEMM buffers for a strided adjoint operand (Tenferro
 //! `dot_general` over the per-job ops path, one per coupled block) are
-//! outside it and are disclosed in the #2147/#2159 records.
+//! outside it and are not covered here.
 
 use std::hint::black_box;
 use std::sync::Arc;

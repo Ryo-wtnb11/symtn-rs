@@ -1,4 +1,4 @@
-//! The general eigendecomposition truncated as a composition (#1534).
+//! The general eigendecomposition truncated as a composition.
 //!
 //! The invariant: `eig_full` → `diagview` → `find_truncated` →
 //! `restrict_leg` keeps the eigenpairs a hand selection
@@ -466,7 +466,7 @@ fn shuffle(n: usize) -> Vec<usize> {
     (1..n).step_by(2).chain((0..n).step_by(2)).collect()
 }
 
-/// The decision follows stored order, not a published sort (#2095): the bond
+/// The decision follows stored order, not a published sort: the bond
 /// of `eig_full` is re-stored in the [`shuffle`]d order — `d' = diag(d[π])`
 /// and `v' = v P` with `P[π(j), j] = 1`, so `t v' = v' d'` still holds — and
 /// the composition must keep exactly the hand selection's positions over the

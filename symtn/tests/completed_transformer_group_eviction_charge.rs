@@ -1,6 +1,6 @@
 //! A completed transformer (cache 3) bound from cached coefficient groups
 //! (cache 4) must not keep those groups' allocations alive once cache 4
-//! evicts them unless it is charged for them (#2251): its charge bounds what
+//! evicts them unless it is charged for them: its charge bounds what
 //! evicting it frees in either eviction order.
 
 use std::sync::Arc;

@@ -637,7 +637,7 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
 
 #[test]
 fn encoded_cold_extent_overflow_does_not_publish_layouts() {
-    // Isolated like #649/#650's checked_bind_failure test: this asserts an
+    // Isolated like the other process-global cache-count tests: this asserts an
     // absolute process-global cache snapshot, which CACHE_TEST_LOCK does not
     // protect from the crate's many ordinary, unlocked encoded constructions.
     if crate::test_support::run_isolated_or_return(
@@ -672,15 +672,13 @@ fn encoded_cold_extent_overflow_does_not_publish_layouts() {
 
 #[test]
 fn encoded_and_lowered_final_layouts_share_checked_frozen_content() {
-    // Isolated like #649/#650's checked_bind_failure test: this asserts
+    // Isolated like the other process-global cache-count tests: this asserts
     // absolute process-global cache counts (entries()==1, misses()==1,
     // admissions()==1 from a fresh reset), which CACHE_TEST_LOCK does not
     // protect from the crate's many ordinary, unlocked encoded
     // constructions landing between the reset and this test's own build.
-    // Found flaking during #1598/#1606 verification (566 passed, 1 failed
-    // at this file's entries()==1 assertion, actual 2, under
-    // `cargo test -p symtn-tensors --lib`); same class as the four named
-    // instances in that pair of issues, so it gets the same fix.
+    // Without isolation the entries()==1 assertion flakes (actual 2) when run
+    // with the rest of the lib tests, so it gets the same fix.
     if crate::test_support::run_isolated_or_return(
         "SYMTN_ENCODED_AND_LOWERED_SHARE_FROZEN_CONTENT_ISOLATED",
         "contract::dynamic_space::checked_metadata_tests::encoded_and_lowered_final_layouts_share_checked_frozen_content",

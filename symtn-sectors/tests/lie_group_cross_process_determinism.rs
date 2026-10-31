@@ -1,6 +1,6 @@
 //! SU(3) F/R symbols are a deterministic function of their labels: fresh
 //! processes (independent hash seeds and cold fusion-symbols caches) must produce
-//! bit-identical blocks (issue #1932; fusion-symbols, formerly racah >= 0.2.3).
+//! bit-identical blocks (fusion-symbols, formerly racah >= 0.2.3).
 //!
 //! The parent test re-runs this test binary as two child processes, each of
 //! which hashes every block's bit pattern, and compares the children with each

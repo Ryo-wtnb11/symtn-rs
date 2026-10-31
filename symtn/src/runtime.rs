@@ -236,7 +236,7 @@ impl Runtime {
     /// contraction-plan cache and its configuration: the types live in
     /// `symtn-network`, which depends on this crate and claims and downcasts
     /// its entry on first use). Behind its own mutex rather than the coarse
-    /// `state` one (#155), so the network hot path never contends with
+    /// `state` one, so the network hot path never contends with
     /// standalone ops. Expert seam for `symtn-network`; the mutex is held for
     /// the duration of `f`, so do not run tensor operations inside it.
     pub(crate) fn with_extension_slot<R>(&self, f: impl FnOnce(&mut ExtensionSlot) -> R) -> R {

@@ -1,6 +1,5 @@
 //! Cold lowered enumeration + cold contraction plan-build allocation,
-//! measured relatively (no absolute byte pins: platform allocators differ,
-//! #611).
+//! measured relatively (no absolute byte pins: platform allocators differ).
 //!
 //! Two properties are pinned:
 //! 1. The genuine cold mechanism (`prepare_fusion_tree_layout_lowered`)

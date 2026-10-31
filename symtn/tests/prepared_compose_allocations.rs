@@ -250,7 +250,7 @@ fn rejected_host_compose_calls_return_typed_errors() {
 }
 
 /// The error of every [`error_matrix`] row. A member-count mismatch is
-/// rejected at `new` (#1775, approved stricter errors A23).
+/// rejected at `new` (approved stricter errors A23).
 fn expected_errors() -> Vec<(&'static str, Option<Error>)> {
     let signature = |field| {
         Some(Error::BatchSignatureMismatch {

@@ -8,8 +8,7 @@ use super::*;
 /// a handful of tests; making the tables test-scoped (thread-local, or wiped
 /// between tests) would stop exercising the process-global design these
 /// tables actually ship with, and would hide the exact "concurrent
-/// reset/flood lands between two reads" bugs this suite exists to catch
-/// (see symtn-tensors #169, #172 for the shape of the bug).
+/// reset/flood lands between two reads" bugs this suite exists to catch.
 ///
 /// So: one process-wide `Mutex`, taken by every test that either mutates
 /// shared intern-table state (`clear_structure_caches`, LRU-cap floods) or
@@ -26,8 +25,8 @@ pub(crate) mod test_support {
     /// `CACHE_TEST_LOCK` only serializes the small set of tests that take
     /// it; any ordinary, unlocked construction elsewhere in the same
     /// binary's cached path can still move that same counter between this
-    /// test's own reads (symtn-tensors #649/#650 first used this technique
-    /// for `checked_bind_failure_preserves_subset_admission_and_caches`).
+    /// test's own reads (the same technique `checked_bind_failure_preserves_subset_admission_and_caches`
+    /// in symtn-tensors uses).
     ///
     /// Call at the top of the `#[test]` fn with a name-unique env var and
     /// the test's libtest path; when it returns `true`, the child already
@@ -53,7 +52,7 @@ pub(crate) mod test_support {
 }
 
 // Shared fixtures and helper fusion rules used across more than one of
-// the per-responsibility test files below (#1590). They live in `support`
+// the per-responsibility test files below. They live in `support`
 // and are glob-imported here, so every sibling test module sees them through
 // its own `use super::*;`.
 mod support;

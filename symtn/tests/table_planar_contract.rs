@@ -1,4 +1,4 @@
-//! `planar_contract` / `planar_contract_into` (#2284): six geometries on
+//! `planar_contract` / `planar_contract_into`: six geometries on
 //! Fibonacci and Ising (composition, both operands transposed, a rotated
 //! golden-chain output, a full contraction, nothing contracted, a conjugated
 //! operand), the destination form with complex α and β ≠ 0, and non-planar
@@ -10,7 +10,7 @@
 //! output and the conjugated operand are checked against `norm` and the inner
 //! product with a probe tensor, values checked against TensorKit 0.17.1
 //! `@planar` on the same tree-hash operands (`support/table_fixture.rs`;
-//! Ising entries carry AnyonWiki's vertex sign `u^{σσ}_ψ = −1`, #2277, so both
+//! Ising entries carry AnyonWiki's vertex sign `u^{σσ}_ψ = −1`, so both
 //! sides are the same morphism).
 //!
 //! Symmetric rules: a Bosonic planar contraction is the ordinary one (U(1),

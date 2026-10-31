@@ -1,4 +1,4 @@
-//! `zeros_like` is one body for every admission mode and symbol lane (#1869).
+//! `zeros_like` is one body for every admission mode and symbol lane.
 //!
 //! TensorKit `cfaa073e` has one `zero(t) = zerovector(t)`
 //! (`src/tensors/linalg.jl:51`) built on `zerovector!(similar(t, T))`

@@ -369,7 +369,7 @@ fn batch_job(shape: (usize, usize, usize), offsets: (usize, usize, usize)) -> De
     }
 }
 // ---------------------------------------------------------------------------
-// Identity batch dispatch (#1182): one strided rank-3 dot iff the batch is one
+// Identity batch dispatch: one strided rank-3 dot iff the batch is one
 // affine run of >= 2 jobs with destination step >= rows * cols; otherwise one
 // grouped submission over every job. Oracles below are scalar loops over the
 // job list, independent of the adapter's routing.

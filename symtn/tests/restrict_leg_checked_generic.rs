@@ -1,4 +1,4 @@
-//! `restrict_leg` / `embed_leg` on a checked Generic provider (#1285).
+//! `restrict_leg` / `embed_leg` on a checked Generic provider.
 //!
 //! SU(3) with the adjoint irrep gives fusion trees that differ only by their
 //! outer-multiplicity vertex, which is the part of a block key a
@@ -191,7 +191,7 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
     );
 }
 
-/// #2095: non-contiguous kept positions on two SU(3) legs whose trees differ
+/// Non-contiguous kept positions on two SU(3) legs whose trees differ
 /// by their outer-multiplicity vertex: the literal per-block gather and
 /// scatter, and a compact `eigh` spectrum restricted to a two-run set.
 #[test]

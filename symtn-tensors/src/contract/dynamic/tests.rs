@@ -381,7 +381,7 @@ fn execution_layout_primer_runs_once_per_derivation() {
     symtn_core::clear_structure_caches();
     reset_execution_primer_calls();
     // The DynamicTree artifact compile primes layouts with the destination's
-    // capability (#1858). The typed route takes `copyC` for this
+    // capability. The typed route takes `copyC` for this
     // permute-only contraction, so the artifact compile is driven directly.
     let output_bound = output_bound
         .clone()

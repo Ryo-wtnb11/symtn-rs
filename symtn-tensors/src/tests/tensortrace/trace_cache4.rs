@@ -1,4 +1,4 @@
-//! Trace permutation columns through cache 4 (#2072): multiplicity-free
+//! Trace permutation columns through cache 4: multiplicity-free
 //! terms and outputs against the per-pair oracle, cold and warm; per-group
 //! hits and misses, key splits and presence.
 
@@ -604,7 +604,7 @@ fn trace_and_transform_of_one_permutation_do_not_share_entries() {
     assert_eq!(bits(&before), bits(&after));
 }
 
-/// What (#2149): the open codomain rank is keyed. A one-pair trace and a
+/// What: the open codomain rank is keyed. A one-pair trace and a
 /// pair-free trace share the `(p…, q…)` permutation `[1, 0] ← [3, 2]` but
 /// split it differently, so the pair-free one misses after the one-pair one
 /// is resident, and its terms equal its own compile on an empty cache.

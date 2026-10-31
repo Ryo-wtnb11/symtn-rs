@@ -1,5 +1,5 @@
 //! Transfer, allocation, statistics and rejection contracts of the typed
-//! device structural transforms (issue #1322).
+//! device structural transforms.
 //!
 //! These read the calling thread's `symtn::expert::cuda_transfer_stats`
 //! counters, so device work another test submits concurrently does not
@@ -216,7 +216,7 @@ fn device_transform_rejections_happen_before_any_device_work() {
 }
 
 // ---------------------------------------------------------------------------
-// `*_into` contracts (issue #1329)
+// `*_into` contracts
 // ---------------------------------------------------------------------------
 
 /// The device wording of a Host message. The device mirrors Host's error
@@ -408,7 +408,7 @@ fn device_into_rejections_happen_before_any_device_work() {
         assert_eq!(error, Error::RuleMismatch);
     }
 
-    // 3. A lazy-adjoint source is admitted (read through its parent, #1870),
+    // 3. A lazy-adjoint source is admitted (read through its parent),
     //    so with a lazy-adjoint destination the destination is reported.
     let lazy_parent = device_destination(cuda);
     let mut lazy_destination = lazy_parent.adjoint(cuda).unwrap();
@@ -468,7 +468,7 @@ fn device_into_rejections_happen_before_any_device_work() {
     }
 
     // 5b. A lazy-adjoint source aliasing its parent's payload: the alias
-    //     check runs against the source's stored body (#1870).
+    //     check runs against the source's stored body.
     let mut parent_alias = source.clone();
     let mut host_parent_alias = host.clone();
     {
@@ -572,7 +572,7 @@ fn device_into_rejections_happen_before_any_device_work() {
 }
 
 // ---------------------------------------------------------------------------
-// `twist` in both directions contracts (issue #1330)
+// `twist` in both directions contracts
 // ---------------------------------------------------------------------------
 
 /// fZ2 with both parities on every leg, so a twist really scales blocks.

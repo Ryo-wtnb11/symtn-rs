@@ -1,6 +1,6 @@
 //! Frozen observable contracts of every built-in fusion-rule provider, pinned
 //! with hand-written literals before the providers are re-backed by the
-//! fusion-symbols category adapter (#2016, option C).
+//! fusion-symbols category adapter (option C).
 //!
 //! The adapter migration must leave each value here unchanged: sector-id
 //! encodings and their boundaries, rule identities, fusion-channel order,

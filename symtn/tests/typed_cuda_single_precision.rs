@@ -1,5 +1,5 @@
 //! Device twins of the `f64`/`Complex64` base-family device suites, run at
-//! every admitted device payload (#1336).
+//! every admitted device payload.
 //!
 //! Each gate here is one generic body instantiated for all four dtypes, so the
 //! double-precision instantiation is the control: a helper that silently did
@@ -7,7 +7,7 @@
 //! result *at the same payload dtype* — never the `f64` host result — so what
 //! these prove is that the device agrees with symtn's own host semantics at
 //! the payload's own precision. The host single-precision semantics themselves
-//! are gated independently by `symtn/tests/single_precision_base.rs` (#1315).
+//! are gated independently by `symtn/tests/single_precision_base.rs`.
 //!
 //! Tolerances are stated per family, not shared:
 //!
@@ -15,7 +15,7 @@
 //! * elementwise arithmetic and the structural transforms are compared at
 //!   `8 * sqrt(n) * eps(real(D)) * scale`, `n` the number of terms combined;
 //! * the reductions accumulate in `f64` on the device like the host
-//!   (`weighted_inner_cuda`; #1344 for `norm`, #1383 for `inner`), so
+//!   (`weighted_inner_cuda`, for `norm` and `inner`), so
 //!   `inner` is compared under the workspace rule of
 //!   `docs/testing_numerics.md`; the range cases are pinned by
 //!   `device_norm_matches_the_host_where_a_payload_sum_would_overflow_or_underflow`
@@ -65,7 +65,7 @@ fn combined(terms: usize, scale: f64) -> Combined {
 
 /// Absolute bound `2 * terms * eps(real(D)) * scale` for the `norm` check,
 /// `scale` an upper bound on `sum |conj(a_i) * b_i|`.
-/// It is looser than the `f64` accumulation (#1344, #1383) needs; `inner` uses the workspace
+/// It is looser than the `f64` accumulation needs; `inner` uses the workspace
 /// rule instead.
 fn reduction_tolerance<D: DevicePayload>(terms: usize, scale: f64) -> f64 {
     2.0 * (terms as f64) * D::EPS * scale.max(1.0)
@@ -377,7 +377,7 @@ fn assert_arithmetic_matches_host<R, D>(
         "lazy adjoint scale",
     );
 
-    // One lazy and one owned operand at every dtype, both orders (#1874).
+    // One lazy and one owned operand at every dtype, both orders.
     assert_matches_host(
         lazy_a
             .axpby(cuda, alpha, &device_b, beta)
@@ -549,7 +549,7 @@ where
     (tensor, stored)
 }
 
-/// #1344: the device `norm` accumulates in `f64` like the Host, so it neither
+/// The device `norm` accumulates in `f64` like the Host, so it neither
 /// saturates where every entry is finite nor underflows where every square is
 /// below the payload's subnormal range.
 ///
@@ -693,7 +693,7 @@ fn device_norm_matches_the_host_where_a_payload_sum_would_overflow_or_underflow(
     );
 }
 
-/// #1383: the device `inner` accumulates in `f64` like the Host, so a
+/// The device `inner` accumulates in `f64` like the Host, so a
 /// cancelling sum whose every product exceeds `f32::MAX` stays finite.
 ///
 /// Every coupled block of `[leg] <- [leg]` is `2 x 2` (all degeneracies two).
@@ -801,7 +801,7 @@ fn device_inner_matches_the_host_where_single_precision_products_overflow() {
 
 /// What the widening costs, warm: a single-precision reduction runs the same
 /// device schedule as its double-precision twin plus exactly one device
-/// allocation per distinct widened operand (#1344, #1383): one for `norm` and
+/// allocation per distinct widened operand: one for `norm` and
 /// `inner(a, a)`, two for `inner(a, b)`. Transferred bytes are *equal*, not
 /// halved, because the per-sector partials are downloaded in the wide lane.
 /// The double-precision schedule itself is pinned by hand: one partials
@@ -901,7 +901,7 @@ fn a_warm_single_precision_reduction_costs_one_extra_device_allocation_per_opera
     }
 }
 
-/// Carried from the #1336 review: `alpha = 0` (and `-0`) on an
+/// `alpha = 0` (and `-0`) on an
 /// `*_into` transform must **overwrite**, not scale-and-accumulate.
 ///
 /// The finite-poison loop in `assert_transforms_match_host` cannot tell the
@@ -1371,7 +1371,7 @@ fn assert_transforms_match_host<R, D>(
         "transpose",
     );
 
-    // The `*_into` forms of the same three planar-or-permute transforms (#1339) write
+    // The `*_into` forms of the same three planar-or-permute transforms write
     // what their returning twins return, at every caller scale.
     // Each destination starts poisoned with a different multiple of the
     // expected payload, so an implementation that wrote nothing at `alpha = 1`
@@ -1490,7 +1490,7 @@ fn device_transforms_match_the_host_at_every_payload() {
     assert_transforms_match_host::<_, Complex32>(engine, cuda, &runtime, &fz2su2);
 }
 
-/// The `*_into` cost of #1339 does not depend on the payload dtype: a replay
+/// The `*_into` cost does not depend on the payload dtype: a replay
 /// over a caller-owned destination downloads nothing at single precision
 /// either. An eager `permute_into` has no workspace, so its device state —
 /// the transform coefficients and the call's scalar operands (the payload's
@@ -1684,7 +1684,7 @@ fn single_precision_costs_the_same_device_calls_and_half_the_bytes() {
 // ---------------------------------------------------------------------------
 
 /// The admission table itself, as a compile-time fact: the base and
-/// factorization device families (device QR included, #1271) are open for all
+/// factorization device families (device QR included) are open for all
 /// four payloads.
 #[test]
 fn every_payload_dtype_satisfies_both_device_marker_traits() {

@@ -2760,7 +2760,7 @@ pub(super) fn u1_leg(charge: i32, deg: usize, dual: bool) -> SectorLeg {
     SectorLeg::new([(u1(charge), deg)], dual)
 }
 
-// Fixture for the cached-hash contracts (#1207): keys that differ from a
+// Fixture for the cached-hash contracts: keys that differ from a
 // base tree in exactly one identity field each (uncoupled, coupled, dual
 // flag, inner line, vertex), plus equal copies built with shared and with
 // fresh backings.

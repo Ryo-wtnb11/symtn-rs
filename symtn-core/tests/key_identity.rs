@@ -1,4 +1,4 @@
-//! Block-key identity contract (#2192).
+//! Block-key identity contract.
 //!
 //! What: `Debug`, `Ord`, `Eq` and the cache hasher's `Hash` of
 //! `FusionTreeKey`, `FusionTreePairKey`, `FusionTreeGroupKey` and `BlockKey`
@@ -657,8 +657,7 @@ fn structure_lookups_find_exactly_the_content_equal_block() {
     }
 }
 
-// Block order recorded by the former key corpus at e5023d98 and unchanged
-// through 85d16e6d. Block indices are observable (block access, lookups), so
+// Block order recorded from the former key corpus. Block indices are observable (block access, lookups), so
 // a change of this order is a contract change, not a refactor.
 #[test]
 fn structure_block_order_matches_recorded_order() {

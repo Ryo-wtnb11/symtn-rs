@@ -1265,7 +1265,7 @@ fn mf_one_sided_zero_bond_sector_between_populated_sectors() {
 }
 
 /// Rank-1 blocks on both sides through the MF and the checked one-sided
-/// owners (#1197). Right: `b x cols` column-major, the block at column
+/// owners. Right: `b x cols` column-major, the block at column
 /// `o` is `F[j + b*o]`; Left: `a x b`, the block at row `o` is
 /// `F[o + a*j]`. Before the fix the Right block was read with the Left
 /// stride (`F[o + b*j]`), which for `b = 3, cols = 2, o = 1` reaches

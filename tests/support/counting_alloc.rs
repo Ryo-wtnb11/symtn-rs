@@ -8,7 +8,7 @@
 //! Counters are thread-local: a measurement sees only the allocations its own
 //! thread makes. Why not process-global counters: a test running concurrently
 //! in the same binary allocates inside the measured window and breaks the
-//! budget (#1824). Budgets that also depend on process-global caches take
+//! budget. Budgets that also depend on process-global caches take
 //! [`serial`] as well.
 //!
 //! A consequence: with a multi-threaded runtime (for example

@@ -1,5 +1,5 @@
 //! Lazy-adjoint payload reads go through `FusionOperand` plus the shared
-//! strided owner (#1201). Expected values are a per-element adjoint kernel written
+//! strided owner. Expected values are a per-element adjoint kernel written
 //! out literally (`common::literal_adjoint_payload`) and TensorKit's `tr`
 //! definition (`common::literal_weighted_trace`); neither touches the
 //! production adjoint kernel.
@@ -378,8 +378,8 @@ fn su2_tr_matches_the_literal_weighted_diagonal_sum_and_conjugates_lazily() {
 fn lazy_adjoint_materialization_copies_non_finite_values_bit_exactly() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // The owner's `alpha == 1, beta == 0` path is a plain (conjugating) copy:
-    // `1 * (inf + 0i)` would turn the imaginary part into NaN, which the
-    // pre-#1201 odometer never did. `conj(inf + 0i) == inf - 0i`, sign kept.
+    // `1 * (inf + 0i)` would turn the imaginary part into NaN, which an
+    // element-wise odometer never does. `conj(inf + 0i) == inf - 0i`, sign kept.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let a = u1_leg(&provider, &[(-1, 2), (0, 1), (1, 2)], false);

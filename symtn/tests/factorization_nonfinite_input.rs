@@ -1,5 +1,5 @@
 //! Multiplicity-free factorizations refuse nonfinite input through the shared
-//! finite-input stage (#1986), for dense, lazy-adjoint and compact diagonal
+//! finite-input stage, for dense, lazy-adjoint and compact diagonal
 //! input in real and complex dtypes. The checked Generic counterpart is in
 //! `checked_generic_facade/nonfinite.rs`.
 

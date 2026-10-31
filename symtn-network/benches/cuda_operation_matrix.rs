@@ -164,10 +164,9 @@ mod device {
     /// differ in element size and in whether they carry an imaginary part.
     ///
     /// The bound stays `CudaFactorizationPayload` because the matrix runs
-    /// device factorizations. #1336 could not add single-precision rows
-    /// because that marker excluded `f32`/`Complex32`, and expected a split
-    /// into a base half and a factorization half; #1341 admitted both dtypes
-    /// to the marker instead, so the rows are an instantiation and the harness
+    /// device factorizations. The marker admits `f32`/`Complex32` as well,
+    /// so single-precision rows need no split into a base half and a
+    /// factorization half; the rows are an instantiation and the harness
     /// stays one piece. Device QR keeps its own row set (below).
     ///
     /// `CHECK_TOLERANCE` is the correctness verdict's bound, not a measured
@@ -979,7 +978,7 @@ mod device {
             }
         }
 
-        // structural transforms (#1322): the same public call on both targets,
+        // structural transforms: the same public call on both targets,
         // written once per row and expanded against the device and the Host
         // receiver, so the two arms cannot drift.
         macro_rules! transform_row {
@@ -1541,7 +1540,7 @@ mod device {
 
     /// `qr_compact` rows, kept apart from `run_dtype` and real-payload only so
     /// the pinned baseline CSVs keep their row set; device QR itself admits
-    /// every `CudaFactorizationPayload` (#1271).
+    /// every `CudaFactorizationPayload`.
     fn run_qr<R, D>(
         config: &Config,
         provider: &str,
@@ -1629,7 +1628,7 @@ mod device {
                     run_qr::<_, f64>($config, $name, family, blocks, degeneracy, &space);
                     run_dtype::<_, Complex64>($config, $name, family, blocks, degeneracy, &space);
                 }
-                // Single precision (#1341). Under `--precision all` these rows
+                // Single precision. Under `--precision all` these rows
                 // follow the double rows of the same provider and size index,
                 // so the two lanes interleave; the baseline row order is only
                 // reproduced by the default `--precision double`.
