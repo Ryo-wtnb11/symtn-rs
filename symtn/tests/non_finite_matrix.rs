@@ -22,14 +22,11 @@
 //! typed error instead of a silent finite decision. The checked Generic
 //! factorization column is `checked_generic_facade/nonfinite.rs`.
 
-use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
-use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{
-    Error, GradedSpace, OperationError, Runtime, SectorSpectrum, TensorMap, Truncation,
-};
+use symtn::sector::U1Irrep;
+use symtn::typed::{Error, OperationError, SectorSpectrum, TensorMap, Truncation};
 
 use crate::fixtures::host_runtime;
 use crate::nonfinite_factor_input;
@@ -266,57 +263,6 @@ fn factorizations_and_pinv_refuse_non_finite_input_on_every_storage() {
         Complex64,
         complex,
         complex_bads()
-    );
-}
-
-/// Structure is reported before values, as on the diagonal route: a
-/// nonfinite non-endomorphism is refused as a non-endomorphism by eig/eigh,
-/// and a nonfinite wide block by left polar as a shape error.
-#[test]
-fn structural_admission_precedes_the_finite_input_stage() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let row = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
-    let col = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let wide: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&row], [&col], |_, _| f64::NAN).unwrap();
-    let operation = |error: Error| match error {
-        Error::Operation(operation) => *operation,
-        other => panic!("expected an operation error, got {other:?}"),
-    };
-    let space_mismatch = |message| OperationError::SpaceMismatch { message };
-    for (error, family) in [
-        (
-            wide.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
-                .unwrap_err(),
-            "eigh",
-        ),
-        (
-            wide.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
-                .unwrap_err(),
-            "eigh",
-        ),
-        (wide.eig_vals(engine, &[0], &[1]).unwrap_err(), "eig"),
-        (wide.eig_full(engine, &[0], &[1]).unwrap_err(), "eig"),
-    ] {
-        let expected = match family {
-            "eigh" => space_mismatch("eigh requires an endomorphism (codomain == domain)"),
-            _ => space_mismatch("eig requires an endomorphism (codomain == domain)"),
-        };
-        assert_eq!(operation(error), expected);
-    }
-    assert_eq!(
-        operation(wide.left_polar(engine, &[0], &[1]).unwrap_err()),
-        OperationError::InvalidArgument {
-            message: "left_polar requires rows >= columns in every coupled-sector matrix"
-        }
-    );
-    // Families with no structural admission refuse the values.
-    assert_eq!(
-        operation(wide.svd_vals(engine, &[0], &[1]).unwrap_err()),
-        OperationError::InvalidArgument {
-            message: "svd input components must be finite"
-        }
     );
 }
 

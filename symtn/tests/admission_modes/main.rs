@@ -179,6 +179,10 @@ fn operation_err<T, E: IntoFacade>(result: Result<T, E>) -> OperationError {
     }
 }
 
+mod construction;
+mod error_kinds;
 mod factorization;
 mod matrix_fn;
+mod nonfinite;
+mod reductions;
 mod transform;

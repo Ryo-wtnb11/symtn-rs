@@ -1329,18 +1329,6 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
 // family (`isomorphism`/`isometry`).
 // ---------------------------------------------------------------------------
 
-fn u1_typed_leg() -> GradedSpace<symtn::sector::U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(symtn::sector::U1FusionRule),
-        [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
-            (symtn::sector::U1Irrep::new(-1), 3),
-        ],
-    )
-    .unwrap()
-}
-
 fn fz2_typed_leg() -> GradedSpace<symtn::sector::FermionParityFusionRule> {
     GradedSpace::try_new(
         Arc::new(symtn::sector::FermionParityFusionRule),

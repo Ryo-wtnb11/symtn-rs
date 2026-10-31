@@ -547,46 +547,6 @@ fn typed_block_fill_preserves_tree_and_storage_order() {
 }
 
 #[test]
-fn typed_rand_with_seed_is_deterministic_f64() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let leg = u1_typed_leg();
-    let first: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7).unwrap();
-    let replay: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7).unwrap();
-    let other: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 8).unwrap();
-
-    assert!(!first.dense_data().unwrap().is_empty());
-    assert_eq!(first.dense_data().unwrap(), replay.dense_data().unwrap());
-    assert_ne!(first.dense_data().unwrap(), other.dense_data().unwrap());
-}
-
-#[test]
-fn typed_rand_with_seed_is_deterministic_c64() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let leg = fz2_typed_leg();
-    let first: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 11).unwrap();
-    let replay: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 11).unwrap();
-    let other: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 12).unwrap();
-
-    assert!(first
-        .dense_data()
-        .unwrap()
-        .iter()
-        .any(|value| value.im != 0.0));
-    assert_eq!(first.dense_data().unwrap(), replay.dense_data().unwrap());
-    assert_ne!(first.dense_data().unwrap(), other.dense_data().unwrap());
-}
-
-#[test]
 fn rand_and_isomorphism_build_on_an_external_provider() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
@@ -615,90 +575,6 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
     let id: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::isomorphism(engine, &runtime, [&dual, &leg], [&dual, &leg]).unwrap();
     assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
-}
-
-#[test]
-fn typed_isomorphism_satisfies_the_identity_law_on_a_builtin_rule() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: `f† ∘ f = id` on the domain product, on a rank-2 <- rank-2
-    // isomorphism whose two sides carry the same fused content through
-    // opposite dual arrangements ([dual, leg] <- [leg, dual]). The norm-fuser
-    // shape (single fused codomain leg) is exercised by the byte-parity test
-    // below.
-    let runtime = runtime();
-    let leg = u1_typed_leg();
-    let dual = leg.try_dual().unwrap();
-
-    let f: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(engine, &runtime, [&dual, &leg], [&leg, &dual]).unwrap();
-    let roundtrip = f.adjoint(engine).unwrap().compose(engine, &f).unwrap();
-    // Explicit `D` for the cuda,cpu-faer feature set (see the ExternalZ3
-    // identity-law test above).
-    let id: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(engine, &runtime, [&leg, &dual], [&leg, &dual]).unwrap();
-    assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
-}
-
-#[test]
-fn typed_isometry_embeds_and_satisfies_the_identity_law() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: on a strictly-embedding fixture (every domain sector strictly
-    // smaller than its codomain sibling in at least one sector) the isometry
-    // satisfies `w† ∘ w = id(domain)`.
-    let runtime = runtime();
-    let provider = Arc::new(symtn::sector::U1FusionRule);
-    let small = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap();
-    let big = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 3),
-            (symtn::sector::U1Irrep::new(-1), 1),
-        ],
-    )
-    .unwrap();
-
-    let w: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isometry(engine, &runtime, [&big], [&small]).unwrap();
-    let roundtrip = w.adjoint(engine).unwrap().compose(engine, &w).unwrap();
-    // Explicit `D` for the cuda,cpu-faer feature set (see the ExternalZ3
-    // identity-law test above).
-    let id: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(engine, &runtime, [&small], [&small]).unwrap();
-    assert_eq!(roundtrip.dense_data().unwrap(), id.dense_data().unwrap());
-}
-
-#[test]
-fn typed_isometry_rejects_a_non_embeddable_pair() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let small = u1_typed_leg();
-    let big = GradedSpace::try_new(
-        Arc::new(symtn::sector::U1FusionRule),
-        [(symtn::sector::U1Irrep::new(0), 1)],
-    )
-    .unwrap();
-
-    // Domain strictly larger than the codomain: not embeddable.
-    let typed_error =
-        TensorMap::<symtn::sector::U1FusionRule, f64>::isometry(engine, &runtime, [&big], [&small])
-            .unwrap_err();
-
-    assert!(matches!(
-        typed_error,
-        symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
-    ));
 }
 
 #[test]
@@ -751,90 +627,6 @@ fn typed_rand_rejects_mismatched_providers_like_zeros() {
     )
     .unwrap_err();
     assert!(matches!(error, symtn::typed::Error::RuleMismatch));
-}
-
-#[test]
-fn typed_isomorphism_rejects_embeddable_but_not_isomorphic_content() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the isomorphism gate is `domain ≅ codomain`, strictly stronger
-    // than the isometry embedding — a domain that embeds but is smaller must
-    // be rejected. The embeddable-but-not-isomorphic fixture is deliberate:
-    // it proves `isomorphism` routes through the isomorphism check, not the
-    // isometry one.
-    let runtime = runtime();
-    let provider = Arc::new(symtn::sector::U1FusionRule);
-    let small = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap();
-    let big = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 3),
-        ],
-    )
-    .unwrap();
-
-    let typed_error = TensorMap::<symtn::sector::U1FusionRule, f64>::isomorphism(
-        engine,
-        &runtime,
-        [&big],
-        [&small],
-    )
-    .unwrap_err();
-    assert!(matches!(
-        typed_error,
-        symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
-    ));
-}
-
-#[test]
-fn typed_isometry_rejects_a_larger_domain_degeneracy_with_identical_sector_sets() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the embedding check is sectorwise `deg_domain <= deg_codomain`,
-    // not sector-set containment — identical sector sets with one domain
-    // degeneracy exactly one above its codomain sibling must fail. The
-    // off-by-one fixture makes a `deg + 1` slip in the
-    // comparison visible.
-    let runtime = runtime();
-    let provider = Arc::new(symtn::sector::U1FusionRule);
-    let codomain = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap();
-    let domain = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
-        ],
-    )
-    .unwrap();
-
-    let typed_error = TensorMap::<symtn::sector::U1FusionRule, f64>::isometry(
-        engine,
-        &runtime,
-        [&codomain],
-        [&domain],
-    )
-    .unwrap_err();
-    assert!(matches!(
-        typed_error,
-        symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
-    ));
 }
 
 #[test]
@@ -897,49 +689,6 @@ fn typed_c64_unitary_satisfies_the_identity_law() {
         TensorMap::isomorphism(engine, &runtime, [&leg, &leg_dual], [&leg_dual, &leg]).unwrap();
     let identity: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
         TensorMap::isomorphism(engine, &runtime, [&leg_dual, &leg], [&leg_dual, &leg]).unwrap();
-
-    assert_eq!(
-        typed
-            .adjoint(engine)
-            .unwrap()
-            .compose(engine, &typed)
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        identity.dense_data().unwrap()
-    );
-}
-
-#[test]
-fn typed_isometry_on_a_dual_domain_satisfies_the_identity_law() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let provider = Arc::new(symtn::sector::U1FusionRule);
-    let small = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
-    .try_dual()
-    .unwrap();
-    let big = GradedSpace::try_new(
-        Arc::clone(&provider),
-        [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 3),
-            (symtn::sector::U1Irrep::new(-1), 3),
-        ],
-    )
-    .unwrap();
-
-    let typed: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isometry(engine, &runtime, [&big], [&small]).unwrap();
-    let identity: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::isomorphism(engine, &runtime, [&small], [&small]).unwrap();
 
     assert_eq!(
         typed

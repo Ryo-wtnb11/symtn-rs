@@ -601,7 +601,7 @@ fn checked_errors_stay_typed_and_callback_waits_for_all_decodes() {
 }
 
 #[test]
-fn identity_mismatch_precedes_algebra_queries_and_both_dtypes_fill() {
+fn identity_mismatch_precedes_algebra_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
@@ -616,20 +616,6 @@ fn identity_mismatch_precedes_algebra_queries_and_both_dtypes_fill() {
     ));
     assert_eq!(first.algebra_queries.load(Ordering::Relaxed), 0);
     assert_eq!(other.algebra_queries.load(Ordering::Relaxed), 0);
-
-    let real: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&left, &left], [&left], 7).unwrap();
-    let complex: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&left, &left], [&left], 7).unwrap();
-    assert_eq!(
-        real.dense_data().unwrap().len(),
-        complex.dense_data().unwrap().len()
-    );
-    assert!(complex
-        .dense_data()
-        .unwrap()
-        .iter()
-        .any(|value| value.im != 0.0));
 }
 
 #[test]
@@ -664,6 +650,7 @@ fn failed_checked_admission_leaves_the_provider_usable() {
     assert_eq!(after_failure.codomain(), control.codomain());
 }
 
+#[cfg(feature = "cgc-gen")]
 /// The identity written sector by sector from its definition, independent of
 /// `isomorphism`: `1` exactly where the codomain and domain fusion trees are
 /// equal (uncoupled sectors, inner lines and vertex labels) and the codomain
@@ -690,6 +677,7 @@ where
     .unwrap()
 }
 
+#[cfg(feature = "cgc-gen")]
 /// `isomorphism(V, V)` is the identity on a checked-Generic provider
 /// with fusion multiplicity, and composing it on either side returns the
 /// operand; `isometry` satisfies `w† ∘ w = isomorphism(domain, domain)`.
@@ -784,18 +772,6 @@ fn check_generic_structural_constructors<R>(
         ),
         "{error}"
     );
-}
-
-#[test]
-fn checked_generic_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    // X ⊗ X = 1 ⊕ 2X: every rank >= 2 side carries a multiplicity vertex.
-    let provider = Arc::new(CheckedOnlyToy::new(0));
-    let leg = GradedSpace::try_new(provider, [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();
-    check_generic_structural_constructors(&runtime, &leg, |ij| {
-        0.25 + (ij[0] * 5 + ij[1] * 3 + ij[2]) as f64
-    });
 }
 
 #[cfg(feature = "cgc-gen")]
