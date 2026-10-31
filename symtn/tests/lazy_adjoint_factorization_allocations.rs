@@ -6,11 +6,6 @@
 //! materialize-then-factor, if any, must not grow with the degeneracies.
 //! Warm measurements, one dense thread.
 
-// The call budgets are measured on the faer provider; a BLAS provider owns
-// its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
-// these gates do not model (#2107).
-use crate::backend;
-
 use std::hint::black_box;
 use std::sync::Arc;
 
@@ -184,13 +179,12 @@ macro_rules! assert_excess_is_metadata {
     }};
 }
 
+/// Purpose: factorizing a lazy adjoint adds no payload-sized allocation
+/// over materializing it first, on every dense provider.
 #[test]
 fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    if !backend::faer_is_default_backend() {
-        return;
-    }
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = |scale: usize| {
@@ -204,14 +198,12 @@ fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
     assert_excess_is_metadata!(engine, "MF SU(2)", runtime, leg);
 }
 
+/// Purpose: the checked-Generic twin of the contract above.
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    if !backend::faer_is_default_backend() {
-        return;
-    }
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().build().unwrap();

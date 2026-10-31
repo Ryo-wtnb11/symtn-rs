@@ -239,6 +239,16 @@ where
 }
 
 #[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "the warm-zero and no-plan-build contracts are the native grouped GEMM kernel's; a BLAS provider allocates its own per-call scratch, so warm prepared replays allocate"
+)]
 fn dynamic_tree_route_allocations_follow_their_contracts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();

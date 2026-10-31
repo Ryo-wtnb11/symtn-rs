@@ -1,29 +1,19 @@
-//! Characterization pins of the Host `ComposePlan` (#1775), recorded on the
-//! base `ec3dea5d` before `ComposePlan` moved onto `ContractPlan`.
+//! Allocation and retention contract of the Host `ComposePlan`.
 //!
 //! Over U(1), SU(2) and fZ2xU(1), f64 and c64, one plan and one workspace run
-//! the member counts B = 1, 2, 17, 1 with new dyadic values on every call.
-//! Every product and partial sum of the fixtures is exact, so the value
-//! digest (±0 and NaN folded) does not depend on the dense kernel's
-//! summation order. [`DIGESTS`] pins every value digest, recorded on the
-//! base and unchanged by #1775; `expected_errors` lists the typed error of
-//! every rejected call.
-//!
-//! Allocation counts and retained bytes are structural contracts, not exact
-//! sizes, so a dense-backend release or a struct layout change cannot fail
-//! them: a warm `execute` and `execute_into` allocate nothing at any member
-//! count (the workspace's executor keeps the block GEMM kernel's staging;
-//! the plans come from the process-global geometry-plan cache,
-//! `prepared_member1_core_reuse`); `execute_into` retains nothing new;
-//! retained bytes grow with `B > 1`, and B = 1 again retains at least the
-//! B = 1 footprint (the GEMM staging keeps its high-water capacity); and at
-//! B = 1 the workspace retains at least its output (no stacked replay; the
-//! base kept a one-member replay there, 208 bytes and 8 allocations on
-//! these fixtures).
+//! the member counts B = 1, 2, 17, 1 with new values on every call. The
+//! contract is structural: a warm `execute` and `execute_into` allocate
+//! nothing at any member count (the workspace's executor keeps the block
+//! GEMM kernel's staging; the plans come from the process-global
+//! geometry-plan cache, `prepared_member1_core_reuse`); `execute_into`
+//! retains nothing new; retained bytes grow with `B > 1`, and B = 1 again
+//! retains at least the B = 1 footprint (the GEMM staging keeps its
+//! high-water capacity); and at B = 1 the workspace retains at least its
+//! output. The values themselves are `prepared_compose`'s contract
+//! (`prepared_compose_equals_eager_and_the_tree_oracle_per_member`), and
+//! every rejected call returns its typed error before any work.
 //!
 //! The target-wide serial guard keeps this test's cache warm-up ordered.
-
-use crate::backend;
 
 use crate::common;
 
@@ -33,31 +23,14 @@ use crate::counting_alloc;
 
 use std::fmt::Debug;
 
-#[allow(unused_imports)]
-use num_complex::{Complex32, Complex64};
+use num_complex::Complex64;
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{ComposePlan, Error, GradedSpace, Runtime, SignatureField, StackedTensorMap};
 
 use common::Payload;
 use prepared::{filled, fz2u1_legs, members, su2_legs, u1_legs};
 
-fn fold(state: &mut u64, values: impl IntoIterator<Item = f64>) {
-    for value in values {
-        let bits = if value.is_nan() {
-            f64::NAN.to_bits()
-        } else if value == 0.0 {
-            0
-        } else {
-            value.to_bits()
-        };
-        for byte in bits.to_le_bytes() {
-            *state ^= u64::from(byte);
-            *state = state.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-}
-
-fn stack_digest<R, D>(stack: &StackedTensorMap<R, D>) -> u64
+fn data<R, D>(stack: &StackedTensorMap<R, D>) -> Vec<D>
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -69,18 +42,16 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let mut state = 0xcbf2_9ce4_8422_2325;
-    for index in 0..stack.len() {
-        let member = stack.member(engine, index).unwrap();
-        fold(
-            &mut state,
-            member.dense_data().unwrap().iter().flat_map(|value| {
-                let (re, im) = value.parts();
-                [re, im]
-            }),
-        );
-    }
-    state
+    (0..stack.len())
+        .flat_map(|index| {
+            stack
+                .member(engine, index)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .to_vec()
+        })
+        .collect()
 }
 
 fn calls<T>(f: impl FnOnce() -> T) -> (T, u64, u64) {
@@ -88,11 +59,8 @@ fn calls<T>(f: impl FnOnce() -> T) -> (T, u64, u64) {
     (value, allocs.calls, allocs.bytes)
 }
 
-fn record<R, D>(
-    label: &str,
-    (v, w): (GradedSpace<R>, GradedSpace<R>),
-    rows: &mut Vec<(String, u64)>,
-) where
+fn record<R, D>(label: &str, (v, w): (GradedSpace<R>, GradedSpace<R>))
+where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -139,7 +107,7 @@ fn record<R, D>(
             plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         });
         let output = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
-        let value = stack_digest(output);
+        let value = data(output);
         let output_bytes = output.len()
             * output
                 .member(engine, 0)
@@ -149,9 +117,6 @@ fn record<R, D>(
                 .len()
             * std::mem::size_of::<D>();
         let retained = workspace.retained_bytes();
-        // The workspace's executor keeps the block GEMM kernel's staging,
-        // so a warm call allocates nothing at any member count.
-        let warm_budget = 0;
         // The first `execute_into` may grow the workspace's fill scratch
         // once; the second is warm.
         for (warm_into, mut dst) in fills.into_iter().enumerate() {
@@ -159,16 +124,16 @@ fn record<R, D>(
                 plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                     .unwrap();
             });
-            assert_eq!(stack_digest(&dst), value, "{key}: execute_into == execute");
+            assert_eq!(data(&dst), value, "{key}: execute_into == execute");
             assert!(
-                warm_into == 0 || into <= warm_budget,
+                warm_into == 0 || into == 0,
                 "{key}: warm execute_into allocated {into} ({into_bytes} B)"
             );
         }
         eprintln!(
-            "    (\"{key}\", {value:#x}), // calls first={first} ({first_bytes} B) warm={warm} ({warm_bytes} B), retained {retained}"
+            "{key}: calls first={first} ({first_bytes} B) warm={warm} ({warm_bytes} B), retained {retained}"
         );
-        assert!(warm <= warm_budget, "{key}: warm execute allocated {warm}");
+        assert_eq!(warm, 0, "{key}: warm execute allocated");
         assert!(first > warm, "{key}: the counter sees the cold call");
         assert_eq!(
             workspace.retained_bytes(),
@@ -179,7 +144,6 @@ fn record<R, D>(
             assert!(retained >= output_bytes, "{key}: B = 1 retains the output");
         }
         retained_by_call.push(retained);
-        rows.push((key, value));
     }
     let [one, two, seventeen, again] = retained_by_call[..] else {
         unreachable!()
@@ -256,27 +220,33 @@ fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
     ]
 }
 
+/// Purpose: a warm Host compose allocates nothing at any member count and
+/// its workspace retains no more than its high-water footprint.
 #[test]
-fn host_compose_plan_values_bytes_allocations_and_errors_are_pinned() {
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "the warm-zero contract is the native grouped GEMM kernel's; a BLAS provider allocates its own per-call scratch"
+)]
+fn warm_host_compose_plan_allocates_nothing_and_retains_its_footprint() {
     let _serial = crate::counting_alloc::serial();
-    if !backend::faer_is_default_backend() {
-        return;
-    }
-    let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
-    let mut rows = Vec::new();
-    record::<_, f64>("U1", u1_legs(), &mut rows);
-    record::<_, Complex64>("U1", u1_legs(), &mut rows);
-    record::<_, f64>("SU2", su2_legs(), &mut rows);
-    record::<_, Complex64>("SU2", su2_legs(), &mut rows);
-    record::<_, f64>("fZ2xU1", fz2u1_legs(), &mut rows);
-    record::<_, Complex64>("fZ2xU1", fz2u1_legs(), &mut rows);
-    let errors = error_matrix();
-    let pinned: Vec<_> = DIGESTS
-        .iter()
-        .map(|&(key, digest)| (key.to_string(), digest))
-        .collect();
-    assert_eq!(rows, pinned, "observed digests are printed above");
-    assert_eq!(errors, expected_errors());
+    record::<_, f64>("U1", u1_legs());
+    record::<_, Complex64>("U1", u1_legs());
+    record::<_, f64>("SU2", su2_legs());
+    record::<_, Complex64>("SU2", su2_legs());
+    record::<_, f64>("fZ2xU1", fz2u1_legs());
+    record::<_, Complex64>("fZ2xU1", fz2u1_legs());
+}
+
+/// Purpose: every rejected Host compose call returns its typed error.
+#[test]
+fn rejected_host_compose_calls_return_typed_errors() {
+    assert_eq!(error_matrix(), expected_errors());
 }
 
 /// The error of every [`error_matrix`] row. A member-count mismatch is
@@ -325,33 +295,3 @@ fn expected_errors() -> Vec<(&'static str, Option<Error>)> {
         ),
     ]
 }
-
-/// Value digests, recorded on the base `ec3dea5d` (macOS aarch64 and qg1
-/// x86_64 Linux alike) and unchanged by #1775.
-#[rustfmt::skip]
-const DIGESTS: &[(&str, u64)] = &[
-    ("U1 f64 call=0 B=1", 0xd76442f7a019dd2),
-    ("U1 f64 call=1 B=2", 0xcc7f92611b071413),
-    ("U1 f64 call=2 B=17", 0x4aea74fa1b49b599),
-    ("U1 f64 call=3 B=1", 0x6b6d317cdac66a13),
-    ("U1 c64 call=0 B=1", 0x652cf4b4aef062b0),
-    ("U1 c64 call=1 B=2", 0x297cf63f68f0d68f),
-    ("U1 c64 call=2 B=17", 0x2dc5cbbc33f0b32e),
-    ("U1 c64 call=3 B=1", 0xb75dc3454851fb8b),
-    ("SU2 f64 call=0 B=1", 0x990d51ba85b0b569),
-    ("SU2 f64 call=1 B=2", 0x9e89efa27937d69d),
-    ("SU2 f64 call=2 B=17", 0x5bb560c4813e8837),
-    ("SU2 f64 call=3 B=1", 0x43ce177b7d3eedd5),
-    ("SU2 c64 call=0 B=1", 0x6d1183ab6294aee9),
-    ("SU2 c64 call=1 B=2", 0x14750eff5eb8112b),
-    ("SU2 c64 call=2 B=17", 0x5a1ded85d8111ec2),
-    ("SU2 c64 call=3 B=1", 0x93d59f926f684fe5),
-    ("fZ2xU1 f64 call=0 B=1", 0xe4b22a8e500beb3f),
-    ("fZ2xU1 f64 call=1 B=2", 0xa0dc11d634d2c0ec),
-    ("fZ2xU1 f64 call=2 B=17", 0x4b5950622b829e71),
-    ("fZ2xU1 f64 call=3 B=1", 0x8e144ba44bb62cb5),
-    ("fZ2xU1 c64 call=0 B=1", 0x6d763c21c6ac588b),
-    ("fZ2xU1 c64 call=1 B=2", 0xf59530db98534636),
-    ("fZ2xU1 c64 call=2 B=17", 0x758b6a9cb59609e),
-    ("fZ2xU1 c64 call=3 B=1", 0xdf19f94b2386f04c),
-];

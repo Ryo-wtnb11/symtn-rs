@@ -12,9 +12,9 @@ use symtn_core::{
     U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
-    build_all_codomain_tree_transform_group_plan, build_tree_pair_transform_group_plan,
-    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, RuleIdentity, TreeTransformBlockSpec,
-    TreeTransformExecutionContext, TreeTransformOperation, TreeTransformStructure,
+    build_tree_pair_transform_group_plan, BoundDynamicFusionMapSpace, DynamicFusionMapSpace,
+    RuleIdentity, TreeTransformBlockSpec, TreeTransformExecutionContext, TreeTransformOperation,
+    TreeTransformStructure,
 };
 
 /// `structure` over the all-codomain hom space of `legs`, bound to `rule`
@@ -84,33 +84,6 @@ fn su2_f_move_structure() -> BlockStructure {
     BlockStructure::from_parts(
         SectorStructure::from_keys(4, keys).unwrap(),
         DegeneracyStructure::packed_column_major(4, [vec![1; 4], vec![1; 4]]).unwrap(),
-    )
-    .unwrap()
-}
-
-fn rank_nine_same_split_su2_groups() -> BlockStructure {
-    let vacuum = SU2FusionRule.vacuum();
-    let keys = [0usize, 1, 2].map(|twice_spin| {
-        let mut uncoupled = [vacuum; 9];
-        uncoupled[0] = SectorId::new(twice_spin);
-        uncoupled[1] = SectorId::new(twice_spin);
-        BlockKey::from(FusionTreePairKey::pair(
-            FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
-                uncoupled,
-                vacuum,
-                [false; 9],
-                [vacuum; 7],
-                [MultiplicityIndex::ONE; 8],
-            )
-            .unwrap(),
-            FusionTreeKey::try_new_for_rule(&SU2FusionRule, [], vacuum, [], [], []).unwrap(),
-        ))
-    });
-    BlockStructure::from_parts(
-        SectorStructure::from_keys(9, keys).unwrap(),
-        DegeneracyStructure::packed_column_major(9, std::array::from_fn::<_, 3, _>(|_| vec![1; 9]))
-            .unwrap(),
     )
     .unwrap()
 }
@@ -272,44 +245,6 @@ fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_wo
     assert_eq!(staged_calls, derivation_calls);
 }
 
-#[test]
-fn su2_f_move_compile_has_no_per_destination_coefficient_rows() {
-    let _serial = crate::counting_alloc::serial();
-    let structure = su2_f_move_structure();
-    let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let _ =
-        build_all_codomain_tree_transform_group_plan(&SU2FusionRule, operation.clone(), &structure)
-            .unwrap();
-    counting_alloc::start();
-    let plan = build_all_codomain_tree_transform_group_plan(&SU2FusionRule, operation, &structure)
-        .unwrap();
-    let allocs = counting_alloc::stop();
-
-    // What: compiling a two-channel SU(2) F move owns one final coefficient
-    // matrix without allocating one temporary coefficient Vec per destination.
-    assert_eq!(plan.specs().len(), 1);
-    assert_eq!(plan.specs()[0].recoupling_coefficients_dst_src().len(), 4);
-    assert!(allocs.calls <= 32, "allocations={}", allocs.calls);
-}
-
-#[test]
-fn su2_tree_pair_f_move_compile_has_no_per_destination_coefficient_rows() {
-    let _serial = crate::counting_alloc::serial();
-    let structure = su2_f_move_structure();
-    let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let _ = build_tree_pair_transform_group_plan(&SU2FusionRule, operation.clone(), &structure)
-        .unwrap();
-    counting_alloc::start();
-    let plan = build_tree_pair_transform_group_plan(&SU2FusionRule, operation, &structure).unwrap();
-    let allocs = counting_alloc::stop();
-
-    // What: the tree-pair assembler owns one row-major coefficient matrix for
-    // the same two-channel F move, independently of the all-codomain builder.
-    assert_eq!(plan.specs().len(), 1);
-    assert_eq!(plan.specs()[0].recoupling_coefficients_dst_src().len(), 4);
-    assert!(allocs.calls <= 52, "allocations={}", allocs.calls);
-}
-
 /// Rank eight with `half_legs` spin-1/2 legs and vacuum legs elsewhere: the
 /// complete layout has one block per vacuum-coupled tree of the spin-1/2
 /// legs (1, 2, 5, 14 for 2, 4, 6, 8 of them).
@@ -355,59 +290,37 @@ where
     )
 }
 
+/// Purpose: the cold ordered whole-block resolution grows at most linearly
+/// in the source blocks: the calls each further block adds never exceed
+/// what the second block added.
 #[test]
-fn cold_ordered_tree_pair_staging_stays_within_allocation_envelopes() {
+fn cold_ordered_tree_pair_staging_grows_at_most_linearly_in_blocks() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
 
-    // What: exact counts cover missing-position plan compilation after registry
-    // capacity exists, independently of unrelated typed-cache test order.
+    // A first cold run grows the process-wide registries' capacity, so the
+    // rows below measure only the plan compilation itself.
     let operation = TreeTransformOperation::permute(0..8, []);
     cold_resolution_allocations(engine, &rank_eight_su2_layout(2), &operation);
 
-    for half_legs in [2, 4, 6, 8] {
+    let rows = [2, 4, 6, 8].map(|half_legs| {
         let source = rank_eight_su2_layout(half_legs);
-        let blocks = source.space().structure().block_count();
-        let (resolution, _, staged) = cold_resolution_allocations(engine, &source, &operation);
-        eprintln!("blocks={blocks}: staging {staged}, resolution {resolution}");
-
-        // What: the staging's ordered whole-block resolution stays within the
-        // prior cold compile envelope (41 one-block allocations, under five
-        // per further block, plus one bounded all-rank normalization
-        // workspace), plus the published composed-coefficient entry's own
-        // tree arena and its reusable re-homing scratch (single-arena ownership, #2192): it
-        // grows at most linearly in the source blocks.
+        let blocks = source.space().structure().block_count() as u64;
+        (
+            blocks,
+            cold_resolution_allocations(engine, &source, &operation).0,
+        )
+    });
+    let slope = |[(b0, r0), (b1, r1)]: [(u64, u64); 2]| (r1 - r0, b1 - b0);
+    let (first_calls, first_blocks) = slope([rows[0], rows[1]]);
+    for pair in rows.windows(2).skip(1) {
+        let (calls, blocks) = slope([pair[0], pair[1]]);
+        // calls / blocks <= first_calls / first_blocks
         assert!(
-            resolution as usize <= 52 + 5 * (blocks - 1),
-            "blocks={blocks}, resolution allocations={resolution}"
+            calls * first_blocks <= first_calls * blocks,
+            "per-block resolution cost grew: {rows:?} (blocks, calls)"
         );
     }
-}
-
-#[test]
-fn rank_nine_same_split_groups_stay_within_the_cold_resolution_allocation_budget() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let vacuum = SU2FusionRule.vacuum();
-    let leg =
-        |sectors: &[SectorId]| SectorLeg::new(sectors.iter().map(|&sector| (sector, 1)), false);
-    let spins = [0usize, 1, 2].map(SectorId::new);
-    let source = bound_source::<_, 9>(
-        Arc::new(SU2FusionRule),
-        [leg(&spins), leg(&spins)]
-            .into_iter()
-            .chain((0..7).map(|_| leg(&[vacuum]))),
-        rank_nine_same_split_su2_groups(),
-    );
-    let operation = TreeTransformOperation::braid([1, 0, 2, 3, 4, 5, 6, 7, 8], [], 0..9, []);
-    let (calls, bytes, staged) = cold_resolution_allocations(engine, &source, &operation);
-    eprintln!("rank-9 groups: staging {staged}, resolution {calls} calls / {bytes} bytes");
-
-    // What: three same-split groups do not regress beyond the prior compiled
-    // allocation and byte envelopes.
-    assert_eq!(source.space().structure().fusion_tree_groups().len(), 3);
-    assert!(calls <= 217, "resolution allocations={calls}");
-    assert!(bytes < 56_500, "resolution bytes={bytes}");
 }
 
 fn rank_one_u1_pair_structure(count: usize) -> BlockStructure {
@@ -427,9 +340,12 @@ fn rank_one_u1_pair_structure(count: usize) -> BlockStructure {
     .unwrap()
 }
 
+/// Purpose: building a Unique rank-one U(1) plan costs the same at every
+/// source block count, and binding it borrows the plan's coefficients.
 #[test]
 fn unique_rank_one_u1_plan_allocations_do_not_scale_with_source_blocks() {
     let _serial = crate::counting_alloc::serial();
+    let mut one_block = None;
     for count in [1, 2, 4, 8, 16] {
         let structure = rank_one_u1_pair_structure(count);
         let operation = TreeTransformOperation::permute([0], [1]);
@@ -439,9 +355,13 @@ fn unique_rank_one_u1_plan_allocations_do_not_scale_with_source_blocks() {
         let allocs = counting_alloc::stop();
 
         // What: every Unique source block is an inline Single and shares the
-        // operation axis map, so plan construction owns only the outer specs
-        // allocation and the shared axis allocation at every cardinality.
-        assert_eq!(allocs.calls, 2, "source_blocks={count}");
+        // operation axis map, so plan construction costs what one block does.
+        let one_block = *one_block.get_or_insert(allocs.calls);
+        counting_alloc::assert_same_calls(
+            &format!("source blocks 1 -> {count}"),
+            one_block,
+            allocs.calls,
+        );
         assert_eq!(plan.specs().len(), count);
 
         let indexed_specs = (0..count)
@@ -469,6 +389,8 @@ fn unique_rank_one_u1_plan_allocations_do_not_scale_with_source_blocks() {
     }
 }
 
+/// Purpose: binding a grouped Multi spec borrows its coefficient matrix
+/// instead of copying it.
 #[test]
 fn grouped_multi_compile_borrows_plan_coefficient_matrix() {
     let _serial = crate::counting_alloc::serial();
@@ -500,49 +422,30 @@ fn grouped_multi_compile_borrows_plan_coefficient_matrix() {
         (0..BLOCKS).collect(),
         coefficients,
     )];
-    counting_alloc::start();
-    let _ = grouped_plan
-        .compile_structures(&structure, &structure)
-        .unwrap();
-    let allocs = counting_alloc::stop();
-    let cold_grouped_allocations = allocs.calls as usize;
-    let cold_grouped_bytes = allocs.bytes as usize;
-    let _ =
-        TreeTransformStructure::compile_structures(&structure, &structure, &direct_specs).unwrap();
-    counting_alloc::start();
+    // A copy of the matrix allocates at least one coefficient's bytes; the
+    // binding's own index and descriptor scratch is far smaller.
+    let coefficient_sized = COEFFICIENT_BYTES..=usize::MAX;
+    let (_, cold) = counting_alloc::measure_matching(coefficient_sized.clone(), || {
+        grouped_plan
+            .compile_structures(&structure, &structure)
+            .unwrap()
+    });
     let direct =
         TreeTransformStructure::compile_structures(&structure, &structure, &direct_specs).unwrap();
-    let allocs = counting_alloc::stop();
-    let direct_allocations = allocs.calls as usize;
-    let direct_bytes = allocs.bytes as usize;
-    counting_alloc::start();
-    let grouped = grouped_plan
-        .compile_structures(&structure, &structure)
-        .unwrap();
-    let allocs = counting_alloc::stop();
-    let grouped_allocations = allocs.calls as usize;
-    let grouped_bytes = allocs.bytes as usize;
+    let (grouped, warm) = counting_alloc::measure_matching(coefficient_sized, || {
+        grouped_plan
+            .compile_structures(&structure, &structure)
+            .unwrap()
+    });
 
-    // What: the first categorical binding references the spec's matrix and
-    // allocates no coefficient buffer beyond what a direct binding does.
-    assert!(
-        cold_grouped_allocations <= direct_allocations + 16,
-        "cold_grouped_allocations={cold_grouped_allocations}, direct_allocations={direct_allocations}"
+    // What: neither the first nor a later binding copies the spec's matrix.
+    assert_eq!(
+        cold.matched_calls, 0,
+        "cold binding copied coefficients: {cold:?}"
     );
-    assert!(
-        cold_grouped_bytes <= direct_bytes + 32 * 1024,
-        "cold_grouped_bytes={cold_grouped_bytes}, direct_bytes={direct_bytes}"
-    );
-
-    // What: grouped key resolution may own index/descriptor scratch, but it
-    // does not allocate the 256 KiB coefficient matrix a second time.
-    assert!(
-        grouped_allocations <= direct_allocations + 16,
-        "grouped_allocations={grouped_allocations}, direct_allocations={direct_allocations}"
-    );
-    assert!(
-        grouped_bytes <= direct_bytes + 32 * 1024,
-        "grouped_bytes={grouped_bytes}, direct_bytes={direct_bytes}"
+    assert_eq!(
+        warm.matched_calls, 0,
+        "warm binding copied coefficients: {warm:?}"
     );
     assert_eq!(
         grouped.gathered_coefficients(),

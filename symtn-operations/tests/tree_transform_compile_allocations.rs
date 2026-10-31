@@ -3,21 +3,27 @@ use symtn_operations::{TreeTransformBlockSpec, TreeTransformStructure};
 
 use crate::counting_alloc;
 
-#[test]
-fn overwrite_proof_allocation_is_bounded_by_layout_metadata() {
-    let _serial = crate::counting_alloc::serial();
-    let logical_elements = 1_000_000;
-    let structure = BlockStructure::packed_column_major(1, [vec![logical_elements]]).unwrap();
+/// Bytes a compile of one identity block of `elements` scalars allocates.
+fn identity_block_compile_bytes(elements: usize) -> u64 {
+    let structure = BlockStructure::packed_column_major(1, [vec![elements]]).unwrap();
     let specs = [TreeTransformBlockSpec::single(0, 0, 1.0_f64)];
-
     counting_alloc::start();
     let compiled = TreeTransformStructure::compile_structures(&structure, &structure, &specs);
     let allocs = counting_alloc::stop();
-
-    // What: compile-time overwrite proof memory scales with block/layout
-    // metadata, not with the number of physical scalar destinations.
     assert_eq!(compiled.unwrap().block_count(), 1);
-    assert!(allocs.bytes < 64 * 1024, "bytes={}", allocs.bytes);
+    allocs.bytes
+}
+
+/// Purpose: the compile-time overwrite proof costs layout metadata, not
+/// memory per scalar destination: a block of 10^3 and of 10^6 scalars
+/// compiles with the same bytes.
+#[test]
+fn overwrite_proof_allocation_is_bounded_by_layout_metadata() {
+    let _serial = crate::counting_alloc::serial();
+    assert_eq!(
+        identity_block_compile_bytes(1_000),
+        identity_block_compile_bytes(1_000_000)
+    );
 }
 
 #[test]

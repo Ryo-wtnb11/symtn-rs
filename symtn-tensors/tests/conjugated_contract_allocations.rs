@@ -1,5 +1,5 @@
-//! #1368: a warm contraction with a lazy-adjoint source reuses its space's
-//! adjoint structure instead of rebuilding it on every call.
+//! A warm contraction with a lazy-adjoint source reuses its space's adjoint
+//! structure instead of rebuilding it on every call.
 
 use std::sync::Arc;
 use symtn_dense::Engine;
@@ -110,6 +110,9 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
         .collect()
 }
 
+/// Purpose: a warm lazy-adjoint-source contraction rebuilds no adjoint
+/// structure: its calls, bytes and the adjoint memo's retained bytes are the
+/// same at degeneracy 2 and 16.
 #[test]
 fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -139,16 +142,13 @@ fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
         ]
     };
     let (small, large) = (rows(2), rows(16));
-    // What: the warm call holds no per-call adjoint rebuild: the core reads
-    // the owned space's lazy adjoint in place, so its allocation count does
-    // not grow with the degeneracy, and neither its bytes nor the adjoint
-    // memo's exceed a structure-sized bound.
-    for ((name, (small_calls, ..)), (_, (large_calls, bytes, retained))) in
-        small.into_iter().zip(large)
-    {
-        eprintln!("{name}: {small_calls} -> {large_calls} calls, {bytes} bytes; memo {retained}");
-        assert_eq!(small_calls, large_calls, "{name}: d2 against d16");
-        assert!(bytes <= 1024, "{name} d16: {bytes} warm bytes");
-        assert!(retained <= 4096, "{name} d16: {retained} memo bytes");
+    // What: the core reads the owned space's lazy adjoint in place, so
+    // nothing the warm call allocates or the memo retains depends on the
+    // degeneracy.
+    for ((name, small), (_, large)) in small.into_iter().zip(large) {
+        assert_eq!(
+            small, large,
+            "{name}: (calls, bytes, memo bytes) d2 against d16"
+        );
     }
 }

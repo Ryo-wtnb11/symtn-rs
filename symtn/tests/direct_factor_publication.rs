@@ -3,7 +3,6 @@
 //! zero-filling first, and polar runs its GEMMs into the output regions
 //! instead of per-sector temporaries that are then copied.
 
-use crate::backend;
 use crate::numerics;
 
 use std::hint::black_box;
@@ -176,15 +175,22 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
 // `faer_linalg::upper_triangle_vec_from_mat`), whose total over sectors is
 // the payload of L: 4872 zeroed bytes for this fixture. The counter observes
 // `alloc_zeroed` (e.g. `vec![0.0; len]`) for f64 (#1478).
-// The zeroed R factor is faer's `upper_triangle_vec_from_mat`; a BLAS provider
-// zero-fills its own workspaces (#2107).
+/// Purpose: compact LQ requests no zeroed storage beyond the dense backend's
+/// R factor.
 #[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "the zeroed-byte bound models faer's R factor; a BLAS provider zero-fills its own workspaces"
+)]
 fn compact_lq_requests_no_zeroed_output_storage() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    if !backend::faer_is_default_backend() {
-        return;
-    }
     let runtime = Runtime::builder().build().unwrap();
     let leg = u1_leg();
     let a: TensorMap<_, f64> =

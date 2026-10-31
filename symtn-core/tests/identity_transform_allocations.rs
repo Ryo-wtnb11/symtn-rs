@@ -209,6 +209,8 @@ fn unique_rank_129_preparation_borrows_prebuilt_operation_metadata() {
     assert_eq!((calls, bytes), (0, 0));
 }
 
+/// Purpose: an identity block permutation allocates only its owned result,
+/// the outer list and one row per source.
 #[test]
 fn block_identity_permute_allocates_only_owned_output() {
     let _serial = crate::counting_alloc::serial();
@@ -235,7 +237,7 @@ fn block_identity_permute_allocates_only_owned_output() {
     // What: identity block permutation allocates only the intentional owned
     // outer result and its one owned row, with no level-vector temporaries.
     assert_eq!(transformed, vec![vec![(source, 1.0)]]);
-    assert_eq!(allocations, 2);
+    assert_eq!(allocations, 1 + transformed.len());
 }
 
 /// Per-source `(destination, coefficient)` rows of an indexed result.
@@ -253,6 +255,7 @@ fn columns(
         .collect()
 }
 
+/// Purpose: an oriented indexed identity allocates only its owned columns.
 #[test]
 fn indexed_adjoint_identity_allocates_only_owned_output() {
     let _serial = crate::counting_alloc::serial();
@@ -296,44 +299,45 @@ fn indexed_adjoint_identity_allocates_only_owned_output() {
     // What: oriented indexed preparation borrows parent key, group, shape, and
     // stride metadata; only the owned columns (destinations, column starts,
     // entries) allocate.
+    const OWNED_COLUMN_SLICES: usize = 3;
     assert_eq!(columns(&transformed), vec![vec![(logical_source, 1.0)]]);
-    assert!(allocations <= 3, "{allocations}");
+    assert!(allocations <= OWNED_COLUMN_SLICES, "{allocations}");
 }
 
-#[test]
-fn indexed_adjoint_simple_group_allocates_only_owned_rows() {
-    let _serial = crate::counting_alloc::serial();
+/// Warm allocation calls of the oriented indexed adjoint of the one Simple
+/// group of `½^⊗legs ← ½^⊗legs`, after checking its columns, and the
+/// group's source count.
+fn indexed_adjoint_simple_group_calls(legs: usize) -> (usize, usize) {
     let half = SU2Irrep::from_twice_spin(1).sector_id();
     let leg = || SectorLeg::new([(half, 1)], false);
-    // `½^⊗3 ← ½^⊗3`: five tree pairs in one Simple group, so a per-source
-    // allocation would exceed the bound below.
     let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg(), leg(), leg()]),
-        FusionProductSpace::new([leg(), leg(), leg()]),
+        FusionProductSpace::new((0..legs).map(|_| leg())),
+        FusionProductSpace::new((0..legs).map(|_| leg())),
     );
     let sources = homspace.fusion_tree_keys(&SU2FusionRule);
-    assert_eq!(sources.len(), 5);
     let structure = BlockStructure::from_blocks(
         sources
             .iter()
             .cloned()
             .enumerate()
             .map(|(index, key)| {
-                BlockSpec::column_major_with_key(key.into(), vec![1; 6], index).unwrap()
+                BlockSpec::column_major_with_key(key.into(), vec![1; 2 * legs], index).unwrap()
             })
             .collect(),
     )
     .unwrap();
     let indices = structure.fusion_tree_group_slice()[0].block_indices();
     assert_eq!(indices, (0..sources.len()).collect::<Vec<_>>());
+    let codomain = (0..legs).collect::<Vec<_>>();
+    let domain = (legs..2 * legs).collect::<Vec<_>>();
     let run = || {
         multiplicity_free_permute_tree_pair_block_indexed(
             &SU2FusionRule,
             &structure,
             indices,
             FusionTreePairOrientation::Adjoint,
-            &[0, 1, 2],
-            &[3, 4, 5],
+            &codomain,
+            &domain,
         )
         .unwrap()
     };
@@ -352,15 +356,20 @@ fn indexed_adjoint_simple_group_allocates_only_owned_rows() {
             )]
         })
         .collect::<Vec<_>>();
-
-    // What: a Simple cohort borrows its parent group and pair frames; the
-    // owned columns (three slices) are the only allocations, independent of
-    // the source count (the per-source rows form allocated 1 + 5).
     assert_eq!(columns(&transformed), expected);
-    assert!(
-        allocations <= 3 && allocations < sources.len(),
-        "{allocations}"
-    );
+    (allocations, sources.len())
+}
+
+/// Purpose: a Simple cohort borrows its parent group and pair frames, so
+/// its owned columns cost the same for two sources (`½^⊗2`) as for five
+/// (`½^⊗3`).
+#[test]
+fn indexed_adjoint_simple_group_allocates_only_owned_rows() {
+    let _serial = crate::counting_alloc::serial();
+    let (small, small_sources) = indexed_adjoint_simple_group_calls(2);
+    let (large, large_sources) = indexed_adjoint_simple_group_calls(3);
+    assert_eq!((small_sources, large_sources), (2, 5));
+    counting_alloc::assert_same_calls("Simple-group sources 2 -> 5", small as u64, large as u64);
 }
 
 #[test]
@@ -609,6 +618,8 @@ fn prepared_nonidentity_unique_operations_have_zero_prepare_and_stable_execute_a
     }
 }
 
+/// Purpose: a borrowed Unique replay costs the same for a one-swap and a
+/// full-reversal Artin schedule.
 #[test]
 fn borrowed_unique_execution_allocations_do_not_scale_with_artin_schedule() {
     let _serial = crate::counting_alloc::serial();
@@ -677,12 +688,9 @@ fn borrowed_unique_execution_allocations_do_not_scale_with_artin_schedule() {
     let (_, short_calls) = measured_allocations(|| run(&short));
     let (_, long_calls) = measured_allocations(|| run(&long));
 
-    // What: UniqueFusion replay allocations are bounded by the one frozen
-    // output arena (its sector, duality and vertex buffers and its `Arc`)
-    // and the term vectors, not by the number of Artin steps.
-    const MUTATED_FIELD_OWNER_BUDGET: usize = 8;
-    assert!(short_calls <= MUTATED_FIELD_OWNER_BUDGET);
-    assert!(long_calls <= MUTATED_FIELD_OWNER_BUDGET);
+    // What: UniqueFusion replay allocates its one frozen output arena and
+    // term vectors whatever the number of Artin steps.
+    counting_alloc::assert_same_calls("Artin steps 1 -> 36", short_calls as u64, long_calls as u64);
 }
 
 #[test]
@@ -701,6 +709,8 @@ fn direct_simple_preparation_does_not_freeze_compiler_owners() {
     assert_eq!(allocations, 0);
 }
 
+/// Purpose: placing blocks into the coupled-sector matricization costs map
+/// growth (logarithmic in the entries), never an allocation per block.
 #[test]
 fn coupled_matricization_builder_allocates_per_map_growth_not_per_block() {
     let _serial = crate::counting_alloc::serial();
@@ -727,20 +737,25 @@ fn coupled_matricization_builder_allocates_per_map_growth_not_per_block() {
         .collect::<Vec<(_, usize, usize)>>();
     assert!(blocks.len() >= 256);
 
-    let (_, allocations) = measured_allocations(|| {
-        let mut layout = symtn_core::CoupledMatricizationBuilder::new();
-        for &(key, rows, cols) in &blocks {
-            black_box(layout.place(key, rows, cols).unwrap());
-        }
-        black_box(layout)
-    });
+    let place = |count: usize| {
+        measured_allocations(|| {
+            let mut layout = symtn_core::CoupledMatricizationBuilder::new();
+            for &(key, rows, cols) in &blocks[..count] {
+                black_box(layout.place(key, rows, cols).unwrap());
+            }
+            black_box(layout)
+        })
+        .1
+    };
+    let (half, all) = (place(blocks.len() / 2), place(blocks.len()));
 
-    // What: the shared coupled-sector placement keeps only its sector and
-    // tree maps, so placing every block of a large SU(2) grid costs map
-    // growth (logarithmic in the entry count), never an allocation per block.
+    // What: the placement keeps only its sector and tree maps, so doubling
+    // the placed blocks grows each map at most once more.
+    const MAPS: usize = 2;
     assert!(
-        allocations <= 32,
-        "{allocations} allocations for {} blocks",
+        all <= half + MAPS,
+        "{half} -> {all} allocations for {} -> {} blocks",
+        blocks.len() / 2,
         blocks.len()
     );
 }

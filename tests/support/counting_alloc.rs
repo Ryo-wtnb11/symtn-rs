@@ -189,6 +189,17 @@ pub fn stop() -> Allocs {
     })
 }
 
+/// The no-growth contract of a paired fixture: `large`, the same structure
+/// as `small` scaled in the dimension `what` names, costs exactly as many
+/// allocation calls.
+#[track_caller]
+pub fn assert_same_calls(what: &str, small: u64, large: u64) {
+    assert_eq!(
+        small, large,
+        "{what}: {small} allocation calls on the small fixture, {large} on the large one"
+    );
+}
+
 static SERIAL: Mutex<()> = Mutex::new(());
 
 /// Serializes the tests of one binary whose budgets depend on process-global

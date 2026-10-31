@@ -421,31 +421,20 @@ fn measure_eager_lazy_core_compose(
     .0
 }
 
+/// Purpose: a warm typed lazy-adjoint compose costs per call, not per
+/// coupled group or block: one group and five groups cost the same.
 #[test]
-fn typed_single_group_lazy_compose_stays_below_the_measured_engine_margin() {
+fn warm_typed_lazy_compose_does_not_scale_with_groups() {
     let _serial = crate::counting_alloc::serial();
-    // What: warmed typed lazy-adjoint compose measured 40 allocations when
-    // admitted here; 64 leaves platform headroom without inheriting the erased
-    // facade's former 128-allocation ceiling.
-    let calls = measure_eager_lazy_core_compose(&[(0, 3)], &[(0, 2)], &[(0, 4)], 272_001);
-    assert!(calls <= 64, "typed lazy compose allocated {calls} times");
-}
-
-#[test]
-fn typed_multigroup_lazy_compose_stays_below_the_measured_engine_margin() {
-    let _serial = crate::counting_alloc::serial();
-    // What: the corresponding multigroup route measured 52 allocations; 80
-    // keeps explicit headroom while still killing a return to per-term replay.
-    let calls = measure_eager_lazy_core_compose(
-        &[(-1, 2), (0, 3), (1, 1)],
-        &[(-1, 1), (0, 2), (1, 3)],
-        &[(-1, 3), (0, 1), (1, 2)],
+    let single = measure_eager_lazy_core_compose(&[(0, 3)], &[(0, 2)], &[(0, 4)], 272_001);
+    let charges = || -2..=2;
+    let many = measure_eager_lazy_core_compose(
+        &charges().map(|charge| (charge, 3)).collect::<Vec<_>>(),
+        &charges().map(|charge| (charge, 2)).collect::<Vec<_>>(),
+        &charges().map(|charge| (charge, 4)).collect::<Vec<_>>(),
         272_011,
     );
-    assert!(
-        calls <= 80,
-        "typed multigroup compose allocated {calls} times"
-    );
+    counting_alloc::assert_same_calls("coupled groups 1 -> 5", single, many);
 }
 
 #[test]
@@ -484,6 +473,8 @@ fn materialize_allocates_one_fresh_payload_per_call() {
     );
 }
 
+/// Purpose: a warm checked Generic adjoint costs the same however many
+/// fusion trees its HomSpace enumerates.
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
@@ -517,8 +508,5 @@ fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
         });
         costs.push(calls);
     }
-    assert!(
-        costs.iter().all(|&calls| calls <= 8) && costs[0] == costs[1],
-        "warm checked Generic adjoint calls: {costs:?}"
-    );
+    counting_alloc::assert_same_calls("fusion trees small -> wide", costs[0], costs[1]);
 }
