@@ -65,7 +65,7 @@ pub fn region<R>(
             }
             None => Err(OperationError::Dense(DenseError::Unsupported {
                 op: "host_region",
-                message: "Host regions run on the caller's CPU or CUDA engine".to_string(),
+                message: "a Host region needs the caller's CPU engine".to_string(),
             })),
         }
     }
@@ -141,7 +141,7 @@ pub fn copy_width(engine: &mut dyn Engine, elements: usize) -> Result<usize, Ope
             Some(width) => width,
             None => Err(OperationError::Dense(DenseError::Unsupported {
                 op: "host_region",
-                message: "Host regions run on the caller's CPU or CUDA engine".to_string(),
+                message: "a Host region needs the caller's CPU engine".to_string(),
             })),
         }
     }

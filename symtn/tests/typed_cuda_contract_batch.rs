@@ -1351,7 +1351,7 @@ fn copy_c_nonzero_single_public_admission() {
                     .collect();
                 let (_, eager) = observe(|| {
                     for (left, right, spec) in &eager_inputs {
-                        black_box(left.contract(engine, right, spec).unwrap());
+                        black_box(left.contract(cuda, right, spec).unwrap());
                     }
                 });
                 eprintln!(
@@ -1602,7 +1602,7 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
             .collect();
         let (_, eager) = observe(|| {
             for (left, right) in &eager_inputs {
-                black_box(left.contract(engine, right, &case.spec()).unwrap());
+                black_box(left.contract(cuda, right, &case.spec()).unwrap());
             }
         });
         eprintln!(

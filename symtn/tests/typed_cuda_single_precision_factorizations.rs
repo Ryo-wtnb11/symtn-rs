@@ -830,7 +830,7 @@ fn assert_device_eigh_matches_host<R, D>(
     // ordering, which both sides share, so they compare pointwise.
     numerics::assert_slices_close_scaled(
         &format!("{} [{}]", "eigh spectrum", D::NAME),
-        d.materialize(cuda).unwrap().dense_data().unwrap(),
+        d.materialize(engine).unwrap().dense_data().unwrap(),
         host_d.materialize(engine).unwrap().dense_data().unwrap(),
         terms,
         kappa,
@@ -940,19 +940,19 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
 
     assert!(
         perturbed::<f32>(engine, cuda, &runtime, &leg, skew)
-            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
             .is_ok(),
         "an f32 block within eps(f32)^(3/4) must be admitted"
     );
     assert!(
         perturbed::<Complex32>(engine, cuda, &runtime, &leg, skew)
-            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
             .is_ok(),
         "a Complex32 block within eps(f32)^(3/4) must be admitted"
     );
     assert!(
         perturbed::<f64>(engine, cuda, &runtime, &leg, skew)
-            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
             .err()
             .unwrap()
             .report()
@@ -967,25 +967,25 @@ fn device_eigh_admits_a_nearly_hermitian_single_precision_block() {
         (
             "f64",
             perturbed::<f64>(engine, cuda, &runtime, &leg, gross)
-                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
         (
             "c64",
             perturbed::<Complex64>(engine, cuda, &runtime, &leg, gross)
-                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
         (
             "f32",
             perturbed::<f32>(engine, cuda, &runtime, &leg, gross)
-                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
         (
             "c32",
             perturbed::<Complex32>(engine, cuda, &runtime, &leg, gross)
-                .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full(cuda, &[0], &[1], HermitianTol::DEFAULT)
                 .err(),
         ),
     ] {
@@ -1524,13 +1524,8 @@ fn assert_shared_plan_matches_host<R, D>(
         terms,
         kappa,
     );
-    assert_residual(
-        engine,
-        &q.compose(cuda, &r).unwrap(),
-        &source,
-        bound,
-        "plan qr reconstruction",
-    );
+    let product = q.compose(engine, &r).unwrap();
+    assert_residual(engine, &product, &source, bound, "plan qr reconstruction");
 
     let Svd {
         u: host_u,
@@ -1567,18 +1562,13 @@ fn assert_shared_plan_matches_host<R, D>(
     );
     numerics::assert_slices_close_scaled(
         &format!("plan svd s [{}]", D::NAME),
-        s.materialize(cuda).unwrap().dense_data().unwrap(),
+        s.materialize(engine).unwrap().dense_data().unwrap(),
         host_s.materialize(engine).unwrap().dense_data().unwrap(),
         terms,
         kappa,
     );
-    assert_residual(
-        engine,
-        &u.compose(cuda, &s).unwrap().compose(cuda, &vh).unwrap(),
-        &source,
-        bound,
-        "plan svd reconstruction",
-    );
+    let product = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
+    assert_residual(engine, &product, &source, bound, "plan svd reconstruction");
     let source_adjoint = source.adjoint(engine).unwrap();
 
     let gram = source.compose(engine, &source_adjoint).unwrap();
@@ -1632,18 +1622,20 @@ fn assert_shared_plan_matches_host<R, D>(
         // spectrum needs no conditioning factor even at a zero eigenvalue.
         numerics::assert_slices_close_scaled(
             &format!("plan eigh d {what} [{}]", D::NAME),
-            d.materialize(cuda).unwrap().dense_data().unwrap(),
+            d.materialize(engine).unwrap().dense_data().unwrap(),
             host_d.materialize(engine).unwrap().dense_data().unwrap(),
             terms,
             scale.max(1.0),
         );
-        let v_adjoint = v.adjoint(cuda).unwrap();
+        let v_adjoint = v.adjoint(engine).unwrap();
+        let product = v
+            .compose(engine, &d)
+            .unwrap()
+            .compose(engine, &v_adjoint)
+            .unwrap();
         assert_residual(
             engine,
-            &v.compose(cuda, &d)
-                .unwrap()
-                .compose(cuda, &v_adjoint)
-                .unwrap(),
+            &product,
             &hermitian,
             tolerance::<D>(terms, scale, 1.0),
             "plan eigh reconstruction",

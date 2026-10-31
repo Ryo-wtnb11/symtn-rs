@@ -1707,19 +1707,17 @@ fn every_payload_dtype_satisfies_both_device_marker_traits() {
     device_factorization_payload::<Complex32>();
 }
 
-/// The rejection order does not depend on the payload dtype: a runtime built
-/// without a CUDA device rejects an upload with the same typed error at every
-/// payload, before any device work.
+/// The rejection does not depend on the payload dtype: an upload through an
+/// engine that is not a CUDA engine is refused with the same typed error at
+/// every payload.
 #[test]
-fn a_device_less_runtime_rejects_every_payload_the_same_way() {
+fn a_non_cuda_engine_rejects_every_payload_the_same_way() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let cuda = &mut crate::common::cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
     let leg = u1_leg();
 
     fn reject<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,
-        cuda: &mut dyn symtn::typed::Engine,
         runtime: &Runtime,
         leg: &GradedSpace<U1FusionRule>,
     ) -> String {
@@ -1731,14 +1729,14 @@ fn a_device_less_runtime_rejects_every_payload_the_same_way() {
             fill::<D, _>(1.5),
         )
         .unwrap();
-        match host.to_cuda(cuda) {
-            Ok(_) => panic!("a device-less runtime must not upload [{}]", D::NAME),
+        match host.to_cuda(engine) {
+            Ok(_) => panic!("a CPU engine must not upload [{}]", D::NAME),
             Err(error) => format!("{error}"),
         }
     }
 
-    let double = reject::<f64>(engine, cuda, &runtime, &leg);
-    assert_eq!(reject::<f32>(engine, cuda, &runtime, &leg), double);
-    assert_eq!(reject::<Complex32>(engine, cuda, &runtime, &leg), double);
-    assert_eq!(reject::<Complex64>(engine, cuda, &runtime, &leg), double);
+    let double = reject::<f64>(engine, &runtime, &leg);
+    assert_eq!(reject::<f32>(engine, &runtime, &leg), double);
+    assert_eq!(reject::<Complex32>(engine, &runtime, &leg), double);
+    assert_eq!(reject::<Complex64>(engine, &runtime, &leg), double);
 }

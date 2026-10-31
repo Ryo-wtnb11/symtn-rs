@@ -892,7 +892,7 @@ fn twist_cuda_rows_match_host() {
                     (a.adjoint(engine).unwrap(), a_dev.adjoint(cuda).unwrap()),
                 ] {
                     let device = device
-                        .twist(engine, legs, direction)
+                        .twist(cuda, legs, direction)
                         .unwrap()
                         .to_host(cuda)
                         .unwrap();
@@ -1360,25 +1360,25 @@ fn transform_cuda_rows_match_host() {
                 (
                     "permute",
                     host.permute(engine, PERMUTE.0, PERMUTE.1).unwrap(),
-                    device.permute(engine, PERMUTE.0, PERMUTE.1).unwrap(),
+                    device.permute(cuda, PERMUTE.0, PERMUTE.1).unwrap(),
                 ),
                 (
                     "braid",
                     host.braid(engine, PERMUTE.0, PERMUTE.1, &[0, 1, 2])
                         .unwrap(),
                     device
-                        .braid(engine, PERMUTE.0, PERMUTE.1, &[0, 1, 2])
+                        .braid(cuda, PERMUTE.0, PERMUTE.1, &[0, 1, 2])
                         .unwrap(),
                 ),
                 (
                     "transpose",
                     host.transpose(engine, &rotated.0, &rotated.1).unwrap(),
-                    device.transpose(engine, &rotated.0, &rotated.1).unwrap(),
+                    device.transpose(cuda, &rotated.0, &rotated.1).unwrap(),
                 ),
                 (
                     "repartition",
                     host.repartition(engine, flipped).unwrap(),
-                    device.repartition(engine, flipped).unwrap(),
+                    device.repartition(cuda, flipped).unwrap(),
                 ),
             ];
             for (name, host, device) in pairs {
@@ -1401,9 +1401,9 @@ fn transform_cuda_rows_match_host() {
                 .materialize(engine)
                 .unwrap();
             let mut device_destination = device_b
-                .permute(engine, PERMUTE.0, PERMUTE.1)
+                .permute(cuda, PERMUTE.0, PERMUTE.1)
                 .unwrap()
-                .materialize(engine)
+                .materialize(cuda)
                 .unwrap();
             host.permute_into(
                 engine,
@@ -1416,7 +1416,7 @@ fn transform_cuda_rows_match_host() {
             .unwrap();
             device
                 .permute_into(
-                    engine,
+                    cuda,
                     PERMUTE.0,
                     PERMUTE.1,
                     &mut device_destination,
@@ -1972,21 +1972,21 @@ fn contract_cuda_rows_match_host() {
             ),
             (a.adjoint(engine).unwrap(), a_dev.adjoint(cuda).unwrap()),
         ] {
-            let host_result = device.compose(engine, &b_dev).unwrap();
-            let host_result_2 = host.compose(engine, b).unwrap();
-            agree(engine, cuda, &host_result, &host_result_2, "compose");
+            let device_result = device.compose(cuda, &b_dev).unwrap();
+            let host_result = host.compose(engine, b).unwrap();
+            agree(engine, cuda, &device_result, &host_result, "compose");
             for spec in [CANONICAL, FLAT] {
-                let host_result = device.contract(engine, &tb_dev, &spec).unwrap();
-                let host_result_2 = host.contract(engine, &tb, &spec).unwrap();
-                agree(engine, cuda, &host_result, &host_result_2, "contract");
+                let device_result = device.contract(cuda, &tb_dev, &spec).unwrap();
+                let host_result = host.contract(engine, &tb, &spec).unwrap();
+                agree(engine, cuda, &device_result, &host_result, "contract");
             }
             let mut host_destination = host.compose(engine, a).unwrap();
-            let mut device_destination = device.compose(engine, &a_dev).unwrap();
+            let mut device_destination = device.compose(cuda, &a_dev).unwrap();
             host.contract_into(engine, &tb, &CANONICAL, &mut host_destination, alpha, beta)
                 .unwrap();
             device
                 .contract_into(
-                    engine,
+                    cuda,
                     &tb_dev,
                     &CANONICAL,
                     &mut device_destination,
@@ -2351,16 +2351,16 @@ fn trace_cuda_rows_match_host() {
             (a.adjoint(engine).unwrap(), a_dev.adjoint(cuda).unwrap()),
         ] {
             for pairs in [&[(0, 2)][..], &[(0, 2), (1, 3)]] {
-                let host_result = device.trace_pairs(engine, pairs).unwrap();
-                let host_result_2 = host.trace_pairs(engine, pairs).unwrap();
-                agree(engine, cuda, &host_result, &host_result_2, "trace_pairs");
+                let device_result = device.trace_pairs(cuda, pairs).unwrap();
+                let host_result = host.trace_pairs(engine, pairs).unwrap();
+                agree(engine, cuda, &device_result, &host_result, "trace_pairs");
             }
             let mut host_destination = b.trace_pairs(engine, &[(0, 2)]).unwrap();
             let mut device_destination = b_dev.trace_pairs(cuda, &[(0, 2)]).unwrap();
             host.trace_pairs_into(engine, &[(0, 2)], &mut host_destination, alpha, beta)
                 .unwrap();
             device
-                .trace_pairs_into(engine, &[(0, 2)], &mut device_destination, alpha, beta)
+                .trace_pairs_into(cuda, &[(0, 2)], &mut device_destination, alpha, beta)
                 .unwrap();
             agree(
                 engine,

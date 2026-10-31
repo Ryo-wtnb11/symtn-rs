@@ -71,13 +71,12 @@ fn delta<T>(body: impl FnOnce() -> T) -> (T, CudaTransferStats) {
 /// rebuilt as a device lazy adjoint of the device parent, so the device path
 /// under test is the parent read, not a materialized copy.
 fn device<R: DeviceRule, D: DevicePayload>(
-    engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
     tensor: &TensorMap<R, D, symtn::typed::CudaStorage<D>>,
     pairs: &[(usize, usize)],
 ) -> TensorMap<R, D> {
     tensor
-        .trace_pairs(engine, pairs)
+        .trace_pairs(cuda, pairs)
         .unwrap()
         .to_host(cuda)
         .unwrap()
@@ -91,7 +90,7 @@ fn check<R: DeviceRule, D: DevicePayload>(
 ) -> TensorMap<R, D> {
     let host = case.host();
     let device_result = case.tensor.to_cuda(cuda).unwrap();
-    let actual = device(engine, cuda, &device_result, &case.pairs);
+    let actual = device(cuda, &device_result, &case.pairs);
     assert_eq!(
         actual.codomain_rank(),
         host.codomain_rank(),
@@ -122,7 +121,7 @@ fn check<R: DeviceRule, D: DevicePayload>(
         .trace_pairs(engine, &pairs)
         .unwrap();
     let device_result = case.tensor.to_cuda(cuda).unwrap().adjoint(cuda).unwrap();
-    let lazy = device(engine, cuda, &device_result, &pairs);
+    let lazy = device(cuda, &device_result, &pairs);
     assert_eq!(
         lazy.codomain_rank(),
         host_lazy.codomain_rank(),
@@ -223,7 +222,7 @@ fn device_fz2_trace_is_the_hand_valued_supertrace() {
             })
             .unwrap();
         let device_result = tensor.to_cuda(cuda).unwrap();
-        let traced = device(engine, cuda, &device_result, &[(0, 1)]);
+        let traced = device(cuda, &device_result, &[(0, 1)]);
         numerics::assert_nonzero_slices_close(
             "fZ2 supertrace",
             traced.dense_data().unwrap(),
@@ -272,7 +271,7 @@ fn repeated_destinations_accumulate_every_producer() {
     };
     let pairs = [(0, 3)];
     let device_result = restricted(engine, None).to_cuda(cuda).unwrap();
-    let full = device(engine, cuda, &device_result, &pairs);
+    let full = device(cuda, &device_result, &pairs);
     let parts: Vec<Vec<f64>> = [-1, 0, 1]
         .into_iter()
         .map(|charge| {

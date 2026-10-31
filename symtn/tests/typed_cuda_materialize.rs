@@ -143,7 +143,7 @@ fn check<R, D>(
         ),
     ] {
         let before = cuda_transfer_stats();
-        let owned = input.materialize(engine).unwrap();
+        let owned = input.materialize(cuda).unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(
             after.device_allocs - before.device_allocs,
