@@ -1,3 +1,4 @@
+use crate::errors::Rejection as _;
 use std::sync::{Arc, Barrier};
 use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
@@ -350,7 +351,7 @@ fn a_metadata_rejection_leases_no_workspace_and_the_next_call_reuses_the_idle_on
     assert!(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
             .contract(engine, &[&a, &foreign])
-            .is_err()
+            .is_runtime_mismatch()
     );
     assert_eq!(plan_cache_stats(&runtime), warm);
     drop(

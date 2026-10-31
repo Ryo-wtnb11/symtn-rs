@@ -12,6 +12,7 @@
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
 
+use crate::common::ErrorKind as _;
 use std::hint::black_box;
 use std::sync::{Arc, OnceLock};
 use symtn::typed::ContractSpec;
@@ -144,12 +145,12 @@ fn labelled_block_inspection_refuses_compact_data_and_borrows_after_materialize(
     let _serial = crate::counting_alloc::serial();
     let diagonal = constructed_diagonal(DEGENERACY);
 
-    let refused = measured_bytes(|| diagonal.subblocks().map(|_| ()).is_err());
+    let refused = measured_bytes(|| diagonal.subblocks().map(|_| ()).is_unsupported());
     assert!(
         refused < dense_payload_bytes(),
         "block inspection materialized the compact payload: {refused}"
     );
-    assert!(diagonal.subblocks().is_err());
+    assert!(diagonal.subblocks().is_unsupported());
 
     let dense = diagonal.materialize(engine).unwrap();
     let borrowed = measured_bytes(|| {
@@ -660,7 +661,9 @@ fn rank_and_leg_inspections_allocate_no_payload() {
         ),
         (
             "scalar-error",
-            warmed_payloads(bytes, || tensor.scalar(engine).is_err()),
+            warmed_payloads(bytes, || {
+                tensor.scalar(engine).is_invalid_argument("rank-0")
+            }),
         ),
         (
             "leg_dims",

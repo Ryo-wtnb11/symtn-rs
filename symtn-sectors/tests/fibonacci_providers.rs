@@ -215,7 +215,10 @@ fn infallible_symbols_panic_with_the_domain_error_on_out_of_domain_ids() {
     {
         let ok = SECTORS[1];
         for invalid in [SectorId::new(2), SectorId::new(usize::MAX)] {
-            assert!(fib.try_nsymbol(ok, ok, invalid).is_err());
+            assert_eq!(
+                fib.try_nsymbol(ok, ok, invalid),
+                Err(FusionAlgebraError::InvalidSector { sector: invalid })
+            );
             for slot in 0..6 {
                 let mut ids = [ok; 6];
                 ids[slot] = invalid;

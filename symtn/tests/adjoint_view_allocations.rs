@@ -1,3 +1,4 @@
+use crate::common::ErrorKind as _;
 use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::Engine;
@@ -102,7 +103,7 @@ fn labelled_block_inspection_refuses_a_lazy_adjoint_without_copying() {
     let payload_bytes = std::mem::size_of_val(parent.dense_data().unwrap()) as u64;
 
     let refused = measure(|| {
-        assert!(adjoint.subblocks().is_err());
+        assert!(adjoint.subblocks().is_unsupported());
     });
     assert!(
         refused.1 < payload_bytes,

@@ -710,7 +710,10 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
     let runtime = runtime();
     let empty: [&GradedSpace<ExternalZ3Rule>; 0] = [];
 
-    assert!(TensorMap::<ExternalZ3Rule, f64>::zeros(engine, &runtime, empty, empty).is_err());
+    assert!(
+        TensorMap::<ExternalZ3Rule, f64>::zeros(engine, &runtime, empty, empty)
+            .is_invalid_argument("at least one leg")
+    );
     assert!(TensorMap::<ExternalZ3Rule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -718,12 +721,15 @@ fn typed_structural_constructors_reject_an_empty_leg_list() {
         empty,
         0x9E37_79B9_7F4A_7C15
     )
-    .is_err());
+    .is_invalid_argument("at least one leg"));
     assert!(matches!(
         TensorMap::<ExternalZ3Rule, f64>::isomorphism(engine, &runtime, empty, empty).unwrap_err(),
         symtn::typed::Error::InvalidArgument(message) if message.contains("at least one leg")
     ));
-    assert!(TensorMap::<ExternalZ3Rule, f64>::isometry(engine, &runtime, empty, empty).is_err());
+    assert!(
+        TensorMap::<ExternalZ3Rule, f64>::isometry(engine, &runtime, empty, empty)
+            .is_invalid_argument("at least one leg")
+    );
 }
 
 #[test]

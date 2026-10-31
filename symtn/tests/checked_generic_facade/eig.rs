@@ -553,9 +553,12 @@ fn checked_generic_eigh_lazy_success_and_failure_leave_the_view_lazy() {
         })
         .unwrap();
     let lazy = nonhermitian.adjoint(engine).unwrap();
-    assert!(lazy
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
-        .is_err());
+    assert!(matches!(
+        lazy.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT),
+        Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(
+            symtn::typed::OperationError::InvalidArgument { message }
+        ))) if message.contains("Hermitian coupled-sector blocks")
+    ));
     assert!(
         symtn::typed::__network::network_reuse_class(&lazy, false)
             == symtn::typed::__network::NetworkReuseClass::LazyAdjoint

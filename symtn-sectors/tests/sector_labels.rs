@@ -381,10 +381,6 @@ fn an_external_provider_implements_the_codec_without_builtin_machinery() {
             label: "Z3 charge 7".to_owned(),
         }
     );
-    assert_eq!(
-        rejected.to_string(),
-        "sector label Z3 charge 7 is not representable by its fusion rule"
-    );
     let sector = SectorId::new(3);
     assert_eq!(
         SectorCodec::decode_sector(&TinyRule, sector),

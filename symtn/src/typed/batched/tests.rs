@@ -33,7 +33,11 @@ fn spectra_publication_failure_does_not_publish_factors() {
     let mut workspace = plan.workspace().unwrap();
     plan.routes.label_routes[0] = Some(usize::MAX);
 
-    assert!(plan.execute(engine, &stack, &mut workspace).is_err());
+    assert!(matches!(
+        plan.execute(engine, &stack, &mut workspace),
+        Err(super::BatchError::Operation(crate::typed::Error::InvalidArgument(reason)))
+            if reason.contains("coupled sector has no route")
+    ));
     assert!(workspace.take_output().is_none());
 }
 

@@ -746,7 +746,11 @@ fn graded_space_reports_an_unrepresentable_label() {
     assert!(error.report().contains("Z3 charge 7"), "{error}");
     let provider = Arc::new(external_z3());
     let space = z3_leg(&provider, false);
-    assert!(space.degeneracy(&Z3Charge(7)).is_err());
+    assert!(matches!(
+        space.degeneracy(&Z3Charge(7)),
+        Err(symtn::typed::Error::FusionAlgebra(error))
+            if matches!(*error, FusionAlgebraError::UnrepresentableSectorLabel { .. })
+    ));
 }
 
 #[test]
@@ -779,7 +783,11 @@ fn graded_space_dual_surfaces_a_failing_checked_dual() {
     let provider = Arc::new(external_z3_with(Quirk::FailDual));
     let space = z3_leg(&provider, false);
 
-    assert!(space.try_dual().is_err());
+    assert!(matches!(
+        space.try_dual(),
+        Err(symtn::typed::Error::FusionAlgebra(error))
+            if matches!(*error, FusionAlgebraError::InvalidSector { .. })
+    ));
 }
 
 #[test]

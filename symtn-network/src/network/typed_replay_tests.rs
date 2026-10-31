@@ -1782,7 +1782,10 @@ fn typed_crossed_schedule_reuses_the_actual_first_step_destination() {
     assert!(std::ptr::eq(rhs_only.provider(), provider.as_ref()));
 
     let retained = rhs_only.clone();
-    assert!(planned.execute(engine, &refs[..2], &mut workspace).is_err());
+    assert!(matches!(
+        planned.execute(engine, &refs[..2], &mut workspace),
+        Err(symtn::typed::Error::InvalidArgument(reason)) if reason.contains("operands but 2 tensors")
+    ));
     assert_eq!(
         workspace.intermediates[0]
             .output
@@ -1795,9 +1798,11 @@ fn typed_crossed_schedule_reuses_the_actual_first_step_destination() {
     );
     let bad_bond = space(&provider, 7);
     let bad_rhs = TensorMap::rand_with_seed(engine, &runtime, [&bad_bond], [&right], 5).unwrap();
-    assert!(planned
-        .execute(engine, &[&a, &bad_rhs, &c], &mut workspace)
-        .is_err());
+    assert!(matches!(
+        planned.execute(engine, &[&a, &bad_rhs, &c], &mut workspace),
+        Err(symtn::typed::Error::InvalidArgument(reason))
+            if reason.contains("contracted input spaces mismatch")
+    ));
     assert_eq!(
         workspace.intermediates[0]
             .output
@@ -1942,7 +1947,15 @@ fn typed_replay_restores_buffers_after_injected_failures() {
     };
     let before = retained(&workspace);
     let codomain = std::mem::replace(&mut planned.schedule.steps[0].codomain, vec![usize::MAX]);
-    assert!(planned.execute(engine, &refs, &mut workspace).is_err());
+    assert!(matches!(
+        planned.execute(engine, &refs, &mut workspace),
+        Err(symtn::typed::Error::Operation(operation))
+            if matches!(
+                *operation,
+                symtn::typed::OperationError::InvalidPermutation { .. }
+                    | symtn::typed::OperationError::InvalidAxisSet { .. }
+            )
+    ));
     assert_eq!(retained(&workspace), before);
     planned.schedule.steps[0].codomain = codomain;
     drop(planned.execute(engine, &refs, &mut workspace).unwrap());
@@ -1952,13 +1965,29 @@ fn typed_replay_restores_buffers_after_injected_failures() {
         &mut planned.schedule.steps[1].rhs_contract_axes,
         vec![usize::MAX],
     );
-    assert!(planned.execute(engine, &refs, &mut workspace).is_err());
+    assert!(matches!(
+        planned.execute(engine, &refs, &mut workspace),
+        Err(symtn::typed::Error::Operation(operation))
+            if matches!(
+                *operation,
+                symtn::typed::OperationError::InvalidPermutation { .. }
+                    | symtn::typed::OperationError::InvalidAxisSet { .. }
+            )
+    ));
     assert!(workspace.slots[planned.schedule.steps[0].result_slot].is_some());
     planned.schedule.steps[1].rhs_contract_axes = rhs_axes;
     drop(planned.execute(engine, &refs, &mut workspace).unwrap());
 
     planned.schedule.final_permutation = Some((vec![usize::MAX], vec![0]));
-    assert!(planned.execute(engine, &refs, &mut workspace).is_err());
+    assert!(matches!(
+        planned.execute(engine, &refs, &mut workspace),
+        Err(symtn::typed::Error::Operation(operation))
+            if matches!(
+                *operation,
+                symtn::typed::OperationError::InvalidPermutation { .. }
+                    | symtn::typed::OperationError::InvalidAxisSet { .. }
+            )
+    ));
     assert!(workspace.slots[planned.schedule.final_slot].is_some());
     planned.schedule.final_permutation = None;
     drop(planned.execute(engine, &refs, &mut workspace).unwrap());

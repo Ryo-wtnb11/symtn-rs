@@ -142,7 +142,9 @@ fn braid_rejects_a_wrong_length_levels_list() {
     let message = short.to_string();
     assert!(message.contains("one level per source axis"), "{message}");
     assert!(message.contains("expected 4"), "{message}");
-    assert!(tensor.braid(engine, &[1, 2], &[3, 0], &[0; 5]).is_err());
+    assert!(tensor
+        .braid(engine, &[1, 2], &[3, 0], &[0; 5])
+        .is_invalid_argument("one level per source axis"));
     // Malformed axes still come back from the expert layer, not from here.
     assert!(
         matches!(tensor.braid(engine, &[0, 0], &[2, 3], &[0, 1, 2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))

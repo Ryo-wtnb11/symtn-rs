@@ -537,14 +537,17 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
     assert_eq!(callbacks.load(Ordering::Relaxed), 0);
     assert_eq!(crate::test_cache::completed(), cache_before);
 
-    assert!(TensorMap::<CountingFibonacci, Complex64>::rand_with_seed(
-        engine,
-        &runtime,
-        [&tau, &tau, &tau],
-        [&tau],
-        0x9E37_79B9_7F4A_7C15,
-    )
-    .is_err());
+    assert!(matches!(
+        TensorMap::<CountingFibonacci, Complex64>::rand_with_seed(
+            engine,
+            &runtime,
+            [&tau, &tau, &tau],
+            [&tau],
+            0x9E37_79B9_7F4A_7C15,
+        ),
+        Err(crate::typed::Error::FusionAlgebra(error))
+            if matches!(*error, FusionAlgebraError::InvalidSector { .. })
+    ));
     assert_eq!(crate::test_cache::completed(), cache_before);
 }
 

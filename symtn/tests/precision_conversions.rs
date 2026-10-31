@@ -10,6 +10,7 @@
 //! widening is `f64::from` and for a narrowing `as f32`, applied per element
 //! to the source payload — independent of the tensor code under test.
 
+use crate::common::ErrorKind as _;
 use crate::single_precision_oracle;
 
 use std::hint::black_box;
@@ -894,7 +895,7 @@ fn converted_lazy_adjoints_are_owned() {
         TensorMap::rand_with_seed(engine, &runtime(), [&leg], [&leg], 11).unwrap();
     let lazy = bond.adjoint(engine).unwrap();
     assert!(
-        lazy.diagview(engine).is_err(),
+        lazy.diagview(engine).is_invalid_argument("lazy adjoint"),
         "the fixture must be a lazy adjoint"
     );
     assert_eq!(

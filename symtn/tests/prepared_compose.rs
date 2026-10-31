@@ -13,6 +13,7 @@
 //! ones.
 
 use crate::common;
+use crate::common::ErrorKind as _;
 use crate::numerics;
 use crate::prepared;
 
@@ -136,7 +137,7 @@ fn foreign_workspace_is_rejected_before_destination_write() {
     let mut workspace = foreign.workspace().unwrap();
     assert!(plan
         .execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-        .is_err());
+        .is_invalid_argument("another plan"));
     assert!(dst
         .member(engine, 0)
         .unwrap()

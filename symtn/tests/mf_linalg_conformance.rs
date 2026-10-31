@@ -6,6 +6,7 @@
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
 
+use crate::common::ErrorKind as _;
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
@@ -345,7 +346,7 @@ macro_rules! factor_conformance {
                 }
             })
             .unwrap();
-        assert!(diagonal.map_diagonal($engine, f64::sqrt).is_err());
+        assert!(diagonal.map_diagonal($engine, f64::sqrt).is_invalid_argument("compact diagonal tensor"));
         let diagonal_diagview = diagonal.diagview($engine).unwrap();
         let compact =
             TensorMap::diagonal($engine, &rt, &endo_space, diagonal_diagview).unwrap();
@@ -359,7 +360,7 @@ macro_rules! factor_conformance {
             .all(|&value| value == 0.0 || value == 2.0 || value == 3.0));
         assert_close!($engine, &root.compose($engine, &root).unwrap(), &diagonal);
         let before = tall.dense_data().unwrap().to_vec();
-        assert!(tall.pinv($engine, &[0], &[1], -1.0).is_err());
+        assert!(tall.pinv($engine, &[0], &[1], -1.0).is_invalid_argument("finite and non-negative"));
         assert_eq!(tall.dense_data().unwrap(), before.as_slice());
     }};
 }

@@ -121,15 +121,18 @@ where
         ..default
     };
     assert!(
-        lhs.contract_into(
-            engine,
-            rhs,
-            &moved,
-            &mut mismatched,
-            D::entry(1.0, 0.0),
-            D::entry(0.0, 0.0)
-        )
-        .is_err(),
+        matches!(
+            lhs.contract_into(
+                engine,
+                rhs,
+                &moved,
+                &mut mismatched,
+                D::entry(1.0, 0.0),
+                D::entry(0.0, 0.0)
+            ),
+            Err(symtn::typed::Error::Operation(operation))
+                if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
+        ),
         "{what}: a destination of another split must be rejected"
     );
     assert_eq!(

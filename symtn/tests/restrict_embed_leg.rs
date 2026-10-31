@@ -12,6 +12,7 @@
 //!   twist to every dual contracted right-hand axis, so it would test a
 //!   different map on odd sectors.
 
+use crate::common::ErrorKind as _;
 use crate::report;
 use report::Report;
 use symtn::typed::Engine;
@@ -662,7 +663,10 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
     let leg = u1(&provider, &[(0, 2), (1, 3)]);
     let other = u1(&provider, &[(0, 2)]);
 
-    assert!(LegSelection::try_new(&leg, std::iter::empty::<(U1Irrep, Range<usize>)>()).is_err());
+    assert!(
+        LegSelection::try_new(&leg, std::iter::empty::<(U1Irrep, Range<usize>)>())
+            .is_invalid_argument("at least one sector")
+    );
     assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 1..1)])
         .err()
         .unwrap()
@@ -786,7 +790,9 @@ fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejec
                 .unwrap()
         )
     );
-    assert!(diagonal.embed_leg(engine, 1, &selection).is_err());
+    assert!(diagonal
+        .embed_leg(engine, 1, &selection)
+        .is_invalid_argument("dense Host payload"));
 }
 
 #[test]
@@ -1811,7 +1817,9 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
     // A parent sector that is not selected keeps nothing; a sector absent
     // from the parent is an error, not an empty set.
     assert!(by_list.positions(&U1Irrep::new(2)).unwrap().is_empty());
-    assert!(by_list.positions(&U1Irrep::new(7)).is_err());
+    assert!(by_list
+        .positions(&U1Irrep::new(7))
+        .is_invalid_argument("absent from the selection"));
 
     let gaps = LegSelection::try_new(&leg, [(zero, vec![0, 2, 3]), (one, vec![0, 2])]).unwrap();
     assert_eq!(gaps.positions(&zero).unwrap(), vec![0, 2, 3]);

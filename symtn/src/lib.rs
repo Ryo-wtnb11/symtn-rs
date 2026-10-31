@@ -121,3 +121,32 @@ mod test_numerics {
     use num_complex::{Complex32, Complex64};
     pub(crate) mod numerics;
 }
+
+/// Variant predicates for unit tests: a test asserts which error it got, not
+/// only that there was one. `InvalidArgument` is stringly, so only its reason
+/// is matched.
+#[cfg(test)]
+mod test_errors {
+    use crate::typed::{Error, OperationError};
+
+    pub(crate) trait ErrorKind {
+        fn is_invalid_argument(&self, reason: &str) -> bool;
+        fn is_destination_shared(&self) -> bool;
+        /// `Error::Operation` whose payload `accept` takes.
+        fn fails_in_operation(&self, accept: impl Fn(&OperationError) -> bool) -> bool;
+    }
+
+    impl<T> ErrorKind for Result<T, Error> {
+        fn is_invalid_argument(&self, reason: &str) -> bool {
+            matches!(self, Err(Error::InvalidArgument(text)) if text.contains(reason))
+        }
+
+        fn is_destination_shared(&self) -> bool {
+            matches!(self, Err(Error::DestinationShared))
+        }
+
+        fn fails_in_operation(&self, accept: impl Fn(&OperationError) -> bool) -> bool {
+            matches!(self, Err(Error::Operation(operation)) if accept(operation))
+        }
+    }
+}

@@ -1246,8 +1246,8 @@ mod fermionic_unit_tests {
             let rhs = vec![1.0; rhs_len * members];
             let mut count = Count::default();
             if negative > 0 && members == 1 {
-                assert!(replay
-                    .execute_host(
+                assert!(matches!(
+                    replay.execute_host(
                         engine,
                         &mut StridedHostKernelAdapter::default(),
                         &mut count,
@@ -1256,8 +1256,9 @@ mod fermionic_unit_tests {
                         &StackedStorageView::new::<f64>(&lhs, lhs_len, members, lhs_len).unwrap(),
                         &StackedStorageView::new::<f64>(&rhs, rhs_len, members, rhs_len).unwrap(),
                         true,
-                    )
-                    .is_err());
+                    ),
+                    Err(OperationError::UnsupportedTensorContractScope { .. })
+                ));
                 assert!(dst.iter().all(|value| value.is_nan()));
                 assert_eq!(count.calls, 0);
             }

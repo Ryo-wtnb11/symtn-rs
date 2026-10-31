@@ -111,8 +111,8 @@ fn unknown_and_unsupported_uuids_are_opaque_errors() {
         assert_eq!(error.to_string(), "table category is unavailable");
         let source = error.source().expect("the table error is the source");
         assert_eq!(
-            source.to_string(),
-            TableCategory::by_uuid(uuid).unwrap_err().to_string()
+            source.downcast_ref::<fusion_symbols::table::TableError>(),
+            Some(&TableCategory::by_uuid(uuid).unwrap_err())
         );
     }
 }

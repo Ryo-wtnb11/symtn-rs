@@ -6,6 +6,8 @@ use symtn::typed::{Complex32, Complex64};
 mod braiding_probe;
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "../../tests/support/errors.rs"]
+mod errors;
 #[path = "../../tests/support/network.rs"]
 mod network_support;
 #[path = "../../tests/support/numerics.rs"]

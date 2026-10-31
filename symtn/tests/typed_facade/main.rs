@@ -6,6 +6,7 @@
 //! doubles as proof that a downstream application can drive the typed facade
 //! with its own category.
 
+use crate::common::ErrorKind as _;
 use crate::{numerics, ulp};
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
@@ -874,9 +875,13 @@ fn a_failing_typed_operation_publishes_no_cache_state() {
     );
     let runtime_before = completed_transformers();
 
-    assert!(tensor.permute(engine, &[0, 0], &[2, 3]).is_err());
-    assert!(tensor
-        .contract(
+    assert!(matches!(
+        tensor.permute(engine, &[0, 0], &[2, 3]),
+        Err(symtn::typed::Error::Operation(operation))
+            if matches!(*operation, symtn::typed::OperationError::InvalidPermutation { .. })
+    ));
+    assert!(matches!(
+        tensor.contract(
             engine,
             &tensor,
             &ContractSpec {
@@ -885,8 +890,10 @@ fn a_failing_typed_operation_publishes_no_cache_state() {
                 codomain: &[0, 1, 2],
                 domain: &[3, 4, 5]
             }
-        )
-        .is_err());
+        ),
+        Err(symtn::typed::Error::Operation(operation))
+            if matches!(*operation, symtn::typed::OperationError::InvalidAxisSet { .. })
+    ));
 
     assert_eq!(
         (
