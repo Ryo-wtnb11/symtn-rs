@@ -39,10 +39,11 @@ where
     /// An infinite *complex* entry instead becomes NaN in both components,
     /// because the device always multiplies where Host copies a factor-1 block
     /// (the #1301 deviation, disclosed by `cuda_region_axpby`); `f64` and every
-    /// finite payload are exact. No θ table is uploaded. A warm call therefore transfers only the #740 output
-    /// initialisation — one H2D of the output bytes — downloads nothing,
-    /// allocates exactly one device buffer and submits one strided move per
-    /// non-empty block. Residual: a whole-buffer bitwise device copy followed
+    /// finite payload are exact. No θ table is uploaded. An eager call keeps
+    /// no device state between calls, so every call transfers the #740 output
+    /// initialisation (one H2D of the output bytes) and the region's
+    /// one-element `1` template (one H2D of one element): two H2D, two device
+    /// allocations, no download, and one strided move per non-empty block. Residual: a whole-buffer bitwise device copy followed
     /// by in-place per-block scaling would submit fewer kernels, but Tenferro
     /// has no in-place strided scale (`cuda_region_axpby` cannot alias its
     /// source and destination), so it is not expressible.

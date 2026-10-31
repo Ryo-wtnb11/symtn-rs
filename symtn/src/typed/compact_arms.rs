@@ -571,6 +571,7 @@ where
     {
         return Ok(None);
     }
+    super::admit_host_engine(engine)?;
     let BondTransform {
         destination,
         output,

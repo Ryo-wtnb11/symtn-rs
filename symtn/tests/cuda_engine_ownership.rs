@@ -313,3 +313,87 @@ fn a_prepared_eigh_follows_the_engine_of_each_call() {
         assert_close(what, d, &runs[0].2);
     }
 }
+
+/// What: a workspace warmed on engine A and then called on engine B with a
+/// call that fails — a stack of another signature, or A's own operands —
+/// keeps nothing of A: its retained bytes are those of a fresh workspace (no
+/// output, spare, member scratch or templates), and the next valid B call
+/// succeeds.
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_failed_call_on_another_engine_keeps_no_device_state() {
+    let engine = &mut CpuEngine::serial();
+    let first = &mut crate::common::cuda_engine();
+    let second = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    let (v, w) = u1_legs();
+    let lhs =
+        StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], MEMBERS, 1)).unwrap();
+    let rhs =
+        StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], MEMBERS, 2)).unwrap();
+    let spec = ContractSpec {
+        lhs: &[2],
+        rhs: &[0],
+        codomain: &[0, 1],
+        domain: &[2],
+    };
+    let (lhs_a, rhs_a) = (lhs.to_cuda(first).unwrap(), rhs.to_cuda(first).unwrap());
+    let (lhs_b, rhs_b) = (lhs.to_cuda(second).unwrap(), rhs.to_cuda(second).unwrap());
+    let plan = ContractPlan::new(first, &lhs_a, &rhs_a, &spec).unwrap();
+    let fresh = plan.workspace().unwrap().retained_bytes();
+    let mut workspace = plan.workspace().unwrap();
+    for (what, call_on_b) in [
+        ("another signature", true),
+        ("the old engine's operands", false),
+    ] {
+        plan.execute(first, &lhs_a, &rhs_a, &mut workspace).unwrap();
+        assert!(workspace.retained_bytes() > fresh, "{what}: warm on A");
+        let failed = if call_on_b {
+            // Operands swapped: B-owned, but not this plan's signatures.
+            plan.execute(second, &rhs_b, &lhs_b, &mut workspace)
+                .is_err()
+        } else {
+            plan.execute(second, &lhs_a, &rhs_a, &mut workspace)
+                .is_err()
+        };
+        assert!(failed, "{what}");
+        assert_eq!(
+            workspace.retained_bytes(),
+            fresh,
+            "{what}: nothing of A kept"
+        );
+    }
+    plan.execute(second, &lhs_b, &rhs_b, &mut workspace)
+        .unwrap();
+
+    let source = StackedTensorMap::pack(&hermitian_members(&runtime, &[&v], MEMBERS, 7)).unwrap();
+    let other = StackedTensorMap::pack(&hermitian_members(&runtime, &[&w], MEMBERS, 9)).unwrap();
+    let (source_a, other_b) = (
+        source.to_cuda(first).unwrap(),
+        other.to_cuda(second).unwrap(),
+    );
+    let eigh = EighFullPlan::new(engine, &source_a, &[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let mut workspace = eigh.workspace().unwrap();
+    let payload = {
+        let output = eigh.execute(first, &source_a, &mut workspace).unwrap();
+        let mut bytes = |stack: &StackedTensorMap<U1FusionRule, f64, CudaStorage<f64>>,
+                         cuda: &mut dyn Engine| {
+            stack_values(engine, &stack.to_host(cuda).unwrap()).len() * 8
+        };
+        bytes(output.d, first) + bytes(output.v, first)
+    };
+    let warm = workspace.retained_bytes();
+    assert!(eigh.execute(second, &other_b, &mut workspace).is_err());
+    assert_eq!(
+        workspace.retained_bytes(),
+        warm - payload,
+        "EIGH factors of A dropped"
+    );
+    eigh.execute(first, &source_a, &mut workspace).unwrap();
+    assert!(eigh.execute(engine, &source_a, &mut workspace).is_err());
+    assert_eq!(
+        workspace.retained_bytes(),
+        warm - payload,
+        "a CPU engine owns none"
+    );
+}

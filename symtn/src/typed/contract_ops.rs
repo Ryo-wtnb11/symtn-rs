@@ -364,6 +364,9 @@ where
         .map_err(Error::from)?;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
+                // The compact arm multiplies spectra itself, before any
+                // checked storage kernel.
+                admit_host_engine(engine)?;
                 if let Some(compact) = lhs.try_contract_diagonal(
                     engine,
                     rhs,
@@ -927,6 +930,7 @@ where
         }
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
+                admit_host_engine(engine)?;
                 if let Some(compact) = lhs.compose_compact(rhs)? {
                     return Ok(S::from_host(EXEC, compact)?);
                 }
@@ -1076,13 +1080,17 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
     /// CUDA; the engine itself on Host.
     type MembersLease<'e>;
 
-    /// Opens one prepared replay on the caller's engine, after every no-write
-    /// check. An engine of the wrong kind is refused here, before any output
-    /// is allocated.
-    fn lease_members(
+    /// Opens one prepared replay on the caller's engine, right after the
+    /// workspace is checked against the plan and before any other check, and
+    /// drops the workspace's device state (outputs, spare, member scratch and
+    /// templates) of any other engine, so no later error of this call keeps
+    /// it. An engine of the wrong kind is refused here, before any output is
+    /// allocated; it owns none of that state either.
+    fn lease_members<'e>(
         _: ExecToken,
-        engine: &mut dyn Engine,
-    ) -> Result<Self::MembersLease<'_>, Error>;
+        engine: &'e mut dyn Engine,
+        workspace: &mut ContractWorkspace<R, D, Self>,
+    ) -> Result<Self::MembersLease<'e>, Error>;
 
     /// A zeroed payload of `members` members of `member_len` elements each
     /// (`total` in all).
@@ -1125,7 +1133,11 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
 impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
     type MembersLease<'e> = &'e mut dyn Engine;
 
-    fn lease_members(_: ExecToken, engine: &mut dyn Engine) -> Result<&mut dyn Engine, Error> {
+    fn lease_members<'e>(
+        _: ExecToken,
+        engine: &'e mut dyn Engine,
+        _: &mut ContractWorkspace<R, D>,
+    ) -> Result<&'e mut dyn Engine, Error> {
         Ok(engine)
     }
 

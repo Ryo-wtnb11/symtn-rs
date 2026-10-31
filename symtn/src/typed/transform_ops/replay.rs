@@ -353,6 +353,9 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
         let source = match source {
             TransformIntoSource::Stored(data) => data.as_slice(),
             TransformIntoSource::Bond { read, dense_source } => {
+                // The bond read writes the destination itself, ahead of the
+                // replay's own engine admission.
+                admit_host_engine(engine)?;
                 if read(structure, destination_structure, destination.as_mut_slice())? {
                     return Ok(());
                 }

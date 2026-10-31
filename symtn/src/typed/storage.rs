@@ -109,7 +109,8 @@ impl<R, D, S: TypedStorage<R, D>> TensorMap<R, D, S> {
             TypedData::Dense(storage) => {
                 <S as sealed::Sealed>::admit_shortcut_engine(engine, storage)
             }
-            TypedData::Diagonal(_) => Ok(()),
+            // A compact spectrum lives on the Host only.
+            TypedData::Diagonal(_) => admit_host_engine(engine),
         }
     }
 }

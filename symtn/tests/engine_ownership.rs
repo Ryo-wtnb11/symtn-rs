@@ -11,7 +11,9 @@
 use std::sync::{Arc, Barrier};
 
 use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{CpuEngine, Engine, GradedSpace, Pool, Runtime, TensorMap};
+use symtn::typed::{
+    ContractSpec, CpuEngine, Direction, Engine, GradedSpace, Pool, Runtime, TensorMap,
+};
 
 use crate::numerics;
 
@@ -226,4 +228,56 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
             "compact axpby",
         );
     }
+}
+
+/// What: every compact (diagonal) numerical arm admits the caller's engine
+/// before its spectrum arithmetic, so a broken engine is refused whatever
+/// the representation: clone shortcuts, a swap read straight off the
+/// spectrum, the compact adjoint, compose and contract, and a compact-source
+/// `permute_into`, whose destination keeps its bits. (Basis: the review probe
+/// `/private/tmp/symtn-l1-rereview-probe`.)
+#[test]
+fn compact_arms_refuse_a_broken_engine_before_any_write() {
+    let runtime = Runtime::builder().build().unwrap();
+    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let good = &mut CpuEngine::serial();
+    let a = TensorMap::<_, f64>::from_subblock_fn(good, &runtime, [&leg], [&leg], |_, i| {
+        (i[0] + 2 * i[1] + 1) as f64
+    })
+    .unwrap();
+    let s = a.svd_compact(good, &[0], &[1]).unwrap().s;
+    assert!(
+        s.dense_data().is_err(),
+        "a compact diagonal stores no dense payload"
+    );
+    let mut destination = s.materialize(good).unwrap().zeros_like(good).unwrap();
+    let before = destination.dense_data().unwrap().to_vec();
+
+    let mut engine = CpuEngine::serial();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+    }));
+    assert!(panicked.is_err() && engine.is_broken());
+    let engine = &mut engine;
+    let spec = ContractSpec {
+        lhs: &[1],
+        rhs: &[0],
+        codomain: &[0],
+        domain: &[1],
+    };
+    assert!(s.permute(engine, &[0], &[1]).is_err(), "identity permute");
+    assert!(s.permute(engine, &[1], &[0]).is_err(), "swap");
+    assert!(
+        s.twist(engine, &[], Direction::Forward).is_err(),
+        "empty twist"
+    );
+    assert!(s.adjoint(engine).is_err(), "compact adjoint");
+    assert!(s.compose(engine, &s).is_err(), "compact compose");
+    assert!(s.contract(engine, &s, &spec).is_err(), "compact contract");
+    assert!(s
+        .permute_into(engine, &[0], &[1], &mut destination, 1.0, 0.0)
+        .is_err());
+    assert_eq!(destination.dense_data().unwrap(), before.as_slice());
+    // A dense lazy adjoint moves no payload and needs nothing of the engine.
+    assert!(a.adjoint(engine).is_ok());
 }

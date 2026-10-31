@@ -397,24 +397,3 @@ fn checked_generic_rule_instance_alone_separates_signatures() {
     assert!(su3 != su4);
     assert!(su3 == signature(&second_su3, vec![0, 0]));
 }
-
-/// What: a workspace's output slot used with another engine drops the live
-/// output and the spare together, and keeps both for the same engine; the
-/// engine is the predicate, so no device is needed.
-#[test]
-fn an_output_slot_drops_live_and_spare_buffers_of_another_engine() {
-    let slot = || {
-        let mut slot = super::OutputSlot::default();
-        slot.fail(Some(("A", "spare")), ());
-        slot.publish(("A", "live"));
-        slot
-    };
-    let mut same = slot();
-    same.retain(|(engine, _)| *engine == "A");
-    assert_eq!(same.buffers().count(), 2);
-
-    let mut other = slot();
-    other.retain(|(engine, _)| *engine == "B");
-    assert_eq!(other.buffers().count(), 0);
-    assert!(other.take().is_none());
-}

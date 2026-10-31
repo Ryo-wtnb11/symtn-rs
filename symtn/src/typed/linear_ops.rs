@@ -200,10 +200,13 @@ where
     /// # CUDA storage
     ///
     /// One `dot_general` over the whole payload with `alpha` as its
-    /// descriptor scale and `beta` in its epilogue; nothing is uploaded or
-    /// allocated on a warm context. A lazy-adjoint `self` is read from its
-    /// parent with one conjugating strided `dot_general` per block, likewise
-    /// upload-free (#1874). A payload of another device or engine returns
+    /// descriptor scale and `beta` in its epilogue. A lazy-adjoint `self` is
+    /// read from its parent with one conjugating strided `dot_general` per
+    /// block (#1874). No payload is uploaded or downloaded, but an eager call
+    /// keeps no device state between calls: the scalar templates its regions
+    /// read (the one-element `1` coefficient, and the zero template of a
+    /// zero-scale fill) are uploaded, each one H2D and one device allocation,
+    /// by every call. A payload of another device or engine returns
     /// [`Error::PlacementMismatch`] before any upload.
     ///
     /// # Errors

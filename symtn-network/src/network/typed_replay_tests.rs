@@ -2264,4 +2264,29 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
             assert!((got - want).abs() <= 1e-12 * (1.0 + want.abs()), "{what}");
         }
     }
+
+    // A failing call on another engine (inputs of another rank, rejected by
+    // the topology check) keeps no device intermediate of the old engine.
+    assert!(workspace
+        .intermediates
+        .iter()
+        .any(|buffers| buffers.output.is_some()));
+    let wrong_rank = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg],
+        748_250,
+    )
+    .unwrap()
+    .to_cuda(second)
+    .unwrap();
+    assert!(planned
+        .execute(second, &[&wrong_rank, &on_b[1], &on_b[2]], &mut workspace)
+        .is_err());
+    assert!(workspace
+        .intermediates
+        .iter()
+        .all(|buffers| buffers.output.is_none()));
+    assert!(workspace.slots.iter().all(Option::is_none));
 }

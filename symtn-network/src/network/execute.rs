@@ -260,6 +260,35 @@ where
         self.input_snapshot.clear();
     }
 
+    /// Drops every retained device tensor (step destinations and leftover
+    /// slots) that the caller's engine does not own, decided per buffer by the
+    /// admission the operands pass. Runs before any fallible check of a call,
+    /// so a failed call on a new engine keeps nothing of the old one, and
+    /// again after parked destinations are re-attached. A Host workspace
+    /// keeps everything (a CPU engine owns every Host buffer).
+    fn drop_foreign_device_state(&mut self, engine: &mut dyn Engine)
+    where
+        R: TypedSectorAdmission,
+        R::Mode: NetworkModeDispatch<R, D, S>,
+        D: TensorScalar,
+        S: NetworkOperandStorage<R, D>,
+    {
+        let mut foreign = |tensor: &TensorMap<R, D, S>| {
+            S::admit_operands(engine, std::slice::from_ref(&tensor), false).is_err()
+        };
+        for buffers in &mut self.intermediates {
+            if buffers.output.as_ref().is_some_and(&mut foreign) {
+                buffers.output = None;
+            }
+        }
+        for (slot, producer) in self.slots.iter_mut().zip(&mut self.producers) {
+            if slot.as_ref().is_some_and(&mut foreign) {
+                *slot = None;
+                *producer = None;
+            }
+        }
+    }
+
     pub(crate) fn slot_capacity(&self) -> usize {
         self.slots.capacity()
     }
@@ -467,6 +496,7 @@ impl PlannedNetwork {
             ))
             .into());
         }
+        workspace.drop_foreign_device_state(engine);
         S::admit_operands(engine, tensors, !self.schedule.steps.is_empty())?;
         self.execute_admitted(engine, tensors, workspace)
     }
@@ -647,17 +677,8 @@ impl PlannedNetwork {
                 buffers.output = None;
             }
         }
-        // Destinations retained for another engine (a device workspace used
-        // with a new engine, or left half-rebuilt by a failed call) are
-        // dropped and rebuilt on this one, never submitted: the admission the
-        // operands passed decides it per buffer.
-        for buffers in &mut workspace.intermediates {
-            if buffers.output.as_ref().is_some_and(|tensor| {
-                S::admit_operands(engine, std::slice::from_ref(&tensor), false).is_err()
-            }) {
-                buffers.output = None;
-            }
-        }
+        // Re-attached parked destinations get the same engine purge.
+        workspace.drop_foreign_device_state(engine);
         workspace.slots.fill(None);
         workspace.producers.fill(None);
         for (index, lowered) in lowered.into_iter().enumerate() {

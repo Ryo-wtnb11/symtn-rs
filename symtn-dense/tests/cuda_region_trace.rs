@@ -527,3 +527,43 @@ fn a_reserved_template_makes_every_trace_upload_free_and_rejections_do_nothing()
     result.unwrap();
     assert_eq!(counters, CudaTransferStats::default());
 }
+
+/// A rank-8 destination, the largest write view Tenferro 0.8 serves, is
+/// traced in place: the template is contracted over the traced mode and the
+/// destination keeps its own rank. The fixture is a ten-leg block of extent 2
+/// traced over its last pair, read as nine modes with the merged diagonal
+/// stride `2^8 + 2^9 = 768`; the oracle sums the two diagonal entries of each
+/// output element directly.
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_rank_eight_destination_is_traced_without_a_ninth_mode() {
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
+    let src_strides: Vec<usize> = (0..8).map(|axis| 1 << axis).chain([768]).collect();
+    let src_region = CudaRegion::new(vec![2; 9], src_strides, 0).unwrap();
+    let dst_region =
+        CudaRegion::new(vec![2; 8], (0..8).map(|axis| 1 << axis).collect(), 0).unwrap();
+    let src: Vec<f64> = (0..1024).map(f64::sample).collect();
+    let dst: Vec<f64> = (0..256).map(|i| f64::sample(i + 2000)).collect();
+    let expected: Vec<f64> = (0..256).map(|i| dst[i] + src[i] + src[i + 768]).collect();
+    let source = CudaDenseStorage::upload(&ctx, &src).unwrap();
+    let mut out = CudaDenseStorage::upload(&ctx, &dst).unwrap();
+    cuda_region_trace_accumulate::<f64>(
+        &mut ctx,
+        &source,
+        &src_region,
+        false,
+        1.0,
+        &mut out,
+        &dst_region,
+    )
+    .unwrap();
+    let got = out.download::<f64>(&ctx).unwrap();
+    for (index, (got, want)) in got.iter().zip(&expected).enumerate() {
+        assert!(
+            (got - want).abs() <= 4.0 * f64::EPSILON * (1.0 + want.abs()),
+            "element {index}: {got} != {want}"
+        );
+    }
+}

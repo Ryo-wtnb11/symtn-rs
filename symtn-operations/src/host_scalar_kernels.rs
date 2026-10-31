@@ -731,6 +731,9 @@ where
     Ok(())
 }
 
+// Its callers are the test-only checked kernel and the debug-build guard of
+// the trusted kernel.
+#[cfg(any(test, debug_assertions))]
 #[allow(clippy::too_many_arguments)]
 fn validate_tensortrace_raw_layout(
     dst_len: usize,

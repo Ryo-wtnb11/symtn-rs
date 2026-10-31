@@ -492,31 +492,35 @@ pub fn cuda_region_trace_accumulate<D: CudaScalar>(
         return Err(cuda_error(OP, "context scalar operand is missing"));
     };
 
-    let src_strides = src_region
-        .strides()
-        .iter()
-        .map(|&stride| {
-            isize::try_from(stride).map_err(|_| DenseError::StrideOverflow { value: stride })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut ones_dims = trace_dims.to_vec();
-    ones_dims.push(1);
-    let mut ones_strides = Vec::with_capacity(ones_dims.len());
+    // The template is contracted over every traced mode and the destination
+    // keeps its own rank, as in `submit_region_axpby`: Tenferro 0.8 writes a
+    // view of at most `t4a_cuda_kernels::MAX_RANK` (8) modes, and a trailing
+    // free unit mode would refuse a rank-8 destination. With no traced mode
+    // the source takes that unit mode instead, against a one-element template.
+    let traced = trace_dims.len();
+    let (src_dims, src_strides, template_dims) = if traced == 0 {
+        let (dims, strides) = src_region.contraction_view_metadata()?;
+        (dims, strides, vec![1])
+    } else {
+        let strides = isize_strides(src_region.strides())?;
+        (src_region.dims().to_vec(), strides, trace_dims.to_vec())
+    };
+    let mut template_strides = Vec::with_capacity(template_dims.len());
     let mut running = 1isize;
-    for &dim in &ones_dims {
-        ones_strides.push(running);
+    for &dim in &template_dims {
+        template_strides.push(running);
         running *= dim as isize;
     }
-    let (out_dims, out_strides) = dst_region.contraction_view_metadata()?;
+    let out_strides = isize_strides(dst_region.strides())?;
 
-    let lhs =
-        src.region_view_nd::<D>(src_region.dims(), &src_strides, src_region.offset_isize()?)?;
-    let rhs = template.region_view_nd::<D>(&ones_dims, &ones_strides, 0)?;
-    let out = dst.region_view_nd_mut::<D>(&out_dims, &out_strides, dst_region.offset_isize()?)?;
-    let traced = trace_dims.len();
+    let lhs = src.region_view_nd::<D>(&src_dims, &src_strides, src_region.offset_isize()?)?;
+    let rhs = template.region_view_nd::<D>(&template_dims, &template_strides, 0)?;
+    let out =
+        dst.region_view_nd_mut::<D>(dst_region.dims(), &out_strides, dst_region.offset_isize()?)?;
+    let contracted = template_dims.len();
     let config = DotGeneralConfig {
-        lhs_contracting_dims: (rank..rank + traced).collect(),
-        rhs_contracting_dims: (0..traced).collect(),
+        lhs_contracting_dims: (rank..rank + contracted).collect(),
+        rhs_contracting_dims: (0..contracted).collect(),
         lhs_batch_dims: Default::default(),
         rhs_batch_dims: Default::default(),
     };

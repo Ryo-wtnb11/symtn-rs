@@ -109,8 +109,22 @@ where
 {
     type MembersLease<'e> = CudaMembersLease<'e>;
 
-    fn lease_members(_: ExecToken, engine: &mut dyn Engine) -> Result<CudaMembersLease<'_>, Error> {
-        Ok(CudaMembersLease(crate::runtime::cuda_call(engine)?))
+    fn lease_members<'e>(
+        _: ExecToken,
+        engine: &'e mut dyn Engine,
+        workspace: &mut ContractWorkspace<R, D, Self>,
+    ) -> Result<CudaMembersLease<'e>, Error> {
+        let lease = match crate::runtime::cuda_call(engine) {
+            Ok(lease) => lease,
+            Err(error) => {
+                workspace.drop_device_state(None);
+                return Err(error);
+            }
+        };
+        if workspace.cuda_engine != Some(lease.identity()) {
+            workspace.drop_device_state(Some(lease.identity()));
+        }
+        Ok(CudaMembersLease(lease))
     }
 
     fn zeroed_members(

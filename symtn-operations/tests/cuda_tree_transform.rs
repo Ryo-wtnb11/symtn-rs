@@ -2095,3 +2095,78 @@ fn unsorted_or_vanishing_destination_scales_are_rejected_before_any_device_work(
     );
     assert_eq!(executor.prepared_structures(), 0);
 }
+
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_single_member_overwrite_refuses_a_foreign_source_before_zeroing_inactive_layouts() {
+    // What: the source belongs to engine A, the destination and context to
+    // engine B on the same device. The overwrite is refused before its
+    // inactive-layout zero fill, so B's destination keeps every element.
+    let structure = Arc::new(BlockStructure::packed_column_major(1, [vec![2], vec![3]]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[TreeTransformBlockSpec::single(0, 0, 1.0_f64)],
+    )
+    .unwrap();
+    let regions =
+        CudaSingleMemberRegions::prepare(&transform, &structure, &structure, 5, 5, 5, 5, 1)
+            .unwrap();
+    assert_eq!(regions.zeros().len(), 1);
+    let (mut first, mut second) = (engine(), engine());
+    let source = {
+        let a = CudaDenseContext::new(&mut first).unwrap();
+        CudaStorage::upload_owned(&a, vec![1.0_f64; 5]).unwrap()
+    };
+    let mut b = CudaDenseContext::new(&mut second).unwrap();
+    b.reserve_zero_template::<f64>(5).unwrap();
+    let before_values = vec![7.0_f64, 8.0, 9.0, 10.0, 11.0];
+    let mut destination = CudaStorage::upload_owned(&b, before_values.clone()).unwrap();
+    let before = cuda_transfer_stats();
+    assert!(regions
+        .execute_overwrite(&mut b, &source, None, &mut destination)
+        .is_err());
+    assert_eq!(cuda_transfer_stats(), before, "nothing reached the device");
+    assert_eq!(destination.download(&b).unwrap(), before_values);
+}
+
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_replay_refuses_a_foreign_source_at_every_scale_before_any_device_work() {
+    // What: a cold executor on engine B, given B's destination and a source of
+    // engine A on the same device, is refused by admission before it prepares
+    // (uploads) any state or writes the destination — also at a zero scale,
+    // whose arithmetic never reads the source.
+    let fixture = rank_sweep().remove(3);
+    let structure = fixture.compile();
+    let (mut first, mut second) = (engine(), engine());
+    let source = {
+        let a = CudaDenseContext::new(&mut first).unwrap();
+        CudaStorage::<f64>::upload(&a, &fixture.source::<f64>()).unwrap()
+    };
+    let mut b = CudaDenseContext::new(&mut second).unwrap();
+    let before_values = vec![-1.0_f64; fixture.dst_len()];
+    let mut destination = CudaStorage::<f64>::upload(&b, &before_values).unwrap();
+    let mut executor = CudaTreeTransformExecutor::default();
+    for alpha in [1.0_f64, 0.0] {
+        let before = cuda_transfer_stats();
+        assert!(executor
+            .replay(
+                &mut b,
+                &structure,
+                &fixture.dst_structure(),
+                &fixture.src_structure(),
+                &mut destination,
+                &source,
+                alpha,
+                CudaTreeTransformDestination::Overwrite,
+            )
+            .is_err());
+        assert_eq!(
+            cuda_transfer_stats(),
+            before,
+            "alpha {alpha}: no device work"
+        );
+    }
+    assert_eq!(destination.download(&b).unwrap(), before_values);
+}

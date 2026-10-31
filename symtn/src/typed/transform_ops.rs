@@ -410,12 +410,13 @@ where
     /// lease is released before the device lease is taken, and nothing under
     /// the device lease leases again: one device lease per replay.
     ///
-    /// A warm call uploads no structure data and downloads nothing. Its only
-    /// transfer is the output initialisation (#740): exactly one H2D of
-    /// `required_len * size_of::<D>()` bytes, from one host `Vec` of that
-    /// size, and its only device allocation is the returned output. The first
-    /// call for a given structure additionally uploads that structure's
-    /// coefficient payload once and may grow the pack/scatter workspace once.
+    /// A call downloads nothing. It uploads the output initialisation (#740),
+    /// one H2D of `required_len * size_of::<D>()` bytes from one host `Vec` of
+    /// that size, the returned output being its allocation. An eager call
+    /// keeps no device state between calls, so every call also uploads the
+    /// structure's coefficient payload, the scalar templates its regions read,
+    /// and allocates its pack/scatter workspace; a prepared workspace is what
+    /// keeps them across calls.
     ///
     /// On device the replay runs in overwrite mode, so it also zero-fills
     /// every *inactive* destination layout on the device — redundant work over
@@ -762,9 +763,15 @@ where
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn adjoint(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
-        // The lazy view moves no payload; the engine is the uniform call
-        // shape of a tensor operation.
-        let _ = engine;
+        // A dense lazy view moves no payload, so it needs nothing of the
+        // engine; a compact spectrum is conjugated into a new one here, Host
+        // arithmetic the engine admits like any other.
+        if self
+            .owned_body()
+            .is_some_and(|body| matches!(body.data.as_ref(), TypedData::Diagonal(_)))
+        {
+            admit_host_engine(engine)?;
+        }
         self.lazy_adjoint()
     }
 

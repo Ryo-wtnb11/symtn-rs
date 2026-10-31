@@ -264,12 +264,6 @@ impl<R: SectorCodec, D, S> EighFullWorkspace<R, D, S> {
         self.output.take_output()
     }
 
-    /// The output buffers for a call over `members`, taken after the source
-    /// is admitted so a rejected call keeps buffers of any member count.
-    fn take_buffers(&mut self, members: usize) -> Option<StackPair<R, D, S>> {
-        self.output.take().filter(|(d, _)| d.members == members)
-    }
-
     /// Bytes retained exclusively by this workspace: output payloads, host
     /// spectra, and Host/CUDA staging buffers. The shared plan and backend
     /// context resources are not included.
@@ -313,6 +307,23 @@ impl<R: SectorCodec, D, S> EighFullPlan<R, D, S> {
                 "eigh workspace belongs to another plan".into(),
             ))
         }
+    }
+
+    /// The source's signature, then the retained `buffers` kept only at its
+    /// member count: a rejected source keeps buffers of any member count.
+    pub(in crate::typed) fn admit_stack_source(
+        &self,
+        source: &StackedTensorMap<R, D, S>,
+        buffers: &mut Option<StackPair<R, D, S>>,
+    ) -> Result<(), Error> {
+        self.check_source(source)?;
+        if buffers
+            .as_ref()
+            .is_some_and(|(d, _)| d.members != source.members)
+        {
+            *buffers = None;
+        }
+        Ok(())
     }
 
     fn check_source(&self, source: &StackedTensorMap<R, D, S>) -> Result<(), Error> {
@@ -433,10 +444,9 @@ where
         workspace: &'a mut EighFullWorkspace<R, D, S>,
     ) -> Result<EighStackOutput<'a, R, D, S>, BatchError> {
         self.check_workspace(workspace)?;
-        if let Err(error) = self.check_source(source) {
-            return Err(workspace.output.hide(error.into()));
-        }
-        let mut buffers = workspace.take_buffers(source.members);
+        // The stack call drops buffers of another engine before it checks
+        // the source, so no error keeps them.
+        let mut buffers = workspace.output.take();
         if let Err(error) = S::eigh_full_stack(engine, EXEC, self, source, &mut buffers, workspace)
         {
             return Err(workspace.output.fail(buffers, error));
@@ -467,6 +477,7 @@ where
         buffers: &mut Option<StackPair<R, D, Vec<D>>>,
         sorted: &mut Vec<f64>,
     ) -> Result<(), BatchError> {
+        self.admit_stack_source(source, buffers)?;
         let members = source.members;
         let len = self.member_len;
         let plan = &self.routes;
@@ -840,16 +851,24 @@ where
     ) -> Result<(), BatchError> {
         let members = source.members;
         let device = &self.routes;
-        let mut lease = crate::runtime::cuda_call(engine)?;
+        // Factors retained for another engine are dropped first, before the
+        // source check and any solver work, so no error of this call keeps
+        // them (a non-CUDA engine owns none of them either).
+        let mut lease = match crate::runtime::cuda_call(engine) {
+            Ok(lease) => lease,
+            Err(error) => {
+                *buffers = None;
+                return Err(error.into());
+            }
+        };
         let cuda = &mut *lease;
         let routes = &device.routes;
-        // Factors retained for another engine are dropped before any solver
-        // work, so they are neither written nor kept as a spare.
         if buffers.as_ref().is_some_and(|(d, v)| {
             ensure_cuda_owns(cuda, "eigh_full", &[&d.storage.0, &v.storage.0]).is_err()
         }) {
             *buffers = None;
         }
+        self.admit_stack_source(source, buffers)?;
         ensure_cuda_owns(cuda, "eigh_full", &[&source.storage.0])?;
 
         let accepted = symtn_dense::cuda_hermitian_regions_batched::<D>(

@@ -394,6 +394,13 @@ impl CudaSingleMemberRegions {
         coefficients: Option<&CudaDenseStorage>,
         destination: &mut CudaStorage<D>,
     ) -> Result<(), OperationError> {
+        // Every operand belongs to this engine before the first write: the
+        // inactive-layout zeros below would otherwise land in the destination
+        // ahead of the refusal of a foreign source or coefficient buffer.
+        const OP: &str = "cuda_single_member_overwrite";
+        ctx.ensure_owns(OP, &[&source.0, &destination.0])
+            .and_then(|()| coefficients.map_or(Ok(()), |c| ctx.ensure_owns(OP, &[c])))
+            .map_err(OperationError::Dense)?;
         for region in &self.zeros {
             cuda_region_zero::<D>(ctx, &mut destination.0, region)
                 .map_err(OperationError::Dense)?;
@@ -908,8 +915,8 @@ impl CudaTreeTransformExecutor {
             // baked fused layout directly, so it declares zero workers.
             fused_index_workers: 0,
         };
-        let dst_snapshot = storage_snapshot::<D>(dst, executor);
-        let src_snapshot = storage_snapshot::<D>(src, executor);
+        let dst_snapshot = storage_snapshot::<D>(ctx, dst, executor);
+        let src_snapshot = storage_snapshot::<D>(ctx, src, executor);
         let admission = validate_stage_a::<D, C>(
             task,
             dst_structure,
@@ -1428,7 +1435,13 @@ fn submit_move<D: CudaScalar>(
 /// Context is the executor's: a device buffer carries no context tag, and the
 /// device ordinal is what distinguishes the resources a wrong context would
 /// reach. Tenferro re-checks the operand's device at submission either way.
+/// The storage's context is the executor's only when the context's engine
+/// owns the buffer ([`CudaDenseContext::ensure_owns`], allocation domain, not
+/// ordinal); a buffer of another engine reports a context no engine has, so
+/// Stage A refuses it in its documented order, before any preparation,
+/// template upload or write.
 fn storage_snapshot<D: CudaScalar>(
+    ctx: &CudaDenseContext,
     storage: &CudaStorage<D>,
     executor: ExecutorSnapshot,
 ) -> StorageSnapshot {
@@ -1447,7 +1460,15 @@ fn storage_snapshot<D: CudaScalar>(
         active_len: len,
         usable_capacity: len,
         placement: TensorStorage::<D>::placement(storage),
-        context: executor.context,
+        context: if ctx
+            .ensure_owns("cuda_tree_transform", &[&storage.0])
+            .is_ok()
+        {
+            executor.context
+        } else {
+            // Identities start at one, so zero is never an engine's.
+            ContextIdentity(0)
+        },
         region,
     }
 }

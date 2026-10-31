@@ -77,6 +77,21 @@ pub struct ContractWorkspace<R, D, S = Vec<D>> {
     pub(in crate::typed) host_context: crate::runtime::ContextLease,
     #[cfg(feature = "cuda")]
     pub(in crate::typed) members_cuda: symtn_tensors::CudaContractMembersWorkspace<S>,
+    /// The engine ([`symtn_dense::CudaDenseContext::identity`]) the device
+    /// state above belongs to; `None` while it holds none.
+    #[cfg(feature = "cuda")]
+    pub(in crate::typed) cuda_engine: Option<u64>,
+}
+
+#[cfg(feature = "cuda")]
+impl<R, D, S> ContractWorkspace<R, D, S> {
+    /// Drops the outputs, the spare and the member scratch and templates, and
+    /// binds the emptied workspace to `engine`.
+    pub(in crate::typed) fn drop_device_state(&mut self, engine: Option<u64>) {
+        self.output = OutputSlot::default();
+        self.members_cuda = Default::default();
+        self.cuda_engine = engine;
+    }
 }
 
 impl<R, D, S> ContractPlan<R, D, S>
@@ -305,6 +320,8 @@ where
             host_context: crate::runtime::ContextLease::new(),
             #[cfg(feature = "cuda")]
             members_cuda: Default::default(),
+            #[cfg(feature = "cuda")]
+            cuda_engine: None,
         })
     }
 
@@ -327,20 +344,21 @@ where
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
         self.check_workspace(workspace)?;
+        // First, so no later error of this call keeps another engine's state.
+        let mut lease = match S::lease_members(EXEC, engine, workspace) {
+            Ok(lease) => lease,
+            Err(error) => return Err(workspace.output.hide(error)),
+        };
         let buffers = workspace.output.take();
         let prepared = self.check(lhs, rhs).and_then(|members| {
             let total = self.total_len(self.member_len, members)?;
-            Ok((members, total, S::lease_members(EXEC, engine)?))
+            Self::admit_members(&lease, &[&lhs.storage, &rhs.storage])?;
+            Ok((members, total))
         });
-        let (members, total, mut lease) = match prepared {
+        let (members, total) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => return Err(workspace.output.fail(buffers, error)),
         };
-        // Buffers of another engine are dropped, never reused or kept.
-        let buffers = buffers.filter(|output| S::owns_output(EXEC, &lease, &output.storage));
-        if let Err(error) = Self::admit_members(&lease, &[&lhs.storage, &rhs.storage]) {
-            return Err(workspace.output.fail(buffers, error));
-        }
         let mut output = match buffers.filter(|output| output.members == members) {
             Some(output) => output,
             None => StackedTensorMap {
@@ -385,12 +403,13 @@ where
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
         self.check_workspace(workspace)?;
+        // First, so no later error of this call keeps another engine's state.
+        let mut lease = match S::lease_members(EXEC, engine, workspace) {
+            Ok(lease) => lease,
+            Err(error) => return Err(workspace.output.hide(error)),
+        };
         let result = self.check(lhs, rhs).and_then(|members| {
             self.check_destination(dst, members)?;
-            let mut lease = S::lease_members(EXEC, engine)?;
-            workspace
-                .output
-                .retain(|output| S::owns_output(EXEC, &lease, &output.storage));
             Self::admit_members(&lease, &[&lhs.storage, &rhs.storage, &dst.storage])?;
             S::contract_members(
                 EXEC,

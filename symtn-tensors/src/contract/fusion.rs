@@ -17,6 +17,7 @@ pub(crate) use plan::{
 
 #[cfg(test)]
 pub(crate) use block_specs::contracted_fusion_tree_basis_matches;
+#[cfg(any(test, debug_assertions))]
 pub(crate) use block_specs::reject_fusion_contract_conjugation;
 pub use block_specs::tensorcontract_fusion_block_specs;
 pub(crate) use block_specs::{
