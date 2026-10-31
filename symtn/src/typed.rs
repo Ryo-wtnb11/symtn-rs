@@ -282,13 +282,17 @@ pub use symtn_core::{
 ///
 /// How grouped dense GEMMs (the recoupling and contraction batches) use a
 /// pooled `CpuEngine`'s threads is the engine's batch policy, an engine-owned
-/// setting symtn never overrides. The default (`CpuBatchStrategy::Auto`) runs
-/// the GEMMs of one batch one per lane with a single thread each, so a batch
-/// of a few large blocks keeps most of the pool idle. A workload dominated by
-/// large blocks can give each GEMM the whole pool instead:
+/// setting symtn never overrides. On the native provider the default
+/// (`CpuBatchStrategy::Auto`) runs the GEMMs of one batch one per lane with a
+/// single thread each, so a batch of a few large blocks keeps most of the pool
+/// idle. A workload dominated by large blocks can give each GEMM the whole
+/// pool instead:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
-/// `CpuBatchStrategy` from `tenferro_cpu`.
+/// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
+/// the batch's vendor GEMMs sequentially on the calling thread (vendor threads
+/// are outside the engine's lanes); forcing `Inner` there runs the GEMMs on
+/// the native kernels instead of the vendor library.
 pub use symtn_dense::{CpuEngine, Engine, Pool};
 /// The caller-owned CUDA engine every device operation borrows, and the
 /// device id it opens on.
