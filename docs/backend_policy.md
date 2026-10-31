@@ -97,7 +97,8 @@ it. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view); the error reported is the
 lowest-indexed block's, the one the per-matrix SVD or QR would report, and
 nothing is returned on error. Each block allocates its own provider workspace
-and its factors at their exact size. Eigendecompositions and the other
+and fresh factors of their logical size, so a factor never inherits a recycled
+buffer's capacity. Eigendecompositions and the other
 factorizations, and every BLAS factorization, still run block after block on
 the whole engine.
 Callers can still give each GEMM the whole pool with

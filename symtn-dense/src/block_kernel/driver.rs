@@ -115,8 +115,8 @@ fn on_lanes<B: BlockOp>(
     let model = exec.batch_policy().model;
     let mut total_work = 0.0;
     scratch.times.clear();
-    // `extend` over the exact-size job iterator reserves exactly the job
-    // count, so a kept scratch holds no growth slack.
+    // One `extend` reserves from the job iterator's size hint up front, as
+    // the former per-kernel cost staging did, instead of growing by pushes.
     scratch
         .times
         .extend(jobs.iter().enumerate().map(|(index, job)| {

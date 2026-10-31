@@ -6,7 +6,9 @@
 //! `qr_read` does (same provider, same validation, same error values), but on
 //! its lane's child token instead of the whole engine, so a block's faer
 //! width is the engine's decision within its lane's reserved share. Each
-//! factor is allocated at its exact size by the provider's `Vec` entry.
+//! factor is a fresh `Vec` from the provider's `Vec` entry: its length is the
+//! factor's logical size and it carries no recycled-buffer history (its
+//! capacity is the provider's reservation, not necessarily the length).
 
 use std::marker::PhantomData;
 

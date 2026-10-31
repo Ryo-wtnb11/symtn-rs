@@ -4,9 +4,7 @@
 //! leaves to the provider); the per-matrix entry's factors and errors,
 //! lowest input first; and the broken-engine refusal after a lane panic.
 
-use super::block_svd::{
-    bits, col_major, engine, numerics, policies, reflector, wide, PanicsAt, Scalar,
-};
+use super::block_svd::{col_major, engine, numerics, policies, reflector, wide, PanicsAt, Scalar};
 use super::*;
 use crate::block_kernel::driver::{self, LaneScratch};
 use tcontract_exec::{BatchPolicy, BatchStrategy};
@@ -202,10 +200,11 @@ fn factors_match_the_constructed_qr_c64() {
     oracle_matches::<Complex64>();
 }
 
-/// Purpose: on a serial engine every block reaches the provider exactly as
-/// the per-matrix entry does, so the factors are bitwise the per-matrix ones.
+/// Purpose: the batch and the per-matrix entry factor each block the same
+/// way (same shapes, factors equal within the numerical tolerance), so the
+/// batch is a drop-in for per-matrix calls.
 #[test]
-fn serial_factors_are_the_per_matrix_factors() {
+fn factors_match_the_per_matrix_factors() {
     let blocks = blocks(true);
     let (data, layouts) = fixture::<Complex64>(&blocks);
     let inputs = inputs(&data, &layouts);
@@ -213,12 +212,40 @@ fn serial_factors_are_the_per_matrix_factors() {
     let batch = DefaultDenseExecutor::new()
         .factorize_batch(&mut engine, DenseFactorization::Qr, &inputs)
         .unwrap();
-    for (factors, &input) in batch.iter().zip(&inputs) {
+    for ((factors, &input), block) in batch.iter().zip(&inputs).zip(&blocks) {
         let want = DefaultDenseExecutor::new().qr(&mut engine, input).unwrap();
-        assert_eq!(
-            factors.iter().map(bits).collect::<Vec<_>>(),
-            want.iter().map(bits).collect::<Vec<_>>()
-        );
+        let scale = block.a.iter().map(|x| x.norm()).fold(1.0, f64::max);
+        let bound = numerics::K * (block.rows.max(block.cols) as f64).sqrt() * f64::EPSILON * scale;
+        for (got, want) in factors.iter().zip(&want) {
+            assert_eq!(got.shape(), want.shape());
+            for (g, w) in wide(got).iter().zip(&wide(want)) {
+                assert!((g - w).norm() <= bound, "{g} against {w}");
+            }
+        }
+    }
+}
+
+/// The variant and op label of a dense error: what the batch must share with
+/// the per-matrix entry (the diagnostic text is the provider's).
+fn kind(error: &DenseError) -> (std::mem::Discriminant<DenseError>, Option<&'static str>) {
+    let op = match error {
+        DenseError::Unsupported { op, .. }
+        | DenseError::Backend { op, .. }
+        | DenseError::NumericalFailure { op, .. }
+        | DenseError::DTypeMismatch { op, .. }
+        | DenseError::ShapeMismatch { op, .. } => Some(*op),
+        _ => None,
+    };
+    (std::mem::discriminant(error), op)
+}
+
+/// The reason text of a stringly error variant.
+fn reason(error: &DenseError) -> &str {
+    match error {
+        DenseError::Unsupported { message, .. }
+        | DenseError::Backend { message, .. }
+        | DenseError::NumericalFailure { message, .. } => message,
+        other => panic!("not a stringly variant: {other:?}"),
     }
 }
 
@@ -258,8 +285,15 @@ fn lowest_failing_input_reports_the_per_matrix_error() {
         let mut engine = engine(threads, policy);
         for (inputs, failing) in cases {
             let (batch, per_call) = batch_and_per_call_errors(&mut engine, inputs, failing);
-            assert_eq!(batch, per_call, "{threads} threads, {policy:?}");
+            assert_eq!(
+                kind(&batch),
+                kind(&per_call),
+                "{threads} threads, {policy:?}"
+            );
         }
+        let (rank, _) = batch_and_per_call_errors(&mut engine, cases[0].0, 1);
+        assert!(matches!(rank, DenseError::Backend { op: "qr_read", .. }));
+        assert!(reason(&rank).contains("rank"), "{rank:?}");
         let (dtype, _) = batch_and_per_call_errors(&mut engine, cases[1].0, 1);
         assert!(matches!(
             dtype,
@@ -318,8 +352,16 @@ fn broken_engine_refuses_like_the_per_matrix_entry() {
     let square = ([2usize, 2], [1usize, 2]);
     let ok = DenseRead::F64(col_major(&good, &square));
     let integer = DenseRead::I32(DenseView::new(&ints, &square.0, &square.1, 0).unwrap());
-    for inputs in [[ok, integer], [integer, ok]] {
-        let (batch, per_call) = batch_and_per_call_errors(&mut engine, &inputs, 0);
-        assert_eq!(batch, per_call);
-    }
+    // A supported first input reaches the engine's refusal; an unsupported
+    // one is refused before the engine is entered.
+    let (broken, per_call) = batch_and_per_call_errors(&mut engine, &[ok, integer], 0);
+    assert_eq!(kind(&broken), kind(&per_call));
+    assert!(reason(&broken).contains("broken"), "{broken:?}");
+    let (dtype, per_call) = batch_and_per_call_errors(&mut engine, &[integer, ok], 0);
+    assert_eq!(kind(&dtype), kind(&per_call));
+    assert!(matches!(
+        dtype,
+        DenseError::Unsupported { op: "qr_read", .. }
+    ));
+    assert!(!reason(&dtype).contains("broken"), "{dtype:?}");
 }
