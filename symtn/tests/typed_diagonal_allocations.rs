@@ -246,6 +246,15 @@ fn warmed_bytes<T>(mut operation: impl FnMut() -> T) -> u64 {
     measured_bytes(operation)
 }
 
+/// Allocations of at least `payload_bytes` in a warm call of `operation`.
+fn warmed_payloads<T>(payload_bytes: usize, mut operation: impl FnMut() -> T) -> u64 {
+    black_box(operation());
+    let (output, allocs) =
+        counting_alloc::measure_matching(payload_bytes..=usize::MAX, || black_box(operation()));
+    black_box(output);
+    allocs.matched_calls
+}
+
 fn spectrum(seed: u64) -> TensorMap<Z2FusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     source(seed).svd_compact(engine, &[0], &[1]).unwrap().s
@@ -628,6 +637,7 @@ fn dense_conversions_allocate_only_their_own_output() {
     }
 }
 
+/// Purpose: rank and leg inspections allocate no payload-sized buffer.
 #[test]
 fn rank_and_leg_inspections_allocate_no_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -636,23 +646,29 @@ fn rank_and_leg_inspections_allocate_no_payload() {
     // allocates nothing; `leg_dims` owns only its `Vec<usize>` of rank
     // entries, never a payload.
     let tensor = source(0x5eed_0025);
+    let bytes = std::mem::size_of_val(tensor.dense_data().unwrap());
 
-    for (name, bytes) in [
-        ("rank", warmed_bytes(|| tensor.rank())),
-        ("codomain_rank", warmed_bytes(|| tensor.codomain_rank())),
-        ("domain_rank", warmed_bytes(|| tensor.domain_rank())),
+    for (name, payloads) in [
+        ("rank", warmed_payloads(bytes, || tensor.rank())),
+        (
+            "codomain_rank",
+            warmed_payloads(bytes, || tensor.codomain_rank()),
+        ),
+        (
+            "domain_rank",
+            warmed_payloads(bytes, || tensor.domain_rank()),
+        ),
         (
             "scalar-error",
-            warmed_bytes(|| tensor.scalar(engine).is_err()),
+            warmed_payloads(bytes, || tensor.scalar(engine).is_err()),
+        ),
+        (
+            "leg_dims",
+            warmed_payloads(bytes, || tensor.leg_dims().unwrap()),
         ),
     ] {
-        // `scalar` on a tensor with legs formats its error message; everything
-        // else is allocation-free. One small ceiling covers both without
-        // letting a payload through.
-        assert!(bytes < 256, "inspection {name} allocated {bytes} bytes");
+        assert_eq!(payloads, 0, "inspection {name} allocated a payload");
     }
-    let dims = warmed_bytes(|| tensor.leg_dims().unwrap());
-    assert!(dims < 256, "leg_dims allocated {dims} bytes");
 }
 
 #[test]

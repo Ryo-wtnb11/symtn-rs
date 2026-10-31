@@ -6,7 +6,8 @@
 //! 1. The genuine cold mechanism (`prepare_fusion_tree_layout_lowered`)
 //!    stays streaming — enumeration bytes track the admitted key count, not
 //!    the candidate sector product — and builds the layout exactly once
-//!    (a committed layout makes the second prepare a cache lookup).
+//!    (a committed layout makes the second prepare a cache hit: no
+//!    structure cache misses).
 //! 2. The tensor-wide fusion route's cold plan build: the plain entry is the
 //!    production route and this test pins its cold/warm plan-build
 //!    behavior.
@@ -34,6 +35,14 @@ fn reset_all_caches() {
     symtn_core::clear_structure_caches();
 }
 
+/// Structure-cache misses so far, over every kind.
+fn structure_misses() -> u64 {
+    symtn_core::StructureCacheKind::ALL
+        .into_iter()
+        .map(|kind| symtn_core::structure_cache_info(kind).misses())
+        .sum()
+}
+
 fn chain_homspace(sector_count: i32) -> FusionTreeHomSpace {
     let sectors = (0..sector_count)
         .map(|charge| (U1Irrep::new(charge).sector_id(), 1))
@@ -44,56 +53,59 @@ fn chain_homspace(sector_count: i32) -> FusionTreeHomSpace {
     )
 }
 
+/// Purpose: the cold lowered enumeration streams its keys, and a second
+/// prepare of a committed layout rebuilds nothing.
 #[test]
 fn cold_lowered_enumeration_streams_and_builds_once() {
     let _serial = crate::counting_alloc::serial();
 
     // Streaming: admitted keys grow linearly with the sector count while the
     // candidate space (codomain x domain sector pairs) grows quadratically.
-    // An eager whole-table regression would push per-key bytes at N=64 far
-    // above per-key bytes at N=8; the streaming path keeps them comparable.
-    let per_key_bytes = |sector_count: i32| {
+    // Doubling the sectors at most doubles the working set; an eager
+    // whole-table materialization would quadruple it.
+    let peak_live_bytes = |sector_count: i32| {
         reset_all_caches();
         let homspace = chain_homspace(sector_count);
-        let (prepared, bytes, _) = measured(|| {
+        let (prepared, allocs) = counting_alloc::measure(|| {
             homspace
                 .prepare_fusion_tree_layout_checked(&U1FusionRule)
                 .unwrap()
         });
         let keys = prepared.commit();
         assert_eq!(keys.len(), sector_count as usize);
-        bytes as f64 / keys.len() as f64
+        allocs.peak_live_bytes
     };
-    let small = per_key_bytes(8);
-    let large = per_key_bytes(64);
+    let (small, large) = (peak_live_bytes(32), peak_live_bytes(64));
     assert!(
-        large <= 2.0 * small,
-        "cold lowered enumeration regressed toward eager whole-table \
-         materialization: {large:.1} bytes/key at N=64 vs {small:.1} at N=8"
+        large <= 2 * small,
+        "cold lowered enumeration grows faster than its keys: peak {small} B \
+         at N=32, {large} B at N=64"
     );
 
     // Builds-once: with the cold layout committed, the second prepare is a
     // cache lookup, not a rebuild.
     reset_all_caches();
     let homspace = chain_homspace(16);
-    let (first, cold_bytes, _) = measured(|| {
-        homspace
-            .prepare_fusion_tree_layout_checked(&U1FusionRule)
-            .unwrap()
-    });
-    let cold_keys = first.commit();
-    let (second, warm_bytes, _) = measured(|| {
-        homspace
-            .prepare_fusion_tree_layout_checked(&U1FusionRule)
-            .unwrap()
-    });
+    let misses = structure_misses();
+    let cold_keys = homspace
+        .prepare_fusion_tree_layout_checked(&U1FusionRule)
+        .unwrap()
+        .commit();
+    assert!(
+        structure_misses() > misses,
+        "premise: the cold prepare misses"
+    );
+    let misses = structure_misses();
+    let second = homspace
+        .prepare_fusion_tree_layout_checked(&U1FusionRule)
+        .unwrap();
+    assert_eq!(
+        structure_misses(),
+        misses,
+        "second lowered prepare rebuilt the layout"
+    );
     let warm_keys = second.commit();
     assert!(Arc::ptr_eq(&cold_keys, &warm_keys));
-    assert!(
-        warm_bytes * 8 <= cold_bytes,
-        "second lowered prepare rebuilt the layout: warm {warm_bytes} bytes \
-         vs cold {cold_bytes} bytes"
-    );
 }
 
 struct ContractFixture {

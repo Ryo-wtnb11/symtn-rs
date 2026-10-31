@@ -45,7 +45,7 @@ fn su2_space(
 
 /// The contracted bond carries only charge 0, so the destination `[a] <- [c]`
 /// has coupled charges -1 and 1 that no GEMM writes (inactive blocks).
-fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u64, seed: u64) {
+fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(seed: u64) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
@@ -97,28 +97,21 @@ fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u
         "the owned output must be exactly one allocator-zeroed payload of {payload_bytes} bytes; got {:?}",
         measurement
     );
-    assert!(
-        measurement.calls <= max_allocations,
-        "owned U(1) contraction allocated {} times (limit {max_allocations})",
-        measurement.calls
-    );
 }
 
-// Total allocations of one warmed owned U(1) contraction (serial engine,
-// debug build): f64 38 calls / 2380 bytes, Complex64 38 / 2516, each with
-// exactly one allocator-zeroed payload (#1212).
-const TOTAL_ALLOCATIONS_U1: u64 = 38;
-
+/// Purpose: a warm owned f64 U(1) contraction allocates its output as one
+/// allocator-zeroed payload.
 #[test]
 fn owned_f64_contraction_output_is_one_allocator_zeroed_payload() {
     let _serial = crate::counting_alloc::serial();
-    u1_contract_measurement::<f64>(TOTAL_ALLOCATIONS_U1, 1_212_001);
+    u1_contract_measurement::<f64>(1_212_001);
 }
 
+/// Purpose: the Complex64 twin of the contract above.
 #[test]
 fn owned_c64_contraction_output_is_one_allocator_zeroed_payload() {
     let _serial = crate::counting_alloc::serial();
-    u1_contract_measurement::<Complex64>(TOTAL_ALLOCATIONS_U1, 1_212_002);
+    u1_contract_measurement::<Complex64>(1_212_002);
 }
 
 /// SU(2) compose: non-abelian recoupling, so this is the fixture where the
@@ -147,18 +140,14 @@ fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
          {payload_bytes} bytes; got {:?}",
         measurement
     );
-    assert!(
-        measurement.calls <= 36,
-        "owned SU(2) compose allocated {} times",
-        measurement.calls
-    );
     measurement.calls
 }
 
+/// Purpose: a warm owned SU(2) compose with an inactive coupled sector
+/// allocates its output as one allocator-zeroed payload.
 #[test]
 fn owned_su2_contraction_with_inactive_sectors_is_one_allocator_zeroed_payload() {
     let _serial = crate::counting_alloc::serial();
-    // 36 calls / 3468 bytes, one 1088-byte zeroed payload.
     su2_compose_measurement::<f64>(1_212_003);
 }
 

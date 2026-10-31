@@ -1026,23 +1026,40 @@ fn large_output_from_small_operands_copies_the_operands_not_c() {
     }
 }
 
-/// Warm DynamicTree calls on the inactive-destination inputs, each after the
-/// previous result was dropped, as in a sweep: the destination's coupled
-/// regions are then recompiled on a fresh structure wrapper every call, so
-/// their per-sector cost is visible (#1488). The regions cost one allocation
-/// per coupled sector and a run of inactive sectors one scale layout, not a
-/// per-tree cost (191 calls for X1 and X4 at d90bfd17).
+/// The `X1` shape of [`inactive_output_cases`] with `v = u1{-reach..=reach,
+/// each 8}`: its destination has `4 reach + 1` coupled sectors and
+/// `(2 reach + 1)²` trees per side.
+fn inactive_sort_case(runtime: &Runtime, reach: i32) -> Case<symtn::sector::U1FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let v = u1(&(-reach..=reach)
+        .map(|charge| (charge, 8))
+        .collect::<Vec<_>>());
+    let w = u1(&[(0, 20)]);
+    let mut tensor = |codomain: [&GradedSpace<_>; 2], domain: [&GradedSpace<_>; 2], salt| {
+        TensorMap::<_, f64>::from_subblock_fn(engine, runtime, codomain, domain, fill(salt))
+            .unwrap()
+    };
+    Case {
+        name: "X1",
+        lhs: tensor([&v, &v], [&w, &w], 95),
+        rhs: tensor([&w, &w], [&v, &v], 96),
+        lhs_axes: vec![3, 2],
+        rhs_axes: vec![1, 0],
+        output_axes: vec![2, 3, 0, 1],
+        dense: false,
+    }
+}
+
+/// Purpose: a warm DynamicTree call whose destination is rebuilt every call
+/// (the previous result dropped, as in a sweep) costs per call, not per
+/// tree: doubling the charge reach (9 -> 17 coupled sectors, 25 -> 81 trees
+/// per side) adds no allocation call.
 #[test]
 fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    for case in inactive_output_cases(&runtime) {
-        let (calls, bytes, _) = warm(&runtime, &case);
-        let name = case.name;
-        eprintln!("U(1) {name}: {calls} calls, {bytes} B with a fresh destination");
-        // What: 13 destination sectors do not cost ~10 allocations each.
-        assert!(calls <= 70, "{name}: {calls} warm allocation calls");
-    }
+    let [small, large] = [2, 4].map(|reach| warm(&runtime, &inactive_sort_case(&runtime, reach)).0);
+    counting_alloc::assert_same_calls("charge reach 2 -> 4", small, large);
 }
 
 /// `dim(C)` below both operands, so `copyC` wins TensorKit's
