@@ -10,17 +10,17 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
 use symtn_core::{
     ErasedStructureCacheControl, StructureCache, StructureCacheInfo, StructureCacheKind,
 };
 use tcontract::api::{CSpec, DType, Labels, LayoutSpec, Op, OperandSpec, Problem, Scalar};
-use tcontract::{ns_per_flop, Plan, PlanConfig, SliceAccumulationSource};
+use tcontract::{Plan, PlanConfig, SliceAccumulationSource};
+use tcontract_exec::Exec;
 use tenferro_cpu::CpuEngine;
 
-use super::schedule;
-use crate::tenferro_adapter::{grouped_error, grouped_validate, tenferro_error};
+use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
+use crate::tenferro_adapter::{grouped_error, grouped_validate};
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
 /// Everything a plan depends on besides the scalar type, which a call fixes:
@@ -188,25 +188,66 @@ pub(crate) fn cached_plan<T: Scalar>(
         .unwrap_or_else(|_| unreachable!("the key's dtype fixes the plan type")))
 }
 
-/// Each job's serial time under the dependency's own GEMM model (tcontract's
-/// `ns_per_flop` over `2 m k n` real flops, four times that for complex),
-/// written to `times`, and the mean weighted work `m k n` (times four for
-/// complex) the engine's batch decision takes.
-pub(crate) fn costs_into<T: Scalar>(jobs: &[DenseGemmBatchJob], times: &mut Vec<Duration>) -> f64 {
+/// A job's weighted work: `m k n` multiply-adds, four times that for a
+/// complex scalar.
+pub(crate) fn work<T: Scalar>(job: &DenseGemmBatchJob) -> f64 {
     let complex = if T::IS_COMPLEX { 4.0 } else { 1.0 };
-    let work = |job: &DenseGemmBatchJob| {
-        job.rows as f64 * job.contracted as f64 * job.cols as f64 * complex
-    };
-    times.clear();
-    times.extend(
-        jobs.iter()
-            .map(|job| schedule::estimate(2.0 * work(job) * ns_per_flop())),
-    );
-    jobs.iter().map(work).sum::<f64>() / jobs.len().max(1) as f64
+    job.rows as f64 * job.contracted as f64 * job.cols as f64 * complex
+}
+
+/// One call's blocks: each job's operands, its plan and the scalars.
+struct GemmBlocks<'a, T> {
+    jobs: &'a [DenseGemmBatchJob],
+    plans: &'a [Arc<ErasedPlan>],
+    lhs: &'a [T],
+    rhs: &'a [T],
+    alpha: T,
+    beta: T,
+    source: SliceAccumulationSource<'a, T>,
+}
+
+impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
+    /// The job's plan index and its destination slice.
+    type Job = (usize, &'a mut [T]);
+    const ENTRY: Entry = Entry::Contraction;
+    const KIND: OpKind = OpKind::Gemm;
+    const LABEL: &'static str = "grouped_gemm";
+
+    fn work(&self, index: usize, _: &Self::Job) -> f64 {
+        work::<T>(&self.jobs[index])
+    }
+
+    fn run(
+        &self,
+        index: usize,
+        (plan, destination): &mut Self::Job,
+        mut exec: Exec<'_>,
+    ) -> Result<(), DenseError> {
+        let job = &self.jobs[index];
+        let plan = self.plans[*plan]
+            .downcast_ref::<Plan<T>>()
+            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
+        plan.execute_slices_accum(
+            &mut exec,
+            self.alpha,
+            (
+                operand(self.lhs, job.lhs_offset, job.rows * job.contracted),
+                0,
+            ),
+            (
+                operand(self.rhs, job.rhs_offset, job.contracted * job.cols),
+                0,
+            ),
+            self.beta,
+            self.source,
+            (&mut **destination, 0),
+        )
+        .map_err(|err| grouped_error(format!("job {index}: {err}")))
+    }
 }
 
 /// The kernel's per-call staging: the destination order, the geometry index,
-/// the per-job plan slots, the plan handles, the costs and the lane tables.
+/// the per-job plan slots, the plan handles and the lane driver's staging.
 /// An owner that submits repeatedly (an executor of a prepared workspace)
 /// keeps one, so a warm submission reuses every capacity and allocates
 /// nothing; an eager executor's scratch lives for its one call. Holds no
@@ -218,8 +259,7 @@ pub(crate) struct GemmScratch {
     geometries: HashMap<Geometry, usize>,
     slots: Vec<(usize, &'static mut [u8])>,
     plans: Vec<Arc<ErasedPlan>>,
-    times: Vec<Duration>,
-    schedule: schedule::AllocationScratch,
+    lanes: LaneScratch,
 }
 
 impl GemmScratch {
@@ -247,8 +287,7 @@ impl GemmScratch {
             self.plans
                 .capacity()
                 .saturating_mul(size_of::<Arc<ErasedPlan>>()),
-            self.times.capacity().saturating_mul(size_of::<Duration>()),
-            self.schedule.retained_bytes(),
+            self.lanes.retained_bytes(),
         ]
         .into_iter()
         .fold(0, usize::saturating_add)
@@ -304,8 +343,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         geometries,
         slots: kept_slots,
         plans,
-        times,
-        schedule: schedule_scratch,
+        lanes,
     } = scratch;
 
     order.clear();
@@ -341,7 +379,6 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
             crate::probe::add(crate::probe::Event::GemmPlanLookup, 1);
         }
     }
-    let mean_work = costs_into::<T>(jobs, times);
 
     let lhs = &lhs.data()[lhs.offset()..lhs.offset() + lhs_len];
     let rhs = &rhs.data()[rhs.offset()..rhs.offset() + rhs_len];
@@ -362,34 +399,17 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     } else {
         SliceAccumulationSource::Output
     };
-    let plans_ref = &*plans;
-    let run = |j: usize, slot: &mut (usize, &mut [T]), mut child: tcontract_exec::Exec<'_>| {
-        let job = &jobs[j];
-        let (plan, destination) = slot;
-        let plan = plans_ref[*plan]
-            .downcast_ref::<Plan<T>>()
-            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
-        plan.execute_slices_accum(
-            &mut child,
-            alpha,
-            (operand(lhs, job.lhs_offset, job.rows * job.contracted), 0),
-            (operand(rhs, job.rhs_offset, job.contracted * job.cols), 0),
-            beta,
-            source,
-            (&mut **destination, 0),
-        )
-        .map_err(|err| grouped_error(format!("job {j}: {err}")))
+    let blocks = GemmBlocks {
+        jobs,
+        plans,
+        lhs,
+        rhs,
+        alpha,
+        beta,
+        source,
     };
-    let times = &*times;
-    let result = cpu
-        .with_contraction_exec(|exec, _, _| {
-            let allocation = schedule::allocate_in(exec, times, mean_work, schedule_scratch);
-            let result = schedule::run(exec.reborrow(), &allocation, &mut slots, run);
-            schedule_scratch.keep(allocation);
-            Ok(result)
-        })
-        .map_err(|err| tenferro_error("grouped_gemm", err));
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
     *kept_slots = recycle(slots);
     plans.clear();
-    result?.map_err(|(_, error)| error)
+    result
 }

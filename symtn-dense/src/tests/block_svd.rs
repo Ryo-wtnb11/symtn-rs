@@ -6,13 +6,14 @@
 //! widths; and a lane panic breaking the engine.
 
 use super::*;
+use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneScratch, OpKind};
 use crate::block_kernel::{factor, schedule};
-use tcontract_exec::{BatchPolicy, BatchStrategy, WorkModel};
+use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
 #[path = "../../../tests/support/numerics.rs"]
-mod numerics;
+pub(super) mod numerics;
 
-trait Scalar: Copy + std::fmt::Debug + 'static {
+pub(super) trait Scalar: Copy + std::fmt::Debug + 'static {
     const COMPLEX: bool;
     const EPS: f64;
     fn make(value: Complex64) -> Self;
@@ -41,11 +42,11 @@ scalar!(Complex32, C32, true, f32::EPSILON as f64, |v| {
 });
 scalar!(Complex64, C64, true, f64::EPSILON, |v| v);
 
-fn engine(threads: usize, policy: BatchPolicy) -> CpuEngine {
+pub(super) fn engine(threads: usize, policy: BatchPolicy) -> CpuEngine {
     CpuEngine::new(Pool::builder().threads(threads).build().unwrap()).with_batch_policy(policy)
 }
 
-fn policies() -> Vec<(usize, BatchPolicy)> {
+pub(super) fn policies() -> Vec<(usize, BatchPolicy)> {
     let split = |lanes| {
         BatchPolicy::new(BatchStrategy::Split {
             lanes: std::num::NonZeroUsize::new(lanes).unwrap(),
@@ -63,7 +64,7 @@ fn policies() -> Vec<(usize, BatchPolicy)> {
 
 /// Column-major `n x n` Householder reflector `I - 2 v v^H / (v^H v)`, an
 /// exactly unitary matrix built without any factorization.
-fn reflector(n: usize, seed: usize, complex: bool) -> Vec<Complex64> {
+pub(super) fn reflector(n: usize, seed: usize, complex: bool) -> Vec<Complex64> {
     let v: Vec<Complex64> = (0..n)
         .map(|i| {
             let re = ((7 * i + 3 * seed) % 11) as f64 - 4.5;
@@ -143,7 +144,7 @@ fn blocks(complex: bool) -> Vec<Block> {
 }
 
 /// The factors as wide complex column-major payloads.
-fn wide(tensor: &DenseTensor) -> Vec<Complex64> {
+pub(super) fn wide(tensor: &DenseTensor) -> Vec<Complex64> {
     match tensor.dtype() {
         DenseDType::F32 => tensor
             .as_f32_slice()
@@ -335,13 +336,16 @@ fn factors_match_the_constructed_svd_c64() {
     oracle_matches::<Complex64>(DenseDType::F64);
 }
 
-fn col_major<'a, T>(data: &'a [T], layout: &'a ([usize; 2], [usize; 2])) -> DenseView<'a, T> {
+pub(super) fn col_major<'a, T>(
+    data: &'a [T],
+    layout: &'a ([usize; 2], [usize; 2]),
+) -> DenseView<'a, T> {
     DenseView::new(data, &layout.0, &layout.1, 0).unwrap()
 }
 
 /// Every factor entry's bit pattern (real and imaginary parts): `-0.0`
 /// against `0.0` or two NaN payloads are differences here.
-fn bits(tensor: &DenseTensor) -> Vec<(u64, u64)> {
+pub(super) fn bits(tensor: &DenseTensor) -> Vec<(u64, u64)> {
     wide(tensor)
         .iter()
         .map(|x| (x.re.to_bits(), x.im.to_bits()))
@@ -467,7 +471,12 @@ fn zero_extent_inputs_return_the_per_matrix_shapes() {
 fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> schedule::Allocation {
     engine(threads, policy)
         .with_linalg_pool(|exec, _| {
-            let (times, mean) = factor::costs(exec, work);
+            let model = exec.batch_policy().model;
+            let times: Vec<_> = work
+                .iter()
+                .map(|&w| cost(OpKind::Factorization, w, &model))
+                .collect();
+            let mean = work.iter().sum::<f64>() / work.len() as f64;
             Ok(schedule::allocate(exec, &times, mean))
         })
         .unwrap()
@@ -486,9 +495,9 @@ fn job_work_is_the_provider_svd_estimate() {
     let tall = DenseRead::F64(DenseView::new(&data[..6], &[3, 2], &[1, 3], 0).unwrap());
     let wide = DenseRead::C64(DenseView::new(&cdata, &[2, 3], &[1, 2], 0).unwrap());
     let batched = DenseRead::F64(DenseView::new(&data, &[3, 2, 4], &[1, 3, 6], 0).unwrap());
-    assert_eq!(factor::work(tall), (3 * 2 * 2) as f64);
-    assert_eq!(factor::work(wide), (2 * 3 * 2 * 4) as f64);
-    assert_eq!(factor::work(batched), (3 * 2 * 2 * 4) as f64);
+    assert_eq!(factor::work::<factor::Svd>(tall), (3 * 2 * 2) as f64);
+    assert_eq!(factor::work::<factor::Svd>(wide), (2 * 3 * 2 * 4) as f64);
+    assert_eq!(factor::work::<factor::Svd>(batched), (3 * 2 * 2 * 4) as f64);
 }
 
 /// Purpose: each job's reserved width is the engine policy's: Auto shares
@@ -525,9 +534,28 @@ fn lane_minimum_is_checked_against_work_not_time() {
         .with_muladds_per_ns(15.6)
         .with_item_overhead_ns(0.0)
         .with_min_work_per_lane_ns(1000.0);
-    let work = [factor::work(block); 2];
+    let work = [factor::work::<factor::Svd>(block); 2];
     let a = allocation(8, BatchPolicy::default().with_model(model), &work);
     assert_eq!(a.decision.lanes, 2);
+}
+
+/// A linalg-entry kernel whose block `self.0` panics.
+pub(super) struct PanicsAt(pub(super) usize);
+
+impl BlockOp for PanicsAt {
+    type Job = ();
+    const ENTRY: Entry = Entry::Linalg;
+    const KIND: OpKind = OpKind::Factorization;
+    const LABEL: &'static str = "svd_read";
+
+    fn work(&self, _: usize, _: &()) -> f64 {
+        1.0
+    }
+
+    fn run(&self, index: usize, _: &mut (), _: Exec<'_>) -> Result<(), DenseError> {
+        assert_ne!(index, self.0, "injected lane panic");
+        Ok(())
+    }
 }
 
 /// Purpose: a panicking job unwinds after the lanes join through the guarded
@@ -537,10 +565,12 @@ fn lane_minimum_is_checked_against_work_not_time() {
 fn lane_panic_breaks_the_engine() {
     let mut engine = engine(4, BatchPolicy::new(BatchStrategy::Outer));
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        factor::run_on_lanes(&mut engine, &[1.0; 4], &mut [(); 4], |job, _, _| {
-            assert_ne!(job, 2, "injected lane panic");
-            Ok(())
-        })
+        driver::drive(
+            &mut engine,
+            &PanicsAt(2),
+            &mut [(); 4],
+            &mut LaneScratch::default(),
+        )
     }));
     assert!(unwound.is_err());
     assert!(engine.is_broken());

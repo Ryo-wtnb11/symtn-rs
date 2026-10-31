@@ -47,10 +47,13 @@ These steps stay inside one public operation.
 ## Factorization
 
 Dense factorization groups the tensor into coupled-sector matrices and
-delegates the dense problems to Tenferro. On the native (faer) provider, the
-Host compact SVD of the direct-region sector matrices is the exception: symtn's
-block kernel spreads the blocks over the engine's lanes inside the engine's
-guarded linalg entry and calls tlinalg (Tenferro's faer provider) per block;
+delegates the dense problems to Tenferro. On the native (faer) provider, two
+Host batches are the exception: compact SVD of the direct-region sector
+matrices, and every compact QR batch (direct-region, matricized and Checked
+Generic inputs, all of which submit their sector matrices as one batch). For
+these, symtn's block kernel spreads the blocks over the engine's lanes inside
+the engine's guarded linalg entry and calls tlinalg (Tenferro's faer provider)
+per block;
 see [backend policy](backend_policy.md#parallel-execution). The multiplicity-free Host
 direct-region and CUDA routes for dense compact QR/SVD and full EIGH use
 `CompactFactorPlan` as the per-call, placement-neutral authority for bond
