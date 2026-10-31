@@ -1631,6 +1631,8 @@ fn dealloc_snapshots_probe_state_after_unregistering_origin() {
     });
 
     // What: disabling the probe after unregister but before attribution excludes the free.
+    // The timeout is a hang guard for a worker that never reaches the
+    // boundary; no assertion depends on elapsed time.
     reached_rx
         .recv_timeout(std::time::Duration::from_secs(2))
         .expect("deallocation did not expose its unregister boundary");

@@ -181,6 +181,7 @@ where
     };
     let lhs = make_space(full_order.clone());
     let rhs = make_space(vec![keys[0].clone()]);
+    let dst_groups = full_order.len();
     let dst = make_space(full_order);
 
     let layout_rec = probe::record();
@@ -194,7 +195,7 @@ where
     .unwrap();
     // What: each destination group performs one LHS and one RHS lookup;
     // ordinary joins never build or query a prelowered block locator.
-    assert_eq!(layout_rec.get(Event::FusionLayoutLookup), 4);
+    assert_eq!(layout_rec.get(Event::FusionLayoutLookup), 2 * dst_groups);
 
     let mut output = vec![11.0, 7.0];
     let mut dense = DenseTreeTransformOperations::default();
@@ -428,11 +429,12 @@ fn generic_layout_keeps_interleaved_cartesian_vertex_order() {
     assert!(!multiplicity.needs_clear);
 
     let layout_rec = probe::record();
-    assert!(layout.take_group(SectorId::new(1)).is_some());
-    assert!(layout.take_group(SectorId::new(0)).is_some());
-    assert!(layout.take_group(SectorId::new(9)).is_none());
+    let queried = [(1, true), (0, true), (9, false)];
+    for (sector, present) in queried {
+        assert_eq!(layout.take_group(SectorId::new(sector)).is_some(), present);
+    }
     // What: finalized coupled-sector hits and misses use one indexed probe each.
-    assert_eq!(layout_rec.get(Event::FusionLayoutLookup), 3);
+    assert_eq!(layout_rec.get(Event::FusionLayoutLookup), queried.len());
 }
 
 #[test]

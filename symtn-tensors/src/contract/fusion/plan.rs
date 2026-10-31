@@ -1975,6 +1975,8 @@ mod tests {
         let rhs = rhs_complete.clone();
         let dst = dst_complete.clone();
         let axes = TensorContractSpec::with_default_output_order(&[2, 3], &[1, 0]);
+        let scored_candidates = contracted_axis_order_candidates(&[2, 3], &[1, 0]).len()
+            * crate::contract::fusion::CACHED_ORIENTATIONS.len();
 
         let candidate_score_calls_rec = probe::record();
         let candidate_build_calls_rec = probe::record();
@@ -1983,7 +1985,10 @@ mod tests {
                 .unwrap();
         // What: Complete cold selection performs one semantic HomSpace preflight
         // and scores all stable candidates without constructing their layouts.
-        assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 4);
+        assert_eq!(
+            candidate_score_calls_rec.get(Event::CandidateScore),
+            scored_candidates
+        );
         assert_eq!(
             (
                 candidate_build_calls_rec.get(Event::ContractPreflight),
@@ -2004,13 +2009,16 @@ mod tests {
         .unwrap();
         // What: the conservative expert fallback probes both operands for each
         // candidate and selects the same mathematical winner.
-        assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 4);
+        assert_eq!(
+            candidate_score_calls_rec.get(Event::CandidateScore),
+            scored_candidates
+        );
         assert_eq!(
             (
                 candidate_build_calls_rec.get(Event::ContractPreflight),
                 candidate_build_calls_rec.get(Event::CandidateLayoutProbe)
             ),
-            (1, 8)
+            (1, 2 * scored_candidates)
         );
         assert_eq!(complete, exact);
     }
