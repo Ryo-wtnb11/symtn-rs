@@ -1,28 +1,11 @@
-//! Real-device gates for general-axes contraction on device tensors
-//!: the Host `DynamicTree` artifact replayed by device
-//! executors.
-//!
-//! Evidence chain:
-//!
-//! 1. the executor replaying one artifact is gated against the Host replay of
-//!    the *same* artifact for both forced orientations and every axis-order
-//!    candidate in `symtn-tensors` (`storage_contract_tests.rs`), where the
-//!    test-only plan builder can force them; the NaN-poisoned core-destination
-//!    scratch is gated there too;
-//! 2. the typed lowering is gated here: device == Host of the same public
-//!    call, at every device payload dtype, owned and lazy-adjoint;
-//! 3. independence: device == TensorKit's `blas_contract!` step sequence on
-//!    Host typed ops (bosonic providers), and device == the physical-basis
-//!    dense contraction (U(1), SU(2)). Both oracles are pinned against the
-//!    Host by the ungated `typed_contract_host_oracle.rs`;
-//! 4. fermionic providers: device == Host == TensorKit's
-//!    sequence with the twist on either role, and the TensorKit-valued FZ2
-//!    loops as explicit device `contract` calls;
-//! 5. `contract_into`: into a NaN-poisoned device
-//!    destination, device == Host eager `contract` (whose overwrite twin is
-//!    pinned ungated) == the same independent oracles, on every fixture
-//!    above plus destinations with blocks no GEMM writes; warm calls transfer
-//!    and allocate nothing; rejections leave the destination untouched.
+//! Device-only gates for general-axes contraction on device tensors: device
+//! == Host of the same public call (and the independent oracle) on the
+//! zero-copy candidates and every split, borrowed identity adjoints,
+//! `copyC` transfer counts, warm calls, and rejections before any device
+//! work. The executor replaying one artifact is gated against the Host
+//! replay in `symtn-tensors` (`storage_contract_tests.rs`); the independent
+//! oracles on every fixture, owned and lazy, `contract` and `contract_into`,
+//! run on both engines in `engine_suites/contract.rs`.
 //!
 //! The target-wide serial guard isolates the thread-local transfer counters.
 //! Run with `cargo test -p symtn --no-default-features
@@ -40,11 +23,10 @@ use report::Report;
 
 use common::{DevicePayload, DeviceRule};
 use contract_cases::{
-    blas_contract_oracle, candidate_core_probes, copy_c_probes, dense_oracle, fermion_su2,
-    fermion_u1, fermionic_blas_contract_oracle, fermionic_general, fz2_tensorkit_loops,
-    identity_adjoint_cases, lazy_cases, poisoned_destination, product_general, su2, su2_bent,
-    su2_core_form_lazy_cases, su2_reordered, u1_inactive_cases, u1_lhs_identity, u1_non_self_dual,
-    u1_rank_five, u1_reordered, u1_rhs_identity, Case, FermionU1, TwistRole,
+    blas_contract_oracle, candidate_core_probes, copy_c_probes, fermion_su2, fermion_u1,
+    fermionic_blas_contract_oracle, fermionic_general, identity_adjoint_cases,
+    poisoned_destination, product_general, su2, su2_bent, u1_non_self_dual, u1_rank_five,
+    u1_reordered, Case, FermionU1, TwistRole,
 };
 use num_complex::{Complex32, Complex64};
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
@@ -115,100 +97,6 @@ fn check<R, D>(
     );
 }
 
-fn every_fixture<D: DevicePayload>(
-    cuda: &mut dyn symtn::typed::Engine,
-    engine: &mut dyn symtn::typed::Engine,
-    runtime: &Runtime,
-) {
-    let fixture = u1_rank_five::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-    let fixture = u1_reordered::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-    let fixture = su2_reordered::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-    let fixture = su2_bent::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-    let fixture = product_general::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-    let fixture = u1_lhs_identity::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-    let fixture = u1_rhs_identity::<D>(engine, runtime);
-    check(engine, cuda, fixture);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn general_axes_match_the_host_and_the_blas_contract_oracle_at_every_dtype() {
-    let cuda = &mut crate::common::cuda_engine();
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    every_fixture::<f64>(cuda, engine, &runtime);
-    every_fixture::<Complex64>(cuda, engine, &runtime);
-    every_fixture::<f32>(cuda, engine, &runtime);
-    every_fixture::<Complex32>(cuda, engine, &runtime);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn general_axes_match_the_physical_basis_contraction() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let cuda = &mut crate::common::cuda_engine();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    fn dense<R, D>(
-        engine: &mut dyn symtn::typed::Engine,
-        cuda: &mut dyn symtn::typed::Engine,
-        case: Case<R, D>,
-    ) where
-        R: DeviceRule + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
-        D: DevicePayload,
-    {
-        assert!(case.dense, "{}", case.name);
-        let (shape, expected) = dense_oracle(engine, &case);
-        let rhs = case.rhs.to_cuda(cuda).unwrap();
-        let device = case
-            .lhs
-            .to_cuda(cuda)
-            .unwrap()
-            .contract(cuda, &rhs, &case.spec())
-            .unwrap()
-            .to_host(cuda)
-            .unwrap()
-            .to_physical_dense(engine)
-            .unwrap();
-        assert_eq!(device.shape, shape, "{}", case.name);
-        numerics::assert_nonzero_slices_close(case.name, &device.data, &expected, case.terms());
-    }
-    let case = u1_reordered::<f64>(engine, &runtime);
-    dense(engine, cuda, case);
-    let case = u1_reordered::<Complex64>(engine, &runtime);
-    dense(engine, cuda, case);
-    let case = su2_reordered::<f64>(engine, &runtime);
-    dense(engine, cuda, case);
-    let case = su2_reordered::<Complex64>(engine, &runtime);
-    dense(engine, cuda, case);
-}
-
-fn lazy_at<D: DevicePayload>(
-    engine: &mut dyn symtn::typed::Engine,
-    cuda: &mut dyn symtn::typed::Engine,
-    runtime: &Runtime,
-) {
-    let operand = u1_rank_five::<D>(engine, runtime).lhs;
-    for case in lazy_cases(engine, &operand, "U(1) rank 5 lazy") {
-        check(engine, cuda, case);
-    }
-    let operand = su2_reordered::<D>(engine, runtime).lhs;
-    for case in lazy_cases(engine, &operand, "SU(2) lazy") {
-        check(engine, cuda, case);
-    }
-    let operand = product_general::<D>(engine, runtime).lhs;
-    for case in lazy_cases(engine, &operand, "U(1) x SU(2) lazy") {
-        check(engine, cuda, case);
-    }
-}
-
 /// The zero-copy sorted/swapped candidates run the device Core
 /// route, swapped operands and lazy-adjoint GEMM flags included. The
 /// fermionic probes take the twisted `blas_contract!` oracle: C2 and L5
@@ -243,43 +131,6 @@ fn zero_copy_candidates_match_the_host_at_every_dtype() {
     at::<Complex64>(engine, cuda, &runtime);
     at::<f32>(engine, cuda, &runtime);
     at::<Complex32>(engine, cuda, &runtime);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn core_form_lazy_contractions_match_the_host_at_every_dtype() {
-    let cuda = &mut crate::common::cuda_engine();
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // Values only. The planner's `copyC` route for this geometry is pinned by
-    // the route-parity test in symtn-tensors (`storage_contract_tests.rs`).
-    let runtime = Runtime::builder().build().unwrap();
-    fn at<D: DevicePayload>(
-        cuda: &mut dyn symtn::typed::Engine,
-        engine: &mut dyn symtn::typed::Engine,
-        runtime: &Runtime,
-    ) {
-        for case in su2_core_form_lazy_cases::<D>(engine, runtime) {
-            check(engine, cuda, case);
-        }
-    }
-    at::<f64>(cuda, engine, &runtime);
-    at::<Complex64>(cuda, engine, &runtime);
-    at::<f32>(cuda, engine, &runtime);
-    at::<Complex32>(cuda, engine, &runtime);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn lazy_adjoint_operands_match_the_host_at_every_dtype() {
-    let cuda = &mut crate::common::cuda_engine();
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    lazy_at::<f64>(engine, cuda, &runtime);
-    lazy_at::<Complex64>(engine, cuda, &runtime);
-    lazy_at::<f32>(engine, cuda, &runtime);
-    lazy_at::<Complex32>(engine, cuda, &runtime);
 }
 
 /// A lazy adjoint whose tree transform is the identity, against a
@@ -481,51 +332,6 @@ fn check_fermionic<R, D>(
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn fermionic_contractions_match_the_host_and_both_tensorkit_twist_roles_at_every_dtype() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let cuda = &mut crate::common::cuda_engine();
-    let _serial = crate::counting_alloc::serial();
-    // General axes with the twist on one or both contracted legs, the
-    // canonical form whose θ varies within one coupled sector (lifted from
-    // the storage core route to DynamicTree), and lazy adjoints on either
-    // side; fZ2 x U(1) and fZ2 (x) SU(2). Non-vacuity — the twist changes
-    // every one of these results — is pinned on the Host, ungated.
-    let runtime = Runtime::builder().build().unwrap();
-    for_each_fermionic_fixture!(engine, &runtime, f64, check_fermionic, cuda);
-    for_each_fermionic_fixture!(engine, &runtime, Complex64, check_fermionic, cuda);
-    for_each_fermionic_fixture!(engine, &runtime, f32, check_fermionic, cuda);
-    for_each_fermionic_fixture!(engine, &runtime, Complex32, check_fermionic, cuda);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn fz2_loops_as_explicit_device_contracts_match_tensorkit() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    // The helper's closures are `Fn`; each borrows the one device engine in
-    // turn, never two at once.
-    let cuda = std::cell::RefCell::new(crate::common::cuda_engine());
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let loops = fz2_tensorkit_loops(
-        engine,
-        &runtime,
-        |tensor| tensor.to_cuda(&mut *cuda.borrow_mut()).unwrap(),
-        |_, x, y, spec| x.contract(&mut *cuda.borrow_mut(), y, spec).unwrap(),
-        |engine, tensor| {
-            let host = tensor.to_host(&mut *cuda.borrow_mut()).unwrap();
-            host.scalar(engine).unwrap()
-        },
-    );
-    for (name, value, expected) in loops {
-        assert!(
-            (value - expected).abs() < 1e-12,
-            "{name}: {value} vs {expected}"
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
 fn rejections_happen_before_any_device_work_and_match_the_host() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
@@ -683,135 +489,6 @@ fn malformed_rank_five_specs() -> [ContractSpec<'static>; 4] {
 // ---------------------------------------------------------------------------
 // `contract_into`
 // ---------------------------------------------------------------------------
-
-/// Device `contract_into` of `case` into a NaN-poisoned device
-/// destination, downloaded.
-fn device_overwrite<R: DeviceRule, D: DevicePayload>(
-    engine: &mut dyn symtn::typed::Engine,
-    cuda: &mut dyn symtn::typed::Engine,
-    case: &Case<R, D>,
-) -> TensorMap<R, D> {
-    let mut destination = poisoned_destination(engine, case).to_cuda(cuda).unwrap();
-    let rhs_device = case.rhs.to_cuda(cuda).unwrap();
-    case.lhs
-        .to_cuda(cuda)
-        .unwrap()
-        .contract_into(
-            cuda,
-            &rhs_device,
-            &case.spec(),
-            &mut destination,
-            D::entry(1.0, 0.0),
-            D::entry(0.0, 0.0),
-        )
-        .unwrap();
-    destination.to_host(cuda).unwrap()
-}
-
-fn check_overwrite<R: DeviceRule, D: DevicePayload>(
-    cuda: &mut dyn symtn::typed::Engine,
-    engine: &mut dyn symtn::typed::Engine,
-    case: Case<R, D>,
-) {
-    let written = device_overwrite(engine, cuda, &case);
-    numerics::assert_nonzero_slices_close(
-        case.name,
-        written.dense_data().unwrap(),
-        case.host(engine).dense_data().unwrap(),
-        case.terms(),
-    );
-    let oracle = blas_contract_oracle(engine, &case);
-    numerics::assert_nonzero_slices_close(
-        case.name,
-        written.dense_data().unwrap(),
-        oracle.dense_data().unwrap(),
-        case.terms(),
-    );
-}
-
-fn check_overwrite_fermionic<R, D>(
-    engine: &mut dyn symtn::typed::Engine,
-    cuda: &mut dyn symtn::typed::Engine,
-    case: Case<R, D>,
-    twist: impl Fn(&mut dyn symtn::typed::Engine, &TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
-) where
-    R: DeviceRule,
-    D: DevicePayload,
-{
-    let written = device_overwrite(engine, cuda, &case);
-    numerics::assert_nonzero_slices_close(
-        case.name,
-        written.dense_data().unwrap(),
-        case.host(engine).dense_data().unwrap(),
-        case.terms(),
-    );
-    for role in [TwistRole::B, TwistRole::A] {
-        let oracle = fermionic_blas_contract_oracle(engine, &case, role, twist);
-        numerics::assert_nonzero_slices_close(
-            &format!("{} overwrite vs the {role:?}-role oracle", case.name),
-            written.dense_data().unwrap(),
-            oracle.dense_data().unwrap(),
-            case.terms(),
-        );
-    }
-}
-
-fn every_overwrite_fixture<D: DevicePayload>(
-    cuda: &mut dyn symtn::typed::Engine,
-    engine: &mut dyn symtn::typed::Engine,
-    runtime: &Runtime,
-) {
-    let fixture = u1_rank_five::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    let fixture = u1_reordered::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    let fixture = su2_reordered::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    let fixture = su2_bent::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    let fixture = product_general::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    let fixture = u1_lhs_identity::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    let fixture = u1_rhs_identity::<D>(engine, runtime);
-    check_overwrite(cuda, engine, fixture);
-    for case in u1_inactive_cases::<D>(engine, runtime) {
-        check_overwrite(cuda, engine, case);
-    }
-    let fixture = u1_rank_five::<D>(engine, runtime).lhs;
-    for case in lazy_cases(engine, &fixture, "U(1) rank 5 lazy") {
-        check_overwrite(cuda, engine, case);
-    }
-    let fixture = su2_reordered::<D>(engine, runtime).lhs;
-    for case in lazy_cases(engine, &fixture, "SU(2) lazy") {
-        check_overwrite(cuda, engine, case);
-    }
-    let fixture = product_general::<D>(engine, runtime).lhs;
-    for case in lazy_cases(engine, &fixture, "U(1) x SU(2) lazy") {
-        check_overwrite(cuda, engine, case);
-    }
-    for case in su2_core_form_lazy_cases::<D>(engine, runtime) {
-        check_overwrite(cuda, engine, case);
-    }
-    for_each_fermionic_fixture!(engine, runtime, D, check_overwrite_fermionic, cuda);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn contract_into_a_poisoned_destination_matches_the_host_and_the_oracles_at_every_dtype() {
-    let cuda = &mut crate::common::cuda_engine();
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: general axes, lazy adjoints, the core-form lazy (`copyC`) class, both
-    // fermionic twist roles, and destinations with blocks no GEMM writes —
-    // by the core route, by an identity output and under an output transform
-    // — each rewritten over NaN.
-    let runtime = Runtime::builder().build().unwrap();
-    every_overwrite_fixture::<f64>(cuda, engine, &runtime);
-    every_overwrite_fixture::<Complex64>(cuda, engine, &runtime);
-    every_overwrite_fixture::<f32>(cuda, engine, &runtime);
-    every_overwrite_fixture::<Complex32>(cuda, engine, &runtime);
-}
 
 #[test]
 #[ignore = "requires a real CUDA device"]

@@ -1,5 +1,5 @@
 //! General-axes contraction fixtures and their independent oracles, shared by
-//! the Host pin (`typed_contract_host_oracle.rs`, ungated) and the device gate
+//! the engine-generic suite (`engine_suites/contract.rs`) and the device gates
 //! (`typed_cuda_contract.rs`).
 //!
 //! Two oracles, neither of which passes through the Host `DynamicTree`
@@ -1145,12 +1145,12 @@ pub fn fz2_tensorkit_loops<T>(
     ]
 }
 
-/// Every fermionic fixture, handed to `check` with the engine, any
-/// `extra` engines (the device gate's CUDA engine) and the provider's typed
-/// twist; shared by the Host pin and the device gate. A
-/// macro because each provider's twist has its own dispatch bound.
+/// Every fermionic fixture: runs `$body` with `$case` bound to the fixture
+/// and `$twist` to the provider's typed twist. A macro because each
+/// provider's twist has its own dispatch bound and the body is instantiated
+/// per engine.
 macro_rules! for_each_fermionic_fixture {
-    ($engine:ident, $runtime:expr, $payload:ty, $check:ident $(, $extra:ident)*) => {{
+    ($engine:ident, $runtime:expr, $payload:ty, |$case:ident, $twist:ident| $body:block) => {{
         let runtime = $runtime;
         let fu1 = $crate::contract_cases::fermion_u1();
         let fsu2 = $crate::contract_cases::fermion_su2();
@@ -1177,7 +1177,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xU1 both sides",
                 31,
             );
-            $check($engine, $($extra,)* case, twist_u1);
+            {
+                let $case = case;
+                let $twist = twist_u1;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_general(
@@ -1188,7 +1192,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xU1 mixed θ",
                 33,
             );
-            $check($engine, $($extra,)* case, twist_u1);
+            {
+                let $case = case;
+                let $twist = twist_u1;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_general(
@@ -1199,7 +1207,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xSU2 both sides",
                 35,
             );
-            $check($engine, $($extra,)* case, twist_su2);
+            {
+                let $case = case;
+                let $twist = twist_su2;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_general(
@@ -1210,7 +1222,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xSU2 mixed θ",
                 37,
             );
-            $check($engine, $($extra,)* case, twist_su2);
+            {
+                let $case = case;
+                let $twist = twist_su2;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_canonical_nonuniform(
@@ -1220,7 +1236,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xU1 canonical nonuniform",
                 39,
             );
-            $check($engine, $($extra,)* case, twist_u1);
+            {
+                let $case = case;
+                let $twist = twist_u1;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_canonical_nonuniform(
@@ -1230,7 +1250,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xSU2 canonical nonuniform",
                 41,
             );
-            $check($engine, $($extra,)* case, twist_su2);
+            {
+                let $case = case;
+                let $twist = twist_su2;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_canonical_uniform(
@@ -1240,7 +1264,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xU1 canonical uniform",
                 43,
             );
-            $check($engine, $($extra,)* case, twist_u1);
+            {
+                let $case = case;
+                let $twist = twist_u1;
+                $body
+            }
         }
         {
             let case = $crate::contract_cases::fermionic_canonical_uniform(
@@ -1250,7 +1278,11 @@ macro_rules! for_each_fermionic_fixture {
                 "fZ2xSU2 canonical uniform",
                 45,
             );
-            $check($engine, $($extra,)* case, twist_su2);
+            {
+                let $case = case;
+                let $twist = twist_su2;
+                $body
+            }
         }
         for case in $crate::contract_cases::fermionic_twist_roles(
             $engine,
@@ -1264,7 +1296,11 @@ macro_rules! for_each_fermionic_fixture {
             ],
             47,
         ) {
-            $check($engine, $($extra,)* case, twist_u1);
+            {
+                let $case = case;
+                let $twist = twist_u1;
+                $body
+            }
         }
         for case in $crate::contract_cases::fermionic_twist_roles(
             $engine,
@@ -1278,19 +1314,31 @@ macro_rules! for_each_fermionic_fixture {
             ],
             55,
         ) {
-            $check($engine, $($extra,)* case, twist_su2);
+            {
+                let $case = case;
+                let $twist = twist_su2;
+                $body
+            }
         }
         // `u` not dual: both lazy orderings then contract a leg that reaches
         // B's codomain dual, so each one is twisted.
         let lazy_u1: symtn::typed::TensorMap<$crate::contract_cases::FermionU1, $payload> =
             $crate::contract_cases::fermionic_general($engine, runtime, &fu1, false, "", 43).lhs;
         for case in $crate::contract_cases::lazy_cases($engine, &lazy_u1, "fZ2xU1 lazy") {
-            $check($engine, $($extra,)* case, twist_u1);
+            {
+                let $case = case;
+                let $twist = twist_u1;
+                $body
+            }
         }
         let lazy_su2: symtn::typed::TensorMap<$crate::contract_cases::FermionSu2, $payload> =
             $crate::contract_cases::fermionic_general($engine, runtime, &fsu2, false, "", 45).lhs;
         for case in $crate::contract_cases::lazy_cases($engine, &lazy_su2, "fZ2xSU2 lazy") {
-            $check($engine, $($extra,)* case, twist_su2);
+            {
+                let $case = case;
+                let $twist = twist_su2;
+                $body
+            }
         }
     }};
 }
