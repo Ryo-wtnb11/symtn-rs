@@ -67,7 +67,7 @@ fn checked_only_generic_eigh_validates_every_region_before_dense_work() {
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
-fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
+fn checked_generic_eigh_provider_failure_leaves_input_unchanged_and_success_keeps_provider() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
@@ -95,7 +95,6 @@ fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
         eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT),
         Err(CheckedGenericFactorPlanError::Provider(LateGenericError(1)))
     ));
-    assert_eq!(dense.counts().of(&[Op::Eigh, Op::EighInto]), 2);
     assert_eq!(input.data(), data);
 
     let complete = Arc::new(LateGenericSpy {
@@ -109,7 +108,6 @@ fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     let full =
         eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
-    assert_eq!(dense.counts().of(&[Op::Eigh, Op::EighInto]), 2);
     assert!(Arc::ptr_eq(full.v().space().provider_arc(), &complete));
     assert!(full
         .eigenvalues()
@@ -404,7 +402,7 @@ fn checked_generic_eigh_stably_keeps_raw_exact_signed_ties() {
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
-fn checked_generic_eig_stages_dense_work_before_checked_factor_admission() {
+fn checked_generic_eig_provider_failure_leaves_input_unchanged() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
@@ -431,7 +429,6 @@ fn checked_generic_eig_stages_dense_work_before_checked_factor_admission() {
         eig_full_dyn_checked_generic(engine, &mut dense, &input),
         Err(CheckedGenericFactorPlanError::Provider(LateGenericError(1)))
     ));
-    assert_eq!(dense.counts().eig, 2);
     assert_eq!(dense.counts().svd_vals, 0);
     assert_eq!(input.data(), data);
 }

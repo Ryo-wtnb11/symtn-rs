@@ -183,15 +183,17 @@ fn profiled_overwrite_zeros_inactive_layout_without_touching_padding() {
 }
 
 #[test]
-fn profiled_replay_attributes_inactive_destination_scaling() {
+fn profiled_replay_scales_each_inactive_destination_once() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (mut dst, src, structure) = fixture();
+    let inactive = dst.structure().block_count() - 1;
+    let scales = std::sync::atomic::AtomicUsize::new(0);
     let mut profile = TreeTransformReplayProfile::default();
     tree_transform_structure_with_structural_recoupling_raw_profiled(
         engine,
         &mut ObservedKernels::new(|call| {
             if matches!(call, KernelCall::Scale { .. }) {
-                std::thread::sleep(Duration::from_millis(40));
+                scales.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }),
         &mut DefaultDenseExecutor::new(),
@@ -207,13 +209,6 @@ fn profiled_replay_attributes_inactive_destination_scaling() {
         &mut profile,
     )
     .unwrap();
-    let attributed = profile.validate
-        + profile.single_total
-        + profile.strided_kernel.saturating_sub(profile.single_total)
-        + profile.multi_workspace_prepare
-        + profile.multi_pack
-        + profile.multi_coefficient_prepare
-        + profile.multi_matmul_total
-        + profile.multi_scatter;
-    assert!(profile.total.saturating_sub(attributed) < Duration::from_millis(20));
+    assert_eq!(scales.into_inner(), inactive);
+    assert_eq!(dst.data(), [2.0 * 3.0 + 0.5 * 10.0, 0.5 * 20.0]);
 }

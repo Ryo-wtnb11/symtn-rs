@@ -236,13 +236,22 @@ fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
     let generic_pair_rec = crate::probe::record();
     let one_sided_rec = crate::probe::record();
 
+    let mut compact_calls = 0;
+    let mut full_calls = 0;
     qr_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
+    compact_calls += 1;
     lq_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
+    compact_calls += 1;
     qr_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    compact_calls += 1;
     svd_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    compact_calls += 1;
     lq_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    compact_calls += 1;
     qr_full_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    full_calls += 1;
     lq_full_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    full_calls += 1;
 
     // Full QR/LQ publish each side through the side-aware builder (#1524).
     let one_sided = one_sided_rec.one_sided_publication();
@@ -251,12 +260,15 @@ fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
             one_sided.canonical_publications,
             one_sided.fallback_publications
         ),
-        (4, 0)
+        (2 * full_calls, 0)
     );
     let probe = generic_pair_rec.generic_pair_publication();
-    assert_eq!(probe.canonical_publications, 5);
+    assert_eq!(probe.canonical_publications, compact_calls);
     assert_eq!(probe.fallback_publications, 0);
-    assert_eq!((probe.left_owner_reused, probe.right_owner_reused), (5, 5));
+    assert_eq!(
+        (probe.left_owner_reused, probe.right_owner_reused),
+        (compact_calls, compact_calls)
+    );
     assert_eq!(
         (probe.left_appended_elements, probe.right_appended_elements),
         (0, 0)
@@ -300,6 +312,9 @@ where
     assert_pair_reconstructs_checked_literal(&full_qr.q, &full_qr.r, complex);
     let full_lq = lq_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_pair_reconstructs_checked_literal(&full_lq.l, &full_lq.q, complex);
+    // qr, svd and lq compact publish pairs; full qr and lq publish one side
+    // per output.
+    let (compact_calls, full_calls) = (3, 2);
 
     // Full QR/LQ publish each side through the side-aware builder (#1524).
     let one_sided = one_sided_rec.one_sided_publication();
@@ -308,10 +323,10 @@ where
             one_sided.canonical_publications,
             one_sided.fallback_publications
         ),
-        (4, 0)
+        (2 * full_calls, 0)
     );
     let probe = generic_pair_rec.generic_pair_publication();
-    assert_eq!(probe.canonical_publications, 3);
+    assert_eq!(probe.canonical_publications, compact_calls);
     assert_eq!(probe.fallback_publications, 0);
     assert!(probe.left_appended_elements > 0);
     assert!(probe.right_appended_elements > 0);

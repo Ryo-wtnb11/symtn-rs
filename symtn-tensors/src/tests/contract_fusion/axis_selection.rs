@@ -1,6 +1,16 @@
 use super::*;
+use crate::contract::FusionContractOrientation;
 use crate::probe::{self, Event};
 use symtn_dense::Engine;
+
+fn scored_candidates(lhs: &[usize], rhs: &[usize]) -> usize {
+    crate::contract::contracted_axis_order_candidates(lhs, rhs).len()
+        * [
+            FusionContractOrientation::LhsRhs,
+            FusionContractOrientation::RhsLhs,
+        ]
+        .len()
+}
 
 #[test]
 fn forced_axis_order_candidates_have_identical_u1_result() {
@@ -306,9 +316,10 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
         0.0,
     )
     .unwrap();
-    // What: eager resolution scores four candidates and builds only the
+    // What: eager resolution scores each candidate once and builds only the
     // reusable completed transformers, which it publishes.
-    assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 4);
+    let scored = scored_candidates(&[3, 2], &[0, 1]);
+    assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), scored);
     // The canonical fixture may be shared with a sibling test that already
     // published one of these keys.
     let cold = crate::probe::take_completed_transformer_activity();
@@ -328,7 +339,10 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
     .unwrap();
     // What: an ordinary repeat resolves eagerly and hits the published
     // transformers instead of rebuilding them.
-    assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 8);
+    assert_eq!(
+        candidate_score_calls_rec.get(Event::CandidateScore),
+        2 * scored
+    );
     let warm = crate::probe::take_completed_transformer_activity();
     assert_eq!((warm.builds, warm.hits), (0, 2));
 }
@@ -485,7 +499,10 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
         beta,
     )
     .unwrap();
-    assert_eq!(candidate_score_calls_rec.get(Event::CandidateScore), 4);
+    assert_eq!(
+        candidate_score_calls_rec.get(Event::CandidateScore),
+        scored_candidates(&[1, 0], &[2, 3])
+    );
     assert_oracle(one_shot_dst.data());
 
     let provider = Arc::new(rule);
