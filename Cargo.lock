@@ -2350,10 +2350,13 @@ dependencies = [
  "cpueinsum",
  "cpueinsum-blas",
  "num-complex",
+ "tcontract",
+ "tcontract-exec",
  "tenferro-cpu",
  "tenferro-gpu",
  "tenferro-linalg",
  "tenferro-tensor",
+ "tlinalg",
 ]
 
 [[package]]

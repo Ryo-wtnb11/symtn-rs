@@ -78,6 +78,25 @@ jobs:
       - name: Run production category contract
         run: cargo run --locked -p symtn-production-contract
         working-directory: symtn
+      # symtn-dense names executor, plan and pool types from these crates and
+      # hands them to tenferro's engine, so a second resolved version would be
+      # a type mismatch or a second thread pool rather than a mere duplicate.
+      - name: execution-path crate identity
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          for features in "" cpu-blas provider-inject "cuda,cpu-faer"; do
+            args=(--locked -p symtn-dense -e normal --target all --prefix none --format '{p}')
+            [ -n "$features" ] && args+=(--no-default-features --features "$features")
+            dups=$(cargo tree "${args[@]}" | awk '{print $1, $2}' | sort -u \
+              | awk '$1 ~ /^(tcontract|tcontract-exec|tlinalg|threadteam|t4a-faer|cpueinsum|cpueinsum-blas)$/ {print $1}' \
+              | uniq -d)
+            if [ -n "$dups" ]; then
+              echo "features [$features]: more than one version of: $dups"
+              exit 1
+            fi
+          done
+        working-directory: symtn
 
   backend-contract-linux:
     name: backend contract (linux)

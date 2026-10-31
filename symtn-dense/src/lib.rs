@@ -28,6 +28,12 @@ mod cuda_hermitian;
 #[cfg(any(feature = "cuda", test))]
 #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 mod cuda_region;
+// Test-only until the native block kernels consume it (#2430 K1, #2337 F1);
+// those leaves drop the `test` gate rather than carry unused production code.
+#[cfg(all(feature = "tenferro", test))]
+mod block_kernel {
+    pub(crate) mod schedule;
+}
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]
