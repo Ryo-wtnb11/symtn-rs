@@ -2,8 +2,8 @@
 //! against a correctly-rounded (or otherwise independently derived) oracle
 //! value, rather than requiring bitwise equality.
 //!
-//! Used by `typed_facade.rs`'s
-//! `c64_compact_inv_and_pinv_are_elementwise_reciprocals`, whose
+//! Used by `admission_modes/matrix_fn.rs`'s
+//! `compact_inv_and_pinv_are_elementwise_reciprocals`, whose
 //! exact equality assumption does not hold because `Complex64`'s compact
 //! reciprocal runs the Julia-ported `inv` (`symtn/src/typed.rs`
 //! `julia_complex64_reciprocal`) instead of the naive `1/z` it compares
