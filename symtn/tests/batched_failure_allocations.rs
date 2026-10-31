@@ -33,6 +33,16 @@ fn sequence(
 ) -> [(u64, u64); 3] {
     let cold = allocations(|| call(engine));
     let warm = allocations(|| call(engine));
+    // Why a BLAS build runs one more warm call: its eigh checks a workspace
+    // and an output out of the engine's best-fit buffer pool
+    // (`tlinalg-blas` eigh through `tenferro-cpu-basic` `buffer_pool`), and
+    // the warm calls alternate between two pool states, measured (124,
+    // 50803) and (126, 50843) without any failure (Tenferro 0.7.1 alternates
+    // too). The recovered call is compared with the warm call of its own
+    // phase. The faer eigh has no such checkout, so its warm state is steady.
+    if !cfg!(feature = "cpu-faer") {
+        call(engine);
+    }
     fail(engine);
     let recovered = allocations(|| call(engine));
     [cold, warm, recovered]

@@ -178,7 +178,18 @@ impl Warm {
     /// (Tenferro); the constant is the owned output, the committed space and
     /// the preview keys.
     fn assert_permute_bound(&self, what: &str) {
-        assert!(self.permute.0 <= 2 * self.permute_groups + 8, "{what}");
+        // A BLAS build adds twelve per recoupling GEMM that misses the
+        // engine's plan slot (see `assert_contract_bounds`); measured at
+        // rank 4 (G_t = 12): 69 calls under Accelerate against 9 with faer.
+        let provider = if cfg!(feature = "cpu-faer") {
+            0
+        } else {
+            12 * self.permute_groups
+        };
+        assert!(
+            self.permute.0 <= 2 * self.permute_groups + 8 + provider,
+            "{what}"
+        );
     }
 
     /// #2063: a warm contraction binds its completed transformers and
@@ -191,8 +202,24 @@ impl Warm {
         let transforms = if self.groups == 0 { 0 } else { 3 };
         assert_eq!(self.transformer_hits, transforms, "{what}");
         let groups = self.core_sectors as u64 + self.groups;
-        assert!(self.contract.0 <= 2 * groups + 32, "{what}");
-        assert!(self.contract.0 <= 3 * self.out_blocks as u64 + 64, "{what}");
+        // Why a BLAS build allows more per group: cpueinsum-blas 0.9 prepares
+        // a vendor plan for every grouped core job on each call and for every
+        // recoupling GEMM that misses the engine's plan slot, twelve
+        // allocations each (four `Vec`s in `layout::choose` for each of the
+        // m, n and k groups), plus one plan vector. The native plan used with
+        // `cpu-faer` allocates none. Measured at rank 2 (S = 2, G = 0): 42
+        // calls under Accelerate against 17 with faer. Provider plan
+        // preparation, not a symtn temporary.
+        let provider = if cfg!(feature = "cpu-faer") {
+            0
+        } else {
+            12 * groups + 1
+        };
+        assert!(self.contract.0 <= 2 * groups + 32 + provider, "{what}");
+        assert!(
+            self.contract.0 <= 3 * self.out_blocks as u64 + 64 + provider,
+            "{what}"
+        );
     }
 }
 

@@ -27,7 +27,19 @@ fn allocations<T>(f: impl FnOnce() -> T) -> (u64, T) {
 const LAZY_ADJOINT_SLACK: u64 = 0;
 /// Upper bound on warm `contract_conj` allocation calls. Recompiling the
 /// oriented plan per call would cost 474 or more on every row.
-const LAZY_ADJOINT_CEILING: u64 = 64;
+const LAZY_ADJOINT_CEILING: u64 = 64 + BLAS_GROUPED_PLAN_CALLS;
+/// Why a BLAS build pins more: cpueinsum-blas 0.9 prepares each grouped
+/// call's vendor plans per call, twelve allocations per GEMM job (four `Vec`s
+/// in `layout::choose` for each of the m, n and k groups) plus the plan
+/// vector, where the native plan used with `cpu-faer` allocates no per-job
+/// heap. The largest row (SU(2)) runs one grouped call of 11 jobs: measured
+/// 159 calls under Accelerate against 32 with faer. Provider plan
+/// preparation, not a symtn temporary; still far below a recompile.
+const BLAS_GROUPED_PLAN_CALLS: u64 = if cfg!(feature = "cpu-faer") {
+    0
+} else {
+    12 * 11 + 1
+};
 
 /// `A: V⊗V ← V⊗V` with three sectors of degeneracy four (the E1 `r4_s3_d4`
 /// row). The Runtime transform store must see no miss on a warm call.
