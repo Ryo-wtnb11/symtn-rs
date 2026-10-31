@@ -1,4 +1,4 @@
-//! Allocation contract of the batched failure rule (#1757): the buffers a
+//! Allocation contract of the batched failure rule: the buffers a
 //! failed call keeps are reused, so the first call after a failure allocates
 //! no more on the caller thread than a warm call. The allocation target
 //! shares one counting allocator; single-threaded runtimes mean the

@@ -1,10 +1,10 @@
-//! Export firewall for `symtn-dense` (#1805).
+//! Export firewall for `symtn-dense`.
 //!
 //! Pins the exact names `lib.rs` re-exports, under every feature combination
 //! at once, so adding or removing one fails here and is reviewed as an API
 //! change. `DensePlacement` (one variant, `Host`, with four accessors that
 //! always returned it), the `CUTENSOR_PLAN_BYTES` estimate and the test-only
-//! `cuda_is_hermitian_region` were removed from this surface (#1805).
+//! `cuda_is_hermitian_region` were removed from this surface.
 //!
 //! Why a source scan and not an import list: an import list only proves
 //! presence, not absence.

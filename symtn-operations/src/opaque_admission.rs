@@ -946,7 +946,7 @@ mod tests {
         );
     }
 
-    /// #1763: every Stage A failure the Host replay also detects surfaces with
+    /// Every Stage A failure the Host replay also detects surfaces with
     /// the Host's `OperationError`, in Stage A order, before any device work.
     #[test]
     fn host_shared_admission_failures_keep_the_host_category() {

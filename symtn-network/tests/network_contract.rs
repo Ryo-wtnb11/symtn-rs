@@ -1,5 +1,5 @@
-//! `Network::contract`: eager contraction through the Runtime's plan cache
-//! (#2022), checked against an independent pairwise oracle, explicit
+//! `Network::contract`: eager contraction through the Runtime's plan cache,
+//! checked against an independent pairwise oracle, explicit
 //! `plan` + `execute`, and an equal network built anew, which shares its
 //! cached plan.
 

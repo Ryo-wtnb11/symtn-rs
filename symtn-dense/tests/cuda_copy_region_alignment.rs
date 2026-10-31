@@ -1,5 +1,4 @@
-//! Device oracle for `cuda_copy_region_into` at arbitrary destination offsets
-//! (#1320, #1376).
+//! Device oracle for `cuda_copy_region_into` at arbitrary destination offsets.
 //!
 //! `copy_read_into` folds a view's element offset into the operand pointer.
 //! Advertising the allocation's 256-byte alignment for that shifted pointer
@@ -188,7 +187,7 @@ fn copy_case<D: CopyScalar>(
     );
 }
 
-/// Odd element offsets, #1320's 9 and 25, every power-of-two byte shift below
+/// Odd element offsets (including 9 and 25), every power-of-two byte shift below
 /// 256 that the element size can express, and the neighbours of the first two
 /// 256-byte boundaries. Blocks range from scalars to extents cuTENSOR can
 /// vectorize by 2, 4 and 8 along a contiguous or gapped leading dimension.

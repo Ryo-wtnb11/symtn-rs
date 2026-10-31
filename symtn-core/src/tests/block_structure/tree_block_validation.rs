@@ -1007,8 +1007,7 @@ fn multiplicity_free_per_block_seam_rejects_misreported_style_under_identity_pla
     let identity = PreparedTreePairOperation::prepare_transpose(0, 0, &[], &[]).unwrap();
 
     // What: identity rows never consult the rule, so the per-block seam's
-    // own style check is the only guard; it rejects in release builds too
-    // (#1950).
+    // own style check is the only guard; it rejects in release builds too.
     assert_eq!(
         proof
             .execute_multiplicity_free_for_block_index(0, &identity)

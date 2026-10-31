@@ -461,7 +461,7 @@ fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: like TensorKit's `exp`, a general per-block Pade approximant
-    // with no hermiticity gate (#577). `exp(A) exp(-A) = id` pins the actual exponential.
+    // with no hermiticity gate. `exp(A) exp(-A) = id` pins the actual exponential.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
@@ -575,7 +575,7 @@ fn exp_of_a_complex_compact_spectrum_takes_the_complex_elementwise_branch() {
             }
         })
         .unwrap();
-    // Dense storage of the very same matrix: since issue #577 it is accepted
+    // Dense storage of the very same matrix: it is accepted
     // too, through the general Pade arm — and because this particular matrix is
     // already diagonal, the two arms must agree entry for entry. Storage no
     // longer decides *whether* `exp` is defined, only how it is computed.
@@ -943,7 +943,7 @@ fn c64_compact_inv_and_pinv_are_elementwise_reciprocals() {
         {
             // Within 1 ulp, not bitwise, per `docs/testing_numerics.md`: the
             // compact reciprocal runs a literal port of Julia's
-            // `inv(::ComplexF64)` (#1463, `symtn/src/typed.rs`
+            // `inv(::ComplexF64)` (`symtn/src/typed.rs`
             // `julia_complex64_reciprocal`), whose fast path uses `mul_add`
             // where the naive `1/z` computed here does not, so this is a
             // different valid floating-point order of the same formula, not

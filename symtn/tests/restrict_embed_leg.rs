@@ -1,4 +1,4 @@
-//! Semantics of `TensorMap::restrict_leg` / `embed_leg` (#1285).
+//! Semantics of `TensorMap::restrict_leg` / `embed_leg`.
 //!
 //! Two oracles, both independent of the restriction kernel under test:
 //!
@@ -1210,10 +1210,10 @@ enum Place {
     End,
     Single,
     /// The first and the last position: the largest `|λ|` of an ascending
-    /// signed `eigh` spectrum, two runs (#2095).
+    /// signed `eigh` spectrum, two runs.
     Ends,
     /// Every other position from the first: an arbitrary `eig` set, one run
-    /// per kept position (#2095).
+    /// per kept position.
     Alternate,
 }
 
@@ -1414,8 +1414,8 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
 }
 
 /// A multi-axis `restrict_leg` against the same independent reduced-block
-/// oracle: every restricted axis is shifted by its own selection's start
-/// (#1561). Sequential one-axis restrictions, in the given order and
+/// oracle: every restricted axis is shifted by its own selection's start.
+/// Sequential one-axis restrictions, in the given order and
 /// reversed, must give the same bits.
 macro_rules! assert_exact_multi_restrict {
     ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),*], [$(($axis:expr, $places:expr)),+]) => {{
@@ -1732,7 +1732,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
     assert_compact_stays_compact!(engine, f64, leg, gaps);
 }
 
-/// #2095: non-contiguous kept positions on a middle SU(2) leg of a rank-four
+/// Non-contiguous kept positions on a middle SU(2) leg of a rank-four
 /// map and on the same leg of its lazy adjoint, against the dense gather of
 /// the physical expansion (multiplets kept whole, physical offsets
 /// recomputed), and `embed_leg` against the dense scatter into zeros.
@@ -1796,7 +1796,7 @@ fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_
     check(engine, &lazy, lazy.codomain().len() + 1);
 }
 
-/// #2095: kept positions are a set. Any spelling of one set is the same
+/// Kept positions are a set. Any spelling of one set is the same
 /// selection (canonical runs), `positions` reports it ascending, and
 /// unsorted, repeated or out-of-range positions are rejected (stricter than
 /// TensorKit's `view(b, :, I)`, which would permute or duplicate columns).

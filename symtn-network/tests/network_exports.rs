@@ -1,4 +1,4 @@
-//! Export firewall for `symtn-network` (#1806).
+//! Export firewall for `symtn-network`.
 //!
 //! Pins the exact names `lib.rs` re-exports, under every feature combination
 //! at once, so adding or removing one fails here and is reviewed as an API

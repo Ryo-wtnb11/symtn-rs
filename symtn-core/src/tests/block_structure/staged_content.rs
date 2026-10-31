@@ -57,7 +57,7 @@ fn concurrent_preview_initialization_moves_backing_once() {
 
 #[test]
 fn equal_uncached_structures_are_semantic_but_keep_monotonic_ids() {
-    // The clear below must not land inside a sibling's locked intern-table window (#2084).
+    // The clear below must not land inside a sibling's locked intern-table window.
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

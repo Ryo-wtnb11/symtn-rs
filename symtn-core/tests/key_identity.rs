@@ -1,17 +1,15 @@
-//! Block-key identity contract (#2192).
+//! Block-key identity contract.
 //!
 //! What: `Debug`, `Ord`, `Eq` and the cache hasher's `Hash` of
 //! `FusionTreeKey`, `FusionTreePairKey`, `FusionTreeGroupKey` and `BlockKey`
 //! depend only on the key's identity fields, never on which arena stores
 //! them, and the structure lookups find exactly the content-equal block.
 //!
-//! The hash formulas are written here from the public accessors; the few
-//! literal hashes pin the in-process `rustc_hash::FxBuildHasher` values (the
-//! hasher of every structure cache), so a reordered field or a changed hasher
-//! is caught even when both sides of a formula would move together. The hashes
-//! are never persisted. Slice hashing feeds native-endian `usize` bytes, so the
-//! literals hold on 64-bit little-endian targets only.
-#![cfg(all(target_pointer_width = "64", target_endian = "little"))]
+//! The hash formulas are written here from the public accessors and the
+//! in-process `rustc_hash::FxBuildHasher` (the hasher of every structure
+//! cache). The hashes are never persisted, so no hash value is pinned. The
+//! sample keys use sector ids above `u32::MAX`, so the file is 64-bit only.
+#![cfg(target_pointer_width = "64")]
 
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hash, Hasher};
@@ -657,42 +655,86 @@ fn structure_lookups_find_exactly_the_content_equal_block() {
     }
 }
 
-// Block order recorded by the former key corpus at e5023d98 and unchanged
-// through 85d16e6d. Block indices are observable (block access, lookups), so
-// a change of this order is a contract change, not a refactor.
+/// Block order is observable (block indices, block access, lookups), so it is
+/// a contract: blocks are grouped by coupled sector in ascending order
+/// (TensorKit `blocksectors` sorts), and each coupled sector lists its tree
+/// pairs column-major, domain tree outer and codomain tree inner (TensorKit
+/// `sectorstructure`). On each side, trees are ordered by their uncoupled
+/// sectors with the last leg most significant, then by inner lines and
+/// vertices, outermost first. TensorKit's `FusionTreeIterator` instead
+/// interleaves each inner line with the uncoupled sectors, so the per-side
+/// order differs from TensorKit on non-Abelian sides of rank three or more.
 #[test]
-fn structure_block_order_matches_recorded_order() {
-    let structures = real_structures();
-    let uncoupled = |label: &str| -> Vec<Vec<usize>> {
-        let (_, structure) = structures.iter().find(|(name, _)| *name == label).unwrap();
+fn structure_block_order_is_coupled_then_column_major_tree_pairs() {
+    fn tree_rank(tree: &FusionTreeKey) -> Vec<usize> {
+        let ids = |sectors: &[SectorId]| sectors.iter().rev().map(|s| s.id()).collect::<Vec<_>>();
+        let mut rank = ids(tree.uncoupled());
+        rank.extend(ids(tree.innerlines()));
+        rank.extend(tree.vertices().iter().rev().map(|v| v.get()));
+        rank
+    }
+    // A coupled sector reached with fusion multiplicity two, so the vertex
+    // index orders trees that share their uncoupled sectors.
+    let mult = vec![(SectorId::new(0), 1), (SectorId::new(1), 2)];
+    let coupled_two = vec![(SectorId::new(1), 1), (SectorId::new(2), 3)];
+    let multiplicity_two = hom(
+        &[(mult.clone(), false), (mult, false)],
+        &[(coupled_two, false)],
+    )
+    .coupled_subblock_structure_from_leg_degeneracies_generic(&MultiplicityTwoRule)
+    .unwrap();
+    let structures = real_structures()
+        .into_iter()
+        .chain([("generic-multiplicity-two", multiplicity_two)]);
+    for (label, structure) in structures {
         let sectors = structure.sector_structure();
-        (0..structure.block_count())
+        let pairs: Vec<FusionTreePairKey> = (0..structure.block_count())
             .map(|index| {
-                let pair = sectors.key(index).unwrap().as_fusion_tree_pair().unwrap();
-                pair.codomain_tree()
-                    .uncoupled()
-                    .iter()
-                    .map(|s| s.id())
-                    .collect()
+                sectors
+                    .key(index)
+                    .unwrap()
+                    .as_fusion_tree_pair()
+                    .unwrap()
+                    .clone()
             })
-            .collect()
-    };
-    assert_eq!(
-        uncoupled("u1-r3-empty-domain"),
-        [
-            [0, 0, 0],
-            [2, 1, 0],
-            [1, 2, 0],
-            [2, 0, 1],
-            [0, 2, 1],
-            [1, 0, 2],
-            [0, 1, 2]
-        ]
-    );
-    assert_eq!(
-        uncoupled("generic-multiplicity-r3"),
-        [[0, 0], [1, 0], [0, 1]]
-    );
+            .collect();
+        assert!(!pairs.is_empty(), "{label}");
+        let coupled: Vec<SectorId> = pairs.iter().map(|p| p.codomain_tree().coupled()).collect();
+        assert!(coupled.is_sorted(), "{label}: coupled sectors ascend");
+
+        let mut start = 0;
+        while start < pairs.len() {
+            let end = start + coupled[start..].partition_point(|&c| c == coupled[start]);
+            let region = &pairs[start..end];
+            let mut rows: Vec<&FusionTreeKey> = region.iter().map(|p| p.codomain_tree()).collect();
+            let mut cols: Vec<&FusionTreeKey> = region.iter().map(|p| p.domain_tree()).collect();
+            for side in [&mut rows, &mut cols] {
+                side.sort_by_key(|tree| tree_rank(tree));
+                side.dedup();
+            }
+            assert_eq!(
+                region.len(),
+                rows.len() * cols.len(),
+                "{label}: complete grid"
+            );
+            for (index, pair) in region.iter().enumerate() {
+                let (col, row) = (index / rows.len(), index % rows.len());
+                assert_eq!(
+                    pair.codomain_tree(),
+                    rows[row],
+                    "{label} block {}",
+                    start + index
+                );
+                assert_eq!(
+                    pair.domain_tree(),
+                    cols[col],
+                    "{label} block {}",
+                    start + index
+                );
+            }
+            start = end;
+        }
+    }
 }
 
 #[test]

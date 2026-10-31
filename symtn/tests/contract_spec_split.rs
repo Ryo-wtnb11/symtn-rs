@@ -1,4 +1,4 @@
-//! `contract` with a [`ContractSpec`] (#1549) against its definition: the
+//! `contract` with a [`ContractSpec`] against its definition: the
 //! contraction with TensorOperations' default split (every open leg of the
 //! left operand in the codomain), followed by `permute(codomain, domain)`.
 //! That is TensorKit's `tensorcontract_structure`,
@@ -190,7 +190,7 @@ fn every_order_and_split_matches_contract_then_permute() {
     check_symmetry::<_, Complex64>("fZ2xU(1)", &fermion_u1());
 }
 
-/// The compact diagonal arms of `contract` (#584): `t · s` and `s · t` with
+/// The compact diagonal arms of `contract`: `t · s` and `s · t` with
 /// `s` a compact SVD spectrum, against a dense copy of `s` through the default
 /// split and `permute`.
 fn check_compact<R>(symmetry: &str, v: &GradedSpace<R>)

@@ -1,6 +1,6 @@
 //! Independent expectation for the truncated-factorization compositions
 //! (`svd_compact` / `eigh_full` / `eig_full` → `diagview` → `find_truncated`
-//! → `restrict_leg`, #1300, #1534).
+//! → `restrict_leg`).
 //!
 //! Nothing here calls a symtn factorization or a symtn truncation decision:
 //!
@@ -278,7 +278,7 @@ pub fn singular_values(a: &Matrix) -> Vec<f64> {
 /// The eigenvalues of a triangular matrix are its diagonal. Panics unless `a`
 /// is exactly upper or lower triangular, so a fixture cannot drift out of the
 /// case this answer covers. Listed in symtn's published `eig` order,
-/// ascending lexicographic `(re, im)` (#1985), sorted here independently.
+/// ascending lexicographic `(re, im)`, sorted here independently.
 pub fn triangular_eigenvalues(a: &Matrix) -> Vec<Complex64> {
     assert_eq!(a.rows, a.cols, "an endomorphism block");
     let zero = |strict_lower: bool| {
@@ -316,7 +316,7 @@ pub fn kept_values<S: PartialEq, V: Copy>(
 /// offered magnitudes at the hand selection's kept positions, within the
 /// tolerance of its own dtype. The offers are descending; the kept values are
 /// compared as a multiset of magnitudes, since an `eigh` spectrum is stored
-/// ascending (#1985).
+/// ascending.
 #[track_caller]
 pub fn assert_kept_magnitudes<S, V>(
     what: &str,

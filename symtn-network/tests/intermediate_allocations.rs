@@ -1353,7 +1353,7 @@ fn typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm() {
                     sample.payload_retained_live_bytes == sample.payload_size_bytes
                         && sample.payload_output_live_bytes == sample.payload_size_bytes
                         // The first step's reordered output is the default order plus
-                        // a permute (#1461, TensorKit `copyC`): its per-call temporary
+                        // a permute (TensorKit `copyC`): its per-call temporary
                         // (the Runtime keeps no execution pool, as TensorKit allocates
                         // the `copyC` temporary per call), that step's result and the
                         // network output allocate.

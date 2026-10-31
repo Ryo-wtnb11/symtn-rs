@@ -1317,7 +1317,7 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
     }
 }
 
-/// #2233: a checked SU(3) source admits its trees once. A warm transform
+/// A checked SU(3) source admits its trees once. A warm transform
 /// whose source outlived its structure-cache entry derives its destination
 /// again, yet asks the provider no admission query (channels or N).
 #[cfg(feature = "cgc-gen")]

@@ -1,5 +1,5 @@
 //! The abelian and CU(1) symbols decode their `SectorId`s into fusion-symbols
-//! labels on every call (#2278); that decode, and the symbol itself, must not
+//! labels on every call; that decode, and the symbol itself, must not
 //! allocate, on admissible and inadmissible labels alike.
 
 use crate::counting_alloc;

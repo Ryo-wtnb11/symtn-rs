@@ -1,4 +1,4 @@
-//! Where the reductions accumulate, and what that is allowed to change (#1315).
+//! Where the reductions accumulate, and what that is allowed to change.
 //!
 //! `inner`, `norm`, `tr` and the compact full trace sum over a whole coupled
 //! region, so they accumulate in `WideScalar::Wide` — the payload type itself

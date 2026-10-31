@@ -1,4 +1,4 @@
-//! Hermitian and general eigendecomposition tests (#1596 split of tests.rs).
+//! Hermitian and general eigendecomposition tests.
 
 use super::*;
 
@@ -579,7 +579,7 @@ fn hermitian_threshold_pair<D: FactorScalar>(tol: f64, scale: f64) -> [TestTenso
 
 #[test]
 fn eigh_uses_eps_three_quarters_relative_tolerance_for_every_factor_dtype() {
-    // What: by default (#1987) normalized residuals below eps^(3/4) pass and
+    // What: by default normalized residuals below eps^(3/4) pass and
     // those above it fail, at the payload's own precision.
     fn check<D: FactorScalar + std::fmt::Debug>() {
         let [within, outside] = hermitian_threshold_pair::<D>(D::epsilon().powf(0.75), 1.0);
@@ -1646,7 +1646,7 @@ fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
 #[test]
 fn eigh_admits_gemm_built_gram_and_congruence_matrices_at_n_1000() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What (#1987): `AᵀA` and `Aᵀ(HA)` (`H = B + Bᵀ`) formed by the dense
+    // What: `AᵀA` and `Aᵀ(HA)` (`H = B + Bᵀ`) formed by the dense
     // backend's gemm are admitted by the default tolerance. Independent
     // oracle: their relative anti-Hermitian residual by direct summation,
     // which must sit below `eps^(3/4)`.
@@ -1710,7 +1710,7 @@ fn ascending_provider_eigh_order_is_published_without_a_permutation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the LAPACK/faer `syev` spectrum is already ascending, so full and
     // values-only EIGH publish it after the O(n) check alone: no sort, no
-    // value copy, no eigenvector column permutation (#1985).
+    // value copy, no eigenvector column permutation.
     let rule = Z2FusionRule;
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -1755,7 +1755,7 @@ fn ascending_provider_eigh_order_is_published_without_a_permutation() {
 #[test]
 fn eigenvalue_order_authority_is_stable_and_skips_sorted_input() {
     // What: the order authority returns the stable sorting permutation, and
-    // `false` with the identity for already-ordered input (#1985).
+    // `false` with the identity for already-ordered input.
     use crate::factorize::{ascending_eigh_order, lexicographic_eig_order};
     let mut order = [9; 4];
     let permutations = crate::probe::record();

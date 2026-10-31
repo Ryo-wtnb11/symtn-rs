@@ -1,4 +1,4 @@
-//! #1359: a warm eager contraction compiles its resolution without heap
+//! A warm eager contraction compiles its resolution without heap
 //! allocations for rank-sized data.
 
 use std::sync::Arc;
@@ -188,8 +188,8 @@ fn warm_contract_compile_allocations_do_not_scale_with_rank() {
     // What: the same allocation count of each route at every rank from 3 to
     // 7: per-call objects (plans, `Arc`s, permuted HomSpaces, the artifact),
     // never rank-sized buffers. An empty twist list is an empty scale list
-    // and allocates nothing (#1975); the layout lookup key borrows the
-    // HomSpace content (#1367).
+    // and allocates nothing; the layout lookup key borrows the
+    // HomSpace content.
     assert!(
         counts.iter().all(|count| *count == counts[0]),
         "[core, dynamic tree, plan] per rank 3..=7: {counts:?}"
@@ -247,7 +247,7 @@ fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
     let counts = CROSSING_SHAPES
         .map(|(codomain, domain)| crossing_compile_allocations(engine, leg, codomain, domain));
     // What: the rank-independent DynamicTree compile, and nothing per leg
-    // that changes side in a source transform. #1403 removed that per-leg
+    // that changes side in a source transform. There is no per-leg
     // allocation: `SectorLeg::dual` shares the source leg's sector data, as
     // TensorKit's `dual(V)` shares `V.dims`.
     assert!(
@@ -256,7 +256,7 @@ fn warm_contract_compile_allocates_nothing_per_leg_that_changes_side() {
     );
 }
 
-/// #1403: a leg whose sector -> degeneracy map the dual moves shares its
+/// A leg whose sector -> degeneracy map the dual moves shares its
 /// storage too, so it allocates nothing per crossing leg either.
 #[test]
 fn warm_contract_compile_allocates_nothing_per_crossing_leg_the_dual_moves() {
@@ -325,7 +325,7 @@ fn copy_c_plan_allocations(engine: &mut dyn Engine, rank: usize) -> [usize; 2] {
         assert!(resolution.is_dynamic_tree(), "rank {rank}");
         resolution
     });
-    // #1993: every structure this fixture builds is retained; the old 8 MiB
+    // Every structure this fixture builds is retained; the old 8 MiB
     // per-entry limit bypassed the rank-5 transform and recompiled it per call.
     assert_eq!(
         coefficient_groups().rejections(),
@@ -344,9 +344,9 @@ fn copy_c_plan_allocations(engine: &mut dyn Engine, rank: usize) -> [usize; 2] {
 fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // Rank 6 is the largest case (#1998): its complete HomSpace, transform
+    // Rank 6 is the largest case: its complete HomSpace, transform
     // and fusion-tree layouts must fit the default budgets and their
-    // largest-entry limits, or each warm call would rebuild them (#1993).
+    // largest-entry limits, or each warm call would rebuild them.
     for rank in [2, 3, 4, 5, 6] {
         let complete_bypasses =
             symtn_core::structure_cache_info(symtn_core::StructureCacheKind::DegeneracyStructure)
@@ -383,9 +383,9 @@ fn warm_copy_c_planning_is_bounded_and_no_costlier_than_the_dynamic_tree() {
 #[test]
 fn rank_six_complete_owner_reuses_content_across_derivations() {
     let _serial = crate::counting_alloc::serial();
-    // What (#1998): the U(1) `V^6 <- V^6` content (73,789 blocks) fits the
+    // What: the U(1) `V^6 <- V^6` content (73,789 blocks) fits the
     // complete owner, so independent ordinary derivations share its content.
-    // Expert from_parts construction is deliberately fresh (#2044).
+    // Expert from_parts construction is deliberately fresh.
     let provider = Arc::new(U1FusionRule);
     let first = space(&provider, 6, 6);
     let cache = symtn_core::StructureCacheKind::DegeneracyStructure;
@@ -407,7 +407,7 @@ fn rank_six_complete_owner_reuses_content_across_derivations() {
 fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (#2011): the rank-6 C1p working set — the
+    // What: the rank-6 C1p working set — the
     // CopyC output transform and the DynamicTree route's transforms — fits
     // the default process-global completed-transformer cache, so
     // alternating the two routes evicts nothing and every warm call reuses

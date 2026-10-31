@@ -1,11 +1,11 @@
 //! Adapter-level device tests over every admitted [`CudaScalar`] payload
-//! (`f32`, `f64`, `Complex32`, `Complex64`), issue #1326.
+//! (`f32`, `f64`, `Complex32`, `Complex64`).
 //!
 //! What this file owns that the `f64`/`Complex64` suites do not: the paths
 //! that were typed by `f64` rather than by the payload's real lane — the
 //! spectrum and reduction downloads, the normalizers of the Hermitian
 //! test, and its tolerance — plus complex device QR, the last
-//! dtype gate (tenferro-rs#1833, lifted by #1271).
+//! dtype gate (Tenferro lacked it: tenferro-rs#1833).
 //!
 //! Oracles are host computations in **double precision** over the widened
 //! fixture: a single-precision device answer is compared against `f64` host
@@ -29,7 +29,7 @@ use symtn_dense::{
 };
 
 /// The one-region case of [`cuda_hermitian_regions`]; test support since no
-/// production caller decides a single region (#1805).
+/// production caller decides a single region.
 fn cuda_is_hermitian_region<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
     src: &CudaDenseStorage,
@@ -729,7 +729,7 @@ fn hermitian_extremes_case<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 }
 
 /// The device Hermitian admission at the default tolerance of the payload's
-/// own lane, `eps(real(D))^(3/4)` (#1987): a block whose relative residual
+/// own lane, `eps(real(D))^(3/4)`: a block whose relative residual
 /// sits at half of it is Hermitian, and one at twice it is not.
 fn hermitian_tolerance_case<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
     // [[1, delta], [0, 1]]: the relative residual is `delta / 2` up to a

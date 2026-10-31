@@ -1,4 +1,4 @@
-//! `dst <- alpha * op(inputs) + beta * dst` for every linear `*_into` (#1550).
+//! `dst <- alpha * op(inputs) + beta * dst` for every linear `*_into`.
 //!
 //! The oracle never touches a destination path: it is the eager operation on
 //! the same inputs combined with the destination's prior value through the
@@ -972,8 +972,8 @@ macro_rules! device_suite {
                 2
             );
         }
-        // A lazy-adjoint axpby source reads its parent's blocks on the device
-        // (#1874); a zero beta over a NaN destination does not let it through.
+        // A lazy-adjoint axpby source reads its parent's blocks on the device;
+        // a zero beta over a NaN destination does not let it through.
         let prior = t2.adjoint(engine).unwrap().materialize(engine).unwrap();
         let poisoned = prior.scale(engine, nan).unwrap();
         for (alpha, beta) in coefficients::<D>() {

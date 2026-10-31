@@ -1,6 +1,6 @@
 //! General-axes contraction fixtures and their independent oracles, shared by
 //! the Host pin (`typed_contract_host_oracle.rs`, ungated) and the device gate
-//! (`typed_cuda_contract.rs`, #1345).
+//! (`typed_cuda_contract.rs`).
 //!
 //! Two oracles, neither of which passes through the Host `DynamicTree`
 //! compiler whose device replay is under test:
@@ -350,7 +350,7 @@ pub fn u1_non_self_dual() -> GradedSpace<U1FusionRule> {
     u1(&[(-1, 2), (0, 1), (1, 3)])
 }
 
-/// The contraction-candidate audit probes (#1468) on `V⊗V ← V⊗V` operands,
+/// The contraction-candidate audit probes on `V⊗V ← V⊗V` operands,
 /// each paired with its literal Core control's name. They are free in
 /// TensorKit only after the paired-axis sort or the operand swap; `P'` is a
 /// lazy adjoint:
@@ -409,12 +409,12 @@ where
 }
 
 /// Zero-copy candidates under a requested output order that is neither the
-/// identity nor `pAB′` (#1475): TensorKit `blas_contract!` then copies only
+/// identity nor `pAB′`: TensorKit `blas_contract!` then copies only
 /// C (`copyC`: `mul!` into a temporary, then a permuting `tensoradd!`), and
 /// `has_shared_permute(::AdjointTensorMap)` keeps `P'` free. Each probe is
 /// paired with whether that zero-copy candidate is the swap `B·A`:
 ///
-/// - `L3p` `P'[3,2]·B[1,0] → [1,0,2,3]` (the issue's example, sort);
+/// - `L3p` `P'[3,2]·B[1,0] → [1,0,2,3]` (sort);
 /// - `L5p` `A[0,1]·P'[2,3] → [3,2,0,1]` (swap);
 /// - `L7p` `A[3,2]·P'[1,0] → [0,1,3,2]` (sort, lazy rhs);
 /// - `C1p` `A[3,2]·B[1,0] → [1,0,3,2]`, `C2p` `A[0,1]·B[2,3] → [3,2,1,0]`
@@ -570,11 +570,11 @@ where
     ]
 }
 
-/// #2147: a lazy adjoint `a = t'` (`t: [V, V] <- [V]`) that is already a core
+/// A lazy adjoint `a = t'` (`t: [V, V] <- [V]`) that is already a core
 /// operand (identity tree transform) against a partner that must be permuted,
 /// so the route is DynamicTree with the adjoint borrowed and only the partner
 /// copied: `a` over its whole domain against `u = s.permute([0], [1, 2])`, and
-/// `w = s.permute([2, 0], [1])`'s leg 0 against `a`'s codomain; and (#2159,
+/// `w = s.permute([2, 0], [1])`'s leg 0 against `a`'s codomain; and (
 /// candidate selection) `a`'s domain against `r: [V, V] <- []`'s codomain in
 /// reverse order. Returns each case with whether its lazy operand is the lhs.
 pub fn identity_adjoint_cases<R, D>(
@@ -600,7 +600,7 @@ where
     let w = tensor::<R, D>(engine, runtime, &[v, v], &[v], 63)
         .permute(engine, &[2, 0], &[1])
         .unwrap();
-    // #2159: `a`'s domain against `r`'s codomain in reverse order. Keeping
+    // `a`'s domain against `r`'s codomain in reverse order. Keeping
     // `a`'s order permutes only `r` (|r| < |t|), keeping `r`'s permutes `a`:
     // TensorKit `contract_memcost` takes the former.
     let r = tensor::<R, D>(engine, runtime, &[v, v], &[], 64);
@@ -755,7 +755,7 @@ where
 /// The `mul!` form with B's whole codomain `(v*, v*)` contracted: θ of a
 /// core-right block is the product of its two uncoupled parities, the parity
 /// of its coupled sector, so it is uniform within each coupled-sector matrix
-/// and the core carries it as per-job GEMM alpha (#1858), where TensorKit's
+/// and the core carries it as per-job GEMM alpha, where TensorKit's
 /// `blas_contract!` copies an operand to twist it.
 pub fn fermionic_canonical_uniform<R, D>(
     engine: &mut dyn Engine,
@@ -1145,7 +1145,7 @@ pub fn fz2_tensorkit_loops<T>(
     ]
 }
 
-/// Every fermionic fixture (#1347), handed to `check` with the engine, any
+/// Every fermionic fixture, handed to `check` with the engine, any
 /// `extra` engines (the device gate's CUDA engine) and the provider's typed
 /// twist; shared by the Host pin and the device gate. A
 /// macro because each provider's twist has its own dispatch bound.

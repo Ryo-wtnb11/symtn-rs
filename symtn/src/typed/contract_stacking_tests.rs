@@ -1,4 +1,4 @@
-//! #1517: contraction of expert-layer tilings whose coupled-sector row and
+//! Contraction of expert-layer tilings whose coupled-sector row and
 //! column tree stackings differ from each other or from the partner operand.
 
 use std::collections::BTreeMap;
@@ -475,7 +475,7 @@ fn su2_mis_stacked_contractions_match_tree_identity() {
     );
 }
 
-/// #1858: a `mul!`-form contraction of non-canonical tilings is a core with
+/// A `mul!`-form contraction of non-canonical tilings is a core with
 /// pack/scatter around the GEMMs on the Host eager executor (its
 /// `IRREGULAR_CORE` capability), as on the Host ladder before: no tree
 /// transform runs, where the device-capable planning would transform both

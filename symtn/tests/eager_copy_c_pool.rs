@@ -1,11 +1,10 @@
 //! An eager `contract(spec)` that takes TensorKit `blas_contract!`'s `copyC`
 //! route (a zero-copy contraction into a temporary, then one permute into the
 //! result) allocates exactly two output-sized buffers, warm or cold: the
-//! temporary and the returned tensor. `contract_into` (#1631) takes the same
+//! temporary and the returned tensor. `contract_into` takes the same
 //! route and allocates only the temporary. Like TensorKit, whose `copyC`
 //! temporary is allocated per call, the temporary is per-call scratch: the
-//! Runtime keeps no execution pool (#1626's pooled temporary was retired with
-//! the caller-owned engine model).
+//! Runtime keeps no execution pool, because the engine is caller-owned.
 
 use std::sync::Arc;
 
@@ -60,7 +59,7 @@ fn warm_split_moving_eager_contract_allocates_only_its_result() {
         );
     }
 
-    // What: `contract_into` takes the same route (#1631), so it allocates
+    // What: `contract_into` takes the same route, so it allocates
     // the temporary and nothing else output-sized.
     let mut destination = a.contract(engine, &b, &spec).unwrap();
     for _ in 0..2 {

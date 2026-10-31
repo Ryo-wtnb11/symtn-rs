@@ -1,4 +1,4 @@
-//! Allocation contract of the owned eager contraction output (#1212): the
+//! Allocation contract of the owned eager contraction output: the
 //! payload is one allocator-zeroed allocation of `P * size_of::<D>()` bytes
 //! for both dtypes, and nothing else on the warmed path allocates zeroed
 //! memory or re-touches the inactive blocks.
@@ -151,7 +151,7 @@ fn owned_su2_contraction_with_inactive_sectors_is_one_allocator_zeroed_payload()
     su2_compose_measurement::<f64>(1_212_003);
 }
 
-/// #1315: a single-precision payload must run the same algorithm on the
+/// A single-precision payload must run the same algorithm on the
 /// recoupling path, not a different one. Same fixture, same call count; only
 /// the zeroed payload is half the size, which
 /// `zeroed_allocations_of(size_of_val(data))` checks per dtype.

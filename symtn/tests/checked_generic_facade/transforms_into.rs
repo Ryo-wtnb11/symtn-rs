@@ -1,4 +1,4 @@
-//! Checked Generic tree-transform `_into` (#1870): the eager op's
+//! Checked Generic tree-transform `_into`: the eager op's
 //! staging and commit around a write into the caller's buffer.
 
 use super::*;
@@ -64,8 +64,8 @@ fn checked_transform_into_makes_the_eager_provider_queries() {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(70));
     for (name, eager, into) in OPERATIONS {
-        // Why a fresh source per cold call: a source admits its trees once
-        // (#2233), so a reused one would make the second cold call cheaper.
+        // Why a fresh source per cold call: a source admits its trees once,
+        // so a reused one would make the second cold call cheaper.
         let source = toy_source(&runtime, &provider);
         forget_cached_structures();
         reset_provider_queries(&provider);

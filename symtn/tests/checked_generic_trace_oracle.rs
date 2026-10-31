@@ -1,5 +1,5 @@
-//! Checked Generic `trace_pairs` against an independent contraction oracle
-//! (#2054): tracing legs `(i, j)` equals contracting them with the identity
+//! Checked Generic `trace_pairs` against an independent contraction oracle:
+//! tracing legs `(i, j)` equals contracting them with the identity
 //! `isomorphism(S ← S)` on `S = space(t, i)`, as TensorKit's `@tensor`
 //! lowers `t[a, b, a]` either way. The contraction shares no trace lowering
 //! (split, channel match, channel factor). SU(2) and SU(3) through the

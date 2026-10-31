@@ -1,9 +1,9 @@
-//! `StackedTensorMap::restrict_leg` on Host (#1503).
+//! `StackedTensorMap::restrict_leg` on Host.
 //!
 //! The oracle is eager `TensorMap::restrict_leg` applied to each member: the
 //! stacked result must equal it bit for bit, with the same space, and reject
 //! the same inputs with the same errors. A multi-axis set is additionally
-//! checked against sequential one-axis restrictions of each member (#1561).
+//! checked against sequential one-axis restrictions of each member.
 
 use num_complex::Complex64;
 use std::sync::Arc;

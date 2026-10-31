@@ -60,7 +60,7 @@ mod tests {
     include!("../../tests/common/spy_executor.rs");
 
     /// The CopyC temporary is born zero and only the core GEMMs write it,
-    /// at member offsets that do not depend on `B` (#1746, #1859): its
+    /// at member offsets that do not depend on `B`: its
     /// inactive block stays zero across `B` changes and warm
     /// replays without a refill, so a warm call submits exactly what the
     /// first call on a fresh temporary did.

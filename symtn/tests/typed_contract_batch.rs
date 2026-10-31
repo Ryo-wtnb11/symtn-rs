@@ -1186,7 +1186,7 @@ where
         .collect()
 }
 
-/// Changed-input reuse of the workspace-owned output (#1732, #2123): over
+/// Changed-input reuse of the workspace-owned output: over
 /// the B sequences 1, 2, 17, 1 and 4, 2, 4 on one workspace, each call
 /// executes stale inputs, then a rejected call (its buffer becomes the
 /// unobservable spare), then fresh inputs into that same buffer, and finally

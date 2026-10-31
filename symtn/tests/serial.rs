@@ -53,7 +53,7 @@ mod lazy_adjoint_factorization_allocations;
 mod permute_overwrite_allocations;
 mod planar_contract_allocations;
 mod precision_conversions;
-mod prepared_compose_pins;
+mod prepared_compose_allocations;
 mod prepared_eigh_allocations;
 mod prepared_member1_core_reuse;
 mod repartition_allocations;

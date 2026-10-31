@@ -1,4 +1,4 @@
-//! Exact cross-sector ties keep the sector TensorKit keeps (#1381).
+//! Exact cross-sector ties keep the sector TensorKit keeps.
 //!
 //! TensorKit 0.17.1 `findtruncated(::SectorVector, ...)`
 //! (`src/factorizations/truncation.jl`) sorts the flat `parent(values)` with
@@ -13,7 +13,7 @@
 //! the `isless` order quoted beside each case. No expectation is read back from
 //! symtn.
 //!
-//! Ties *within* a sector (#2095) go to the lower position in the same flat
+//! Ties *within* a sector go to the lower position in the same flat
 //! order, so `truncrank` keeps the earlier position and `truncerror` discards
 //! it. Those expected positions were produced by TensorKit `cfaa073e`
 //! (0.17.0) with MatrixAlgebraKit 0.6.8, `MAK.findtruncated` over a

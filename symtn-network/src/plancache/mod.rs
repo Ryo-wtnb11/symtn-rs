@@ -1521,7 +1521,7 @@ mod tests {
 
     type Call<'a> = &'a dyn Fn(&mut dyn Engine) -> Result<(), String>;
 
-    /// #1371: `reject` is rejected on the plan-cache miss, topology-hit and
+    /// `reject` is rejected on the plan-cache miss, topology-hit and
     /// alias-hit paths of the `Network::contract` call that `accept` publishes,
     /// leaving [`CacheState`] and `extra` (device transfers) unchanged, with
     /// one error on every path, which is returned.
@@ -1574,7 +1574,7 @@ mod tests {
         error
     }
 
-    /// The two networks of the #1371 tests: `[i; k] = a[i; j] * b[j; k]`, and
+    /// The two networks of the metadata-rejection tests: `[i; k] = a[i; j] * b[j; k]`, and
     /// a contraction of two codomain legs, neither read as a dual,
     /// `[i; k] = a[i, j;] * b[j, k;]`. Each is one topology for every
     /// provider and storage, so a probe operand meets the plan a U(1) operand
@@ -1615,7 +1615,7 @@ mod tests {
         .map_err(|error| error.to_string())
     }
 
-    /// The operands of the #1371 tests, every leg of dimension 2: `v` has two
+    /// The operands of the metadata-rejection tests, every leg of dimension 2: `v` has two
     /// sectors, `w` one, and `v*` is `v`'s dual.
     struct Rejections<T, P> {
         a: T,
@@ -1706,9 +1706,9 @@ mod tests {
         }
     }
 
-    /// #1274: an execution that fails after the lease quarantines the
+    /// An execution that fails after the lease quarantines the
     /// leased workspace instead of recycling buffers the failure may have
-    /// disturbed, and the next call builds a fresh one. After the #1371
+    /// disturbed, and the next call builds a fresh one. After the metadata
     /// preflight only a runtime fault fails an execution, so the fault is
     /// injected through the executor `execute_leased` already takes.
     #[test]
@@ -1748,7 +1748,7 @@ mod tests {
         );
     }
 
-    /// #2269: a written `;` split that is not the tensor's codomain rank is
+    /// A written `;` split that is not the tensor's codomain rank is
     /// rejected before the plan-cache lookup on the miss, topology-hit and
     /// alias-hit paths of the same `Network`, so the alias the accepted call
     /// installed (keyed by the network, not the tensors) is never reached.
@@ -1786,7 +1786,7 @@ mod tests {
         }
     }
 
-    /// #1371: a Host `Network::contract` whose operands are
+    /// A Host `Network::contract` whose operands are
     /// inadmissible from metadata alone — a contracted leg of another sector
     /// structure or of the wrong duality, or a non-symmetric braiding that
     /// contracts — is rejected before the plan-cache lookup on the miss,
@@ -1863,7 +1863,7 @@ mod tests {
         assert_eq!(error, contract_error, "non-symmetric");
     }
 
-    /// #1371 on the device: the same rejections, before any lease or plan
+    /// The metadata rejections on the device: the same rejections, before any lease or plan
     /// lookup, with the Host's error.
     ///
     /// The transfer counters are process-wide: run with `--test-threads=1`.
@@ -1932,7 +1932,7 @@ mod tests {
         }
     }
 
-    /// #2022: `Network` labels are arbitrary strings, so a label holding the
+    /// `Network` labels are arbitrary strings, so a label holding the
     /// key's separators must not make two topologies share a persisted key.
     /// Unescaped, both of these would be `0:1:1:a,b`.
     #[test]

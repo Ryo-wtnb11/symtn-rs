@@ -1,4 +1,4 @@
-//! Behaviour of the owned eager contraction output (#1212): inactive
+//! Behaviour of the owned eager contraction output: inactive
 //! destination blocks (coupled sectors the contracted bond cannot reach) are
 //! exactly `+0.0`, active blocks agree with the destination path
 //! `contract_into` on a `+0.0`-prefilled buffer, and an empty

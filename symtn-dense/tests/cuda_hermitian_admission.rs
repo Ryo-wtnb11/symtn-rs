@@ -1,6 +1,6 @@
-//! Batched device Hermitian admission (#1483): one call over many regions
+//! Batched device Hermitian admission: one call over many regions
 //! makes the same per-region decisions as the per-region rule, and its
-//! downloads do not grow with the region count. Member stacks (#1782) run the
+//! downloads do not grow with the region count. Member stacks run the
 //! same pipeline: every (member, region) decision equals the single call on
 //! that member, and downloads do not grow with the member count.
 //!
@@ -25,7 +25,7 @@ use symtn_dense::{
 
 /// The one-region case of [`cuda_hermitian_regions`] at the default
 /// tolerance; test support since no production caller decides a single
-/// region (#1805).
+/// region.
 fn cuda_is_hermitian_region<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
     src: &CudaDenseStorage,

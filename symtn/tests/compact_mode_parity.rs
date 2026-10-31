@@ -1,5 +1,5 @@
 //! A compact diagonal (TensorKit `DiagonalTensorMap`) answers every operation
-//! the same way in both admission modes (#1866): the same storage form, the
+//! the same way in both admission modes: the same storage form, the
 //! same values, and the dense route's answer once materialized.
 //!
 //! Twist. TensorKit `cfaa073e` `twist(t, inds; inv)`
@@ -756,7 +756,7 @@ const CONTRACT_CASES: [BondCase; 10] = [
         'b',
         Some(spec(&[1], &[0], &[0, 1], &[2])),
     ),
-    // Reordered `D . D` is the product spectrum and one permute (#1870):
+    // Reordered `D . D` is the product spectrum and one permute:
     // a swap stays compact (TensorKit `diagonal.jl:291`), a bend is dense.
     (
         "contract D . D swapped",
@@ -968,7 +968,7 @@ fn fermionic_compact_compose_and_contract_agree_across_modes() {
             ),
             &cases,
         );
-        // Every pattern is an arm, reordered `D . D` included (#1870).
+        // Every pattern is an arm, reordered `D . D` included.
         assert_rows_close(&mf, &checked);
     }
 }
@@ -1003,8 +1003,8 @@ fn multiplicity_free_u1_compact_compose_and_contract_match_the_dense_route() {
 fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the complex-symbol coefficient lane takes the compact arms
-    // (#1866); compose stays compact for `D * D` and scales for
+    // What: the complex-symbol coefficient lane takes the compact arms;
+    // compose stays compact for `D * D` and scales for
     // `t * D` / `D * t`. Fibonacci is anyonic, so `contract` keeps rejecting
     // it before any arm, compact or not.
     use symtn::sector::{TableRule, TableSector};
@@ -1354,7 +1354,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
         &fixture(z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0))),
         &cases,
     );
-    // No row is rejected: reordered `D . D` is an arm too (#1870).
+    // No row is rejected: reordered `D . D` is an arm too.
     assert_rows_close(&mf, &checked);
 }
 
@@ -1366,8 +1366,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
 // rank-one tree pair. `braid` has no diagonal method: `similar(t, T, V)`
 // (`src/tensors/abstracttensor.jl:614-618`) makes it a dense `TensorMap`.
 // QSpace has no braiding. The per-sector swap coefficients below were read
-// from TensorKit at `cfaa073e` (script and output in the #1866
-// record): fZ2 permute θ-sign `-1` on the odd sector and transpose `+1`; Z2,
+// from TensorKit at `cfaa073e` (computed with a TensorKit script): fZ2 permute θ-sign `-1` on the odd sector and transpose `+1`; Z2,
 // U(1) and SU(2) (j = 0, 1/2, 1) all `1`.
 
 const TRANSFORMS: [&str; 3] = ["permute", "transpose", "braid"];
@@ -1725,8 +1724,8 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
 fn fibonacci_complex_symbol_compact_transpose_and_braid_take_the_arm() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the complex-symbol coefficient lane takes the same arm (#1866
-    // X6): transpose stays compact and the braid is read from the spectrum.
+    // What: the complex-symbol coefficient lane takes the same arm:
+    // transpose stays compact and the braid is read from the spectrum.
     // Fibonacci is anyonic, so `permute` is rejected alike for the compact
     // and the materialized input.
     use symtn::sector::{TableRule, TableSector};
@@ -2325,9 +2324,9 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
     cuda_rows!("U(1) c64", u1(), charge, complex);
 }
 
-/// Checked tree-transform `_into` (#1870): which error a call with two
+/// Checked tree-transform `_into`: which error a call with two
 /// faults reports does not depend on cache history. A warm checked transform
-/// defers its plan preflight from staging to resolution (#2154), so the
+/// defers its plan preflight from staging to resolution, so the
 /// destination's space is compared only after resolution in that mode;
 /// otherwise a `SpaceMismatch` would hide the preflight error only when warm.
 /// Lives here for the `CheckedZ2` rule, whose braiding is a parameter.
@@ -2675,7 +2674,7 @@ fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() 
     // What: a provider failing in the staging of a compact or lazy-adjoint
     // source's `_into` is the typed plan error, leaves the destination bit
     // for bit, and publishes no layout, transformer or coefficients; the
-    // succeeding call after it does (#2063).
+    // succeeding call after it does.
     const ISOLATED: &str = "SYMTN_COMPACT_TRANSFORM_INTO_PUBLICATION_ISOLATED";
     const NAME: &str = "compact_mode_parity::checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing";
     if std::env::var_os(ISOLATED).is_none() {
@@ -2883,7 +2882,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
     // in the permute staging of a reordered compact arm, is the typed plan
     // error, leaves the destination bit for bit and publishes nothing; so
     // does a shared destination rejected after staging. The succeeding call
-    // after them publishes (#2063).
+    // after them publishes.
     const ISOLATED: &str = "SYMTN_CONTRACT_INTO_PUBLICATION_ISOLATED";
     const NAME: &str =
         "compact_mode_parity::checked_contract_into_failure_is_typed_and_nonpublishing";
@@ -3208,7 +3207,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
     // What: a provider failing in the staging of `trace_pairs_into` is the
     // typed plan error, leaves the destination bit for bit and publishes
     // nothing; so does a shared destination rejected after staging. The
-    // succeeding call after them publishes (#2063).
+    // succeeding call after them publishes.
     const ISOLATED: &str = "SYMTN_TRACE_INTO_PUBLICATION_ISOLATED";
     const NAME: &str =
         "compact_mode_parity::checked_trace_pairs_into_failure_is_typed_and_nonpublishing";
@@ -3245,7 +3244,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         let mut destination = trace_into_destination(source.runtime(), salt, kind);
         let pairs = trace_into_pairs(kind);
         symtn_core::clear_structure_caches();
-        // What #2063 stages: the destination layout and the coefficients
+        // What is staged: the destination layout and the coefficients
         // (the sector algebra the preflight reads is not staged, as for
         // contraction).
         let published = || {

@@ -1,5 +1,4 @@
-//! `truncspace` — fixed per-sector truncation on the typed facade (issue #597,
-//! item 4).
+//! `truncspace` — fixed per-sector truncation on the typed facade.
 //!
 //! TensorKit `TruncationSpace` (`src/factorizations/truncation.jl:261-269`)
 //! reads the target rank of coupled sector `c` as `dim(strategy.space, c)` and

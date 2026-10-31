@@ -98,7 +98,7 @@ fn raw_execution_failure_does_not_publish() {
     assert_eq!(payloads.get(), 1);
     assert_eq!(executions.get(), 1);
     assert_unpublished();
-    // Nor are its trace permutation groups (#2072).
+    // Nor are its trace permutation groups.
     assert_eq!(crate::probe::take_trace_column_activity().publications, 0);
 }
 
@@ -221,7 +221,7 @@ fn success_uses_independent_partial_trace_and_commits_after_execution() {
     let (admissions, entries, bytes) = owner();
     assert_eq!((admissions, entries), (1, 1));
     assert!(bytes > 0);
-    // Its trace permutation groups are published after the commit (#2072).
+    // Its trace permutation groups are published after the commit.
     let activity = crate::probe::take_trace_column_activity();
     assert!(activity.publications > 0);
     assert_eq!(activity.publications, activity.misses);
@@ -381,7 +381,7 @@ fn bond_source() -> BoundDynamicFusionMapSpace<CheckedTraceToy> {
 
 #[test]
 fn read_answers_a_scalar_destination_in_the_same_transaction() {
-    // What (#1866): a scalar destination may be answered from the compiled
+    // What: a scalar destination may be answered from the compiled
     // terms. The answer is scaled by `alpha`, neither the payload nor the
     // execution runs, and the destination still commits. A conjugated source
     // is not offered to `read`.

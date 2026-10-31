@@ -1,4 +1,4 @@
-//! Allocation probes for the typed facade's compact diagonal storage (#570).
+//! Allocation probes for the typed facade's compact diagonal storage.
 //!
 //! The `Σ_c k_c` storage claim is asserted by counting bytes through a global
 //! allocator while one operation runs, and by `dense_data()` refusing a
@@ -421,7 +421,7 @@ fn contracting_a_spectrum_scales_instead_of_densifying() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `contract` against a compact operand takes the same scaling route
-    // `compose` does (issue #584) — TensorKit's `lmul!`/`rmul!` on a
+    // `compose` does — TensorKit's `lmul!`/`rmul!` on a
     // `DiagonalTensorMap` — rather than materializing the `Σ_c k_c²` block
     // diagonal and running a GEMM.
     //
@@ -492,7 +492,7 @@ fn the_rank_one_swap_keeps_its_source_and_its_result_compact() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: re-ordering the two legs of a spectrum factor is a per-sector
-    // rescaling of the stored values (#585), so it neither reads nor writes a
+    // rescaling of the stored values, so it neither reads nor writes a
     // `Σ_c k_c²` payload. Two things are measured, because each catches a
     // different way of getting it wrong: the swap's own byte cost (a densified
     // route would pay for two dense buffers), and that the *result* is still
@@ -554,9 +554,9 @@ fn exact_identity_keeps_compact_storage_and_braid_publishes_dense_output() {
 fn compact_is_posdef_never_builds_a_dense_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the positive-definiteness chain on a spectrum factor (#1557:
-    // Hermiticity gate, norm, `diagview`) is a comparison over the stored
-    // values (#585). It is not allocation-*free* — the Hermiticity gate it
+    // What: the positive-definiteness chain on a spectrum factor (Hermiticity
+    // gate, norm, `diagview`) is a comparison over the stored
+    // values. It is not allocation-*free* — the Hermiticity gate it
     // opens with is `t - t†`, which owns two compact `Σ_c k_c` results, and
     // that is the route TensorKit takes too — but it must stay far below the
     // `Σ_c k_c²` materialization the eigensolver route needed.
@@ -678,9 +678,9 @@ fn rank_and_leg_inspections_allocate_no_payload() {
 fn the_full_bond_trace_reduces_the_spectrum_without_materializing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (issue #604): `trace_pairs` over the only pair of a compact bond
-    // factor reduces the stored spectrum in O(Σ_c k_c), preserving the #585
-    // regression gate. The warm-up runs on a throwaway twin, so the measured
+    // What: `trace_pairs` over the only pair of a compact bond
+    // factor reduces the stored spectrum in O(Σ_c k_c), preserving the
+    // linear-in-spectrum bound. The warm-up runs on a throwaway twin, so the measured
     // run pays for everything but the process-global caches.
     let ceiling = dense_payload_bytes();
 
@@ -762,7 +762,7 @@ fn contract_keeps_the_compact_storage_outcomes() {
         "ordered s * s densified its result"
     );
 
-    // `s · s` with `[1] ← [0]` is the product spectrum and one swap (#1870):
+    // `s · s` with `[1] ← [0]` is the product spectrum and one swap:
     // the swap keeps it
     // compact, as TensorKit's `DiagonalTensorMap` result (`diagonal.jl:291`),
     // and the whole contraction costs less than one dense payload.

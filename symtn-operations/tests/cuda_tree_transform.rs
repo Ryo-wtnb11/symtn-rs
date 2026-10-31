@@ -1,4 +1,4 @@
-//! Device tests for the tree-transform executor (issues #1304, #1310).
+//! Device tests for the tree-transform executor.
 //!
 //! Oracles: the explicit-index walk in `common`, which never reads a
 //! `TreeTransformStructure` and is itself pinned against the host executor by
@@ -385,7 +385,7 @@ fn device_replay_matches_the_oracle_and_the_host_for_every_fixture() {
     // What: rank 2-6 permutes, transposes, fermionic signs, coefficients that
     // are neither 1 nor -1, conjugated sources, interleaved multi-block
     // layouts, inactive layouts and a zero-extent block, in all four payload
-    // dtypes (#1326) and both destination modes.
+    // dtypes and both destination modes.
     let mut ctx_engine = engine();
     let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
@@ -678,7 +678,7 @@ fn unsupported_modes_are_rejected_before_any_device_work() {
     // — for a Single-block structure and for a recoupling
     // structure, whose pack columns and coefficient upload must not happen on
     // the strength of one unwritable scatter region. Every `beta` is
-    // supported (#1550), so it is not a rejection input.
+    // supported, so it is not a rejection input.
     let mut ctx_engine = engine();
     let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
@@ -840,7 +840,7 @@ fn mismatched_structures_and_lengths_are_rejected_by_admission() {
             CudaTreeTransformDestination::Overwrite,
         )
         .unwrap_err();
-    // The Host replay's categories (#1763), not a collapsed InvalidArgument.
+    // The Host replay's categories, not a collapsed InvalidArgument.
     assert_eq!(
         wrong_structure,
         OperationError::StructureMismatch { tensor: "dst" }
@@ -1498,8 +1498,8 @@ fn check_scales<T: DeviceScalar>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_zero_caller_scale_writes_zeros_over_a_nan_source_as_the_host() {
-    // What: alpha = 0 follows VectorInterface's `scale(x, 0) = zero(x) * 0`
-    // (#1438), as TensorKit's `permute!(tdst, tsrc, p, 0, 0)` does: Overwrite
+    // What: alpha = 0 follows VectorInterface's `scale(x, 0) = zero(x) * 0`,
+    // as TensorKit's `permute!(tdst, tsrc, p, 0, 0)` does: Overwrite
     // writes zeros over every layout whatever the source holds, and
     // Axpby(1) and Axpby(0) behave as `dst + 0` and Overwrite. Compared
     // with the host and the oracle, whose zero rule CI pins.
@@ -1651,7 +1651,7 @@ fn a_zero_scale_sizes_the_template_of_a_structure_with_no_zero_fill() {
     // template of its own, so the zero fills a zero scale writes over its
     // written layouts are the only reason one exists. It must still be
     // reserved — before the first submission — and the result must be the
-    // host's: zeros, NaN source included (#1438).
+    // host's: zeros, NaN source included.
     let mut ctx_engine = engine();
     let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
@@ -1827,7 +1827,7 @@ fn a_zero_caller_scale_is_rejected_in_the_same_order() {
 
 /// θ = −1 on every other non-empty destination block, starting with the
 /// first (so a one-block fixture is scaled too), as the sorted
-/// `(offset, θ)` list `replay_with_destination_scales` takes (#1347).
+/// `(offset, θ)` list `replay_with_destination_scales` takes.
 /// Alternating per block, not per Multi group: the executor scales each
 /// write by its own block's θ, which is exact whether or not a group is
 /// uniform.
@@ -1982,7 +1982,7 @@ fn destination_scales_match_the_host_replay_followed_by_an_in_place_block_scale(
 #[ignore = "requires a real CUDA device"]
 fn a_zero_caller_scale_with_destination_scales_writes_the_hosts_zeros() {
     // What: alpha = 0 takes the zero route whatever θ is, so a NaN source
-    // does not reach the destination, as the host's θ * scale(x, 0) (#1438).
+    // does not reach the destination, as the host's θ * scale(x, 0).
     let mut ctx_engine = engine();
     let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();

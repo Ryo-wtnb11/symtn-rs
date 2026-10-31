@@ -395,7 +395,7 @@ fn assert_cuda_svd_result<R>(
 }
 
 // ---------------------------------------------------------------------------
-// Complex64 device payload (#1268). Every fixture below has nonzero
+// Complex64 device payload. Every fixture below has nonzero
 // imaginary parts in every stored entry: a real value cast to `Complex64`
 // cannot distinguish a conjugation defect from a transpose.
 // ---------------------------------------------------------------------------

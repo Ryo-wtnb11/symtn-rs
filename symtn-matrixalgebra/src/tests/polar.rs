@@ -1,4 +1,4 @@
-//! Polar decomposition tests (#1596 split of tests.rs).
+//! Polar decomposition tests.
 
 use super::*;
 

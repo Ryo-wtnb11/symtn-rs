@@ -1,4 +1,4 @@
-//! Typed allocation gates for the general (Padé) arm of `exp` (issue #780).
+//! Typed allocation gates for the general (Padé) arm of `exp`.
 //!
 //! The operation owns ten `max_c n_c²` matrix buffers and reuses them across
 //! coupled sectors. Dense backends may allocate and free their own GEMM/solve

@@ -1,5 +1,5 @@
-//! Real-device gates for `trace_pairs` on device tensors (issue
-//! #1349): the Host trace structure replayed as one diagonal-view x ones
+//! Real-device gates for `trace_pairs` on device tensors: the
+//! Host trace structure replayed as one diagonal-view x ones
 //! contraction per term.
 //!
 //! Evidence chain:

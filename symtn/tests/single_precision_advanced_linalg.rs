@@ -1,4 +1,4 @@
-//! Advanced linear-algebra oracle for the single-precision payloads (#1459).
+//! Advanced linear-algebra oracle for the single-precision payloads.
 //!
 //! Every operation `AdvancedLinalgScalar` admits — `inv`, `solve` (also in
 //! its adjointed right-solve composition), `pinv`, `exp` (Hermitian spectral
@@ -377,7 +377,7 @@ macro_rules! advanced_checks {
             kappa_v
         );
         // The truncated eigendecomposition is `eig_full` → `diagview` →
-        // `find_truncated` → two-leg `restrict_leg` (#1534).
+        // `find_truncated` → two-leg `restrict_leg`.
         let (kept, error) = {
             let found = d.domain()[0]
                 .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(2))

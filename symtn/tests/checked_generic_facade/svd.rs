@@ -594,7 +594,7 @@ fn checked_generic_svd_truncation_reconstructs_and_preserves_provider() {
             }
         })
         .unwrap();
-    // The truncated SVD is a composition (#1534).
+    // The truncated SVD is a composition.
     let Svd { u, s, vh } = source.svd_compact(engine, &[0], &[1]).unwrap();
     let found = s.domain()[0]
         .find_truncated(&s.diagview(engine).unwrap(), &Truncation::rank(1))
@@ -633,7 +633,7 @@ fn checked_generic_compact_svd_failure_is_typed_and_nonpublishing() {
     let before = source.dense_data().unwrap().to_vec();
     // The construction published the layouts this operation walks; a
     // provider whose answers change is not one identity, so the cached
-    // layouts go first (#2030). The tag is this test's alone.
+    // layouts go first. The tag is this test's alone.
     forget_cached_structures();
     provider.fail_algebra.store(true, Ordering::Relaxed);
     let error = source.svd_compact(engine, &[0, 1], &[2]).unwrap_err();
@@ -674,7 +674,7 @@ fn checked_generic_full_svd_failure_is_typed_and_nonpublishing() {
     assert_eq!(source.dense_data().unwrap(), before.as_slice());
 }
 
-/// QR/LQ/SVD and the value-only spectra of a facade-layout source (#1494),
+/// QR/LQ/SVD and the value-only spectra of a facade-layout source,
 /// each against an oracle that does not share the factorization's layout:
 /// reconstruction, isometry against an explicit tree-basis identity, `S`
 /// against `svd_vals`, and `eigh_vals`/`eig_vals` of `A Aᴴ` against the

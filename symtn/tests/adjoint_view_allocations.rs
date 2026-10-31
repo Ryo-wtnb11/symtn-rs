@@ -239,7 +239,7 @@ fn lazy_add_allocation_count_does_not_depend_on_the_block_count() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `add` with a lazy-adjoint operand copies each block through one
-    // bounds-checked strided call (#1399) and allocates only its output and
+    // bounds-checked strided call and allocates only its output and
     // the tensor wrapping it, the same count as the per-element kernel it
     // replaced, for one block or many.
     let runtime = Runtime::builder().build().unwrap();
@@ -278,7 +278,7 @@ fn lazy_add_allocation_count_does_not_depend_on_the_block_count() {
 fn block_stride_buffers_spill_only_past_rank_sixteen() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the per-op block layout (`CheckedBlockLayout`, #1401) holds up
+    // What: the per-op block layout (`CheckedBlockLayout`) holds up
     // to 16 non-unit axes inline, so at rank 10 lazy `add` and lazy-adjoint
     // materialization allocate as at rank 2, for one block or many. Past 16
     // axes its four stride buffers spill at most once per op.
@@ -442,7 +442,7 @@ fn warm_typed_lazy_compose_does_not_scale_with_groups() {
 fn materialize_allocates_one_fresh_payload_per_call() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: `materialize` (#1545) of an owned dense tensor or a lazy adjoint
+    // What: `materialize` of an owned dense tensor or a lazy adjoint
     // costs one payload allocation plus fixed body wrappers, whatever the
     // block count, on every call: the result never shares a payload, so a
     // repeated call cannot be free.
@@ -481,7 +481,7 @@ fn materialize_allocates_one_fresh_payload_per_call() {
 fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (#1942): a warm checked Generic adjoint of a complete tensor costs
+    // What: a warm checked Generic adjoint of a complete tensor costs
     // a constant number of header allocations, independent of how many fusion
     // trees the HomSpace enumerates. Re-enumerating the adjoint trees with
     // provider queries cost 810 and 1407 calls for the two spaces below.

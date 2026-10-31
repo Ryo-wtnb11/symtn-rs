@@ -388,7 +388,7 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         symtn::typed::__network::network_reuse_class(&factor, false),
         NetworkReuseClass::Compact
     ));
-    // TensorKit `adjoint(::DiagonalTensorMap)` is again a diagonal (#1449).
+    // TensorKit `adjoint(::DiagonalTensorMap)` is again a diagonal.
     let factor_adjoint = factor.adjoint(engine).unwrap();
     assert!(matches!(
         symtn::typed::__network::network_reuse_class(&factor_adjoint, false),
@@ -1169,6 +1169,10 @@ fn golden_diagonal_c64(
     TensorMap::diagonal(engine, runtime, &su2_leg(provider, false), spectrum).unwrap()
 }
 
+/// Wire-format stability contract: bytes written by version 1 of the persisted
+/// format must keep decoding to the same tensor and re-encode byte for byte.
+/// The `*_v1.bin` fixtures are that format, not a snapshot of a computation;
+/// changing them requires a new format version.
 #[test]
 fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -1560,7 +1564,7 @@ macro_rules! single_precision_roundtrip {
             );
 
             // Checked Generic: vertex multiplicity; compact adjoints are owned
-            // compact values here too (#1449).
+            // compact values here too.
             let provider = Arc::new(GenericToy);
             let codec = GenericCodec {
                 provider: Arc::clone(&provider),

@@ -345,7 +345,7 @@ where
 
     // A zero alpha (either sign) leaves exactly TensorKit's `scale(C,
     // beta)` in every class, over Inf/NaN operands, a NaN destination and
-    // a NaN-filled scratch: no pack, GEMM or product is formed (#1442).
+    // a NaN-filled scratch: no pack, GEMM or product is formed.
     let nan = T::from(f64::NAN);
     let poisoned = |values: &[T], bad: T| {
         let mut values = values.to_vec();
@@ -937,7 +937,7 @@ fn direct_batch_orders_same_shape_groups_as_strided_runs() {
 #[test]
 fn direct_batch_plan_bakes_run_partition() {
     // Five same-shape groups fold into one length-5 constant-stride run;
-    // the plan stores that partition (issue #103) so the backend routes it
+    // the plan stores that partition so the backend routes it
     // without recomputing. Storage matches the shared partition helper.
     let groups = (0usize..5)
         .map(|block| {
@@ -1911,8 +1911,8 @@ fn pair_bits(re: &[f64], im: &[f64]) -> Vec<(u64, u64)> {
 /// block componentwise, i.e. exactly as it acts on the two real component
 /// blocks, for coefficients `1`, `-0.5` and `0`, and for scatter `beta`
 /// in `{0, 1, 0.5}`. The coefficient-0 block is VectorInterface's
-/// `scale(strided_kernel::Exec::serial(), strided_kernel::Exec::serial(), x, 0) = zero(strided_kernel::Exec::serial(), x) * 0`, an exact zero that wipes NaN and inf
-/// (#1438); the real component runs give the same zeros.
+/// `scale(strided_kernel::Exec::serial(), strided_kernel::Exec::serial(), x, 0) = zero(strided_kernel::Exec::serial(), x) * 0`, an exact zero that wipes NaN and inf;
+/// the real component runs give the same zeros.
 #[test]
 fn pack_and_scatter_scale_real_coefficients_componentwise() {
     let mut exec = strided_kernel::Exec::serial();

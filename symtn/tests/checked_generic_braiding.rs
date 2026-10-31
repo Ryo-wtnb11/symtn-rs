@@ -1181,7 +1181,7 @@ fn assert_compose_any_braiding<D>(
 #[test]
 fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
     let _serial = crate::counting_alloc::serial();
-    // What (#1378): canonical composition glues lhs.domain to rhs.codomain
+    // What: canonical composition glues lhs.domain to rhs.codomain
     // without crossing legs, so it is blockwise matrix multiplication for
     // every braiding style (TensorKit `mul!`), with outer degeneracies,
     // several coupled sectors, multiplicity-two vertices, real and complex
@@ -1203,7 +1203,7 @@ fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
 fn checked_generic_contract_keeps_its_braiding_boundaries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (#1372, #1378): general `contract` shares the ordinary contraction's
+    // What: general `contract` shares the ordinary contraction's
     // symmetric-braiding boundary, canonical axes included, and the checked
     // Generic engine keeps Fermionic general contraction explicitly
     // unsupported (it needs the supertrace twist). `compose` on the same
@@ -1277,7 +1277,7 @@ fn checked_generic_contract_keeps_its_braiding_boundaries() {
 fn checked_generic_planar_contract_is_bosonic_only() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (#2284): a Bosonic checked provider's planar contraction is its
+    // What: a Bosonic checked provider's planar contraction is its
     // ordinary contraction; every other style is the typed
     // `UnsupportedTensorContractScope` (the checked engine has no planar
     // route), eager and `_into`, with the destination untouched.
@@ -1349,7 +1349,7 @@ fn checked_generic_planar_contract_is_bosonic_only() {
 fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (#1553, #1620): factorization and solve leg roles are a `permute`, so a split
+    // What: factorization and solve leg roles are a `permute`, so a split
     // other than the current one needs a symmetric braiding. The anyonic
     // provider refuses it with the permute's typed error before any
     // factorization work, while its current split, which needs no braid,
@@ -1406,7 +1406,7 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
     let _serial = crate::counting_alloc::serial();
     // What: as TensorKit `trace_permute!`, the braiding gate comes before any
     // index handling, so a non-symmetric provider's trace fails even with an
-    // empty or malformed pair list (#1872).
+    // empty or malformed pair list.
     let runtime = Runtime::builder().build().unwrap();
     for braiding in [
         BraidingStyleKind::NoBraiding,

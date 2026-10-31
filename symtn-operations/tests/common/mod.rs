@@ -373,7 +373,7 @@ impl Fixture {
     /// `alpha * (U x)` for a recoupling group — never on a pack, never inside
     /// the recoupling sum, and never on a zero fill, which stays an exact zero
     /// whatever `alpha` is. A zero scale is VectorInterface's
-    /// `scale(x, 0) = zero(x) * 0` (#1438): an exact zero whatever the source
+    /// `scale(x, 0) = zero(x) * 0`: an exact zero whatever the source
     /// holds, so a NaN source does not reach the destination.
     pub fn expected_scaled<T: TestScalar>(
         &self,
@@ -638,7 +638,7 @@ pub fn inactive_destination_layouts() -> Fixture {
 }
 
 /// Inactive destinations whose compiled zero region does not fuse to one
-/// axis (#2011): a padded block with an extent-1 middle axis, `[2, 1, 3]`
+/// axis: a padded block with an extent-1 middle axis, `[2, 1, 3]`
 /// with strides `[1, 1, 4]`, which normalizes to `[2, 3]` / `[1, 4]` and
 /// leaves storage gaps that no block owns; and, in
 /// [`rank_zero_inactive_destination`], a scalar block, whose region is `[1]`.

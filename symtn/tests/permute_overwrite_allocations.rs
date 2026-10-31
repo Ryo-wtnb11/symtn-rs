@@ -121,8 +121,8 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
     let _serial = crate::counting_alloc::serial();
     // What: a warm multiplicity-free non-Abelian `permute_into` submits each
     // Multi block's recoupling GEMM without a per-block allocation, so its
-    // caller-thread allocation calls are the same for B and > 3B blocks
-    // (#2184). Degeneracies stay small so no GEMM reaches the dense provider's
+    // caller-thread allocation calls are the same for B and > 3B blocks.
+    // Degeneracies stay small so no GEMM reaches the dense provider's
     // own packing workspace.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
@@ -192,7 +192,7 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
 /// A source that outlives its structure-cache entry (here by `clear`, as by
 /// eviction) loses the destination memo, so every warm permute derives its
 /// destination; its trees were admitted once and are not re-admitted per
-/// call (#2233). Each SU(3) admission query allocates in Racah, so per-block
+/// call. Each SU(3) admission query allocates in Racah, so per-block
 /// re-admission would make the large case allocate more.
 #[cfg(feature = "cgc-gen")]
 #[test]

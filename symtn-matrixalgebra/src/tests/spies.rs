@@ -3,8 +3,8 @@ pub(super) use super::scripted_executor::{
 };
 use super::*;
 
-// The doubles of this suite, as observers of the one `ScriptedExecutor`
-// (#1826): `script` sets what each entry does, the hooks record what a test
+// The doubles of this suite, as observers of the one `ScriptedExecutor`:
+// `script` sets what each entry does, the hooks record what a test
 // inspects. Entries left at `Action::Default` run the trait's default body,
 // as the hand-written doubles did for every method they did not override.
 
@@ -831,7 +831,7 @@ impl SpyTwin for LateGenericSpy {
 /// `source`'s layout bound to `spy`. Why not `bind_generic(source, spy)`:
 /// a spy that fails, or whose call counts a test compares against a cold
 /// walk, has its own identity (to a structure cache it is not
-/// `FactorGenericRule`, #2030), so the space is admitted for the spy by a
+/// `FactorGenericRule`), so the space is admitted for the spy by a
 /// twin that neither fails nor counts. That admission walks the source layout
 /// once, outside the spy's own counts.
 pub(super) fn bind_to_spy<P>(

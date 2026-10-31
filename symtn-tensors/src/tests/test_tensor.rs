@@ -2,7 +2,7 @@
 //!
 //! Why not a static-rank tensor: the production expert entries take a dynamic
 //! space plus a raw slice, so a fixture that carries rank in its type would be
-//! a second public-shaped tensor layer kept alive only by tests (#2222).
+//! a second public-shaped tensor layer kept alive only by tests.
 
 use std::sync::Arc;
 

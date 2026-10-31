@@ -604,7 +604,7 @@ mod owned_overwrite_tests {
     fn owned_writer_zero_scales_write_zeros_over_non_finite_sources() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         // What: the uninitialized writer follows VectorInterface's
-        // `scale(x, 0) = zero(x) * 0` (#1438) for a zero caller alpha and for
+        // `scale(x, 0) = zero(x) * 0` for a zero caller alpha and for
         // a zero structural coefficient in a Single block, and for a zero
         // alpha in a Multi scatter whose recoupling GEMM saw `inf`: every
         // output is `0.0`, as TensorKit's `permute!(tdst, tsrc, p, 0, 0)`

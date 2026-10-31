@@ -1,5 +1,5 @@
-//! Device factorizations take leg roles `(rows, cols)` exactly as on Host
-//! (#1553): `t.op(rows, cols)` is `t.permute(rows, cols)?.op(current split)`,
+//! Device factorizations take leg roles `(rows, cols)` exactly as on Host:
+//! `t.op(rows, cols)` is `t.permute(rows, cols)?.op(current split)`,
 //! the permute running on the device.
 //!
 //! The oracle is that composition on the device, compared bit for bit (the

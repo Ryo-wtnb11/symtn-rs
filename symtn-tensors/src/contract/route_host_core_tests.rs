@@ -1,4 +1,4 @@
-//! Core and CopyC routes on the one Host executor (#1859).
+//! Core and CopyC routes on the one Host executor.
 //!
 //! The eager accumulation contract `dst = alpha · lhs·rhs + beta · dst`
 //! (`Zeroed`, strong-zero beta, NaN propagation) is checked by hand formula
@@ -597,7 +597,7 @@ fn member_core_and_copy_c_replays_match_the_dense_oracle() {
 #[test]
 fn a_failed_copy_c_member_replay_refills_its_temporary_on_retry() {
     // Why: CopyC's temporary shares the workspace core destination and its
-    // #1747 proof. A replay that dirties it and fails (the fault hook) must
+    // zero-fill proof. A replay that dirties it and fails (the fault hook) must
     // leave the retry to refill the inactive blocks; a warm replay of the
     // same plan does not refill.
     let (_, case, route) = core_fixtures().remove(2);
@@ -684,7 +684,7 @@ fn folded_bits(values: &[f64]) -> Vec<u64> {
 
 #[test]
 fn zeroed_member_replays_skip_the_fills_of_a_born_zero_destination() {
-    // What (#2123): into a destination born zero and reused across
+    // What: into a destination born zero and reused across
     // B = 1, 2, 17, 1 with changed inputs on every call, `Zeroed` (the
     // `ContractPlan::execute` init) gives the bits `Axpby(0)` gives into a
     // NaN-poisoned destination. A directly written destination gets no

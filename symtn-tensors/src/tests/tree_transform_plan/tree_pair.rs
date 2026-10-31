@@ -1499,7 +1499,7 @@ fn tree_transform_execution_context_separates_tree_pair_operations() {
     assert!(!same_core(&resolve(&permute), &resolve(&braid)));
 }
 
-// Regression (#1921): rank-5 SU(2) and Fibonacci transposes whose last
+// Regression: rank-5 SU(2) and Fibonacci transposes whose last
 // compact step is a bend emit destination rows in first-appearance order, not
 // HomSpace order. The compact plan must still replay to the same values as
 // the per-pair plan in one shared destination structure.

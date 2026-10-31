@@ -1,4 +1,4 @@
-//! Explicit payload precision conversions (#1323).
+//! Explicit payload precision conversions.
 //!
 //! What: `convert` widenings (f32 -> f64/c32/c64, f64 -> c64, c32 -> c64) are
 //! exact and the narrowings (f64 -> f32, c64 -> c32) round like Rust `as f32`,
@@ -884,8 +884,7 @@ fn conversion_payload_allocations() {
 }
 
 /// A converted lazy adjoint is owned, so operations that reject lazy
-/// adjoints accept it (#1446 review: `diagview` on U(1) returned `Ok` on main
-/// and must keep doing so).
+/// adjoints accept it (`diagview` on U(1) must return `Ok`).
 #[test]
 fn converted_lazy_adjoints_are_owned() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -987,7 +986,7 @@ fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
     let (_, complex, _, _) = assert_adjoint_conversions!(engine, "SU(3) dense adjoint", source);
     // The converted adjoint comes out owned (only owned dense storage lends
     // its payload), and QR reaches the finite-input stage, which refuses the
-    // fixture's NaN and infinities (#1986).
+    // fixture's NaN and infinities.
     complex.dense_data().unwrap();
     let error = complex.qr_compact(engine, &[0, 1], &[2, 3]).unwrap_err();
     assert_eq!(
@@ -999,7 +998,7 @@ fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
     );
 }
 
-/// Checked-Generic compact diagonal adjoint (#1446 review, #1449): the
+/// Checked-Generic compact diagonal adjoint: the
 /// conversion must come out as the owned compact diagonal, keep the
 /// structural zeros `+0 + 0i`, and stay factorizable.
 #[cfg(feature = "cgc-gen")]

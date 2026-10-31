@@ -1,4 +1,4 @@
-//! Host transforms keep a real structural coefficient real (#1398).
+//! Host transforms keep a real structural coefficient real.
 //!
 //! Oracle: a real coefficient acting on a complex block is, by definition, the
 //! same coefficient acting separately on the real and the imaginary component.
@@ -362,7 +362,7 @@ fn fermionic_transforms_scale_componentwise() {
     );
 }
 
-/// Trace (#1407): with `α = 1` the structural coefficient acts on the traced
+/// Trace: with `α = 1` the structural coefficient acts on the traced
 /// sum in its own type (TensorKit folds `α′ = α * coeff` but applies it per
 /// element before the reduction; symtn applies it after the sum). The SU(2) partial trace carries
 /// `dim(coupled) / dim(uncoupled)` and the fermionic one a twist `-1`, so
@@ -430,14 +430,14 @@ fn traces_scale_componentwise() {
         .trace_pairs(engine, &[(0, 2)]));
 }
 
-/// Known residual of #1398: a transform that needs a recoupling *matrix* still
+/// Known gap: a transform that needs a recoupling *matrix* still
 /// applies it as a dense GEMM over coefficients promoted to the payload type,
 /// so `0 * inf` reappears. Fixing it needs the complex destination block to be
 /// driven through the real GEMM as an interleaved real matrix (the column
 /// mixing only touches the source index, so the reinterpretation is exact),
 /// which belongs to the dense-executor boundary.
 #[test]
-#[ignore = "multi-block recoupling GEMM still promotes the coefficient (#1398 residual)"]
+#[ignore = "multi-block recoupling GEMM still promotes the coefficient"]
 fn su2_recoupling_matrix_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);

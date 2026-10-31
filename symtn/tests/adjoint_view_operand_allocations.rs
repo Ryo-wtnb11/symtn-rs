@@ -1,4 +1,4 @@
-//! #1546 performance contract: allocation budget of a borrowed view operand.
+//! Performance contract: allocation budget of a borrowed view operand.
 
 use std::hint::black_box;
 use std::sync::Arc;

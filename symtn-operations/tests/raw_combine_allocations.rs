@@ -192,7 +192,7 @@ fn native_and_raw_twelve() -> [(Vec<usize>, Vec<isize>, Vec<isize>); 2] {
 #[test]
 fn raw_rank_twelve_fusing_to_eight_allocates_like_native_rank_eight() {
     let _serial = crate::counting_alloc::serial();
-    // What: issue #2230. A raw rank-12 layout that fuses to rank 8 makes the
+    // What: a raw rank-12 layout that fuses to rank 8 makes the
     // same number of warm allocation calls on the caller thread as the
     // native rank-8 layout, for copy, scale, axpy and axpby, plain and
     // conjugating; both are allocation-free.

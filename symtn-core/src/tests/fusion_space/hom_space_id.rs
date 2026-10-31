@@ -34,7 +34,7 @@ fn hom_space_clone_shares_content_but_not_unpublished_id_state() {
 
 #[test]
 fn hom_space_id_separates_dual_flip() {
-    // Rank-1 duality analog of the #119 regression: flipping one leg's dual
+    // Rank-1 duality case: flipping one leg's dual
     // bit must not alias, on either the codomain or the domain side.
     let base = FusionTreeHomSpace::new(
         FusionProductSpace::new([u1_leg(1, 2, false)]),

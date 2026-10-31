@@ -1,4 +1,4 @@
-//! Static-assertion side of the payload-dtype capability split (#1308).
+//! Static-assertion side of the payload-dtype capability split.
 //!
 //! Each helper below is a *positive* assertion: the family's representative
 //! entry points are callable with exactly the marker named in its bound, and
@@ -84,8 +84,8 @@ where
 fn each_family_is_callable_under_exactly_its_marker() {
     let _: fn(&TensorMap<U1FusionRule, f64>) = base_family;
     let _: fn(&TensorMap<U1FusionRule, num_complex::Complex64>) = base_family;
-    // Single precision reaches every family: base (#1315), factorization
-    // (#1324) and advanced (#1459).
+    // Single precision reaches every family: base, factorization
+    // and advanced.
     let _: fn(&TensorMap<U1FusionRule, f32>) = base_family;
     let _: fn(&TensorMap<U1FusionRule, num_complex::Complex32>) = base_family;
     let _: fn(&TensorMap<U1FusionRule, f64>) = factorization_family;

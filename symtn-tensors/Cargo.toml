@@ -24,7 +24,7 @@ cuda = ["symtn-dense/cuda", "symtn-operations/cuda"]
 cgc-gen = ["symtn-core/cgc-gen"]
 # Unstable, internal: the infallible Generic entries (`*_generic` facade,
 # context and plan builders), test oracles only, since production Generic is
-# checked only (#1854); and the CUDA member workspace's failure seam
+# checked only; and the CUDA member workspace's failure seam
 # (`fail_next_before_output`). Only in-workspace tests may enable it.
 testing = ["symtn-core/testing"]
 
@@ -41,9 +41,9 @@ num-complex = "0.4"
 smallvec = { version = "1", features = ["const_generics", "union"] }
 
 [dev-dependencies]
-# Reference-oracle replay driver for dtype cases the GEMM path does not admit (#1767).
+# Reference-oracle replay driver for dtype cases the GEMM path does not admit.
 symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-features = false, features = ["testing"] }
-# Plan tests compare against symtn-core's one-shot tree-pair oracles (#1805).
+# Plan tests compare against symtn-core's one-shot tree-pair oracles.
 symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }
 # Tests reset fusion-symbols' process-global caches as an application would.

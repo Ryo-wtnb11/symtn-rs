@@ -1,4 +1,4 @@
-//! The shared operands of the complex-symbol (#2281) test targets: the
+//! The shared operands of the complex-symbol test targets: the
 //! tree-hash entries on which tests hardcode values checked against
 //! TensorKit 0.17.1, and a real-symbol rule embedded in `Complex64`
 //! (optionally with a non-real quantum dimension).

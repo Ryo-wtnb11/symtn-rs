@@ -1,5 +1,5 @@
 //! `axpby` and `axpby_into` with lazy-adjoint operands follow one rule in both
-//! admission modes (#1874): one lazy and one owned operand (either order)
+//! admission modes: one lazy and one owned operand (either order)
 //! give an owned result, two lazy operands the lazy adjoint of their parents'
 //! combination (A10), and a lazy `axpby_into` source is read in its logical
 //! orientation.

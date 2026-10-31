@@ -1,4 +1,4 @@
-//! The truncation composition on a checked Generic provider (#1300).
+//! The truncation composition on a checked Generic provider.
 //!
 //! SU(3) with the adjoint irrep is the case the multiplicity-free file cannot
 //! reach: the quantum-dimension weight is the fallible exact `try_dim_scalar`.
@@ -465,7 +465,7 @@ fn su3_eig_composition_matches_the_oracle_for_every_policy() {
 
 #[test]
 fn checked_generic_decision_keeps_stored_positions() {
-    // What (#2095): the checked-Generic decision takes the stored order too.
+    // What: the checked-Generic decision takes the stored order too.
     // Weights are the exact SU(3) dimensions 3 and 27; no magnitude ties, so
     // the hand answers below need no sector order. norm^2 = 3 (0.25 + 9 + 4)
     // + 27 (2.25 + 1) = 127.5.

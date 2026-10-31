@@ -1379,7 +1379,7 @@ mod tests {
 
     // What: the offset helper family's Result must stay pointer-small so the
     // per-element non-contiguous combine/scale loop pays no 536-byte sret move
-    // + drop (issue #230). Fails if OffsetError grows a field or OperationError
+    // + drop. Fails if OffsetError grows a field or OperationError
     // is routed back onto these hot helpers.
     #[test]
     fn offset_error_result_stays_small() {
@@ -1880,7 +1880,7 @@ mod tests {
         );
     }
 
-    // TensorKit scaling parity for non-finite data (#1438). Every expected
+    // TensorKit scaling parity for non-finite data. Every expected
     // value below is an output observed in Julia 1.11 with TensorKit main
     // f87ca7fe (version 0.17.1), TensorOperations 5.6.2 and VectorInterface
     // 0.6.0, quoted beside it.

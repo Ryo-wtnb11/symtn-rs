@@ -1,4 +1,4 @@
-//! `inv`/`pinv`/`exp`/`solve` matrix-function tests (#1596 split of tests.rs).
+//! `inv`/`pinv`/`exp`/`solve` matrix-function tests.
 
 use super::*;
 
@@ -322,7 +322,7 @@ fn solve_left_validates_spaces_before_backend_execution() {
             message: "solve requires equal divisor and right-hand-side codomains"
         }
     ));
-    // The divisor's isomorphism is the facade preflight's (#1995): this
+    // The divisor's isomorphism is the facade preflight's: this
     // seam requires an admitted divisor.
 }
 
@@ -1176,7 +1176,7 @@ fn pinv_adjoint_parent_discards_unpublished_output_on_recomposition_failure() {
 }
 
 // ============================================================================
-// Issue #577: general (non-Hermitian) matrix exponential.
+// General (non-Hermitian) matrix exponential.
 //
 // Oracle. `series_exp` evaluates the defining series and shares nothing with
 // the Padé implementation; `exp_of_the_oracle_tensor_matches_tensorkit_anchors`
@@ -1190,11 +1190,10 @@ fn pinv_adjoint_parent_discards_unpublished_output_on_recomposition_failure() {
 // is taken.
 // ============================================================================
 
-/// Relative Frobenius agreement with the series oracle and the anchors, per the
-/// #577 design.
+/// Relative Frobenius agreement with the series oracle and the anchors.
 const EXP_ORACLE_RTOL: f64 = 1e-12;
 
-/// Residual of `exp(A) exp(-A) - 1`, per the #577 design.
+/// Residual of `exp(A) exp(-A) - 1`.
 const EXP_INVERSE_RTOL: f64 = 1e-11;
 
 /// Column-major coupled-sector matrix of a single-tree `1 <- 1` U(1) tensor.
@@ -1258,7 +1257,7 @@ impl Observer for SolvelessExecutor {}
 fn exp_fixture_blocks_reproduce_the_oracle_input() {
     // What: fixture certification. Before any exponential is taken, the blocks
     // symtn stores are the blocks Julia's `blocks(t)` filled — read back with
-    // the pre-existing block reader, not with anything #577 introduced.
+    // the pre-existing block reader, not with a reader added for `exp`.
     let tensor = exp_oracle_tensor::<f64>(4.0);
     for (charge, order) in [(0, 3usize), (1, 2usize)] {
         let block = u1_block_matrix(&tensor, charge);
@@ -2381,7 +2380,7 @@ fn exp_reports_unsupported_when_the_executor_cannot_solve() {
 fn exp_rejects_a_non_endomorphism() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: TensorKit's own precondition (`domain == codomain`) still holds —
-    // #577 widens which endomorphisms are accepted, not which maps are.
+    // general `exp` widens which endomorphisms are accepted, not which maps are.
     let rule = U1FusionRule;
     let codomain = SectorLeg::new([(U1Irrep::new(0).sector_id(), 3)], false);
     let domain = SectorLeg::new([(U1Irrep::new(0).sector_id(), 2)], false);
@@ -2458,7 +2457,7 @@ fn exp_rejects_a_block_whose_column_norm_overflows() {
     // factor of five of `f64::MAX`, which puts LAPACK's overflow guards (`ca`
     // and `ra` against `sfmax2`) in the way of any radix step, and the column
     // sum stays infinite. A block whose imbalance balancing *can* undo —
-    // `[1e308 1; 1e308 2]` — is not refused (#577 balancing), and is not
+    // `[1e308 1; 1e308 2]` — is not refused (balancing), and is not
     // meant to be: Julia reaches the same finite
     // balanced norm on it and exponentiates it.
     let tensor = u1_block_endomorphism(&[(0, 2, vec![1e308_f64, 1e308, 2e307, 1e308])]);
@@ -2542,8 +2541,8 @@ fn hermitian_exp_accepts_consistently_reordered_tree_stacking_with_facade_values
     // What: reversing rows and columns together is the same operator in a
     // permuted basis, so exp's spectral route passes the stacking guard and
     // publishes the facade's values block by block: `V f(D) V^H` composes
-    // eigenvectors published in the fresh factor layout by tree identity
-    // (#1518). The Padé route refuses the layout explicitly instead
+    // eigenvectors published in the fresh factor layout by tree identity.
+    // The Padé route refuses the layout explicitly instead
     // ("inverse output tree basis does not transpose the source basis").
     let rule = U1FusionRule;
     let sectors = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
@@ -2671,7 +2670,7 @@ fn checked_factor_isomorphism_queries_codomain_then_domain_without_shortcut() {
 
 #[test]
 fn mf_pinv_exp_and_polar_publish_no_factor_layout() {
-    // What (#1752): the multiplicity-free pseudo-inverse, Hermitian exponential
+    // What: the multiplicity-free pseudo-inverse, Hermitian exponential
     // and polar factors recompose each coupled sector into their output by one
     // GEMM: no factor space is staged, no SVD factor is scattered into a
     // factor layout, and no fusion contraction runs (the seams take no

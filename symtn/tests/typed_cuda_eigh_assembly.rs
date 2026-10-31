@@ -1,6 +1,6 @@
 //! Device `eigh_full` assembles its eigenvectors without a GEMM when
-//! cuSOLVER's order is already the published ascending one (#1985), and its
-//! uploads do not depend on the number of fusion trees (#1485).
+//! cuSOLVER's order is already the published ascending one, and its
+//! uploads do not depend on the number of fusion trees.
 //!
 //! [`cuda_transfer_stats`] snapshots count only the calling thread.
 //!
@@ -87,7 +87,7 @@ fn eigh_assembly_gemms_and_uploads_do_not_depend_on_the_tree_count() {
             .unwrap();
         let after = cuda_transfer_stats();
         let gemms = after.gemm_calls - before.gemm_calls;
-        // cuSOLVER's ascending order is the published one (#1985): the
+        // cuSOLVER's ascending order is the published one: the
         // eigenvectors are copied, with no selector GEMM.
         assert_eq!(gemms, 0);
         counts.push((

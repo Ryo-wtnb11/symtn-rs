@@ -769,7 +769,7 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
             .unwrap_err();
         if style_mismatch {
             // The checked transform's own admission reports the tensors
-            // variant (#1950), not the core one.
+            // variant, not the core one.
             assert!(
                 matches!(
                     &error,
@@ -788,7 +788,7 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
         }
         assert_eq!(provider.calls.get(), [0; CheckedPlanCall::COUNT]);
         // A layout walk that succeeded before the failure may publish its
-        // pure-data layout (#2030); nothing else is published.
+        // pure-data layout; nothing else is published.
         let layout_after = structure_cache_info(StructureCacheKind::SectorStructure);
         assert!(layout_after.admissions() <= layout_before.admissions() + 1);
         assert_eq!(layout_after.rejections(), layout_before.rejections());
@@ -849,7 +849,7 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
             )),
         }
         // A layout walk that succeeded before the failure may publish its
-        // pure-data layout (#2030); nothing else is published.
+        // pure-data layout; nothing else is published.
         let layout_after = structure_cache_info(StructureCacheKind::SectorStructure);
         assert!(layout_after.admissions() <= layout_before.admissions() + 1);
         assert_eq!(layout_after.rejections(), layout_before.rejections());
@@ -901,7 +901,7 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
         CheckedGenericPlanError::Provider(CheckedPlanSpyError(CheckedPlanCall::FrobeniusSchur))
     ));
     // The destination layout walk succeeded before the failure and may
-    // publish its pure-data layout (#2030); nothing else is published.
+    // publish its pure-data layout; nothing else is published.
     let layout_after = structure_cache_info(StructureCacheKind::SectorStructure);
     assert!(layout_after.admissions() <= layout_before.admissions() + 1);
     assert_eq!(layout_after.rejections(), layout_before.rejections());

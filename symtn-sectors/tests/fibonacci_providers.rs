@@ -189,7 +189,7 @@ fn unit_associators_are_bitwise_one() {
     check(&table());
 }
 
-/// Issue #1737: the infallible symbols have no checked twin, so an
+/// The infallible symbols have no checked twin, so an
 /// out-of-domain id panics with the typed domain error,
 /// never aliasing another entry.
 #[test]

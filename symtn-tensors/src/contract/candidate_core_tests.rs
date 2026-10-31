@@ -1,4 +1,4 @@
-//! Route pins for the zero-copy TensorKit candidates (#1468): a contraction
+//! Route pins for the zero-copy TensorKit candidates: a contraction
 //! whose sources are the identity only after the paired-axis sort or the
 //! operand swap, including through a lazy adjoint, resolves to the direct
 //! Core GEMM and never projects or transforms an operand. Independent value
@@ -398,7 +398,7 @@ fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
 /// `A: V⊗V ← V*⊗V*` against `B: V*⊗V* ← V⊗V` sorted into `mul!` form puts
 /// dual legs on B's contracted codomain. TensorKit `blas_contract!` copies
 /// one operand to twist it; θ here is the parity of B's coupled sector, so
-/// the Host core carries it as per-job GEMM alpha and copies nothing (#1858).
+/// the Host core carries it as per-job GEMM alpha and copies nothing.
 /// Values against TensorKit's steps: `symtn/tests/typed_contract_host_oracle.rs`.
 #[test]
 fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_core() {

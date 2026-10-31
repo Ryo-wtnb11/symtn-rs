@@ -1181,7 +1181,7 @@ mod tests {
     /// What: checked compose plans the shared Core route over a preview of
     /// its staged destination. Its provider events are the pair admission,
     /// the destination stage (identity read, admission style, and cold its
-    /// structure queries) and the commit guard's style (#2046): planning
+    /// structure queries) and the commit guard's style: planning
     /// and replay query nothing, and no second (core) destination is
     /// derived. The left binding owns the result; a failing destination
     /// query surfaces exactly and publishes nothing.
@@ -1288,7 +1288,7 @@ mod tests {
     /// What: a canonical contraction plans the shared Core rung (zero-copy
     /// candidate, identity output). Its provider events are the pair
     /// admission, the braiding read, the destination stage and the
-    /// commit guard's style (#2046): planning and replay query nothing, and
+    /// commit guard's style: planning and replay query nothing, and
     /// no second (core) destination is derived. The left binding owns the
     /// result; a failing destination query surfaces exactly and publishes
     /// nothing.
@@ -1573,7 +1573,7 @@ mod tests {
     /// What: each fixture plans its route, and the GEMM failing on the first
     /// or a later job of the replay returns the error without publishing:
     /// no layout, transformer, composed coefficient or output, so a failed
-    /// call leaves nothing behind (#2063). The context scratch a warm call
+    /// call leaves nothing behind. The context scratch a warm call
     /// sized is reused, not grown, by a failing call.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
@@ -1693,7 +1693,7 @@ mod tests {
         assert_eq!(right.algebra_calls(), 0);
         assert_eq!(cache_entries(), (1, 0));
         // The commit guard's style is the last provider event: commit reuses
-        // the admitted identity (#2046).
+        // the admitted identity.
         assert_eq!(left.events.borrow().last(), Some(&Style));
     }
 
@@ -1747,8 +1747,8 @@ mod tests {
             assert_eq!((transformers.builds, transformers.publications), (3, 0));
             assert_eq!(cache_entries(), (0, 0));
             assert!(left.count(Query::F) > 0 && left.count(Query::R) > 0);
-            // The F/R ledger: layout walks may publish pure-data layouts
-            // (#2030), so structural queries can shrink on a retry.
+            // The F/R ledger: layout walks may publish pure-data layouts,
+            // so structural queries can shrink on a retry.
             ledgers.push(
                 left.events
                     .borrow()
@@ -1791,7 +1791,7 @@ mod tests {
         );
     }
 
-    /// What (#2063): the three-stage fixture
+    /// What: the three-stage fixture
     /// plans a `DynamicTree` artifact that stages the lhs, the rhs and the
     /// core destination; two of its four committed spaces (the destination
     /// and three intermediates) share a HomSpace, so within the first call
@@ -2147,7 +2147,7 @@ mod tests {
         }
     }
 
-    /// What (#2063): with a lazy-adjoint lhs, a replay failing on its first
+    /// What: with a lazy-adjoint lhs, a replay failing on its first
     /// GEMM publishes nothing on any route; a successful call commits, and
     /// its warm repeat builds no transformer, stages nothing new and
     /// returns the same bits.
@@ -2247,11 +2247,11 @@ mod tests {
             return;
         }
 
-        // Why (#2101): each stage replays into its own context workspace, so
+        // Why: each stage replays into its own context workspace, so
         // no stage evicts another's Multi pack: a warm call converts at most
         // one pack per stage (a shared workspace would convert three into one
-        // slot). #2063 tightens this to none: a warm call binds the completed
-        // transformers of the first call, whose packs are already converted.
+        // slot). A warm call then binds the completed transformers of the
+        // first call, whose packs are already converted, so it converts none.
         let (_left, lhs, _right, rhs) = bound_pair(2, 2);
         let lhs_data = (0..lhs.space().required_len().unwrap())
             .map(|index| index as f64 - 1.5)
@@ -2462,7 +2462,7 @@ mod tests {
             )
     }
 
-    /// What (#2154): a warm owned checked permute, braid or transpose, of a
+    /// What: a warm owned checked permute, braid or transpose, of a
     /// direct source or of a lazy adjoint, takes its destination from the
     /// source's memo and its transformer from the completed cache: its
     /// provider events are the identity read, the admission style and the
@@ -2521,7 +2521,7 @@ mod tests {
         }
     }
 
-    /// What (#2154): a memo hit whose operation has no completed transformer
+    /// What: a memo hit whose operation has no completed transformer
     /// yet (a permute after a braid on the same axes) runs the source
     /// preflight inside the structure build. Its ledger is the derived
     /// path's without the destination's derivation, its payload is
@@ -2560,7 +2560,7 @@ mod tests {
             // The derived ledger is the memo's with the destination's
             // derivation where they diverge: one `Identity` read and no
             // `Dual` query, because the braid filled the dual maps of the
-            // crossing legs under this identity (#2422).
+            // crossing legs under this identity.
             let split = derived
                 .1
                 .iter()
@@ -2605,8 +2605,8 @@ mod tests {
         }
     }
 
-    /// What (#2157): a warm checked contraction stages each permuted operand
-    /// from the operand's destination memo (#2154), as a warm transform
+    /// What: a warm checked contraction stages each permuted operand
+    /// from the operand's destination memo, as a warm transform
     /// does, on every route, direct or with a lazy-adjoint lhs. Its provider
     /// events are the pair admission and braiding read, the destination
     /// stage, one identity read and admission style per staged permute (an
@@ -2642,7 +2642,7 @@ mod tests {
             ),
             (
                 "lhs_only",
-                // The adjoint row admits its source structure once (#2233).
+                // The adjoint row admits its source structure once.
                 true,
                 [
                     vec![i, s, b, i, s, i, s, i, s],
@@ -2652,10 +2652,9 @@ mod tests {
             (
                 "three_stages",
                 // Both operands share one canonical source structure, whose
-                // trees are admitted once per call (#2233). Each of its two
+                // trees are admitted once per call. Each of its two
                 // derivations reads the identity once and asks no `Dual`:
-                // its legs' dual maps were filled under that identity
-                // (#2422).
+                // its legs' dual maps were filled under that identity.
                 true,
                 [
                     vec![i, s, b, i, i, i, s, i, s, i, i, s, i, i, s, i, s],

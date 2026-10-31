@@ -1,4 +1,4 @@
-//! The CUDA contraction stage sequence (#1859): eager `contract` /
+//! The CUDA contraction stage sequence: eager `contract` /
 //! `contract_into` on every route (Core, CopyC, DynamicTree) and member
 //! replays of one `ContractPlan` on every route.
 //!
@@ -98,7 +98,7 @@ fn filled_destination<R: DeviceRule, D: DevicePayload>(
 /// templates are uploaded by every call; only a prepared workspace keeps
 /// them), so a repeated call costs exactly what the first one did, every
 /// upload is a fresh allocation and nothing is downloaded. A `contract`
-/// uploads at least its zeroed output (#740); on a core route that is all it
+/// uploads at least its zeroed output; on a core route that is all it
 /// uploads, and a warm core `contract_into` transfers nothing. Submissions do not
 /// depend on alpha or on beta, except that at `beta = 1` a core route skips
 /// the region moves that write `beta * destination` into the coupled sectors
@@ -346,7 +346,7 @@ fn members<R: DeviceRule, D: DevicePayload>(
             );
             // The first call writes stale values (a later call's scaling) into
             // the output the warm call reuses; a rejected call in between keeps
-            // that buffer as the spare (#2123).
+            // that buffer as the spare.
             let stale: Vec<_> = (0..count)
                 .map(|i| rescaled(engine, case, call + 8, i))
                 .collect();
@@ -508,7 +508,7 @@ fn signed_cases<D: DevicePayload>(
     ]
 }
 
-/// Member Core and CopyC (#1859): unit and signed direct cores, swapped
+/// Member Core and CopyC: unit and signed direct cores, swapped
 /// and unswapped, with and without inactive destination blocks.
 fn direct_member_routes<D: DevicePayload>(
     engine: &mut dyn symtn::typed::Engine,

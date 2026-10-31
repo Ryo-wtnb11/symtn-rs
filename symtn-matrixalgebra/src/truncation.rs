@@ -1601,7 +1601,7 @@ mod tests {
 
     #[test]
     fn an_ascending_out_of_range_spectrum_scales_by_its_maximum() {
-        // What (#1440 with stored order): `1e200^2` overflows, so the norm is
+        // What (with stored order): `1e200^2` overflows, so the norm is
         // rescaled. Scaled by the first value (`1.0`) the sum stays `Inf`, the
         // threshold is `Inf` and everything was discarded; scaled by the
         // maximum the norm is `1e200` and only the `1.0` goes.
@@ -1790,7 +1790,7 @@ mod tests {
         }
     }
 
-    /// The #1324 pin fixture (non-dyadic tenths, so partial sums round) plus an
+    /// The pinned fixture (non-dyadic tenths, so partial sums round) plus an
     /// SU(2)-weighted one; `(1/90)^(1/2)` puts the budget on the two smallest
     /// tails up to rounding.
     fn scale_fixtures() -> Vec<Vec<(f64, Vec<f64>)>> {
@@ -1988,7 +1988,7 @@ mod tests {
 
     #[test]
     fn discard_weight_within_sector_ties_discard_the_earlier_position() {
-        // Behaviour change (#2095): TensorKit's `TruncationByError` walks the
+        // Behaviour change: TensorKit's `TruncationByError` walks the
         // ascending stable `sortperm`, so of equal values the earlier
         // position goes first, even on a descending SVD spectrum. TensorKit
         // `findtruncated` at cfaa073e gives these masks.
@@ -2101,7 +2101,7 @@ mod tests {
 
     #[test]
     fn out_of_range_powers_of_two_scale_norms_and_decisions_exactly() {
-        // What (#1440): at `2^±700` and beyond every square leaves the `f64`
+        // What: at `2^±700` and beyond every square leaves the `f64`
         // range, yet the norm is representable. Scaling by a power of two is
         // exact, so the kept counts must equal the unit spectrum's and the
         // error must scale bit for bit, for every norm-driven policy.

@@ -1227,7 +1227,7 @@ mod cache_tests {
         OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
         let output = exact.adjoint(&U1FusionRule).unwrap();
         assert_eq!(output.data().len(), expected);
-        // #1290: the canonical output tiles its storage, so no element is
+        // The canonical output tiles its storage, so no element is
         // zero-filled before its block overwrites it.
         assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
     }

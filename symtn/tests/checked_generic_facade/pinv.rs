@@ -443,7 +443,7 @@ fn checked_generic_pinv_uses_a_strict_global_cutoff() {
     numerics::assert_close("pinv kept value", pseudo.dense_data().unwrap()[0], 0.25, 1);
 }
 
-/// #1800: a nonfinite compact entry is refused by the dense cutoff's typed
+/// A nonfinite compact entry is refused by the dense cutoff's typed
 /// error, as in multiplicity-free mode, not sent to the dense SVD.
 #[test]
 fn checked_compact_diagonal_pinv_refuses_nonfinite_like_multiplicity_free() {
@@ -553,7 +553,7 @@ fn checked_compact_diagonal_pinv_precision_limits_follow_multiplicity_free_seman
         assert!((actual - expected).norm() <= 1e-6);
     }
 
-    // #1800 (multiplicity-free semantics, TensorKit
+    // Multiplicity-free semantics (TensorKit
     // `pinv(::DiagonalTensorMap)`): magnitudes are compared unrounded, so a
     // finite entry whose f32 magnitude overflows is retained and inverted;
     // a retained subnormal stays compact with its IEEE reciprocal.

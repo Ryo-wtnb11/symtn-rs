@@ -108,7 +108,7 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
         let gemms = warm.cuda.gemm_calls;
         assert_eq!(
             gemms, cold.cuda.gemm_calls,
-            "a reused output is born zero and not refilled (#2123)"
+            "a reused output is born zero and not refilled"
         );
         if let Some(expected) = expected_gemms {
             assert_eq!(gemms, expected);
@@ -526,7 +526,7 @@ fn payload_snapshot<R: DeviceRule, D: DevicePayload>(
     )
 }
 
-/// Changed-input workspace reuse (#1732). Every workspace in `workspaces` has
+/// Changed-input workspace reuse. Every workspace in `workspaces` has
 /// already executed this member count with `members`. Each member is
 /// rescaled by its own negative factor, and both execution forms run again
 /// through those same workspaces; `execute_into` writes a NaN-poisoned
@@ -696,7 +696,7 @@ fn check<R: DeviceRule, D: DevicePayload>(
         let cold_h2d = cold_after.h2d_calls - cold_before.h2d_calls;
         let cold_bytes = cold_after.h2d_bytes - cold_before.h2d_bytes;
         let cold_gemms = cold_after.gemm_calls - cold_before.gemm_calls;
-        assert!(cold_h2d >= 1, "new B needs #740 output zero upload");
+        assert!(cold_h2d >= 1, "new B needs an output zero upload");
         assert!(cold_gemms > 0, "direct core must submit work");
         let output = device_output.to_host(cuda).unwrap();
         assert!(
@@ -917,7 +917,7 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
     let oracle = blas_contract_oracle(engine, &case);
     // Template uploads of the first `execute_into` per B on this fresh
     // workspace: zero and ones templates at B = 1, then the zero template's
-    // growth to each new high-water B. `execute` reserves none (#2123).
+    // growth to each new high-water B. `execute` reserves none.
     for (count, template_uploads) in [(1, 2), (2, 1), (17, 1), (1, 0)] {
         let left = StackedTensorMap::pack(&vec![&case.lhs; count])
             .unwrap()
@@ -943,7 +943,7 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
         assert_eq!(
             after.gemm_calls - before.gemm_calls,
             core_calls,
-            "the reused output's inactive region stays zero (#2123)"
+            "the reused output's inactive region stays zero"
         );
         assert_eq!(after.h2d_calls - before.h2d_calls, 0);
         assert_eq!(after.d2h_calls - before.d2h_calls, 0);
@@ -1615,7 +1615,7 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
     check_high_water(engine, cuda, &plan, case, &oracle);
 }
 
-/// High-water member stacks across B changes (#1746): the DynamicTree
+/// High-water member stacks across B changes: the DynamicTree
 /// workspace stacks and the CopyC temporary. Fresh workspaces run
 /// B = 4, 2, 4 and B = 1, 17, 3 with new values at every call, so a stale
 /// stack region left by an earlier, larger B would show. Each member of
@@ -1623,7 +1623,7 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
 /// inactive output block must be written zero on device) matches `oracle`.
 /// Through `execute_into`, which owns no output, a B at or below the high
 /// water allocates and uploads nothing and keeps the retained bytes; through
-/// `execute` the only upload is the owned output of the new B (#740).
+/// `execute` the only upload is the owned output of the new B.
 fn check_high_water<R: DeviceRule, D: DevicePayload>(
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,

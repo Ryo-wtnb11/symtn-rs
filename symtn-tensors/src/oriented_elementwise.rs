@@ -1062,7 +1062,7 @@ mod tests {
         assert_eq!(output, before);
     }
 
-    /// #1401: per block, lazy `add` normalizes one joint layout and walks it
+    /// Per block, lazy `add` normalizes one joint layout and walks it
     /// once (it made two adapter calls, each converting and then normalizing
     /// its own layout), and restriction and adjoint materialization normalize
     /// once per block.
@@ -1112,7 +1112,7 @@ mod tests {
             crate::adjoint::materialize_adjoint_data_dyn(&padded, &logical, &parent).unwrap();
         assert_eq!(take_checked_block_passes(), passes(1));
         assert_eq!(materialized.len(), 6);
-        // #1290: each owned output tiles its storage, so none is zero-filled
+        // Each owned output tiles its storage, so none is zero-filled
         // before the blocks overwrite it.
         assert_eq!(take_owned_block_prefills(), 0);
     }

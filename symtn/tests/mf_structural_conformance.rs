@@ -1,7 +1,7 @@
 //! Public, by-value conformance checks for the built-in multiplicity-free providers.
 //!
 //! This deliberately covers ordinary structural operations only.  Factorizations
-//! and matrix functions have their own #1002 gates.
+//! and matrix functions have their own gates.
 
 use std::sync::Arc;
 use symtn::typed::{ContractSpec, Direction, Duality, Side};

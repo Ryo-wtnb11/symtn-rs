@@ -1,4 +1,4 @@
-//! Checked Generic trace (#2054): first-provider-error order, query and
+//! Checked Generic trace: first-provider-error order, query and
 //! validation counts, on the actual checked SU(3) provider behind a
 //! recording, key-selective failure wrapper.
 
@@ -328,7 +328,7 @@ fn each_injected_query_is_reached_alone() {
 /// What: a source's lowering error (its trace channel factor) is reported
 /// before any error of a fusion group whose first member comes later in
 /// block order, whether that group fails at admission or at recoupling.
-/// This is the cross-group order Option A of #2054 keeps.
+/// This is the cross-group order the whole-group admission keeps.
 #[test]
 fn lowering_error_precedes_later_group_admission_and_recoupling() {
     let fixture = fixture();
@@ -431,7 +431,7 @@ fn checked_trace_terms_match_eager_per_source_composition() {
     }
 }
 
-/// What (#2054, Option A): a fusion group is admitted and recoupled whole
+/// What (Option A): a fusion group is admitted and recoupled whole
 /// before its first member is lowered, as TensorKit `_trace_permute!`
 /// builds one permutation matrix per fusion block before any trace
 /// lowering. Inside one group, a later member's admission or recoupling
@@ -493,7 +493,7 @@ fn group_admission_validates_each_member_once_in_block_order() {
     assert_ne!(calls[after..after + per_member[0].len()], per_member[0][..]);
 }
 
-/// What (#2150): a checked split asks the provider exactly one admission of
+/// What: a checked split asks the provider exactly one admission of
 /// its input tree, in order (the codomain half of admitting the pair
 /// `(tree, tree)`), at every split position; its outputs are structural
 /// sub-trees of that admitted tree and are not re-admitted.
@@ -539,10 +539,10 @@ fn trace_activity() -> (usize, usize, usize) {
     (activity.hits, activity.misses, activity.publications)
 }
 
-/// What (#2072, #2149): a warm checked compile is one compiled-trace hit,
+/// What: a warm checked compile is one compiled-trace hit,
 /// with no fusion-group lookup, and asks the provider exactly the
-/// preflight's queries, in order: no group admission or recoupling (#2072)
-/// and no lowering split or channel factor (#2149). The cold compile asks
+/// preflight's queries, in order: no group admission or recoupling
+/// and no lowering split or channel factor. The cold compile asks
 /// the same preflight first, and the term bits are equal.
 #[test]
 fn warm_compile_asks_only_the_preflight() {
@@ -555,7 +555,7 @@ fn warm_compile_asks_only_the_preflight() {
     let groups = structure.fusion_tree_group_slice().len();
     // The identity the compiles below run under: the source's dual maps
     // were filled under an earlier one, so every dualization re-queries
-    // its sectors (#2422).
+    // its sectors.
     provider.reset(Vec::new());
     crate::tensortrace_fusion_dyn_preflight_generic_checked(&fixture.src, axes(), 1).unwrap();
     let preflight = provider.calls.take();
@@ -592,7 +592,7 @@ fn warm_compile_asks_only_the_preflight() {
         .any(|call| matches!(call, Call::Twist(_))));
 }
 
-/// What (#2072): a failing call publishes no group, whether it fails in a
+/// What: a failing call publishes no group, whether it fails in a
 /// later group's admission or recoupling (after earlier groups were built)
 /// or in lowering, so repeating it asks the provider exactly the same
 /// queries and fails the same way.
@@ -619,7 +619,7 @@ fn failing_compile_publishes_nothing_and_repeats_its_ledger() {
     }
 }
 
-/// What (#2072): the owned checked trace publishes its groups and its
+/// What: the owned checked trace publishes its groups and its
 /// compiled trace only once execution returned `Ok`; a lowering failure
 /// publishes none, and the following successful call is cold, then warm.
 #[test]
@@ -665,7 +665,7 @@ fn owned_checked_trace_publishes_after_success_only() {
     );
 }
 
-/// What (#2146): the owned checked trace preflights once per call: in its
+/// What: the owned checked trace preflights once per call: in its
 /// stage, never in its execution. Its stage asks exactly the preflight's
 /// queries, and its execution asks the committed-destination compile's
 /// queries without that compile's own preflight, in the same order, cold
@@ -683,7 +683,7 @@ fn owned_checked_trace_preflights_once() {
     crate::tensortrace_fusion_dyn_preflight_generic_checked(&fixture.src, axes(), 1).unwrap();
     let preflight = provider.calls.take();
     // The preflight only dualizes the source's legs, whose dual maps were
-    // filled under the bound identity, so it asks nothing (#2422);
+    // filled under the bound identity, so it asks nothing;
     // `warm_compile_asks_only_the_preflight` pins a non-empty preflight.
     assert_eq!(preflight, []);
     let owned = |compile_calls: Vec<Call>| {
@@ -712,7 +712,7 @@ fn owned_checked_trace_preflights_once() {
     owned(provider.calls.take());
 }
 
-/// What (#2075): the checked trace channel factor is TensorKit's
+/// What: the checked trace channel factor is TensorKit's
 /// `dim(c) / dim(first)` (`_trace_permute!`, `tensoroperations.jl:252`) to
 /// the bit. SU(3) `V ⊗ V ← V ⊗ V` with `V = 3 ⊕ 8`, traced over the second
 /// leg pair, permutes nothing (coefficient 1) and SU(3) twists are 1, so each
@@ -790,7 +790,7 @@ fn checked_trace_channel_factor_is_the_exact_dimension_quotient() {
 /// identity and SU(2) twists are 1, so each term is the bare factor of its
 /// source tree `(a, b) → c`, and both modes must return the hand quotient
 /// `(2j_c+1)/(2j_a+1)` bit for bit. The previous MF `dim · inv_dim` missed
-/// `5/3, 7/3, 3/5, 7/5` by one ulp while the checked mode divided (#2209).
+/// `5/3, 7/3, 3/5, 7/5` by one ulp while the checked mode divided.
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {

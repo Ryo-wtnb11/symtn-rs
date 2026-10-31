@@ -1,4 +1,4 @@
-//! `contract!` (#2029): every written form builds the same `Network` as the
+//! `contract!`: every written form builds the same `Network` as the
 //! equivalent `Network::new` call and returns the same result.
 //!
 //! "Same `Network`" is observed through the Runtime's plan cache, whose key

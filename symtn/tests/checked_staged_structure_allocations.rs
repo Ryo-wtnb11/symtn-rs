@@ -1,9 +1,9 @@
-//! #2050: a pre-commit plan compiled against a staged checked destination
+//! A pre-commit plan compiled against a staged checked destination
 //! lends the live canonical structure on a complete-cache hit instead of
 //! wrapping a cloned preview in a fresh `Arc`. Warm allocation calls of the
 //! public checked permute and contraction (non-identity, so a destination is
-//! staged) are pinned as upper bounds. #2129: the contraction's core plan
-//! compiles from coupled regions; #2063: its staged and core intermediates
+//! staged) are pinned as upper bounds. The contraction's core plan
+//! compiles from coupled regions; its staged and core intermediates
 //! are committed and its transformers reused, so warm planning is
 //! O(S + G + P_in·r) and its warm calls are bounded by `c·(S + G)`.
 
@@ -171,7 +171,7 @@ impl Warm {
         )
     }
 
-    /// #2154: a warm permute hits its source's destination memo and its
+    /// A warm permute hits its source's destination memo and its
     /// completed transformer, so it re-admits nothing and derives nothing:
     /// `calls ≤ 2·G_t + 8`, independent of `P_in` and the source sectors.
     /// The `G_t` term is the dense backend's per-recoupling-group scratch
@@ -192,7 +192,7 @@ impl Warm {
         );
     }
 
-    /// #2063: a warm contraction binds its completed transformers and
+    /// A warm contraction binds its completed transformers and
     /// allocates `calls ≤ 2·(S + G) + 32`. The `G` term is the dense
     /// backend's per-recoupling-GEMM scratch (out of scope, Tenferro); the
     /// constant is the owned output and payload buffers and per-call keys.
@@ -223,8 +223,8 @@ impl Warm {
     }
 }
 
-/// Permute: a warm permute does not re-admit its source (#2154). Contract:
-/// the region core plan (#2129) and committed intermediates (#2063) keep the
+/// Permute: a warm permute does not re-admit its source. Contract:
+/// the region core plan and committed intermediates keep the
 /// count linear in sectors and groups. Bounds, not
 /// equalities: platform allocators and the toy provider may shift
 /// incidental sizes.

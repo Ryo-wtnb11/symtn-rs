@@ -1,4 +1,4 @@
-//! Allocation ledger of `planar_contract` (#2284), warm, one dense thread.
+//! Allocation ledger of `planar_contract`, warm, one dense thread.
 //!
 //! Payload-sized allocations only (at least half the smallest payload), so
 //! per-call plan metadata is not counted. The reference is the core alone:

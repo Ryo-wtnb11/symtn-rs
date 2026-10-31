@@ -114,7 +114,7 @@ fn fusion_tree_key_debug_excludes_cache() {
     );
 }
 
-// Canary (#153, #2192) against silent growth of the hottest recoupling-plan
+// Canary against silent growth of the hottest recoupling-plan
 // key: a handle into its holder's tree arena, two words. A smaller
 // representation is allowed; growth requires re-checking the arena design.
 #[test]

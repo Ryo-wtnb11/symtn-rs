@@ -18,7 +18,7 @@ rustc-hash = "2"
 
 [dev-dependencies]
 # Generic test fixtures implement the infallible symbol tier, which is
-# test-only (#1854).
+# test-only.
 symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
 
 [features]

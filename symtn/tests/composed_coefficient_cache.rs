@@ -1,4 +1,4 @@
-//! The composed-coefficient cache (cache 4 of #2014; #1554 before it).
+//! The composed-coefficient cache (coefficient cache).
 //!
 //! A truncation changes block dimensions but usually not which sectors are
 //! present. Such a degeneracy-only change misses the completed-transformer

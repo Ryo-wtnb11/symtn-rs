@@ -1,4 +1,4 @@
-//! Allocation contracts of the single-precision payloads (#1315).
+//! Allocation contracts of the single-precision payloads.
 //!
 //! Two contracts:
 //!
@@ -14,8 +14,7 @@
 //! process compared against each other. Absolute allocation counts depend on
 //! the platform, the allocator and the core count — the CPU context sizes its
 //! pool from the available parallelism — so a number measured on one machine
-//! is evidence, not a contract. The measured figures live in
-//! [historical audit](https://github.com/Ryo-wtnb11/symtn-rs/blob/8c54ce960d0dd5ea000c75ff1893624e3da42420/docs/audit/issue-1315-single-precision-base.md).
+//! is evidence, not a contract.
 
 use std::hint::black_box;
 use symtn::typed::Engine;
@@ -35,7 +34,7 @@ use crate::counting_alloc;
 // same sectors and degeneracies, hence the same key into symtn-core's
 // process-global fusion-tree-layout and complete-HomSpace-structure caches
 // (`symtn-core/src/fusion_space/layout_cache.rs`). One test's concurrent
-// admission or (weakly held, #1610) eviction of that shared entry between
+// admission or (weakly held) eviction of that shared entry between
 // another test's warm-up and measured call changes the measured call's own
 // allocation count without changing what it computes: reported as 218 f32
 // allocations against 202 f64 under a full parallel workspace run. Every test in
@@ -237,7 +236,7 @@ macro_rules! measure_factorization {
                 TensorMap::rand_with_seed($engine, $runtime, [space, space], [space], 7_502)
                     .unwrap();
             let Svd { u, s, vh } = tensor.svd_compact($engine, &[0, 1], &[2]).unwrap();
-            // The truncated SVD is a composition (#1534).
+            // The truncated SVD is a composition.
             let found = s.domain()[0]
                 .find_truncated(&s.diagview($engine).unwrap(), &Truncation::rank(4))
                 .unwrap();
@@ -313,7 +312,7 @@ macro_rules! assert_factorization_allocates_like_double {
             "Complex32 against Complex64"
         );
 
-        // Equality, not a bound (#1337): the buffer count is a property of
+        // Equality, not a bound: the buffer count is a property of
         // the algorithm rather than of the payload layout. The spectrum
         // factor is filled from a borrowed slice; a
         // `into_iter().map(to_scalar).collect()` from the `Vec<f64>` spectrum

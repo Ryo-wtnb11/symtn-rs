@@ -242,7 +242,7 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
     let _serial = crate::counting_alloc::serial();
     // What: checked Generic reductions take their `dim(c)` weights
     // through one fallible closure and never build a per-call weight map
-    // (a std `HashMap`, #1219), for owned and lazy-adjoint inputs alike.
+    // (a std `HashMap`), for owned and lazy-adjoint inputs alike.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
@@ -412,7 +412,7 @@ fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
 }
 
 /// Checked-Generic `norm` of single-precision payloads accumulates in `f64`
-/// (#1315, #1344) and rescales from that wide sum (#1437).
+/// and rescales from that wide sum.
 ///
 /// Oracle: the same `f32` entries widened exactly into an `f64` tensor, whose
 /// norm cannot overflow or underflow at these magnitudes. A single-precision
@@ -512,7 +512,7 @@ fn checked_generic_single_precision_norm_accumulates_wide() {
 }
 
 /// Checked Generic compact reductions read the stored spectrum: warmed, they
-/// allocate nothing, so no operation-local dense payload exists (#1867). The
+/// allocate nothing, so no operation-local dense payload exists. The
 /// compact plus lazy `axpby` allocates its one dense result and never a
 /// densified copy of the compact operand.
 #[test]
@@ -611,7 +611,7 @@ fn warmed_checked_generic_compact_reductions_do_not_densify() {
 fn warmed_complex_symbol_reductions_do_not_allocate() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the complex-symbol lane (#2281) reads the real quantum dimension
+    // What: the complex-symbol lane reads the real quantum dimension
     // through the same seam, so warm Ising `inner`, `norm` and `tr` stay
     // allocation-free on the caller thread, owned and lazy.
     use symtn::sector::{TableRule, TableSector};

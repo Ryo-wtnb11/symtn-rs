@@ -1,5 +1,5 @@
 //! Shared fixtures and the independent oracle for the compose plan/workspace
-//! gates (#1639).
+//! gates.
 //!
 //! Every fixture composes `A: V ⊗ V ← W` with `B: W ← V`. `W` lacks a sector
 //! of `V` that `V ⊗ V` reaches, so the destination `V ⊗ V ← V` has coupled

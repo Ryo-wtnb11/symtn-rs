@@ -1,5 +1,5 @@
 //! `norm(p)` keeps a representable result when the unscaled power sum
-//! would overflow or underflow (#1437).
+//! would overflow or underflow.
 //!
 //! # Reference behaviour
 //!

@@ -1,4 +1,4 @@
-//! Factorizations and truncation of complex-symbol rules (#2281): SVD, QR/LQ,
+//! Factorizations and truncation of complex-symbol rules: SVD, QR/LQ,
 //! polar, eigh/eig, null spaces, matrix functions and the
 //! `svd_compact` → `find_truncated` → `restrict_leg` chain on Fibonacci and
 //! Ising through `TableRule`, plus a planar contraction, the golden chain and
@@ -18,7 +18,7 @@
 //! Operands are filled with the tree-hash `entry` of `support/table_fixture.rs`,
 //! so a value checked against TensorKit is reproducible from the same
 //! coordinates (Ising entries there carry AnyonWiki's vertex sign
-//! `u^{σσ}_ψ = −1`, #2277, so both sides are the same morphism).
+//! `u^{σσ}_ψ = −1`, so both sides are the same morphism).
 
 use std::f64::consts::SQRT_2;
 use std::sync::Arc;

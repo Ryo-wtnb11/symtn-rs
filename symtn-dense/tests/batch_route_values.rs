@@ -346,7 +346,7 @@ fn partition_call(
         .unwrap();
 }
 
-// #1291: a mixed run partition is one dense phase. Each GEMM keeps its
+// A mixed run partition is one dense phase. Each GEMM keeps its
 // kernel, order, alpha/beta and conjugation, so on one engine the output is
 // bitwise what one call per run produces, serial or threaded.
 #[test]

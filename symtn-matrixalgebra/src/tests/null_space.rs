@@ -1,4 +1,4 @@
-//! Left/right null-space tests (#1596 split of tests.rs).
+//! Left/right null-space tests.
 
 use super::*;
 
@@ -542,7 +542,7 @@ pub(crate) mod counting_alloc;
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
-/// Byte contract (#1525): per op, the forced-pack control allocates at least
+/// Byte contract: per op, the forced-pack control allocates at least
 /// the op's input payload more than the borrowed call, measured in-process
 /// after warming both paths (provider-independent, unlike absolute budgets).
 fn assert_pack_drop_covers_payload(borrowed: &[usize], packed: &[usize], payloads: &[usize]) {
@@ -683,7 +683,7 @@ fn scalar_copy<D: FactorScalar>(source: &TestTensor<f64>, real_only: bool) -> Te
     .unwrap()
 }
 
-/// What (#1525): canonical inputs to the multiplicity-free full QR/LQ, null
+/// What: canonical inputs to the multiplicity-free full QR/LQ, null
 /// and eigen ops pack nothing, and their outputs are bit-identical to the
 /// forced-pack path; consistently reordered tilings keep the same values, and
 /// mis-stacked tilings keep their factors and their eigen refusals.
@@ -1034,7 +1034,7 @@ fn assert_checked_factor_generic_full_family_borrows_input<D: FactorScalar>() {
 
 #[test]
 fn checked_generic_full_null_eigen_ops_borrow_canonical_multiplicity_input() {
-    // What (#1525): checked-Generic inputs with a two-dimensional vertex
+    // What: checked-Generic inputs with a two-dimensional vertex
     // space borrow their regions and keep the forced-pack values bit for bit.
     assert_checked_factor_generic_full_family_borrows_input::<f64>();
     assert_checked_factor_generic_full_family_borrows_input::<Complex64>();

@@ -1,4 +1,4 @@
-//! Real-device gate for `materialize` on CUDA tensors (#1545).
+//! Real-device gate for `materialize` on CUDA tensors.
 //!
 //! The Host `materialize` is checked against independent oracles in
 //! `typed_materialize.rs`. Here the device result must equal it bit for bit

@@ -1,5 +1,5 @@
 //! Independent oracles for checked Generic contraction through the shared
-//! planner (#1860), one per route the ladder takes: the Core rung (both
+//! planner, one per route the ladder takes: the Core rung (both
 //! orientations), TensorKit's `copyC`, and the `DynamicTree` artifact with a
 //! transformed lhs only (the rhs-sorted candidate), a transformed rhs, a
 //! `RhsLhs` winner and an output transform.

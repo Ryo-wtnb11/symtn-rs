@@ -299,7 +299,7 @@ macro_rules! warm_compact_braid_calls {
 fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What (#2011): the compact braid sends sector c to its dual. For U(1)
+    // What: the compact braid sends sector c to its dual. For U(1)
     // charges ±1 that moves each destination to the other ordinal, and the
     // destination block is still found without an allocation, so the warm
     // call costs exactly what the self-dual Z2 braid of the same shape does.

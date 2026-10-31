@@ -1,4 +1,4 @@
-//! #1546: an operation given `t.adjoint_view()` equals the same operation
+//! An operation given `t.adjoint_view()` equals the same operation
 //! given the owned lazy adjoint `&t.adjoint()?`, and either consumes it with
 //! zero entries into adjoint materialization or refuses it with
 //! `Unsupported { Materialize }`.
@@ -356,8 +356,8 @@ fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
                 TensorMap::rand_with_seed($engine, &runtime, [&v, &w], [&v, &w], 3).unwrap();
             shared_suite!($engine, a, b, s, $alpha, $beta, $what);
 
-            // Contraction, its `_into` (#1870) and composition consume
-            // the view as the owned lazy adjoint (#1865).
+            // Contraction, its `_into` and composition consume
+            // the view as the owned lazy adjoint.
             let lazy = b.adjoint($engine).unwrap();
             let spec = ContractSpec { lhs: &[2], rhs: &[0], codomain: &[0, 1], domain: &[2, 3] };
             let (view, owned) =
@@ -858,7 +858,7 @@ fn cat_fallback_reads_compact_operand_without_densifying() {
     }
 }
 
-/// #1547/#1548: `dense_data` borrows dense Host storage and refuses a lazy
+/// `dense_data` borrows dense Host storage and refuses a lazy
 /// adjoint or a compact diagonal with `Unsupported { Materialize }`,
 /// entering neither adjoint materialization nor diagonal densification.
 #[test]

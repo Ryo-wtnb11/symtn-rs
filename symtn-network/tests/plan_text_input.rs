@@ -77,7 +77,7 @@ fn from_text_restores_a_hand_written_plan_exactly() {
 fn from_text_rejects_malformed_text_with_a_contract_error() {
     let replace = |from: &str, to: &str| B_C_FIRST.replacen(from, to, 1);
     // ponytail: the reasons are only distinguishable by message text; a typed
-    // reason per case belongs to the error-taxonomy work (#2313).
+    // reason per case belongs to the error-taxonomy work.
     let cases = [
         ("empty text", String::new(), "missing header"),
         (

@@ -283,7 +283,7 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
 fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the #595 NoBraiding oracle is TensorKit's own PlanarTrivial
+    // What: the NoBraiding oracle is TensorKit's own PlanarTrivial
     // category. The previous contract-plus-output-permute route reached its
     // NoBraiding boundary; the monoidal merge succeeds without an R symbol.
     let runtime = runtime();
@@ -317,7 +317,7 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
     )
     .unwrap();
 
-    // The pre-#595 lowering encoded the same operation as empty-axis
+    // The earlier lowering encoded the same operation as empty-axis
     // contraction plus this interleaving output permutation. NoBraiding still
     // rejects that braid-requiring route.
     assert!(lhs
@@ -1262,7 +1262,7 @@ fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
 fn non_symmetric_compact_trace_rejects_like_dense_trace() {
     let _serial = crate::counting_alloc::serial();
     // What: the rank-(1,1) compact-spectrum trace is rejected with the dense
-    // trace's error instead of answering from the spectrum (#1355).
+    // trace's error instead of answering from the spectrum.
     assert_compact_trace_rejects_like_dense_trace::<false>();
     assert_compact_trace_rejects_like_dense_trace::<true>();
 }

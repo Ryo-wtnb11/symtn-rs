@@ -837,7 +837,7 @@ mod tests {
 
     #[test]
     fn a_shared_payload_is_charged_once_and_released_with_its_last_holder() {
-        // What (#1753): holders of one payload are separate entries charged
+        // What: holders of one payload are separate entries charged
         // once; the charge survives eviction and purge of any holder but the
         // last, whose removal releases it; another payload is charged apart.
         let structures: Vec<Arc<()>> = (0..4).map(|_| Arc::new(())).collect();

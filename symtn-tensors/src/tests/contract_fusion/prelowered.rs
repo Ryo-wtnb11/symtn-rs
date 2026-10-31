@@ -361,7 +361,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
         &lazy,
     );
     // What: a twist uniform per RHS coupled sector rides the core as per-job
-    // GEMM alpha (#1858), where TensorKit copies an operand to twist it.
+    // GEMM alpha, where TensorKit copies an operand to twist it.
     assert!(context.last_resolution_is_core());
 }
 
@@ -667,7 +667,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
 
 #[test]
 fn storage_direct_contraction_refuses_mis_stacked_trees_before_gemm() {
-    // What (#1517): an operand whose coupled-sector columns are stacked in a
+    // What: an operand whose coupled-sector columns are stacked in a
     // different tree order than the partner's rows has no positional GEMM;
     // the storage-direct seam must refuse it, not multiply mismatched trees.
     struct NoGemm;
@@ -753,7 +753,7 @@ fn storage_direct_contraction_refuses_mis_stacked_trees_before_gemm() {
 #[test]
 fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What (#1520): checked Generic compose on SU(3), where `8 ⊗ 8 → 8` has
+    // What: checked Generic compose on SU(3), where `8 ⊗ 8 → 8` has
     // vertex multiplicity 2, pairs coupled-sector rows and columns by tree
     // identity (vertex label included) when operands stack those trees in
     // different orders, through the checked irregular core of `plan_compose`.
@@ -998,7 +998,7 @@ fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
         }
     }
 
-    // What (#1865): the lazy adjoint of each tiling composes as its
+    // What: the lazy adjoint of each tiling composes as its
     // materialization does. Its logical space is canonical while the
     // parent's storage order is caller-chosen, so a restacked parent
     // reaches the checked irregular core, read with `MatrixOp::Adjoint`.

@@ -1,4 +1,4 @@
-//! Gate suite for the provider-typed facade (`symtn::typed`, issue #557).
+//! Gate suite for the provider-typed facade (`symtn::typed`).
 //!
 //! Every external provider here is a `fusion_symbols` category with its own
 //! codec in `CategoryRule`, built from the public vocabulary alone — no
@@ -855,7 +855,7 @@ fn a_failing_typed_operation_publishes_no_cache_state() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Keep the absolute process-global snapshot in an explicitly fresh child
-    // process, as in the original #1606 regression gate.
+    // process.
     if run_isolated_or_return(
         "SYMTN_TYPED_FACADE_FAILING_OPERATION_PUBLISHES_NO_CACHE_STATE_ISOLATED",
         "a_failing_typed_operation_publishes_no_cache_state",
@@ -925,7 +925,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// `symtn::typed` self-sufficiency (issue #557).
+// `symtn::typed` self-sufficiency.
 // ---------------------------------------------------------------------------
 
 /// Deliberately imports nothing but `symtn::typed` names and the provider
@@ -1115,7 +1115,7 @@ fn fermionic_endo(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParityFu
 }
 
 // ---------------------------------------------------------------------------
-// `map_diagonal`: elementwise maps of a compact diagonal (issue #1558).
+// `map_diagonal`: elementwise maps of a compact diagonal.
 // ---------------------------------------------------------------------------
 
 fn spectra<S: Clone, D: Clone>(entries: &[(S, &[D])]) -> Vec<symtn::typed::SectorSpectrum<S, D>> {
@@ -1129,7 +1129,7 @@ fn spectra<S: Clone, D: Clone>(entries: &[(S, &[D])]) -> Vec<symtn::typed::Secto
 }
 
 // ---------------------------------------------------------------------------
-// Issue #585: compact diagonal parity, round 2.
+// Compact diagonal parity, round 2.
 //
 // The value oracles below are what pin the compact arms that follow. They are
 // written against the typed dense and pointwise routes those arms replace, so
@@ -1188,7 +1188,7 @@ fn z2_bond(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #589: semantic laws for U(1), U(1) x fZ2, and
+// Semantic laws for U(1), U(1) x fZ2, and
 // fZ2 x U(1) x SU(2). The two product rules exercise the packed product codec.
 // ---------------------------------------------------------------------------
 
@@ -1582,8 +1582,7 @@ impl CategoryCodec<PlanarZ2> for PlanarZ2Codec {
 }
 
 // ---------------------------------------------------------------------------
-// Non-symmetric braiding boundary of the destination and compact entries
-// (#1355, #1372).
+// Non-symmetric braiding boundary of the destination and compact entries.
 // ---------------------------------------------------------------------------
 
 use crate::braiding_probe;

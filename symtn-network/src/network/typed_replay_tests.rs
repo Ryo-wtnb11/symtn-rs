@@ -1245,7 +1245,7 @@ fn device_operand_admission_decides_each_class_from_metadata() {
             assert!(device_operand_admission(contracts, braiding, dense).is_ok());
         }
     }
-    // What: non-symmetric braiding (#1372: unbraided as well as anyonic)
+    // What: non-symmetric braiding (unbraided as well as anyonic)
     // is the contraction's boundary only, with the typed error.
     for braiding in [BraidingStyleKind::NoBraiding, BraidingStyleKind::Anyonic] {
         assert!(device_operand_admission(false, braiding, dense).is_ok());
@@ -2033,7 +2033,7 @@ fn typed_split_moving_step_is_one_contract_equal_to_contract_then_permute() {
         (&[1, 2][..], &[0][..])
     );
     assert!(planned.schedule.final_permutation.is_none());
-    // The pre-#1614 lowering, spelled out: default-split contract, then the
+    // The separate-permute lowering, spelled out: default-split contract, then the
     // orientation permute, per step.
     let ab = a
         .contract(

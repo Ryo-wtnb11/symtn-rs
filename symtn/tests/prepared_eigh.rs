@@ -1,4 +1,4 @@
-//! Host gates of `EighFullPlan` (#1499).
+//! Host gates of `EighFullPlan`.
 //!
 //! Per member the plan must equal Host eager `eigh_full` (gauge-fixed, so
 //! the eigenvectors themselves are compared) and the dense Jacobi oracle of
@@ -602,7 +602,7 @@ fn a_failed_batch_leaves_no_observable_output_and_the_next_call_is_whole() {
     assert_equals_eager("B change", &plan, &mut ws, &good[..2], &stack(&good[..2]));
 }
 
-/// Bit-identity pin for #1744: through one workspace, at `B = 1, 2, 17, 1`
+/// Bit-identity pin: through one workspace, at `B = 1, 2, 17, 1`
 /// (buffers reallocated on every change of `B`), every member's `d`, `v` and
 /// spectra equal Host eager `eigh_full` of that member exactly, over
 /// U(1), SU(2) and fZ2xU(1).
