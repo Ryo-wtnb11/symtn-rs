@@ -417,3 +417,47 @@ fn mixed_partition_is_bitwise_equal_to_per_run_calls() {
         }
     }
 }
+
+// A replay issues one single-job GEMM per block, block shapes differing. On a
+// warm engine every such GEMM finds its plan: none is rebuilt because the
+// previous block had another shape (tenferro-rs#2349).
+#[test]
+fn single_job_gemms_of_alternating_shapes_reuse_their_plans_when_warm() {
+    let shapes = [(4usize, 3usize, 5usize), (5, 4, 3), (2, 6, 7)];
+    let lhs = (0..64).map(|i| i as f64 * 0.5 - 3.0).collect::<Vec<_>>();
+    let rhs = (0..64).map(|i| 1.0 - i as f64 * 0.25).collect::<Vec<_>>();
+    let mut dst = vec![0.0; 64];
+    let strides = [1usize];
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
+    let mut round = |engine: &mut CpuEngine, dst: &mut [f64]| {
+        for (rows, contracted, cols) in shapes {
+            let job = DenseGemmBatchJob {
+                rows,
+                contracted,
+                cols,
+                lhs_offset: 0,
+                rhs_offset: 0,
+                dst_offset: 0,
+            };
+            executor
+                .matmul_batch_axpby_into(
+                    engine,
+                    DenseWrite::F64(DenseViewMut::new(dst, &[64], &strides, 0).unwrap()),
+                    DenseRead::F64(DenseView::new(&lhs, &[64], &strides, 0).unwrap()),
+                    DenseRead::F64(DenseView::new(&rhs, &[64], &strides, 0).unwrap()),
+                    &[job],
+                    &[1],
+                    DenseScalar::F64(1.0),
+                    DenseScalar::F64(0.0),
+                )
+                .unwrap();
+        }
+    };
+    round(engine, &mut dst);
+    let warm = engine.plan_cache().contraction_stats();
+    round(engine, &mut dst);
+    let after = engine.plan_cache().contraction_stats();
+    assert_eq!(after.misses, warm.misses, "a warm round rebuilt a plan");
+    assert_eq!(after.hits - warm.hits, shapes.len() as u64);
+}

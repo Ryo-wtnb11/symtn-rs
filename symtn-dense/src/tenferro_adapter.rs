@@ -15,7 +15,7 @@ use tenferro_tensor::{
     TypedTensorView, TypedTensorViewMut,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 struct StridedBatchRunLayout {
     lhs_shape: [usize; 3],
     lhs_strides: [usize; 3],
@@ -26,6 +26,33 @@ struct StridedBatchRunLayout {
     dst_shape: [usize; 3],
     dst_strides: [usize; 3],
     dst_job_offset: usize,
+}
+
+/// The engine plan-cache slot of one strided-entry GEMM: its full descriptor
+/// (scalar type, operand layouts with base offsets, operand ops) hashed over
+/// the engine's slot capacity.
+///
+/// Why not one fixed slot: the engine keeps one plan per slot and rebuilds it
+/// whenever the descriptor changes, so a replay issuing one GEMM per block of
+/// differing shape rebuilt every block's plan on every warm call
+/// (tenferro-rs#2349). Why not a caller-supplied identity: this executor seam
+/// carries none, and the descriptor is the plan's identity anyway. A collision
+/// only costs a rebuild: the engine compares the full descriptor before it
+/// reuses a slot's plan.
+fn descriptor_slot<T: 'static>(
+    cpu: &CpuEngine,
+    layout: &StridedBatchRunLayout,
+    base_offsets: [usize; 3],
+    ops: [MatrixOp; 2],
+) -> usize {
+    use std::hash::{Hash, Hasher};
+    let capacity = cpu.plan_cache().contraction_capacity().max(1);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    core::any::TypeId::of::<T>().hash(&mut hasher);
+    layout.hash(&mut hasher);
+    base_offsets.hash(&mut hasher);
+    ops.hash(&mut hasher);
+    (hasher.finish() % capacity as u64) as usize
 }
 
 fn run_partition_covers(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
@@ -294,7 +321,6 @@ impl DefaultDenseExecutor {
                 lhs,
                 rhs,
                 jobs,
-                0,
                 MatrixOp::Identity,
                 MatrixOp::Identity,
                 alpha,
@@ -598,7 +624,6 @@ impl DefaultDenseExecutor {
         lhs: DenseView<'_, T>,
         rhs: DenseView<'_, T>,
         run: &[DenseGemmBatchJob],
-        cache_slot: usize,
         lhs_op: MatrixOp,
         rhs_op: MatrixOp,
         alpha: DenseScalar,
@@ -613,6 +638,12 @@ impl DefaultDenseExecutor {
         R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
     {
         let layout = self.strided_batch_run_layout(run, lhs_op, rhs_op)?;
+        let cache_slot = descriptor_slot::<T>(
+            cpu,
+            &layout,
+            [lhs.offset(), rhs.offset(), output.offset()],
+            [lhs_op, rhs_op],
+        );
         self.matmul_strided_batch_run_layout_typed(
             cpu, output, lhs, rhs, layout, cache_slot, lhs_op, rhs_op, alpha, beta, error_op,
             wrap_write, wrap_read,

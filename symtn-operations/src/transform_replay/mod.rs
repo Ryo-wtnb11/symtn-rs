@@ -416,12 +416,8 @@ impl<T> HostTreeTransformWorkspace<T> {
     where
         T: Clone,
     {
-        self.packed
-            .source_mut()
-            .resize_filled(source_len, zero.clone());
-        self.packed
-            .destination_mut()
-            .resize_filled(destination_len, zero);
+        prepare_packed_buffer(self.packed.source_mut(), source_len, zero.clone());
+        prepare_packed_buffer(self.packed.destination_mut(), destination_len, zero);
     }
 
     /// Heap elements `fused_indices` owns (none while inline).
@@ -444,6 +440,25 @@ impl<T> HostTreeTransformWorkspace<T> {
             self.fused_indices.resize(len, 0);
         }
         Ok(())
+    }
+}
+
+/// Sizes one pack buffer to `len` zero-initialised elements.
+///
+/// Why not `resize_filled` when the buffer must grow past its capacity: that
+/// reallocates, copies contents every reader overwrites, and then fills the
+/// new tail element by element. A per-call workspace grows from empty on
+/// every call, so that fill was one extra pass over the whole chunk scratch
+/// before the pack overwrote it. A fresh `filled` allocation lets std zero
+/// real scalars through the allocator (`alloc_zeroed`): fresh pages need no
+/// pass, and a reused block gets one bulk zeroing instead of the element loop.
+/// Complex scalars still take the element loop (std has no zeroed path for
+/// them).
+fn prepare_packed_buffer<T: Clone>(buffer: &mut HostScratchBuffer<T>, len: usize, zero: T) {
+    if len > buffer.capacity() {
+        *buffer = HostScratchBuffer::filled(len, zero);
+    } else {
+        buffer.resize_filled(len, zero);
     }
 }
 
