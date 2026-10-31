@@ -136,6 +136,8 @@ pub struct CopyCRoute<C> {
     pub(crate) temporary_len: usize,
     /// Permutes the temporary into the destination's order and split.
     pub(crate) transform: TreeTransformStructure<C>,
+    /// The destination's codomain rank.
+    pub(crate) nout: usize,
 }
 
 impl<C> CopyCRoute<C> {

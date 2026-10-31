@@ -1,9 +1,11 @@
-//! Allocation contract of the owned eager contraction output on routes whose
-//! core GEMMs write the destination (the fixtures here take the canonical
-//! core): the payload is one allocation of `P * size_of::<D>()` bytes for
-//! every dtype, and none of that size is allocator-zeroed. This removes the
-//! allocator-level whole-output zero fill only; kernel-side output fills are
-//! not visible here, and output-transform routes (CopyC) are not covered.
+//! Allocation contract of the owned eager contraction output: the payload is
+//! one allocation of `P * size_of::<D>()` bytes for every dtype, and none of
+//! that size is allocator-zeroed, when the route's core GEMMs write the
+//! destination or its output transform proves it overwrites every element
+//! once. An output transform without that proof (a coupled sector whose
+//! blocks are strided) overwrites one allocator-zeroed payload. This
+//! concerns the allocator-level whole-output zero fill only; kernel-side
+//! output fills are not visible here.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -170,4 +172,74 @@ fn owned_su2_single_precision_contraction_allocates_like_double() {
     let complex_double = su2_compose_measurement::<Complex64>(1_315_005);
     let complex_single = su2_compose_measurement::<Complex32>(1_315_005);
     assert_eq!(complex_single, complex_double);
+}
+
+/// `[p, q] <- [c]` times `[c] <- [r]` into `[p, r] <- [q]`: `r` joins the
+/// codomain and `q` the domain, a split no core GEMM writes, so an output
+/// transform writes the destination from a temporary of the same length.
+/// Returns that length and the output-sized allocations of a warm owned
+/// call minus those of a warm `contract_into` on the same route, which
+/// allocates the temporary alone: what the owned output itself allocates.
+fn moved_output_allocations(r: &[(i32, usize)]) -> (usize, (u64, u64)) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let provider = Arc::new(U1FusionRule);
+    let p = u1_space(&provider, &[(0, 2), (1, 3)]);
+    let q = u1_space(&provider, &[(0, 2), (1, 4)]);
+    let c = u1_space(&provider, &[(0, 3), (1, 3), (2, 3)]);
+    let r = u1_space(&provider, r);
+    let lhs: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&p, &q], [&c], 1_212_501).unwrap();
+    let rhs: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&c], [&r], 1_212_502).unwrap();
+    let spec = ContractSpec {
+        lhs: &[2],
+        rhs: &[0],
+        codomain: &[0, 2],
+        domain: &[1],
+    };
+    let mut destination = lhs.contract(engine, &rhs, &spec).unwrap();
+    lhs.contract_into(engine, &rhs, &spec, &mut destination, 1.0, 0.0)
+        .unwrap();
+    let payload_len = destination.dense_data().unwrap().len();
+    let payload_bytes = std::mem::size_of_val(destination.dense_data().unwrap());
+    let owned = measure(payload_bytes, || {
+        black_box(lhs.contract(engine, &rhs, &spec).unwrap());
+    });
+    let into = measure(payload_bytes, || {
+        lhs.contract_into(engine, &rhs, &spec, &mut destination, 1.0, 0.0)
+            .unwrap();
+    });
+    (
+        payload_len,
+        (
+            owned.matched_calls - into.matched_calls,
+            owned.matched_zeroed_calls - into.matched_zeroed_calls,
+        ),
+    )
+}
+
+/// Purpose: with `r` only charge 0 the destination is one block, one
+/// contiguous interval, so the output transform writes one payload that is
+/// not allocator-zeroed.
+#[test]
+fn owned_moved_output_with_contiguous_blocks_is_one_unzeroed_payload() {
+    let _serial = crate::counting_alloc::serial();
+    let (payload_len, output) = moved_output_allocations(&[(0, 5)]);
+    // Charge 0 only: (p, q, r) = (0, 0, 0).
+    assert_eq!(payload_len, 2 * 5 * 2);
+    assert_eq!(output, (1, 0), "(payload calls, allocator-zeroed calls)");
+}
+
+/// Purpose: with `r` also charge 1, the coupled charge 0 stacks the codomain
+/// trees `(p, r) = (0, 0)` (10 rows) and `(1, 1)` (6 rows) over 2 columns,
+/// so its blocks are strided, the overwrite proof fails, and the transform
+/// overwrites one allocator-zeroed payload.
+#[test]
+fn owned_moved_output_with_strided_blocks_is_one_zeroed_payload() {
+    let _serial = crate::counting_alloc::serial();
+    let (payload_len, output) = moved_output_allocations(&[(0, 5), (1, 2)]);
+    // (p, q, r) = (0, 0, 0), (0, 1, 1) and (1, 0, 1).
+    assert_eq!(payload_len, 2 * 2 * 5 + 2 * 4 * 2 + 3 * 2 * 2);
+    assert_eq!(output, (1, 1), "(payload calls, allocator-zeroed calls)");
 }

@@ -124,19 +124,48 @@ where
     ) -> Result<(), OperationError>;
 }
 
-/// The destination of one route replay.
-pub(super) enum RouteDestination<'d, D> {
+/// The destination of one route replay. `B` and `W` are the output
+/// stage's backend and workspace.
+pub(super) enum RouteDestination<'d, D, B, W, C> {
     /// `dst = alpha * contract(lhs, rhs) + init(dst)` into an existing
     /// payload.
     Into(&'d mut [D], ContractDestinationInit<D>),
     /// `alpha * contract(lhs, rhs)` into a fresh payload stored in `output`
-    /// on success (one member only). `zeroed` allocates the zero payload a
-    /// route with an output transform overwrites.
+    /// on success (one member only).
     Owned {
         output: &'d mut Vec<D>,
+        /// The output transform's owned writer: a payload written once
+        /// under its overwrite proof, or `None` before allocating when the
+        /// destination has no proof.
+        overwrite: OwnedOverwrite<B, W, D, C>,
+        /// The allocator-zeroed payload the output transform overwrites
+        /// when `overwrite` has no proof.
         zeroed: fn(usize) -> Vec<D>,
     },
 }
+
+/// The signature of
+/// [`DenseTreeTransformOperations::try_tree_transform_structure_overwrite_owned_raw`].
+pub(super) type OwnedOverwrite<B, W, D, C> = fn(
+    &mut B,
+    &mut dyn Engine,
+    &mut W,
+    &TreeTransformStructure<C>,
+    &Arc<BlockStructure>,
+    &Arc<BlockStructure>,
+    usize,
+    &[D],
+    D,
+) -> Result<Option<Vec<D>>, OperationError>;
+
+/// The destination of a route replay through stage `S`.
+type StageDestination<'d, S, D, C> = RouteDestination<
+    'd,
+    D,
+    <S as HostTreeStage<D, C>>::Backend,
+    <<S as HostTreeStage<D, C>>::Backend as TreeTransformBackend<D, C>>::Workspace,
+    C,
+>;
 
 const EAGER_IS_ONE_MEMBER: OperationError = OperationError::UnsupportedTensorContractScope {
     message: "eager Host contraction replays exactly one member",
@@ -553,6 +582,8 @@ pub(super) struct RouteView<'r, C> {
     /// `(output transform, core-destination structure)`; `None` when the
     /// core writes the caller's destination.
     pub(super) output: Option<(&'r TreeTransformStructure<C>, &'r Arc<BlockStructure>)>,
+    /// The destination's codomain rank, read only with `output`.
+    output_nout: usize,
     /// Alpha rides the output transform (CopyC: `mul!` into the temporary,
     /// then `tensoradd!(C, Cnew, α, β)`), else the core GEMMs.
     output_alpha: bool,
@@ -587,6 +618,10 @@ impl<'r, C: DenseBlockScalar> RouteView<'r, C> {
                 .core_dst
                 .as_ref()
                 .map(|entry| (&entry.output_transform_structure, entry.space.structure())),
+            output_nout: artifact
+                .core_dst
+                .as_ref()
+                .map_or(0, |entry| entry.output_nout),
             output_alpha: false,
         }
     }
@@ -596,7 +631,7 @@ impl<'r, C: DenseBlockScalar> RouteView<'r, C> {
         lhs: &'r Arc<BlockStructure>,
         rhs: &'r Arc<BlockStructure>,
     ) -> Self {
-        let direct = |plan, swapped, output| Self {
+        let direct = |plan, swapped, output, output_nout| Self {
             lhs_core: lhs,
             rhs_core: rhs,
             lhs_source: None,
@@ -604,15 +639,17 @@ impl<'r, C: DenseBlockScalar> RouteView<'r, C> {
             swapped,
             plan,
             output,
+            output_nout,
             // CopyC (an output transform) carries alpha in its `tensoradd!`.
             output_alpha: output.is_some(),
         };
         match route {
-            ContractRoute::Core { plan, swapped } => direct(plan, *swapped, None),
+            ContractRoute::Core { plan, swapped } => direct(plan, *swapped, None, 0),
             ContractRoute::CopyC(copy) => direct(
                 &copy.core,
                 copy.swapped,
                 Some((&copy.transform, &copy.temporary)),
+                copy.nout,
             ),
             ContractRoute::DynamicTree(artifact) => Self::dynamic_tree(artifact),
         }
@@ -651,7 +688,7 @@ fn execute_route_view<S, G, D, C>(
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
     scratch: HostRouteScratch<'_, D, C>,
     route: RouteView<'_, C>,
-    (dst_structure, destination): (&Arc<BlockStructure>, RouteDestination<'_, D>),
+    (dst_structure, destination): (&Arc<BlockStructure>, StageDestination<'_, S, D, C>),
     lhs_data: &[D],
     rhs_data: &[D],
     members: usize,
@@ -665,13 +702,17 @@ where
 {
     let (mut dst_data, mut owned, init) = match destination {
         RouteDestination::Into(data, init) => (Some(data), None, init),
-        RouteDestination::Owned { output, zeroed } => {
+        RouteDestination::Owned {
+            output,
+            overwrite,
+            zeroed,
+        } => {
             if members != 1 {
                 return Err(EAGER_IS_ONE_MEMBER);
             }
             (
                 None,
-                Some((output, zeroed)),
+                Some((output, overwrite, zeroed)),
                 ContractDestinationInit::Zeroed,
             )
         }
@@ -877,7 +918,7 @@ where
     if members == 1 {
         let mut kernels = crate::StridedHostKernelAdapter::default();
         let Some(core_out) = core_out else {
-            let (output, _) = owned.as_mut().ok_or(OperationError::InvalidArgument {
+            let (output, _, _) = owned.as_mut().ok_or(OperationError::InvalidArgument {
                 message: "contraction route has no destination",
             })?;
             #[cfg(test)]
@@ -954,21 +995,10 @@ where
                 usize::from(members == 1 && matches!(init, ContractDestinationInit::Zeroed));
         }
     }
-    // L2 keeps the zeroed output plus overwrite transform for an owned
-    // output-transform route; the owned transform writer is a separate step.
-    let mut zeroed_output = None;
-    let dst_data = match (dst_data.take(), owned.as_ref()) {
-        (Some(data), _) => data,
-        (None, Some((_, zeroed))) => {
-            zeroed_output.insert(zeroed(member_len::<D>(dst_structure, 1)?))
-        }
-        (None, None) => {
-            return Err(OperationError::InvalidArgument {
-                message: "contraction route has no destination",
-            })
-        }
-    };
     if members != 1 {
+        let Some(dst_data) = dst_data else {
+            return Err(EAGER_IS_ONE_MEMBER);
+        };
         return stage.overwrite_members(
             engine,
             Stage::Output,
@@ -983,6 +1013,40 @@ where
     }
     let (backend, workspace) = stage.ordinary(Stage::Output);
     let source = core_dst.as_slice();
+    let mut zeroed_output = None;
+    let dst_data = match (dst_data, owned.as_mut()) {
+        (Some(data), _) => data,
+        (None, Some((output, overwrite, zeroed))) => {
+            if let Some(data) = overwrite(
+                backend,
+                engine,
+                workspace,
+                transform,
+                dst_structure,
+                core_dst_structure,
+                route.output_nout,
+                source,
+                output_alpha,
+            )? {
+                #[cfg(test)]
+                crate::probe::hit(crate::probe::Event::OwnedOutputOverwrite);
+                **output = data;
+                return Ok(());
+            }
+            // No overwrite proof (a block that is not one contiguous
+            // interval, padding, non-tiling coupled regions): the
+            // transform overwrites an allocator-zeroed payload, which
+            // covers what no block writes.
+            #[cfg(test)]
+            crate::probe::hit(crate::probe::Event::OwnedOutputZeroedFallback);
+            zeroed_output.insert(zeroed(member_len::<D>(dst_structure, 1)?))
+        }
+        (None, None) => {
+            return Err(OperationError::InvalidArgument {
+                message: "contraction route has no destination",
+            })
+        }
+    };
     let written = match init {
         ContractDestinationInit::Zeroed => backend.tree_transform_structure_overwrite_into_raw(
             engine,
@@ -1008,7 +1072,7 @@ where
         ),
     };
     written?;
-    if let (Some((output, _)), Some(data)) = (owned, zeroed_output) {
+    if let (Some((output, _, _)), Some(data)) = (owned, zeroed_output) {
         *output = data;
     }
     Ok(())
@@ -1025,7 +1089,7 @@ pub(super) fn execute_route_host<S, G, D, C>(
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
     scratch: HostRouteScratch<'_, D, C>,
     resolution: &StorageContractResolution<C>,
-    dst: (&Arc<BlockStructure>, RouteDestination<'_, D>),
+    dst: (&Arc<BlockStructure>, StageDestination<'_, S, D, C>),
     (lhs_structure, lhs_data): (&Arc<BlockStructure>, &[D]),
     (rhs_structure, rhs_data): (&Arc<BlockStructure>, &[D]),
     members: usize,

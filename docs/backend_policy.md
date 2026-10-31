@@ -75,8 +75,14 @@ destination ranges through the fresh entry above; the blocks no direct GEMM
 writes (inactive blocks, padding, and the blocks a packed group scatters
 into) are written `+0.0` by symtn, and scatter groups then overwrite theirs.
 The output is published only after every element has been written. A route
-with an output transform (`copyC`, a `DynamicTree` output) still overwrites
-an allocator-zeroed payload.
+with an output transform (`copyC`, a `DynamicTree` output) runs its core into
+scratch; the transform then writes every destination element once into an
+unzeroed payload, inactive blocks as `+0.0`, when the destination proves
+exact overwrite coverage: each block one contiguous interval, the blocks
+tiling the payload, and the coupled-sector regions tiling it. Without that
+proof (for example a coupled sector stacking several codomain trees over more
+than one column, whose blocks are strided) the transform overwrites an
+allocator-zeroed payload.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
