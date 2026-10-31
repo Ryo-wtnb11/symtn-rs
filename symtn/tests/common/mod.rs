@@ -9,6 +9,48 @@
 
 use symtn::typed::BlockFusionTrees;
 
+/// Variant predicates on a typed `Result`, so a test asserts which error it
+/// got and not only that there was one. `InvalidArgument` is stringly: only
+/// its reason is matched.
+pub trait ErrorKind {
+    /// The dense backend (here: a broken CPU engine) refused the call.
+    fn is_backend_failure(&self) -> bool;
+    /// The operation is unsupported for this storage form.
+    fn is_unsupported(&self) -> bool;
+    /// `InvalidArgument` whose reason contains `reason`.
+    fn is_invalid_argument(&self, reason: &str) -> bool;
+    /// A batch operand or plan differs in signature.
+    fn is_batch_signature_mismatch(&self) -> bool;
+}
+
+impl<T> ErrorKind for Result<T, symtn::typed::Error> {
+    fn is_backend_failure(&self) -> bool {
+        matches!(
+            self,
+            Err(symtn::typed::Error::Operation(operation))
+                if matches!(
+                    **operation,
+                    symtn::typed::OperationError::Dense(symtn_dense::DenseError::Backend { .. })
+                )
+        )
+    }
+
+    fn is_unsupported(&self) -> bool {
+        matches!(self, Err(symtn::typed::Error::Unsupported { .. }))
+    }
+
+    fn is_invalid_argument(&self, reason: &str) -> bool {
+        matches!(self, Err(symtn::typed::Error::InvalidArgument(text)) if text.contains(reason))
+    }
+
+    fn is_batch_signature_mismatch(&self) -> bool {
+        matches!(
+            self,
+            Err(symtn::typed::Error::BatchSignatureMismatch { .. })
+        )
+    }
+}
+
 pub struct BlockGeometry {
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,

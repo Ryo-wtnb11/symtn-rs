@@ -267,8 +267,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
                     domain: &[1]
                 }
             )
-            .unwrap_err()
-            .to_string(),
+            .unwrap_err(),
         host.contract(
             engine,
             &host,
@@ -280,7 +279,6 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
             }
         )
         .unwrap_err()
-        .to_string()
     );
     let close = |actual: &[f64], expected: &[f64]| {
         assert_eq!(actual.len(), expected.len());

@@ -539,7 +539,9 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
         lazy.is_diagonal(engine, 0.0),
         eager.is_diagonal(engine, 0.0)
     );
-    assert!(lazy.is_diagonal(engine, -1.0).is_err());
+    assert!(lazy
+        .is_diagonal(engine, -1.0)
+        .is_invalid_argument("finite and nonnegative"));
     assert_eq!(
         lazy.convert::<Complex64>(engine)
             .unwrap()
@@ -1841,7 +1843,9 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
         };
         assert!(Arc::ptr_eq(view, output_view));
     }
-    assert!(adjoint.braid(engine, &[0], &[1, 2], &[]).is_err());
+    assert!(adjoint
+        .braid(engine, &[0], &[1, 2], &[])
+        .is_invalid_argument("one level per source axis"));
     assert!(
         matches!(adjoint.permute(engine, &[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
@@ -1851,7 +1855,9 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
     assert!(
         matches!(adjoint.transpose(engine, &[0, 0], &[1]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
-    assert!(adjoint.repartition(engine, 4).is_err());
+    assert!(adjoint
+        .repartition(engine, 4)
+        .is_invalid_argument("exceeds rank"));
 
     let scalar = fixture(engine).trace_pairs(engine, &[(0, 1)]).unwrap();
     let scalar_adjoint = scalar.adjoint(engine).unwrap();

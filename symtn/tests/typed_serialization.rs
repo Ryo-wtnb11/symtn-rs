@@ -1785,10 +1785,6 @@ fn every_scalar_mismatch_direction_is_typed_and_precedes_provider_resolution() {
             expected: PersistedScalar::F64,
         }
     ));
-    assert_eq!(
-        error.to_string(),
-        "typed snapshot stores f32 values, but f64 was requested"
-    );
     assert_eq!(missing.resolve_calls.load(Ordering::Relaxed), 0);
 
     // A tensor snapshot is never a graded space, whatever its scalar tag.

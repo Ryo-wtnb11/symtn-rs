@@ -492,21 +492,11 @@ fn device_twist_handles_a_space_with_no_coupled_sector_and_rejects_a_leg_past_th
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], real_fill).unwrap();
     let device = host.to_cuda(cuda).unwrap();
     assert_eq!(
-        device
-            .twist(cuda, &[2], Direction::Forward)
-            .unwrap_err()
-            .to_string(),
-        host.twist(engine, &[2], Direction::Forward)
-            .unwrap_err()
-            .to_string(),
+        device.twist(cuda, &[2], Direction::Forward).unwrap_err(),
+        host.twist(engine, &[2], Direction::Forward).unwrap_err(),
     );
     assert_eq!(
-        device
-            .twist(cuda, &[7], Direction::Inverse)
-            .unwrap_err()
-            .to_string(),
-        host.twist(engine, &[7], Direction::Inverse)
-            .unwrap_err()
-            .to_string(),
+        device.twist(cuda, &[7], Direction::Inverse).unwrap_err(),
+        host.twist(engine, &[7], Direction::Inverse).unwrap_err(),
     );
 }

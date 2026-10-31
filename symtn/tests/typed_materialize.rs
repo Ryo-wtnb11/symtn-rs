@@ -9,6 +9,7 @@
 //! - Compact diagonals: the physical expansion is the diagonal matrix of the
 //!   supplied values in TensorKit sector order.
 
+use crate::common::ErrorKind as _;
 use std::sync::Arc;
 
 use num_complex::Complex64;
@@ -574,7 +575,7 @@ fn materialize_is_the_remedy_for_apis_that_reject_lazy_adjoints() {
     let tensor: TensorMap<_, Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 21).unwrap();
     let lazy = tensor.adjoint(engine).unwrap();
-    assert!(lazy.diagview(engine).is_err());
+    assert!(lazy.diagview(engine).is_invalid_argument("lazy adjoint"));
     let diagonal = lazy.materialize(engine).unwrap().diagview(engine).unwrap();
     let parent = tensor.diagview(engine).unwrap();
     for (entry, parent) in diagonal.iter().zip(&parent) {

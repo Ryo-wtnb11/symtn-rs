@@ -5,6 +5,7 @@
 //! through the shared `SpyExecutor`; the oracle is eager on an unspied Runtime
 //! over the same runtime-independent member data.
 
+use crate::common::ErrorKind as _;
 use crate::prepared;
 
 #[allow(unused_imports)]
@@ -121,7 +122,7 @@ fn compose_failures_leave_no_output_and_the_next_call_recovers() {
     let mut short = short_destination(&runtime, [0, 1]);
     assert!(plan
         .execute_into(engine, &lhs, &rhs, &mut short, &mut workspace)
-        .is_err());
+        .is_invalid_argument("member count"));
     assert!(
         workspace.take_output().is_none(),
         "execute_into validation error"
@@ -161,7 +162,7 @@ fn contract_case(spec: &ContractSpec<'_>, label: &str) {
     let mut short = short_destination(&runtime, order);
     assert!(plan
         .execute_into(engine, &lhs, &rhs, &mut short, &mut workspace)
-        .is_err());
+        .is_invalid_argument("member count"));
     assert!(
         workspace.take_output().is_none(),
         "{label}: execute_into validation error"

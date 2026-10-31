@@ -383,7 +383,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &wrong_layout);
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut wrong_layout, 1.0, 0.0)
-        .is_err());
+        .fails_in_operation(|e| matches!(e, OperationError::SpaceMismatch { .. })));
     assert_unchanged(engine, &wrong_layout, &before);
 
     for (codomain_axes, domain_axes) in [(&[1, 1][..], &[2][..]), (&[1][..], &[2, 3][..])] {
@@ -399,7 +399,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
                 1.0,
                 0.0
             )
-            .is_err());
+            .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
         assert_unchanged(engine, &destination, &before);
     }
 
@@ -412,7 +412,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &nonplanar);
     assert!(source
         .transpose_into(engine, &[0, 2], &[1], &mut nonplanar, 1.0, 0.0)
-        .is_err());
+        .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
     assert_unchanged(engine, &nonplanar, &before);
 
     let other_runtime = Runtime::builder().build().unwrap();
@@ -434,7 +434,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let shared_body_handle = shared_body.clone();
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut shared_body, 1.0, 0.0)
-        .is_err());
+        .is_destination_shared());
     assert_unchanged(engine, &shared_body, &before);
     drop(shared_body_handle);
 
@@ -446,7 +446,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .unwrap();
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut shared_payload, 1.0, 0.0)
-        .is_err());
+        .is_destination_shared());
     assert_unchanged(engine, &shared_payload, &before);
     drop(payload_handle);
 
@@ -458,7 +458,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &alias);
     assert!(source
         .permute_into(engine, &[0, 1], &[2], &mut alias, 1.0, 0.0)
-        .is_err());
+        .is_invalid_argument("must not alias an input"));
     assert_unchanged(engine, &alias, &before);
 
     let mut bad_len = expected.zeros_like(engine).unwrap();
@@ -477,14 +477,14 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     };
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut bad_len, 1.0, 0.0)
-        .is_err());
+        .is_invalid_argument("does not match required length"));
     assert_unchanged(engine, &bad_len, &before);
 
     let mut lazy_destination = expected.adjoint(engine).unwrap();
     let before = f64_bits(engine, &lazy_destination);
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut lazy_destination, 1.0, 0.0)
-        .is_err());
+        .is_invalid_argument("ordinary dense host storage"));
     assert_eq!(f64_bits(engine, &lazy_destination), before);
 
     let lazy_source = source.adjoint(engine).unwrap();
@@ -493,7 +493,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &destination);
     assert!(lazy_source
         .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
-        .is_err());
+        .fails_in_operation(|e| matches!(e, OperationError::SpaceMismatch { .. })));
     assert_unchanged(engine, &destination, &before);
 
     let square = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -510,7 +510,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .to_vec();
     assert!(square
         .permute_into(engine, &[0], &[1], &mut compact_destination, 1.0, 0.0)
-        .is_err());
+        .is_invalid_argument("ordinary dense host storage"));
     assert_eq!(
         compact_destination
             .materialize(engine)
@@ -596,7 +596,7 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
             1.0,
             0.0,
         )
-        .is_err());
+        .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
     assert_eq!(f64_bits(engine, &high_rank_destination), before);
 
     crate::cache::clear();
@@ -1061,7 +1061,13 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         let before = f64_destination_state(engine, &rejected);
         assert!(lhs
             .contract_into(engine, &rhs, &spec, &mut rejected, 1.0, 0.0)
-            .is_err());
+            .fails_in_operation(|e| {
+                matches!(
+                    e,
+                    OperationError::InvalidAxisSet { .. }
+                        | OperationError::InvalidPermutation { .. }
+                )
+            }));
         assert_eq!(f64_destination_state(engine, &rejected), before);
     }
 
@@ -1076,7 +1082,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &rejected);
     assert!(lhs
         .contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
-        .is_err());
+        .fails_in_operation(|e| matches!(e, OperationError::Core(_))));
     assert_eq!(f64_destination_state(engine, &rejected), before);
 
     let mut wrong_layout = lhs
@@ -1088,7 +1094,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &wrong_layout);
     assert!(lhs
         .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut wrong_layout, 1.0, 0.0)
-        .is_err());
+        .fails_in_operation(|e| matches!(e, OperationError::SpaceMismatch { .. })));
     assert_eq!(f64_destination_state(engine, &wrong_layout), before);
 
     for malformed in ["lhs", "rhs", "destination"] {
@@ -1102,9 +1108,14 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             _ => unreachable!(),
         }
         let before = f64_destination_state(engine, &rejected);
-        assert!(bad_lhs
-            .contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
-            .is_err());
+        let rejection =
+            bad_lhs.contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0);
+        if malformed == "destination" {
+            assert!(rejection.is_invalid_argument("does not match required length"));
+        } else {
+            assert!(rejection
+                .fails_in_operation(|e| matches!(e, OperationError::ElementCountMismatch { .. })));
+        }
         assert_eq!(f64_destination_state(engine, &rejected), before);
     }
 
@@ -1116,7 +1127,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &lhs_alias);
     assert!(lhs
         .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut lhs_alias, 1.0, 0.0)
-        .is_err());
+        .is_invalid_argument("must not alias an input"));
     assert_eq!(f64_destination_state(engine, &lhs_alias), before);
 
     let mut rhs_alias = rhs
@@ -1127,7 +1138,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &rhs_alias);
     assert!(lhs
         .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut rhs_alias, 1.0, 0.0)
-        .is_err());
+        .is_invalid_argument("must not alias an input"));
     assert_eq!(f64_destination_state(engine, &rhs_alias), before);
 
     let mut shared_body = destination(engine);
@@ -1135,7 +1146,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &shared_body);
     assert!(lhs
         .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut shared_body, 1.0, 0.0)
-        .is_err());
+        .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &shared_body), before);
     drop(shared_body_handle);
 
@@ -1153,7 +1164,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             1.0,
             0.0
         )
-        .is_err());
+        .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &shared_payload), before);
     drop(shared_payload_handle);
 
@@ -1171,7 +1182,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             1.0,
             0.0
         )
-        .is_err());
+        .is_invalid_argument("ordinary dense host storage"));
     let TypedTensorRepr::Adjoint(after) = &lazy_destination.repr else {
         unreachable!()
     };
@@ -1189,7 +1200,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             1.0,
             0.0
         )
-        .is_err());
+        .is_invalid_argument("ordinary dense host storage"));
     assert!(Arc::ptr_eq(&owned(&compact_destination).data, &payload));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 

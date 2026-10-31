@@ -420,7 +420,11 @@ fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
 
-        assert!(source.remove_unit(engine, 0).is_err());
+        assert!(matches!(
+            source.remove_unit(engine, 0),
+            Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(reason)))
+                if reason.contains("not a canonical unit leg")
+        ));
         let inserted = source
             .insert_unit(engine, 0, Side::Domain, symtn::typed::Duality::Plain)
             .unwrap();
@@ -1837,8 +1841,22 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         owned: &TensorMap<CheckedOnlyToy, D>,
     ) -> [ToyStep<D>; 5] {
         let parent = lazy.adjoint(engine).unwrap();
-        assert!(owned.permute(engine, &[], &[1, 0, 2]).is_err());
-        assert!(owned.braid(engine, &[], &[1, 0, 2], &[0, 1, 2]).is_err());
+        assert!(matches!(
+            owned.permute(engine, &[], &[1, 0, 2]),
+            Err(GenericTensorError::Plan(
+                symtn::typed::CheckedGenericPlanError::Operation(
+                    symtn::typed::OperationError::EmptyTransformBlock
+                )
+            ))
+        ));
+        assert!(matches!(
+            owned.braid(engine, &[], &[1, 0, 2], &[0, 1, 2]),
+            Err(GenericTensorError::Plan(
+                symtn::typed::CheckedGenericPlanError::Operation(
+                    symtn::typed::OperationError::EmptyTransformBlock
+                )
+            ))
+        ));
         [
             (
                 "permute",

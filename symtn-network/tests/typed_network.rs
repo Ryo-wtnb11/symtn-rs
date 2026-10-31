@@ -1,3 +1,4 @@
+use crate::errors::Rejection as _;
 use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
@@ -406,7 +407,7 @@ fn run_shape_reuse_sequence<R, D>(
     let invalid_b = matrix(engine, &runtime, &wrong_bond, &initial, 81.0, &sector_tag);
     assert!(plan
         .execute(engine, &[valid[0], &invalid_b, valid[2]], &mut workspace)
-        .is_err());
+        .is_invalid_argument("spaces mismatch"));
     assert_chain_case(engine, &plan, &mut workspace, valid);
 
     let wrong_split =
@@ -416,7 +417,7 @@ fn run_shape_reuse_sequence<R, D>(
         .unwrap();
     assert!(plan
         .execute(engine, &[valid[0], &wrong_split, valid[2]], &mut workspace)
-        .is_err());
+        .is_invalid_argument("topology drifted"));
     assert_chain_case(engine, &plan, &mut workspace, valid);
 
     let wrong_rank = TensorMap::from_subblock_fn(
@@ -437,7 +438,7 @@ fn run_shape_reuse_sequence<R, D>(
     .unwrap();
     assert!(plan
         .execute(engine, &[valid[0], &wrong_rank, valid[2]], &mut workspace)
-        .is_err());
+        .is_invalid_argument("topology drifted"));
     assert_chain_case(engine, &plan, &mut workspace, valid);
 }
 
@@ -882,7 +883,7 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
 
     assert!(plan
         .execute(engine, &[&a1, &foreign_b], &mut workspace)
-        .is_err());
+        .is_runtime_mismatch());
     let plan_execute = &plan.execute(engine, &[&a1, &b1], &mut workspace).unwrap();
     let a1_contract = &a1
         .contract(
@@ -900,8 +901,12 @@ fn workspace_drift_and_provider_allocation_changes_do_not_leave_stale_results() 
 
     let incompatible = u1_space(&provider1, 4);
     let bad = make(engine, &runtime1, &incompatible, 38);
-    assert!(plan.execute(engine, &[&a1, &bad], &mut workspace).is_err());
-    assert!(plan.execute(engine, &[&a1], &mut workspace).is_err());
+    assert!(plan
+        .execute(engine, &[&a1, &bad], &mut workspace)
+        .is_invalid_argument("spaces mismatch"));
+    assert!(plan
+        .execute(engine, &[&a1], &mut workspace)
+        .is_invalid_argument("operands but 1 tensors"));
 
     let second_plan = network.plan(&[&a2, &b2], &GreedyDenseOptimizer).unwrap();
     let second_plan_execute = &second_plan

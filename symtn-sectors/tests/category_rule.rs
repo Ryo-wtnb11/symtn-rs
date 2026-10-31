@@ -2454,10 +2454,12 @@ fn admission_errors_report_their_cause_and_keep_the_codec_error_as_source() {
         EnumeratedCodec::<MF>::new(),
     )
     .unwrap_err();
-    assert_eq!(
-        style.to_string(),
-        "multiplicity-free admission requires a multiplicity-free category, got Generic fusion"
-    );
+    assert!(matches!(
+        style,
+        CategoryAdmissionError::IncompatibleFusionStyle {
+            actual: FusionStyle::Generic
+        }
+    ));
     assert!(style.source().is_none());
 
     let unit = CategoryRule::try_new(
@@ -2467,14 +2469,11 @@ fn admission_errors_report_their_cause_and_keep_the_codec_error_as_source() {
         EnumeratedCodec::<CG>::new(),
     )
     .unwrap_err();
-    assert_eq!(
-        unit.to_string(),
-        "canonical-unit admission requires a canonical-unit category"
-    );
+    assert!(matches!(unit, CategoryAdmissionError::MissingCanonicalUnit));
     assert!(unit.source().is_none());
 
     let codec = CategoryRule::try_new(ForeignUnit, RawU8).unwrap_err();
-    assert_eq!(codec.to_string(), "the category codec rejected the unit");
+    assert!(matches!(codec, CategoryAdmissionError::Codec(_)));
     let source = codec.source().unwrap().downcast_ref::<FusionAlgebraError>();
     assert!(matches!(
         source,
@@ -2491,8 +2490,11 @@ fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
     let error = rule.try_fusion_channels(s(1), s(0)).unwrap_err();
     let provider = adapter_source::<AuthorityFailed>(&error);
     assert_eq!(provider, &CategoryAdapterError::Provider(AuthorityFailed));
-    assert_eq!(provider.to_string(), "the fusion category failed");
-    assert_eq!(provider.source().unwrap().to_string(), "authority failed");
+    assert!(provider
+        .source()
+        .unwrap()
+        .downcast_ref::<AuthorityFailed>()
+        .is_some());
 
     // A decoded object outside the category (index 3 unranks to 3).
     let error = rule.try_dual_sector(s(3)).unwrap_err();
@@ -2501,6 +2503,7 @@ fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
         foreign,
         &CategoryAdapterError::ForeignObject { sector: Some(s(3)) }
     );
+    // The one `Display` check for this error type.
     assert_eq!(
         foreign.to_string(),
         "SectorId(3) names an object outside the category"
@@ -2516,10 +2519,6 @@ fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
         &CategoryAdapterError::ForeignObject { sector: None }
     );
     assert_eq!(
-        outcome.to_string(),
-        "the category produced an object outside itself"
-    );
-    assert_eq!(
         rule.try_fusion_channels(s(0), s(0)).unwrap().as_slice(),
         &[s(0)]
     );
@@ -2528,8 +2527,8 @@ fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
     let error = checked.try_dim_scalar(s(2)).unwrap_err();
     let dimension = adapter_source::<AuthorityFailed>(&error);
     assert_eq!(
-        dimension.to_string(),
-        "the dimension of SectorId(2) is not a finite positive f64"
+        dimension,
+        &CategoryAdapterError::DimensionNotRepresentable { sector: s(2) }
     );
     assert!(dimension.source().is_none());
 
@@ -2537,34 +2536,33 @@ fn adapter_errors_name_their_failure_and_keep_authority_and_storage_sources() {
         .try_f_symbol_generic(s(1), s(1), s(1), s(1), s(1), s(1))
         .unwrap_err();
     let storage = adapter_source::<AuthorityFailed>(&error);
-    assert_eq!(
-        storage.to_string(),
-        "symbol storage disagrees with its fusion multiplicities"
-    );
+    let shape = SymbolShapeError {
+        actual_len: 1,
+        expected_len: Some(0),
+    };
+    assert_eq!(storage, &CategoryAdapterError::MalformedSymbolData(shape));
     assert_eq!(
         storage.source().unwrap().downcast_ref::<SymbolShapeError>(),
-        Some(&SymbolShapeError {
-            actual_len: 1,
-            expected_len: Some(0),
-        })
+        Some(&shape)
     );
 
     let axes = CategoryAdapterError::<AuthorityFailed>::MalformedSymbolAxes {
         expected: vec![2, 2],
         actual: vec![1, 4],
     };
-    assert_eq!(
-        axes.to_string(),
-        "symbol axes [1, 4] disagree with the fusion multiplicities [2, 2]"
-    );
+    assert!(matches!(
+        &axes,
+        CategoryAdapterError::MalformedSymbolAxes { expected, actual }
+            if expected == &[2, 2] && actual == &[1, 4]
+    ));
     assert!(axes.source().is_none());
 
     let rep_s3 = cg(TableCategory::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap());
     let error = rep_s3.try_twist_scalar(s(1)).unwrap_err();
-    assert_eq!(
-        adapter_source::<fusion_symbols::table::TableError>(&error).to_string(),
-        "the category has no braiding"
-    );
+    assert!(matches!(
+        adapter_source::<fusion_symbols::table::TableError>(&error),
+        CategoryAdapterError::NoBraiding
+    ));
 }
 
 #[test]
@@ -2572,10 +2570,11 @@ fn a_category_failure_reports_and_exposes_the_failure_it_keeps() {
     use std::error::Error as _;
 
     let error = cg(Faulty).try_fusion_channels(s(1), s(0)).unwrap_err();
+    assert!(matches!(error, FusionAlgebraError::CategoryFailure(_)));
+    // The one `Display` check for this error type.
     assert_eq!(error.to_string(), "fusion category failed");
     let failure = error.source().unwrap();
-    // The failure's message and source are the authority's own.
-    assert_eq!(failure.to_string(), "authority failed");
+    // The failure's source is the authority's own error.
     assert!(failure
         .source()
         .unwrap()

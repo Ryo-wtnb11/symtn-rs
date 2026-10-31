@@ -462,7 +462,9 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
 
     // Validation still precedes the braid shortcut.
     let calls = transform_seam_calls(|| {
-        assert!(u1_f64.braid(engine, &[0, 1], &[2], &[0, 0]).is_err());
+        assert!(u1_f64
+            .braid(engine, &[0, 1], &[2], &[0, 0])
+            .is_invalid_argument("one level per source axis"));
     });
     assert_eq!(calls, 0);
     assert!(
@@ -471,7 +473,9 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
     assert!(
         matches!(u1_f64.transpose(engine, &[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
-    assert!(u1_f64.repartition(engine, 4).is_err());
+    assert!(u1_f64
+        .repartition(engine, 4)
+        .is_invalid_argument("exceeds rank"));
 
     // Negative control: the counter observes a real transform.
     let calls = transform_seam_calls(|| {
@@ -1286,7 +1290,11 @@ fn checked_compact_trace_reads_the_spectrum_after_admission() {
     )
     .unwrap();
     let densified = probe::record();
-    assert!(diagonal.trace_pairs(engine, &[(0, 0)]).is_err());
+    assert!(matches!(
+        diagonal.trace_pairs(engine, &[(0, 0)]),
+        Err(GenericTensorError::Facade(Error::Operation(operation)))
+            if matches!(*operation, OperationError::InvalidAxisSet { .. })
+    ));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     let result = diagonal.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);

@@ -3,6 +3,7 @@
 //! `plan` + `execute`, and an equal network built anew, which shares its
 //! cached plan.
 
+use crate::errors::Rejection as _;
 use std::sync::Arc;
 
 use symtn::sector::{
@@ -291,18 +292,29 @@ fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
     network.contract(engine, &[&a, &b, &c]).unwrap();
     let before = plan_cache_stats(&runtime);
 
-    for (what, tensors) in [
-        ("operand count", vec![&a, &b]),
-        ("contracted space", vec![&a, &wide, &c]),
-        ("rank", vec![&a, &rank3, &c]),
+    for (what, reason, tensors) in [
+        ("operand count", "operands but 2 tensors", vec![&a, &b]),
+        (
+            "contracted space",
+            "space mismatch for contracted label",
+            vec![&a, &wide, &c],
+        ),
+        ("rank", "labels but tensor rank", vec![&a, &rank3, &c]),
     ] {
-        assert!(network.contract(engine, &tensors).is_err(), "{what}");
+        assert!(
+            network
+                .contract(engine, &tensors)
+                .is_invalid_argument(reason),
+            "{what}"
+        );
         assert_eq!(plan_cache_stats(&runtime), before, "{what}");
     }
 
     let foreign = Runtime::builder().build().unwrap();
     let elsewhere = TensorMap::<_, f64>::rand_with_seed(engine, &foreign, [&v], [&v], 25).unwrap();
-    assert!(network.contract(engine, &[&a, &b, &elsewhere]).is_err());
+    assert!(network
+        .contract(engine, &[&a, &b, &elsewhere])
+        .is_runtime_mismatch());
     assert_eq!(plan_cache_stats(&runtime), before);
 }
 

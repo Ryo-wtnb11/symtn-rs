@@ -644,9 +644,12 @@ fn failed_checked_admission_leaves_the_provider_usable() {
     let fresh = GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(7)), [(Label::X, 1)]).unwrap();
 
     provider.fail_algebra.store(true, Ordering::Relaxed);
-    assert!(
-        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7).is_err()
-    );
+    assert!(matches!(
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 7),
+        Err(GenericTensorError::Structure(
+            CheckedGenericStructureError::Provider(ToyError::Algebra)
+        ))
+    ));
     provider.fail_algebra.store(false, Ordering::Relaxed);
 
     let after_failure =

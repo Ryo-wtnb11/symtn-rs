@@ -1,3 +1,4 @@
+use crate::common::ErrorKind as _;
 use crate::report;
 use report::Report;
 use symtn::typed::Engine;
@@ -677,7 +678,7 @@ fn check_twisted_members<R, D>(
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             assert!(plan
                 .execute_into(engine, &lhs, &short_rhs, &mut dst, &mut independent)
-                .is_err());
+                .is_invalid_argument("different member counts"));
             for (i, data) in before.iter().enumerate() {
                 assert_eq!(dst.member(engine, i).unwrap().dense_data().unwrap(), data);
             }
@@ -804,7 +805,7 @@ fn check_fermionic_unit_batch<R, D>(
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             assert!(plan
                 .execute_into(engine, &lhs, &short_rhs, &mut destination, &mut workspace)
-                .is_err());
+                .is_invalid_argument("different member counts"));
             for (i, expected) in before.iter().enumerate() {
                 assert_eq!(
                     destination.member(engine, i).unwrap().dense_data().unwrap(),
@@ -1037,7 +1038,7 @@ fn check_mixed_signed_members<R, D>(
                 .collect();
             assert!(plan
                 .execute_into(engine, &lhs, &short_rhs, &mut dst, &mut other_workspace)
-                .is_err());
+                .is_invalid_argument("different member counts"));
             for (i, before) in snapshot.iter().enumerate() {
                 assert_eq!(dst.member(engine, i).unwrap().dense_data().unwrap(), before);
             }
@@ -1230,7 +1231,7 @@ where
                     &stack(&longer, |m| &m.rhs),
                     &mut workspace
                 )
-                .is_err());
+                .is_invalid_argument("different member counts"));
             assert!(workspace.take_output().is_none(), "{what}");
             let fresh = rescaled_members(case, count, -0.75 - call as f64 / 8.0);
             let (lhs, rhs) = (stack(&fresh, |m| &m.lhs), stack(&fresh, |m| &m.rhs));

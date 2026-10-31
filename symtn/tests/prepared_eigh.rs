@@ -207,7 +207,11 @@ fn plan_supports_independent_workspaces_changing_b_and_rejects_foreign_workspace
     foreign
         .execute(engine, &four, &mut foreign_workspace)
         .unwrap();
-    assert!(plan.execute(engine, &four, &mut foreign_workspace).is_err());
+    assert!(matches!(
+        plan.execute(engine, &four, &mut foreign_workspace),
+        Err(symtn::typed::BatchError::Operation(symtn::typed::Error::InvalidArgument(reason)))
+            if reason.contains("another plan")
+    ));
     assert!(
         foreign_workspace.take_output().is_some(),
         "identity rejection leaves another plan's workspace untouched"

@@ -15,6 +15,7 @@ use symtn::typed::{
     ContractSpec, CpuEngine, Direction, Engine, GradedSpace, Pool, Runtime, TensorMap,
 };
 
+use crate::common::ErrorKind as _;
 use crate::numerics;
 
 type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
@@ -124,16 +125,17 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
         assert!(panicked.is_err());
         assert!(engine.is_broken());
         assert!(
-            t.svd_compact(&mut engine, &[0, 1], &[2]).is_err(),
+            t.svd_compact(&mut engine, &[0, 1], &[2])
+                .is_backend_failure(),
             "width {threads}: svd"
         );
         assert!(
-            t.permute(&mut engine, &[2, 0], &[1]).is_err(),
+            t.permute(&mut engine, &[2, 0], &[1]).is_backend_failure(),
             "width {threads}: permute"
         );
         let adjoint = t.adjoint(&mut CpuEngine::serial()).unwrap();
         assert!(
-            t.compose(&mut engine, &adjoint).is_err(),
+            t.compose(&mut engine, &adjoint).is_backend_failure(),
             "width {threads}: compose"
         );
         // Host value operations whose arithmetic needs no token admit the
@@ -248,7 +250,7 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
     .unwrap();
     let s = a.svd_compact(good, &[0], &[1]).unwrap().s;
     assert!(
-        s.dense_data().is_err(),
+        matches!(s.dense_data(), Err(symtn::typed::Error::Unsupported { .. })),
         "a compact diagonal stores no dense payload"
     );
     let mut destination = s.materialize(good).unwrap().zeros_like(good).unwrap();
@@ -266,18 +268,28 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
         codomain: &[0],
         domain: &[1],
     };
-    assert!(s.permute(engine, &[0], &[1]).is_err(), "identity permute");
-    assert!(s.permute(engine, &[1], &[0]).is_err(), "swap");
     assert!(
-        s.twist(engine, &[], Direction::Forward).is_err(),
+        s.permute(engine, &[0], &[1]).is_backend_failure(),
+        "identity permute"
+    );
+    assert!(s.permute(engine, &[1], &[0]).is_backend_failure(), "swap");
+    assert!(
+        s.twist(engine, &[], Direction::Forward)
+            .is_backend_failure(),
         "empty twist"
     );
-    assert!(s.adjoint(engine).is_err(), "compact adjoint");
-    assert!(s.compose(engine, &s).is_err(), "compact compose");
-    assert!(s.contract(engine, &s, &spec).is_err(), "compact contract");
+    assert!(s.adjoint(engine).is_backend_failure(), "compact adjoint");
+    assert!(
+        s.compose(engine, &s).is_backend_failure(),
+        "compact compose"
+    );
+    assert!(
+        s.contract(engine, &s, &spec).is_backend_failure(),
+        "compact contract"
+    );
     assert!(s
         .permute_into(engine, &[0], &[1], &mut destination, 1.0, 0.0)
-        .is_err());
+        .is_backend_failure());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
     // Compact `contract_into` (diagonal·diagonal, diagonal·dense,
     // dense·diagonal), with and without a zero alpha: the nonzero diagonal
@@ -288,7 +300,7 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
         for alpha in [1.0, 0.0] {
             assert!(
                 lhs.contract_into(engine, rhs, &spec, &mut target, alpha, 0.0)
-                    .is_err(),
+                    .is_backend_failure(),
                 "compact contract_into {what}, alpha {alpha}"
             );
             assert_eq!(target.dense_data().unwrap(), target_before.as_slice());

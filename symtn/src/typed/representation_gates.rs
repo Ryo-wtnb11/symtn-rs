@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_errors::ErrorKind as _;
 use crate::typed::probe::{self, Event};
 
 include!("../../tests/common/predicate_chains.rs");
@@ -212,7 +213,12 @@ fn physical_projection_publishes_only_after_success_on_receiver_authority() {
             data: vec![0.0; 4],
         },
     );
-    assert!(failure.is_err());
+    assert!(matches!(
+        failure,
+        Err(PhysicalDenseError::Operation(
+            OperationError::ShapeMismatch { .. }
+        ))
+    ));
     assert!(Arc::ptr_eq(owned(&target), &target_body));
     assert!(Arc::ptr_eq(&owned(&target).data, &target_data));
 }

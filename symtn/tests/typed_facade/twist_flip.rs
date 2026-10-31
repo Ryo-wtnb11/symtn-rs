@@ -511,23 +511,25 @@ fn typed_index_op_error_classes_and_empty_shortcuts_are_stable() {
     for (error, message) in [
         (
             typed.twist(engine, &[5], Direction::Forward).unwrap_err(),
-            "invalid argument: twist leg 5 out of range for rank 3",
+            "twist leg 5 out of range for rank 3",
         ),
         (
             typed.flip(engine, &[5], Direction::Forward).unwrap_err(),
-            "invalid argument: flip leg 5 out of range for rank 3",
+            "flip leg 5 out of range for rank 3",
         ),
         (
             typed.twist(engine, &[5], Direction::Inverse).unwrap_err(),
-            "invalid argument: inverse twist leg 5 out of range for rank 3",
+            "inverse twist leg 5 out of range for rank 3",
         ),
         (
             typed.flip(engine, &[5], Direction::Inverse).unwrap_err(),
-            "invalid argument: inverse flip leg 5 out of range for rank 3",
+            "inverse flip leg 5 out of range for rank 3",
         ),
     ] {
-        assert!(matches!(error, symtn::typed::Error::InvalidArgument(_)));
-        assert_eq!(error.to_string(), message);
+        assert!(
+            matches!(&error, symtn::typed::Error::InvalidArgument(reason) if reason.contains(message)),
+            "{error:?}"
+        );
     }
 
     // Empty leg list: identical clone, shared buffer typed-side.
@@ -557,34 +559,24 @@ fn typed_index_op_error_classes_and_empty_shortcuts_are_stable() {
     );
 
     // Insert: position past the rank.
-    assert_eq!(
-        typed
-            .insert_unit(engine, 4, Side::Domain, Duality::Plain)
-            .unwrap_err()
-            .to_string(),
-        "invalid argument: TensorMap::insert_unit: position 4 exceeds rank 3"
-    );
-    assert_eq!(
-        typed
-            .insert_unit(engine, 4, Side::Codomain, Duality::Plain)
-            .unwrap_err()
-            .to_string(),
-        "invalid argument: TensorMap::insert_unit: position 4 exceeds rank 3"
-    );
+    assert!(matches!(
+        typed.insert_unit(engine, 4, Side::Domain, Duality::Plain),
+        Err(symtn::typed::Error::InvalidArgument(reason)) if reason.contains("position 4 exceeds rank 3")
+    ));
+    assert!(matches!(
+        typed.insert_unit(engine, 4, Side::Codomain, Duality::Plain),
+        Err(symtn::typed::Error::InvalidArgument(reason)) if reason.contains("position 4 exceeds rank 3")
+    ));
 
     // Remove: out-of-range axis, then a non-unit leg.
-    assert_eq!(
-        typed.remove_unit(engine, 3).unwrap_err().to_string(),
-        "invalid argument: TensorMap::remove_unit: axis 3 is out of range for rank 3"
-    );
+    assert!(matches!(
+        typed.remove_unit(engine, 3),
+        Err(symtn::typed::Error::InvalidArgument(reason)) if reason.contains("axis 3 is out of range for rank 3")
+    ));
     let error = typed.remove_unit(engine, 0).unwrap_err();
     assert!(
-        matches!(error, symtn::typed::Error::InvalidArgument(_)),
+        matches!(&error, symtn::typed::Error::InvalidArgument(reason) if reason.contains("axis 0 is not a canonical unit leg")),
         "{error:?}"
-    );
-    assert_eq!(
-        error.to_string(),
-        "invalid argument: TensorMap::remove_unit: axis 0 is not a canonical unit leg"
     );
 }
 

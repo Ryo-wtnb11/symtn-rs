@@ -782,7 +782,11 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
         structure_cache_info(StructureCacheKind::DegeneracyStructure),
     );
 
-    assert!(lhs.deligne_product(engine, &rhs, product).is_err());
+    assert!(matches!(
+        lhs.deligne_product(engine, &rhs, product),
+        Err(symtn::typed::Error::FusionAlgebra(error))
+            if matches!(*error, FusionAlgebraError::ProductCodec(_))
+    ));
 
     assert_eq!(
         (
@@ -1251,7 +1255,7 @@ fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
         is_unsupported_contract_scope(&compact_error),
         "{compact_error:?}"
     );
-    assert_eq!(compact_error.to_string(), dense_error.to_string());
+    assert_eq!(compact_error, dense_error);
 }
 
 #[test]

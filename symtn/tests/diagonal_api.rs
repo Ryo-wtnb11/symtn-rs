@@ -1,3 +1,4 @@
+use crate::common::ErrorKind as _;
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
@@ -128,7 +129,7 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
             values: vec![1.0, 2.0],
         }],
     )
-    .is_err());
+    .is_invalid_argument("missing a bond sector"));
     assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
         engine,
         &runtime,
@@ -144,7 +145,7 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
             },
         ],
     )
-    .is_err());
+    .is_invalid_argument("does not match bond degeneracy"));
     assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
         engine,
         &runtime,
@@ -160,7 +161,7 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
             },
         ],
     )
-    .is_err());
+    .is_invalid_argument("missing a bond sector"));
     assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
         engine,
         &runtime,
@@ -176,7 +177,7 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
             },
         ],
     )
-    .is_err());
+    .is_invalid_argument("declared more than once"));
 
     let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let dense = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
@@ -229,7 +230,9 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
     )
     .unwrap();
     assert!(!symtn::expert::is_diagonal(engine, &inf, 1.0).unwrap());
-    assert!(symtn::expert::is_diagonal(engine, &dense, -1.0).is_err());
+    assert!(symtn::expert::is_diagonal(engine, &dense, -1.0)
+        .is_invalid_argument("finite and nonnegative"));
     let vector = TensorMap::<U1FusionRule, f64>::zeros(engine, &runtime, [&v], []).unwrap();
-    assert!(symtn::expert::is_diagonal(engine, &vector, f64::NAN).is_err());
+    assert!(symtn::expert::is_diagonal(engine, &vector, f64::NAN)
+        .is_invalid_argument("finite and nonnegative"));
 }

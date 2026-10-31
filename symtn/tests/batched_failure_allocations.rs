@@ -4,6 +4,7 @@
 //! shares one counting allocator; single-threaded runtimes mean the
 //! caller thread sees every symtn allocation.
 
+use crate::common::ErrorKind as _;
 use crate::prepared;
 use symtn::typed::Engine;
 
@@ -82,7 +83,7 @@ fn the_first_call_after_a_failure_allocates_no_more_than_a_warm_call() {
             |engine| {
                 assert!(compose
                     .execute(engine, &rhs, &lhs, &mut workspace.borrow_mut())
-                    .is_err())
+                    .is_batch_signature_mismatch())
             },
         ),
     );
@@ -108,7 +109,7 @@ fn the_first_call_after_a_failure_allocates_no_more_than_a_warm_call() {
             |engine| {
                 assert!(contract
                     .execute(engine, &rhs, &lhs, &mut workspace.borrow_mut())
-                    .is_err())
+                    .is_batch_signature_mismatch())
             },
         ),
     );
@@ -127,9 +128,12 @@ fn the_first_call_after_a_failure_allocates_no_more_than_a_warm_call() {
                     .unwrap();
             },
             |engine| {
-                assert!(eigh
-                    .execute(engine, &other, &mut workspace.borrow_mut())
-                    .is_err())
+                assert!(matches!(
+                    eigh.execute(engine, &other, &mut workspace.borrow_mut()),
+                    Err(symtn::typed::BatchError::Operation(
+                        symtn::typed::Error::BatchSignatureMismatch { .. }
+                    ))
+                ))
             },
         ),
     );

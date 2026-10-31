@@ -107,7 +107,12 @@ fn checked_generic_eig_dense_failure_preserves_the_source() {
         })
         .unwrap();
     let before = source.dense_data().unwrap().to_vec();
-    assert!(source.eig_full(engine, &[0], &[1]).is_err());
+    assert!(matches!(
+        source.eig_full(engine, &[0], &[1]),
+        Err(GenericTensorError::Plan(
+            CheckedGenericPlanError::Operation(OperationError::Dense(DenseError::Backend { .. }))
+        ))
+    ));
     assert_eq!(source.dense_data().unwrap(), before);
     assert!(std::ptr::eq(source.provider(), provider.as_ref()));
 }
@@ -246,9 +251,12 @@ fn checked_generic_eigh_dense_failure_preserves_the_source() {
         })
         .unwrap();
     let before = source.dense_data().unwrap().to_vec();
-    assert!(source
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
-        .is_err());
+    assert!(matches!(
+        source.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT),
+        Err(GenericTensorError::Plan(
+            CheckedGenericPlanError::Operation(OperationError::Dense(DenseError::Backend { .. }))
+        ))
+    ));
     assert_eq!(calls.of(EIGH_OWNED), 1);
     assert_eq!(source.dense_data().unwrap(), before);
     assert!(std::ptr::eq(source.provider(), provider.as_ref()));

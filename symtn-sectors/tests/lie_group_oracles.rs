@@ -886,10 +886,6 @@ fn label_length_mismatch_names_the_mismatched_slice() {
             found: 2
         }
     ));
-    assert_eq!(
-        error.to_string(),
-        "expected 1 entries in the first mismatched label slice (Dynkin labels, then charges), got 2"
-    );
     assert!(matches!(
         u2.encode_irrep_with_charges(&[0, 0], &[0]),
         Err(LieGroupFusionRuleError::LabelLength {
