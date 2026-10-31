@@ -71,7 +71,15 @@ operations concurrently, hold one engine per thread and share the tensors and
 the `Runtime`.
 
 Host parallelism is the engine's own decision. Dense kernels split work by
-Tenferro's batch policy on the engine. A backend-free Host region
+Tenferro's batch policy on the engine, an engine-owned setting symtn never
+overrides. Under the default policy (`CpuBatchStrategy::Auto`) a grouped GEMM
+batch (recoupling, block-wise contraction) runs its GEMMs one per lane with a
+single thread each, so a batch of a few large blocks uses only a few of the
+pool's threads. Callers whose workloads are dominated by large blocks can give
+each GEMM the whole pool with
+`CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
+(or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`
+are in `tenferro_cpu`). A backend-free Host region
 (tree-transform replay, plan compile, strided moves) takes the engine's
 placement token; a replay forks over the engine's width only when the
 engine's cost rule (threadteam's `pays`, with strided's copy estimate for the

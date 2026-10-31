@@ -56,7 +56,6 @@ where
         let recoupling_plan = structure.recoupling_plan();
         let storage_conjugate = structure.storage_conjugate();
         let coefficients = task.single_coefficients();
-        let mut kernels = crate::StridedHostKernelAdapter::default();
 
         for &layout_index in structure.inactive_destination_layouts() {
             write_uninit_layout_zero(layouts, layout_index, dst_data)?;
@@ -108,7 +107,6 @@ where
         for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
             let (destination_start, scatter_slice_disjoint) = replay_multi_chunk(
                 engine,
-                &mut kernels,
                 dense,
                 workspace,
                 task,
@@ -269,54 +267,6 @@ fn layout_linear_offset(
             .ok_or_else(|| OperationError::ElementCountOverflow)?;
     }
     usize::try_from(offset).map_err(|_| OperationError::OffsetOverflow { value: usize::MAX })
-}
-
-/// Fused loop nest over a prebaked layout writing into uninitialized memory
-/// (issue #232, condition 2), mirroring `apply_fused_pair_slices` but with
-/// `MaybeUninit::write` for the destination. Each destination offset is visited
-/// exactly once, identical to `layout_linear_offset`'s odometer, so the
-/// write-once-then-`assume_init` invariant of `initialize_owned` (#226/#233) is
-/// preserved: the normalization only drops extent-1 axes, reorders, and fuses
-/// contiguous runs — the *set* of visited (dst, src) offsets is unchanged, and
-/// there is no read-after-write within a single writer (`src` is a disjoint,
-/// fully-initialized slice). The caller supplies runtime-length traversal scratch.
-fn write_fused_uninit<D, F>(
-    baked: BakedFusedLayout<'_>,
-    dst: &mut [MaybeUninit<D>],
-    src: &[D],
-    dst_offset: isize,
-    src_offset: isize,
-    index: &mut [usize],
-    map: F,
-) -> Result<(), OperationError>
-where
-    D: Copy,
-    F: Fn(D) -> D,
-{
-    let dims = baked.dims();
-    let dst_strides = baked.dst_strides();
-    let src_strides = baked.src_strides();
-    let Some(index) = index.get_mut(..dims.len()) else {
-        return Err(OperationError::InvalidArgument {
-            message: "fused traversal scratch is shorter than the normalized rank",
-        });
-    };
-    for_each_fused_span(
-        dims,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        index,
-        |dst_base, src_base, inner_len, inner_dst, inner_src| {
-            for position in 0..inner_len {
-                let dst_position = (dst_base + position as isize * inner_dst) as usize;
-                let src_position = (src_base + position as isize * inner_src) as usize;
-                dst[dst_position].write(map(src[src_position]));
-            }
-        },
-    );
-    Ok(())
 }
 
 // Why-not fuse the zero writer: it has no paired source view, and a pure

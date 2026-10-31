@@ -199,7 +199,8 @@ where
             );
         }
     }
-    workspace.prepare_packed_buffers(largest.0, largest.1, D::zero());
+    workspace.packed.source_mut().reserve_overwrite(largest.0);
+    workspace.prepare_packed_destination(largest.1, D::zero());
 
     for (block_index, job) in recoupling_plan.entries() {
         let TreeTransformBlock::Multi {
@@ -223,27 +224,35 @@ where
             .checked_mul(dst_count)
             .ok_or_else(|| OperationError::ElementCountOverflow)?;
         let start = profile.as_ref().map(|_| std::time::Instant::now());
-        workspace.prepare_packed_buffers(source_len, destination_len, D::zero());
+        workspace.prepare_packed_destination(destination_len, D::zero());
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.multi_workspace_prepare += start.elapsed();
         }
         let start = profile.as_ref().map(|_| std::time::Instant::now());
-        crate::host_pool::with_exec(engine, |mut exec| {
-            for src_index in 0..src_count {
-                pack_layout_into_column(
-                    exec.reborrow(),
-                    kernels,
-                    Some(workspace.fused_indices.as_mut_slice()),
-                    layouts,
-                    src_layout_start + src_index,
-                    src_data,
-                    workspace.packed.source_mut().as_mut_slice(),
-                    src_index * element_count,
-                    task.storage_conjugate(),
-                )?;
-            }
-            Ok(())
-        })?;
+        let HostTreeTransformWorkspace {
+            packed,
+            fused_indices,
+            ..
+        } = &mut *workspace;
+        let storage_conjugate = task.storage_conjugate();
+        packed
+            .source_mut()
+            .overwrite_with_columns(source_len, |mut writer| {
+                crate::host_pool::with_exec(engine, |_| {
+                    for src_index in 0..src_count {
+                        let entry = src_layout_start + src_index;
+                        writer.write_column(
+                            src_index * element_count,
+                            layouts.role(entry)?,
+                            src_data,
+                            layouts.entry(entry).offset,
+                            fused_indices.as_mut_slice(),
+                            |value: D| value.maybe_conj(storage_conjugate),
+                        )?;
+                    }
+                    Ok(())
+                })
+            })?;
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.multi_blocks += 1;
             profile.packed_columns += src_count;
@@ -309,22 +318,22 @@ pub(super) fn parallel_split(items: usize, threads: usize) -> usize {
         .clamp(1, items - 1)
 }
 
+/// Packs `items` through `packed`, whose slot 0 is packed offset
+/// `packed_start`, split over `threads` lanes on item boundaries.
 #[allow(clippy::too_many_arguments)]
-fn replay_pack_columns<A, D>(
-    mut kernels: A,
+fn replay_pack_columns<D>(
     fused_indices: &mut [usize],
     max_fused_rank: usize,
     layouts: &TreeTransformLayoutTable,
     items: &[TreeTransformPackReplay],
-    packed_source: &mut [D],
+    mut packed: PackColumnWriter<'_, D>,
     packed_start: usize,
     src_data: &[D],
     storage_conjugate: bool,
     threads: usize,
-    mut exec: Exec<'_>,
+    exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
-    A: HostKernelAdapter<D> + Clone + Send + Sync,
     D: DenseRecouplingScalar + ConjugateValue,
 {
     if items.is_empty() {
@@ -333,16 +342,13 @@ where
     if threads <= 1 || items.len() == 1 {
         let fused_index = &mut fused_indices[..max_fused_rank];
         for item in items {
-            pack_layout_into_column(
-                exec.reborrow(),
-                &mut kernels,
-                Some(&mut *fused_index),
-                layouts,
-                item.src_layout,
-                src_data,
-                packed_source,
+            packed.write_column(
                 item.packed_offset - packed_start,
-                storage_conjugate,
+                layouts.role(item.src_layout)?,
+                src_data,
+                layouts.entry(item.src_layout).offset,
+                fused_index,
+                |value: D| value.maybe_conj(storage_conjugate),
             )?;
         }
         return Ok(());
@@ -350,23 +356,21 @@ where
 
     let middle = parallel_split(items.len(), threads);
     let boundary = items[middle].packed_offset;
-    let (left_data, right_data) = packed_source.split_at_mut(boundary - packed_start);
+    let (left_packed, right_packed) = packed.split_at(boundary - packed_start)?;
     let (left_items, right_items) = items.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
     let (left_indices, mut right_indices) =
         split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
-    let right_kernels = kernels.clone();
     let (left, right) = replay_join(
         exec,
         |exec| {
             replay_pack_columns(
-                kernels,
                 left_indices,
                 max_fused_rank,
                 layouts,
                 left_items,
-                left_data,
+                left_packed,
                 packed_start,
                 src_data,
                 storage_conjugate,
@@ -376,12 +380,11 @@ where
         },
         |exec| {
             replay_pack_columns(
-                right_kernels,
                 right_indices.get(),
                 max_fused_rank,
                 layouts,
                 right_items,
-                right_data,
+                right_packed,
                 boundary,
                 src_data,
                 storage_conjugate,
@@ -758,9 +761,8 @@ where
 /// Returns the chunk's packed destination base offset and whether the ordered
 /// scatter groups may be split by destination slice.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn replay_multi_chunk<A, E, D, C>(
+pub(super) fn replay_multi_chunk<E, D, C>(
     engine: &mut dyn Engine,
-    kernels: &mut A,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
     task: TreeTransformTaskView<'_, C>,
@@ -773,7 +775,6 @@ pub(super) fn replay_multi_chunk<A, E, D, C>(
     mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<(usize, bool), OperationError>
 where
-    A: HostKernelAdapter<D> + Clone + Send + Sync,
     E: DenseExecutor,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
@@ -811,11 +812,7 @@ where
     strided_batch_runs_into(&workspace.chunk_jobs, &mut workspace.chunk_runs);
 
     let start = profile.as_ref().map(|_| std::time::Instant::now());
-    workspace.prepare_packed_buffers(
-        source_end - source_start,
-        destination_end - destination_start,
-        D::zero(),
-    );
+    workspace.prepare_packed_destination(destination_end - destination_start, D::zero());
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
         profile.multi_workspace_prepare += start.elapsed();
     }
@@ -827,21 +824,29 @@ where
         *pack_cursor += 1;
     }
     let start = profile.as_ref().map(|_| std::time::Instant::now());
-    replay_region(engine, threads, |exec| {
-        replay_pack_columns(
-            kernels.clone(),
-            workspace.fused_indices.as_mut_slice(),
-            max_fused_rank,
-            layouts,
-            &schedule.pack_columns[pack_start..*pack_cursor],
-            workspace.packed.source_mut().as_mut_slice(),
-            source_start,
-            src_data,
-            storage_conjugate,
-            threads,
-            exec,
-        )
-    })??;
+    let HostTreeTransformWorkspace {
+        packed,
+        fused_indices,
+        ..
+    } = &mut *workspace;
+    packed
+        .source_mut()
+        .overwrite_with_columns(source_end - source_start, |writer| {
+            replay_region(engine, threads, |exec| {
+                replay_pack_columns(
+                    fused_indices.as_mut_slice(),
+                    max_fused_rank,
+                    layouts,
+                    &schedule.pack_columns[pack_start..*pack_cursor],
+                    writer,
+                    source_start,
+                    src_data,
+                    storage_conjugate,
+                    threads,
+                    exec,
+                )
+            })?
+        })?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
         profile.packed_columns += chunk.iter().map(|job| job.contracted).sum::<usize>();
         profile.multi_pack += start.elapsed();
@@ -1026,7 +1031,6 @@ where
         let scattered_column_count = chunk.iter().map(|job| job.cols).sum::<usize>();
         let (destination_start, scatter_slice_disjoint) = replay_multi_chunk(
             engine,
-            kernels,
             dense,
             workspace,
             task,

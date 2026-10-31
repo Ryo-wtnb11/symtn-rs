@@ -295,6 +295,7 @@ where
     Ok(())
 }
 
+#[cfg(any(test, feature = "testing"))]
 #[expect(
     clippy::too_many_arguments,
     reason = "the packing kernel keeps layout authority, source and destination slices, offset, and conjugation explicit"

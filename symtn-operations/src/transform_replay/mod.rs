@@ -20,8 +20,8 @@ use symtn_core::{BlockStructure, Placement};
 use symtn_dense::DefaultDenseExecutor;
 use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
-use crate::host_scratch::HostScratchBuffer;
-use crate::kernel_adapter::for_each_fused_span;
+use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
+use crate::kernel_adapter::write_fused_uninit;
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::scalar::scale_value;
 use crate::storage_scratch::TreeTransformScratchBuffers;
@@ -32,7 +32,7 @@ use crate::transform_structure::{
     TreeTransformScatterReplay,
 };
 use crate::{
-    BakedFusedLayout, ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
+    ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
     RecouplingCoefficientAction, ReportsPlacement, TransformScale, TreeTransformBlock,
     TreeTransformLayoutTable, TreeTransformReplayProfile, TreeTransformStructure,
 };
@@ -418,6 +418,15 @@ impl<T> HostTreeTransformWorkspace<T> {
     {
         prepare_packed_buffer(self.packed.source_mut(), source_len, zero.clone());
         prepare_packed_buffer(self.packed.destination_mut(), destination_len, zero);
+    }
+
+    /// Sizes the packed destination alone, for a replay whose source pack
+    /// overwrites its scratch without a fill.
+    fn prepare_packed_destination(&mut self, len: usize, zero: T)
+    where
+        T: Clone,
+    {
+        prepare_packed_buffer(self.packed.destination_mut(), len, zero);
     }
 
     /// Heap elements `fused_indices` owns (none while inline).
